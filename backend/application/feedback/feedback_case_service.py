@@ -45,7 +45,7 @@ from repositories.chat_repository import ChatRepo
 from repositories.feedback_case_repository import FeedbackCaseRepo
 
 
-async def list_for_user(
+async def list_feedback_cases_for_user(
     *,
     user_id: str,
     collection_id: str | None = None,
@@ -80,7 +80,7 @@ async def list_for_user(
     return tuple(rows[offset : offset + limit])
 
 
-async def read_for_user(case_id: str, user_id: str) -> dict[str, Any]:
+async def get_feedback_case_for_user(case_id: str, user_id: str) -> dict[str, Any]:
     case = await FeedbackCaseRepo.read_case(case_id)
     if case is None:
         raise ResourceNotFoundException(
@@ -141,7 +141,7 @@ async def read_for_user(case_id: str, user_id: str) -> dict[str, Any]:
     )
 
 
-async def save_annotation_for_user(
+async def save_feedback_annotation_for_user(
     *,
     case_id: str,
     user_id: str,
@@ -238,7 +238,7 @@ async def _authorized_case(
     return case, (*results, *signal_results, *tool_failure_results)
 
 
-async def submit_review_for_user(
+async def submit_feedback_review_for_user(
     *,
     case_id: str,
     user_id: str,
@@ -333,7 +333,7 @@ async def _validate_review_acceptance(
         )
 
 
-async def list_reviews_for_user(
+async def list_feedback_reviews_for_user(
     *, case_id: str, user_id: str
 ) -> tuple[ReviewDecision, ...]:
     case, _ = await _authorized_case(case_id, user_id)
@@ -689,9 +689,9 @@ def _readable_scope(scope: Any) -> list[dict[str, Any]]:
 
 __all__ = [
     "FeedbackCaseSummary",
-    "list_for_user",
-    "read_for_user",
-    "save_annotation_for_user",
-    "submit_review_for_user",
-    "list_reviews_for_user",
+    "list_feedback_cases_for_user",
+    "get_feedback_case_for_user",
+    "save_feedback_annotation_for_user",
+    "submit_feedback_review_for_user",
+    "list_feedback_reviews_for_user",
 ]

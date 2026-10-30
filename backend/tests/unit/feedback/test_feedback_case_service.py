@@ -175,8 +175,8 @@ async def test_case_service_returns_user_readable_detail_and_summary() -> None:
     feedback_case_service.CollectionRepo = _CollectionRepository()
     service = feedback_case_service
 
-    summaries = await service.list_for_user(user_id="user-1", needs_human_review=True)
-    detail = await service.read_for_user(case.case_id, "user-1")
+    summaries = await service.list_feedback_cases_for_user(user_id="user-1", needs_human_review=True)
+    detail = await service.get_feedback_case_for_user(case.case_id, "user-1")
 
     assert summaries[0].problem_type == "source_missing"
     assert summaries[0].confidence == 0.87
@@ -200,7 +200,7 @@ async def test_case_service_hides_a_case_from_another_collection_owner() -> None
     service = feedback_case_service
 
     with pytest.raises(FileNotFoundError):
-        await service.read_for_user(case.case_id, "other-user")
+        await service.get_feedback_case_for_user(case.case_id, "other-user")
 
 
 async def test_case_service_exposes_message_correction_signal_without_claiming_target() -> (
@@ -243,7 +243,7 @@ async def test_case_service_exposes_message_correction_signal_without_claiming_t
     feedback_case_service.CollectionRepo = _CollectionRepository()
     service = feedback_case_service
 
-    detail = await service.read_for_user(signal_case.case_id, "user-1")
+    detail = await service.get_feedback_case_for_user(signal_case.case_id, "user-1")
 
     correction = next(
         item

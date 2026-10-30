@@ -144,7 +144,7 @@ async def list_feedback_cases(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    items = await feedback_case_service.list_for_user(
+    items = await feedback_case_service.list_feedback_cases_for_user(
         user_id=user_id,
         collection_id=collection_id,
         status=status,
@@ -172,7 +172,7 @@ async def get_feedback_case(
     case_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    detail = await feedback_case_service.read_for_user(case_id, user_id)
+    detail = await feedback_case_service.get_feedback_case_for_user(case_id, user_id)
     return make_api_response(data=FeedbackCaseDetailResponse.model_validate(detail))
 
 
@@ -184,7 +184,7 @@ async def save_feedback_annotation(
     payload: FeedbackAnnotationRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    annotation = await feedback_case_service.save_annotation_for_user(
+    annotation = await feedback_case_service.save_feedback_annotation_for_user(
         case_id=case_id,
         user_id=user_id,
         expected_digest=payload.expected_digest,
@@ -211,7 +211,7 @@ async def submit_feedback_review(
         default=None, alias="Idempotency-Key", max_length=128
     ),
 ) -> Response:
-    decision = await feedback_case_service.submit_review_for_user(
+    decision = await feedback_case_service.submit_feedback_review_for_user(
         case_id=case_id,
         user_id=user_id,
         expected_annotation_digest=payload.expected_annotation_digest,
@@ -234,7 +234,7 @@ async def list_feedback_reviews(
     case_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    decisions = await feedback_case_service.list_reviews_for_user(
+    decisions = await feedback_case_service.list_feedback_reviews_for_user(
         case_id=case_id,
         user_id=user_id,
     )

@@ -168,7 +168,7 @@ def _fixture():
 
 async def test_annotation_is_versioned_and_source_scoped() -> None:
     service, repo = _fixture()
-    annotation = await service.save_annotation_for_user(
+    annotation = await service.save_feedback_annotation_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_digest=None,
@@ -188,7 +188,7 @@ async def test_annotation_is_versioned_and_source_scoped() -> None:
         RequestInvalidException,
         match="An annotation source does not belong to this case.",
     ):
-        await service.save_annotation_for_user(
+        await service.save_feedback_annotation_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_digest=annotation.annotation_digest,
@@ -207,7 +207,7 @@ async def test_annotation_rejects_stale_digest_and_missing_sft_target() -> None:
     with pytest.raises(
         ResourceConflictException, match="feedback_case_stale|The case changed"
     ):
-        await service.save_annotation_for_user(
+        await service.save_feedback_annotation_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_digest="b" * 64,
@@ -222,7 +222,7 @@ async def test_annotation_rejects_stale_digest_and_missing_sft_target() -> None:
     with pytest.raises(
         RequestInvalidException, match="sft annotation requires a target"
     ):
-        await service.save_annotation_for_user(
+        await service.save_feedback_annotation_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_digest=None,
@@ -237,7 +237,7 @@ async def test_annotation_rejects_stale_digest_and_missing_sft_target() -> None:
     with pytest.raises(
         RequestInvalidException, match="sft annotation requires support sources"
     ):
-        await service.save_annotation_for_user(
+        await service.save_feedback_annotation_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_digest=None,
@@ -253,7 +253,7 @@ async def test_annotation_rejects_stale_digest_and_missing_sft_target() -> None:
 
 async def test_rejected_case_can_be_revised_without_erasing_review_history() -> None:
     service, repo = _fixture()
-    first = await service.save_annotation_for_user(
+    first = await service.save_feedback_annotation_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_digest=None,
@@ -266,7 +266,7 @@ async def test_rejected_case_can_be_revised_without_erasing_review_history() -> 
         now="2026-09-24T00:01:00+00:00",
     )
     repo.case = replace(repo.case, status="rejected")
-    second = await service.save_annotation_for_user(
+    second = await service.save_feedback_annotation_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_digest=first.annotation_digest,
@@ -285,7 +285,7 @@ async def test_rejected_case_can_be_revised_without_erasing_review_history() -> 
 
 async def test_annotation_revision_rejects_terminal_accepted_case() -> None:
     service, repo = _fixture()
-    first = await service.save_annotation_for_user(
+    first = await service.save_feedback_annotation_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_digest=None,
@@ -301,7 +301,7 @@ async def test_annotation_revision_rejects_terminal_accepted_case() -> None:
     with pytest.raises(
         ResourceConflictException, match="This case cannot be annotated"
     ):
-        await service.save_annotation_for_user(
+        await service.save_feedback_annotation_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_digest=first.annotation_digest,
@@ -333,7 +333,7 @@ async def test_concurrent_first_annotations_allow_one_digest_winner() -> None:
 
     async def write(reason: str):
         try:
-            return await service.save_annotation_for_user(
+            return await service.save_feedback_annotation_for_user(
                 case_id="case-1",
                 user_id="user-1",
                 expected_digest=None,

@@ -17,7 +17,7 @@ def _request(service, user_id: str = "user-1"):
 
 
 class _Service:
-    async def save_annotation_for_user(self, **kwargs):
+    async def save_feedback_annotation_for_user(self, **kwargs):
         if kwargs["user_id"] != "user-1":
             raise ResourceNotFoundException("feedback case not found")
         return FeedbackAnnotation.build(
@@ -63,7 +63,7 @@ def test_annotation_route_returns_digest_without_accepting_client_identity():
 
 def test_annotation_route_maps_stale_digest_to_conflict():
     class StaleService(_Service):
-        async def save_annotation_for_user(self, **kwargs):
+        async def save_feedback_annotation_for_user(self, **kwargs):
             raise ResourceConflictException(
                 "The case changed.", data={"code": "feedback_case_stale"}
             )

@@ -184,7 +184,7 @@ def _fixture():
 
 async def test_review_is_append_only_and_projects_withdrawal() -> None:
     service, repo, annotation = _fixture()
-    accepted = await service.submit_review_for_user(
+    accepted = await service.submit_feedback_review_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_annotation_digest=annotation.annotation_digest,
@@ -194,7 +194,7 @@ async def test_review_is_append_only_and_projects_withdrawal() -> None:
     )
     assert accepted.seq == 1
     assert repo.case.status == "accepted"
-    withdrawn = await service.submit_review_for_user(
+    withdrawn = await service.submit_feedback_review_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_annotation_digest=annotation.annotation_digest,
@@ -212,7 +212,7 @@ async def test_review_requires_current_annotation_digest() -> None:
     with pytest.raises(
         ResourceConflictException, match="feedback_case_stale|The case changed"
     ):
-        await service.submit_review_for_user(
+        await service.submit_feedback_review_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_annotation_digest="b" * 64,
@@ -239,7 +239,7 @@ async def test_accept_requires_a_declared_dataset_use() -> None:
     repo.annotation = empty
     repo.case = replace(repo.case, annotation_digest=empty.annotation_digest)
     with pytest.raises(RequestInvalidException, match="Select a dataset use"):
-        await service.submit_review_for_user(
+        await service.submit_feedback_review_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_annotation_digest=empty.annotation_digest,
@@ -266,7 +266,7 @@ async def test_preference_accept_requires_a_distinct_corrected_answer() -> None:
     repo.annotation = preference
     repo.case = replace(repo.case, annotation_digest=preference.annotation_digest)
     with pytest.raises(RequestInvalidException, match="A preference sample requires"):
-        await service.submit_review_for_user(
+        await service.submit_feedback_review_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_annotation_digest=preference.annotation_digest,
@@ -279,7 +279,7 @@ async def test_review_history_keeps_old_digest_when_new_annotation_is_reviewed()
     None
 ):
     service, repo, first = _fixture()
-    rejected = await service.submit_review_for_user(
+    rejected = await service.submit_feedback_review_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_annotation_digest=first.annotation_digest,
@@ -304,7 +304,7 @@ async def test_review_history_keeps_old_digest_when_new_annotation_is_reviewed()
     repo.case = replace(
         repo.case, status="ready_for_review", annotation_digest=second.annotation_digest
     )
-    accepted = await service.submit_review_for_user(
+    accepted = await service.submit_feedback_review_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_annotation_digest=second.annotation_digest,
@@ -338,7 +338,7 @@ async def test_concurrent_accepts_have_one_history_winner() -> None:
 
     async def submit(reason: str):
         try:
-            return await service.submit_review_for_user(
+            return await service.submit_feedback_review_for_user(
                 case_id="case-1",
                 user_id="user-1",
                 expected_annotation_digest=annotation.annotation_digest,
@@ -361,7 +361,7 @@ async def test_concurrent_accepts_have_one_history_winner() -> None:
 
 async def test_idempotency_key_replays_one_review_and_rejects_payload_reuse() -> None:
     service, repo, annotation = _fixture()
-    first = await service.submit_review_for_user(
+    first = await service.submit_feedback_review_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_annotation_digest=annotation.annotation_digest,
@@ -370,7 +370,7 @@ async def test_idempotency_key_replays_one_review_and_rejects_payload_reuse() ->
         idempotency_key="retry-1",
         now="2026-09-24T00:05:00+00:00",
     )
-    replay = await service.submit_review_for_user(
+    replay = await service.submit_feedback_review_for_user(
         case_id="case-1",
         user_id="user-1",
         expected_annotation_digest=annotation.annotation_digest,
@@ -385,7 +385,7 @@ async def test_idempotency_key_replays_one_review_and_rejects_payload_reuse() ->
     with pytest.raises(
         ResourceConflictException, match="review_decision_identity_conflict"
     ):
-        await service.submit_review_for_user(
+        await service.submit_feedback_review_for_user(
             case_id="case-1",
             user_id="user-1",
             expected_annotation_digest=annotation.annotation_digest,

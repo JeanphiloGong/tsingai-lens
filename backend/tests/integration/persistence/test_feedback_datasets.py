@@ -379,7 +379,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     analysis_worker.FeedbackCaseRepo = chain.cases
     await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
-    await chain.case_service.save_annotation_for_user(
+    await chain.case_service.save_feedback_annotation_for_user(
         case_id=case.case_id,
         user_id=USER_ID,
         expected_digest=None,

@@ -266,14 +266,14 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
         "doc-b",
     }
 
-    detail = await chain.case_service.read_for_user(case.case_id, USER_ID)
+    detail = await chain.case_service.get_feedback_case_for_user(case.case_id, USER_ID)
     assert detail["question"] == chain.question.content
     assert detail["answer"] == chain.answer.content
     assert detail["source_signals"][0]["feedback_id"] == feedback.feedback_id
     assert detail["annotation"] is None
     assert detail["review_decisions"] == []
 
-    annotation = await chain.case_service.save_annotation_for_user(
+    annotation = await chain.case_service.save_feedback_annotation_for_user(
         case_id=case.case_id,
         user_id=USER_ID,
         expected_digest=None,
@@ -293,7 +293,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert annotated_case.status == "ready_for_review"
     assert annotated_case.annotation_digest == annotation.annotation_digest
 
-    review = await chain.case_service.submit_review_for_user(
+    review = await chain.case_service.submit_feedback_review_for_user(
         case_id=case.case_id,
         user_id=USER_ID,
         expected_annotation_digest=annotation.annotation_digest,
@@ -575,7 +575,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     )
     assert case.context_snapshot["answer_message_id"] == final_answer.message_id
 
-    summaries = await chain.case_service.list_for_user(
+    summaries = await chain.case_service.list_feedback_cases_for_user(
         user_id=USER_ID,
         collection_id=COLLECTION_ID,
         problem_type="tool_failure",
@@ -584,7 +584,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     assert summaries[0].case_id == case.case_id
     assert summaries[0].problem_type == "tool_failure"
 
-    detail = await chain.case_service.read_for_user(case.case_id, USER_ID)
+    detail = await chain.case_service.get_feedback_case_for_user(case.case_id, USER_ID)
     assert detail["answer"] == final_answer.content
     assert detail["source_signals"][0]["signal_type"] == "tool_failure"
     assert detail["source_signals"][0]["error_code"] == "source_unavailable"

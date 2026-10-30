@@ -17,7 +17,7 @@ def _request(service, user_id: str = "user-1"):
 
 
 class _Service:
-    async def list_for_user(self, **kwargs):
+    async def list_feedback_cases_for_user(self, **kwargs):
         if kwargs["user_id"] != "user-1":
             raise ResourceNotFoundException("collection not found")
         return (
@@ -33,7 +33,7 @@ class _Service:
             ),
         )
 
-    async def read_for_user(self, case_id: str, user_id: str):
+    async def get_feedback_case_for_user(self, case_id: str, user_id: str):
         if user_id != "user-1" or case_id != "case-1":
             raise ResourceNotFoundException("feedback case not found")
         return {

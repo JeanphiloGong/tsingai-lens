@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-
 import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.dataset_export import (
     EXPORT_SCHEMA_VERSION,
@@ -24,9 +18,14 @@ from domain.feedback.dataset_export import (
     member_digest,
 )
 from domain.feedback.sample_revision import (
-    SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
-    SFT_SCHEMA_VERSION, PREFERENCE_SCHEMA_VERSION, EVALUATION_SCHEMA_VERSION,
+    EVALUATION_SCHEMA_VERSION,
+    PREFERENCE_SCHEMA_VERSION,
+    SFT_SCHEMA_VERSION,
+    EvaluationRevisionContent,
+    PreferenceRevisionContent,
+    SftRevisionContent,
 )
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.feedback import FeedbackCaseRow
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetExportMemberRow,
@@ -37,6 +36,8 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackSampleRevisionRow,
 )
 from repositories.feedback_dataset_sample_repository import source_digest_for_case
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @dataclass(frozen=True)
@@ -337,7 +338,9 @@ class FeedbackDatasetExportRepository:
                 )
             preview_members = tuple(member_values)
             selected = {member.sample_id for member in preview_members}
-            current_members = await _read_current_members(db, draft.dataset_id, sample_ids=tuple(selected))
+            current_members = await _read_current_members(
+                db, draft.dataset_id, sample_ids=tuple(selected)
+            )
             if member_digest(current_members) != draft.member_digest:
                 raise DatasetExportConflict("export_preview_stale")
             if member_digest(preview_members) != draft.member_digest:
@@ -367,7 +370,9 @@ class FeedbackDatasetExportRepository:
                 export_id=export_id,
                 dataset_id=draft.dataset_id,
                 export_no=export_no,
-                schema_version=str(draft.manifest.get("schema_version") or EXPORT_SCHEMA_VERSION),
+                schema_version=str(
+                    draft.manifest.get("schema_version") or EXPORT_SCHEMA_VERSION
+                ),
                 rows=list(draft.rows),
                 provenance=list(draft.provenance),
                 manifest=manifest,
@@ -433,7 +438,9 @@ async def _read_current_members(
     )
     # Case writers lock the source before its samples; publication uses the same order.
     await db.execute(statement.with_for_update(of=FeedbackCaseRow))
-    statement = statement.with_for_update(of=(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow))
+    statement = statement.with_for_update(
+        of=(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow)
+    )
     rows = (await db.execute(statement)).all()
     for sample, _revision_row, case in rows:
         if case.status == "withdrawn":
@@ -495,11 +502,13 @@ async def _read_export_locked(
 ) -> DatasetExport:
     if row.schema_version not in EXPORT_SCHEMA_VERSIONS:
         raise ValueError("unsupported export schema")
-    member_rows = list(await db.scalars(
-        select(FeedbackDatasetExportMemberRow)
-        .where(FeedbackDatasetExportMemberRow.export_id == row.export_id)
-        .order_by(FeedbackDatasetExportMemberRow.row_key)
-    ))
+    member_rows = list(
+        await db.scalars(
+            select(FeedbackDatasetExportMemberRow)
+            .where(FeedbackDatasetExportMemberRow.export_id == row.export_id)
+            .order_by(FeedbackDatasetExportMemberRow.row_key)
+        )
+    )
     revisions = {}
     if member_rows:
         revision_ids = [member.revision_id for member in member_rows]
@@ -617,7 +626,13 @@ def _iso(value: datetime) -> str:
     return parsed.isoformat()
 
 
-__all__ = ['DatasetExportConflict', 'DatasetExportDraft', 'DatasetExportIdempotencyConflict', 'DatasetExportSummary', 'FeedbackDatasetExportRepository']
+__all__ = [
+    "DatasetExportConflict",
+    "DatasetExportDraft",
+    "DatasetExportIdempotencyConflict",
+    "DatasetExportSummary",
+    "FeedbackDatasetExportRepository",
+]
 
 
 FeedbackDatasetExportRepo = FeedbackDatasetExportRepository()

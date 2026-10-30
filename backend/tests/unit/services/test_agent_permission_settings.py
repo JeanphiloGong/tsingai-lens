@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
-from application.source.collection_service import CollectionService
+from application.source import collection_service
 from domain.chat.permissions import AUTO_ACTIONS
+from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.file.object_store import FileObjectStore
 from repositories.collection_repository import CollectionRepository
 
 pytestmark = pytest.mark.anyio
@@ -22,12 +23,17 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_collection_default_permission_round_trips_and_expands_all_actions(tmp_path, *, postgres_session_factory) -> None:
-    service = CollectionService(
-        repository=CollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+async def test_collection_default_permission_round_trips_and_expands_all_actions(
+    tmp_path, *, postgres_session_factory
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
+    service = collection_service
+    collection = await service.create_collection(
+        "Agent settings", owner_user_id="owner"
     )
-    collection = await service.create_collection("Agent settings", owner_user_id="owner")
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 
     saved = await service.set_agent_default_permission_for_user(
@@ -41,17 +47,25 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     )
 
     assert saved["actions"] == sorted(AUTO_ACTIONS)
-    assert await service.get_agent_default_permission_for_user(
-        collection["collection_id"], "owner"
-    ) == saved
-
-
-async def test_collection_default_permission_can_be_persistent(tmp_path, *, postgres_session_factory) -> None:
-    service = CollectionService(
-        repository=CollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+    assert (
+        await service.get_agent_default_permission_for_user(
+            collection["collection_id"], "owner"
+        )
+        == saved
     )
-    collection = await service.create_collection("Persistent Agent settings", owner_user_id="owner")
+
+
+async def test_collection_default_permission_can_be_persistent(
+    tmp_path, *, postgres_session_factory
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
+    service = collection_service
+    collection = await service.create_collection(
+        "Persistent Agent settings", owner_user_id="owner"
+    )
 
     saved = await service.set_agent_default_permission_for_user(
         collection["collection_id"],
@@ -63,30 +77,43 @@ async def test_collection_default_permission_can_be_persistent(tmp_path, *, post
     )
 
     assert saved["expires_at"] is None
-    assert await service.get_agent_default_permission_for_user(
-        collection["collection_id"], "owner"
-    ) == saved
-
-
-async def test_collection_default_permission_hides_collection_from_other_users(tmp_path, *, postgres_session_factory) -> None:
-    service = CollectionService(
-        repository=CollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+    assert (
+        await service.get_agent_default_permission_for_user(
+            collection["collection_id"], "owner"
+        )
+        == saved
     )
-    collection = await service.create_collection("Private settings", owner_user_id="owner")
 
-    with pytest.raises(FileNotFoundError):
+
+async def test_collection_default_permission_hides_collection_from_other_users(
+    tmp_path, *, postgres_session_factory
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
+    service = collection_service
+    collection = await service.create_collection(
+        "Private settings", owner_user_id="owner"
+    )
+
+    with pytest.raises(ResourceNotFoundException):
         await service.get_agent_default_permission_for_user(
             collection["collection_id"], "other-user"
         )
 
 
-async def test_collection_default_permission_rejects_stale_revision(tmp_path, *, postgres_session_factory) -> None:
-    service = CollectionService(
-        repository=CollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+async def test_collection_default_permission_rejects_stale_revision(
+    tmp_path, *, postgres_session_factory
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
+    service = collection_service
+    collection = await service.create_collection(
+        "Concurrent settings", owner_user_id="owner"
     )
-    collection = await service.create_collection("Concurrent settings", owner_user_id="owner")
     expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
     await service.set_agent_default_permission_for_user(
@@ -97,7 +124,7 @@ async def test_collection_default_permission_rejects_stale_revision(tmp_path, *,
         expires_at=None,
         expected_revision=0,
     )
-    with pytest.raises(ValueError, match="permission_revision_conflict"):
+    with pytest.raises(ResourceConflictException, match="permission_revision_conflict"):
         await service.set_agent_default_permission_for_user(
             collection["collection_id"],
             "owner",

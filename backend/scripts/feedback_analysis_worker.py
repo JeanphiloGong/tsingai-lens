@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -21,12 +20,10 @@ if str(BACKEND_ROOT) not in sys.path:
 
 
 async def run_once() -> str:
-    from main import ApplicationOverrides, build_application_runtime
+    from main import build_application_runtime
 
-    runtime = await build_application_runtime(ApplicationOverrides())
+    runtime = await build_application_runtime()
     try:
-        if runtime.feedback_analysis_worker is None:
-            raise RuntimeError("feedback analysis worker is not configured")
         job = await runtime.feedback_analysis_worker.run_once()
         return "idle" if job is None else job.status
     finally:
@@ -35,14 +32,13 @@ async def run_once() -> str:
 
 async def requeue_failed_job(job_id: str) -> str:
     """Explicitly requeue one failed feedback-analysis job for inspection."""
-    from main import ApplicationOverrides, build_application_runtime
+    from main import build_application_runtime
 
-    runtime = await build_application_runtime(ApplicationOverrides())
+    runtime = await build_application_runtime()
     try:
-        repository = runtime.analysis_job_repository
-        if repository is None:
-            raise RuntimeError("feedback analysis job repository is not configured")
-        job = await repository.requeue_failed_feedback_analysis_job(
+        from repositories.analysis_job_repository import AnalysisJobRepo
+
+        job = await AnalysisJobRepo.requeue_failed_feedback_analysis_job(
             job_id=job_id,
             now=datetime.now(timezone.utc).isoformat(),
         )
@@ -52,13 +48,11 @@ async def requeue_failed_job(job_id: str) -> str:
 
 
 async def run_loop(interval_seconds: float) -> None:
-    from main import ApplicationOverrides, build_application_runtime
+    from main import build_application_runtime
 
-    runtime = await build_application_runtime(ApplicationOverrides())
+    runtime = await build_application_runtime()
     try:
         worker = runtime.feedback_analysis_worker
-        if worker is None:
-            raise RuntimeError("feedback analysis worker is not configured")
         while True:
             job = await worker.run_once()
             print("idle" if job is None else job.status, flush=True)
@@ -68,7 +62,9 @@ async def run_loop(interval_seconds: float) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run feedback analysis jobs explicitly")
+    parser = argparse.ArgumentParser(
+        description="Run feedback analysis jobs explicitly"
+    )
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--once", action="store_true", help="process at most one job")
     actions.add_argument(
@@ -76,7 +72,9 @@ def main() -> None:
         metavar="JOB_ID",
         help="manually return one failed feedback-analysis job to pending",
     )
-    parser.add_argument("--interval", type=float, default=2.0, help="loop delay in seconds")
+    parser.add_argument(
+        "--interval", type=float, default=2.0, help="loop delay in seconds"
+    )
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")

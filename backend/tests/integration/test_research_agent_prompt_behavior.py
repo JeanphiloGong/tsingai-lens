@@ -7,19 +7,14 @@ explicit operator-supplied endpoint. No environment file is loaded here.
 
 from __future__ import annotations
 
-from copy import deepcopy
-
-from tests.support.source_artifacts import build_source_documents
-
 import json
 import os
+from copy import deepcopy
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from openai import AsyncOpenAI
-
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.agent_runner import AgentRunLimits
 from application.chat.capabilities import (
@@ -34,10 +29,12 @@ from application.chat.capabilities import (
 from domain.source import (
     Document,
 )
+from openai import AsyncOpenAI
 from repositories.collection_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.paper_map_repository import PaperMapRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.source_artifacts import build_source_documents
 
 _LIVE = os.environ.get("LENS_RUN_LIVE_PROMPT_TESTS") == "1"
 _FIXTURE = (
@@ -88,7 +85,7 @@ async def _fixture_collection(collection_service, *, postgres_session_factory):
         created_at=now,
         updated_at=now,
     )
-    await collection_service.repository.add_documents(
+    await collection_service.CollectionRepo.add_documents(
         collection["collection_id"],
         (stored_document,),
         updated_at=now,
@@ -109,7 +106,9 @@ async def _fixture_collection(collection_service, *, postgres_session_factory):
     return user_id, collection["collection_id"], document_id, sources
 
 
-def _runner(*, client: AsyncOpenAI, collection_service, sources, postgres_session_factory):
+def _runner(
+    *, client: AsyncOpenAI, collection_service, sources, postgres_session_factory
+):
     profiles = DocumentProfileRepository()
     maps = PaperMapRepository()
     objective_repository = _EmptyObjectiveRepository()
@@ -159,20 +158,29 @@ def _runner(*, client: AsyncOpenAI, collection_service, sources, postgres_sessio
     )
 
 
-async def test_live_agent_reads_source_when_profile_and_map_are_missing(collection_service, *, postgres_session_factory):
+async def test_live_agent_reads_source_when_profile_and_map_are_missing(
+    collection_service, *, postgres_session_factory
+):
     """A readable paper remains inspectable without optional navigation metadata."""
 
     required = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
-    user_id, collection_id, document_id, sources = await _fixture_collection(collection_service, postgres_session_factory=postgres_session_factory)
+    user_id, collection_id, document_id, sources = await _fixture_collection(
+        collection_service, postgres_session_factory=postgres_session_factory
+    )
     client = AsyncOpenAI(
         api_key=os.environ["LLM_API_KEY"],
         base_url=os.environ["LLM_BASE_URL"],
         timeout=60,
     )
     try:
-        result = await _runner(client=client, collection_service=collection_service, sources=sources, postgres_session_factory=postgres_session_factory).run_turn(
+        result = await _runner(
+            client=client,
+            collection_service=collection_service,
+            sources=sources,
+            postgres_session_factory=postgres_session_factory,
+        ).run_turn(
             context=AgentContext(
                 session_id="live-prompt-session",
                 user_id=user_id,
@@ -204,38 +212,49 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(collecti
             )
         )
         for outcome in result.tool_results
-    ), [{
-        "tool_call_id": outcome.tool_call_id,
-        "status": outcome.status.value,
-        "data": deepcopy(dict(outcome.data)),
-        "resource_refs": [
-            {
-                "resource_type": item.resource_type,
-                "resource_id": item.resource_id,
-                "href": item.href,
-            }
-            for item in outcome.resource_refs
-        ],
-        "warnings": list(outcome.warnings),
-        "error_code": outcome.error_code,
-        "error_message": outcome.error_message,
-    } for outcome in result.tool_results]
+    ), [
+        {
+            "tool_call_id": outcome.tool_call_id,
+            "status": outcome.status.value,
+            "data": deepcopy(dict(outcome.data)),
+            "resource_refs": [
+                {
+                    "resource_type": item.resource_type,
+                    "resource_id": item.resource_id,
+                    "href": item.href,
+                }
+                for item in outcome.resource_refs
+            ],
+            "warnings": list(outcome.warnings),
+            "error_code": outcome.error_code,
+            "error_message": outcome.error_message,
+        }
+        for outcome in result.tool_results
+    ]
     answer = " ".join(message.content for message in result.messages if message.content)
     assert "72" in answer and "82" in answer
     assert not any(
         phrase in answer.casefold()
-        for phrase in ("build a paper map first", "manually review the pdf", "cannot inspect")
+        for phrase in (
+            "build a paper map first",
+            "manually review the pdf",
+            "cannot inspect",
+        )
     )
 
 
 @pytest.mark.parametrize("knowledge_scope", ["ordinary", "no_web", "supplied_only"])
-async def test_live_agent_respects_the_requested_knowledge_scope(collection_service, knowledge_scope, *, postgres_session_factory):
+async def test_live_agent_respects_the_requested_knowledge_scope(
+    collection_service, knowledge_scope, *, postgres_session_factory
+):
     """A trend supports arithmetic; explaining its mechanism needs allowed premises."""
 
     required = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
-    user_id, collection_id, _document_id, sources = await _fixture_collection(collection_service, postgres_session_factory=postgres_session_factory)
+    user_id, collection_id, _document_id, sources = await _fixture_collection(
+        collection_service, postgres_session_factory=postgres_session_factory
+    )
     scope_instruction = {
         "ordinary": "",
         "no_web": "Do not search the web.",
@@ -251,7 +270,12 @@ async def test_live_agent_respects_the_requested_knowledge_scope(collection_serv
         timeout=60,
     )
     try:
-        result = await _runner(client=client, collection_service=collection_service, sources=sources, postgres_session_factory=postgres_session_factory).run_turn(
+        result = await _runner(
+            client=client,
+            collection_service=collection_service,
+            sources=sources,
+            postgres_session_factory=postgres_session_factory,
+        ).run_turn(
             context=AgentContext(
                 session_id=f"live-knowledge-{knowledge_scope}",
                 user_id=user_id,
@@ -280,7 +304,7 @@ async def test_live_agent_respects_the_requested_knowledge_scope(collection_serv
     assert not result.tool_calls
     answer = result.messages[-1].content.strip()
     if answer.startswith("```json") and answer.endswith("```"):
-        answer = answer[len("```json"): -len("```")].strip()
+        answer = answer[len("```json") : -len("```")].strip()
     payload = json.loads(answer)
     assert payload["elongation_change_pp"] == 5
     assert payload["mechanism_gap"].strip()
@@ -290,5 +314,6 @@ async def test_live_agent_respects_the_requested_knowledge_scope(collection_serv
         assert hypotheses == [], payload
     else:
         assert hypotheses, payload
-        assert all(item["hypothesis"].strip() and item["basis"].strip()
-                   for item in hypotheses)
+        assert all(
+            item["hypothesis"].strip() and item["basis"].strip() for item in hypotheses
+        )

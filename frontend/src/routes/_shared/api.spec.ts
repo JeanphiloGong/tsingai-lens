@@ -1,141 +1,114 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, errorMessage, requestBlob, requestJson, isHttpStatusError, getApiErrorDetail } from './api';
+import {
+	ApiError, errorMessage, requestBlob, requestJson, requestText,
+	isApiErrorCode, getApiErrorData
+} from './api';
 import { language } from './i18n';
+import { get } from 'svelte/store';
+import { authState } from './auth';
 
-describe('api shared error handling', () => {
+function apiResponse(code: number, data: unknown, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
+		headers: { 'Content-Type': 'application/json' }
+	});
+}
+
+describe('API business response contract', () => {
 	afterEach(() => {
 		language.set('en');
 		vi.unstubAllGlobals();
 	});
 
-	it('uses the HTTP error contract and leaves network messages uninterpreted', () => {
-		const network = new Error('404 Not Found - {"detail":"missing"}');
-		expect(isHttpStatusError(network, 404)).toBe(false);
-		expect(getApiErrorDetail(network)).toBeNull();
-		expect(errorMessage(network)).toBe(network.message);
-		const http = new ApiError(404, 'Not Found', { detail: 'missing' });
-		expect(isHttpStatusError(http, 404)).toBe(true);
-		expect(getApiErrorDetail(http)).toBe('missing');
+	it('unwraps successful data and sends session credentials', async () => {
+		const fetch = vi.fn().mockResolvedValue(apiResponse(200, { collection_id: 'col_1' }));
+		vi.stubGlobal('fetch', fetch);
+		await expect(requestJson('/collections')).resolves.toEqual({ collection_id: 'col_1' });
+		expect(fetch).toHaveBeenCalledWith('/api/v1/collections', expect.objectContaining({ credentials: 'same-origin' }));
 	});
 
-	it.each([
-		['en', 'Invalid email or password.'],
-		['zh', '邮箱或密码错误。']
-	] as const)(
-		'formats invalid credentials for %s without exposing the raw response',
-		(lang, expected) => {
-			language.set(lang);
-			const error = new ApiError(401, 'Unauthorized', {
-				code: 'invalid_credentials',
-				message: 'Invalid email or password.'
-			});
+	it.each([200100, 200201, 200204, 200205])('rejects business code %s under HTTP 200', async (code) => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse(code, { code: 'rejected' }, 'Rejected.')));
+		await expect(requestJson('/collections')).rejects.toMatchObject({ code, message: 'Rejected.', data: { code: 'rejected' } });
+	});
 
-			expect(errorMessage(error)).toBe(expected);
-			expect(errorMessage(error)).not.toContain('401 Unauthorized');
+	it('leaves ordinary network errors outside the business error contract', () => {
+		const network = new Error('404 Not Found');
+		expect(isApiErrorCode(network, 200201)).toBe(false);
+		expect(getApiErrorData(network)).toBeNull();
+		expect(errorMessage(network)).toBe(network.message);
+	});
+
+	it.each([['en', 'Invalid email or password.'], ['zh', '邮箱或密码错误。']] as const)(
+		'formats invalid credentials for %s', (lang, expected) => {
+			language.set(lang);
+			expect(errorMessage(new ApiError(200301, 'Rejected.', { code: 'invalid_credentials' }))).toBe(expected);
 		}
 	);
 
-	it.each([
-		['en', 'This file is larger than the 256 MiB upload limit.'],
-		['zh', '文件超过 256 MiB 上传限制。']
-	] as const)('formats oversized uploads for %s', (lang, expected) => {
-		language.set(lang);
-		const error = new ApiError(413, 'Request Entity Too Large', {
-			detail: 'uploaded file exceeds the 256 MiB limit'
-		});
+	it.each([['en', 'This file is larger than the 256 MiB upload limit.'], ['zh', '文件超过 256 MiB 上传限制。']] as const)(
+		'formats oversized uploads for %s', (lang, expected) => {
+			language.set(lang);
+			expect(errorMessage(new ApiError(200100, 'Rejected.', { code: 'upload_too_large' }))).toBe(expected);
+		}
+	);
 
-		expect(errorMessage(error)).toBe(expected);
+	it('shows a safe message for server failures', () => {
+		expect(errorMessage(new ApiError(200000, 'private diagnostic', {}))).toBe('The request could not be completed. Please try again.');
 	});
 
-	it.each([
-		['en', 'The request could not be completed. Please try again.'],
-		['zh', '请求未能完成，请稍后重试。']
-	] as const)('does not expose technical details from unknown server failures for %s', (lang, expected) => {
-		language.set(lang);
-		const error = new ApiError(500, 'Internal Server Error', {
-			detail: 'PdfiumError: Failed to load document (PDFium: Data format error).'
-		});
-
-		expect(errorMessage(error)).toBe(expected);
-		expect(errorMessage(error)).not.toContain('PdfiumError');
-		expect(errorMessage(error)).not.toContain('500 Internal Server Error');
-	});
-
-	it('redirects to login when an authenticated request loses its session', async () => {
+	it('redirects an expired session to login', async () => {
 		const replace = vi.fn();
-		vi.stubGlobal('window', {
-			location: { pathname: '/collections/col_1', replace }
-		});
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				new Response(
-					JSON.stringify({
-						detail: {
-							code: 'authentication_required',
-							message: 'Authentication is required.'
-						}
-					}),
-					{
-						status: 401,
-						statusText: 'Unauthorized',
-						headers: { 'Content-Type': 'application/json' }
-					}
-				)
-			)
-		);
-
-		await expect(requestJson('/collections')).rejects.toMatchObject({
-			status: 401
-		});
+		authState.set({ status: 'authenticated', user: { user_id: 'user_1', email: 'researcher@example.test' } });
+		vi.stubGlobal('window', { location: { pathname: '/collections/col_1', replace } });
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse(200301, { code: 'authentication_required' }, 'Authentication is required.')));
+		await expect(requestJson('/collections')).rejects.toMatchObject({ code: 200301 });
 		expect(replace).toHaveBeenCalledWith('/login');
+		expect(get(authState)).toEqual({ status: 'anonymous', user: null });
 	});
 
-	it('keeps invalid login credentials on the login page', async () => {
+	it('keeps invalid credentials on the login page', async () => {
 		const replace = vi.fn();
-		vi.stubGlobal('window', {
-			location: { pathname: '/login', replace }
-		});
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				new Response(
-					JSON.stringify({
-						detail: {
-							code: 'invalid_credentials',
-							message: 'Invalid email or password.'
-						}
-					}),
-					{ status: 401, statusText: 'Unauthorized' }
-				)
-			)
-		);
-
-		await expect(
-			requestJson('/auth/login', {
-				method: 'POST',
-				body: JSON.stringify({ email: 'admin@example.com', password: 'wrong' })
-			})
-		).rejects.toMatchObject({ status: 401 });
+		vi.stubGlobal('window', { location: { pathname: '/login', replace } });
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse(200301, { code: 'invalid_credentials' }, 'Invalid email or password.')));
+		await expect(requestJson('/auth/login')).rejects.toMatchObject({ code: 200301 });
 		expect(replace).not.toHaveBeenCalled();
 	});
 
-	it('sets JSON content type for a POST blob download', async () => {
-		const fetchMock = vi
-			.fn()
-			.mockResolvedValue(
-				new Response('archive', { status: 200, headers: { 'Content-Type': 'application/zip' } })
-			);
-		vi.stubGlobal('fetch', fetchMock);
-
-		await requestBlob('/collections/col_1/source-archives', {
-			method: 'POST',
-			body: JSON.stringify({ document_ids: ['doc_1'] })
-		});
-
-		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-		expect(init.method).toBe('POST');
+	it('preserves binary downloads and their JSON request content type', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response('archive', { headers: { 'Content-Type': 'application/zip' } }));
+		vi.stubGlobal('fetch', fetch);
+		expect(await (await requestBlob('/collections/col_1/source-archives', { method: 'POST', body: JSON.stringify({ document_ids: ['doc_1'] }) })).text()).toBe('archive');
+		const [, init] = fetch.mock.calls[0] as [string, RequestInit];
 		expect(new Headers(init.headers).get('Content-Type')).toBe('application/json');
 		expect(init.credentials).toBe('same-origin');
+	});
+
+	it('rejects a download error instead of saving its JSON', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse(200204, { code: 'export_stale' }, 'Export is stale.')));
+		await expect(requestBlob('/exports/one')).rejects.toMatchObject({ code: 200204 });
+	});
+
+	it.each(['attachment', 'inline'])('downloads %s JSON files as their original bytes', async (disposition) => {
+		const content = '{"code":7,"rows":[1]}';
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(content, { headers: {
+			'Content-Type': 'application/json', 'Content-Disposition': `${disposition}; filename="export.json"`
+		} })));
+		expect(await (await requestBlob('/exports/one')).text()).toBe(content);
+	});
+
+	it('downloads an ordinary JSON query as its data', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse(200, { items: [1] })));
+		expect(JSON.parse(await (await requestBlob('/finding-dataset')).text())).toEqual({ items: [1] });
+	});
+
+	it('keeps text responses and rejects JSON failures from text endpoints', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('# Source', { headers: { 'Content-Type': 'text/markdown' } })).mockResolvedValueOnce(apiResponse(200201, {}, 'Missing source.')));
+		await expect(requestText('/markdown')).resolves.toBe('# Source');
+		await expect(requestText('/markdown')).rejects.toMatchObject({ code: 200201 });
+	});
+
+	it('rejects the retired raw JSON protocol', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"items":[]}')));
+		await expect(requestJson('/collections')).rejects.toThrow('error.requestFailed');
 	});
 });

@@ -1,4 +1,4 @@
-import { errorMessage, getApiErrorDetail, requestJson } from './api';
+import { errorMessage, getApiErrorReason, requestJson } from './api';
 
 export type CollectionDocument = {
 	document_id: string;
@@ -60,7 +60,7 @@ export async function uploadCollectionDocument(
 }
 
 export function isDuplicateCollectionDocumentError(error: unknown) {
-	return getApiErrorDetail(error) === 'document content already exists in collection';
+	return getApiErrorReason(error) === 'document_content_already_exists';
 }
 
 export async function uploadCollectionDocuments(

@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from types import ModuleType
 from typing import Any, Literal
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
-
 from application.core.objectives.paper_experiment_authoring_service import (
-    PaperExperimentAuthoringService,
     PaperExperimentAuthoringError,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _ScientificAttributeToolField(BaseModel):
@@ -152,8 +149,12 @@ class _PaperExperimentTestConditionToolField(BaseModel):
         min_length=1,
         description="Test or characterization category, such as tensile or microscopy.",
     )
-    method: str | None = Field(default=None, description="Reported method or instrument description.")
-    standard: str | None = Field(default=None, description="Reported standard, such as ASTM E8.")
+    method: str | None = Field(
+        default=None, description="Reported method or instrument description."
+    )
+    standard: str | None = Field(
+        default=None, description="Reported standard, such as ASTM E8."
+    )
     parameters: list[_ScientificAttributeToolField] = Field(
         default_factory=list,
         description=(
@@ -219,9 +220,15 @@ class _PaperExperimentMeasurementToolField(BaseModel):
         min_length=1,
         description="Required response-local key used by comparisons and interpretations.",
     )
-    variant_key: str | None = Field(default=None, description="Response-local variant key, when known.")
-    test_key: str | None = Field(default=None, description="Response-local test key, when known.")
-    outcome: str = Field(min_length=1, description="Measured or observed outcome label.")
+    variant_key: str | None = Field(
+        default=None, description="Response-local variant key, when known."
+    )
+    test_key: str | None = Field(
+        default=None, description="Response-local test key, when known."
+    )
+    outcome: str = Field(
+        min_length=1, description="Measured or observed outcome label."
+    )
     value: str | int | float | bool | None = Field(
         default=None,
         description="Reported scalar value; supply value or result_text. Omit or use null for a qualitative result.",
@@ -245,7 +252,9 @@ class _PaperExperimentMeasurementToolField(BaseModel):
             "Keep paper-native identifiers inside reported_identifiers."
         ),
     )
-    result_kind: Literal["measured", "observed", "simulated", "predicted", "unknown"] = Field(
+    result_kind: Literal[
+        "measured", "observed", "simulated", "predicted", "unknown"
+    ] = Field(
         default="measured",
         description="Nature of the reported result; use observed for qualitative observations.",
     )
@@ -287,7 +296,6 @@ class _PaperExperimentMeasurementToolField(BaseModel):
         default_factory=list,
         description="Other source-grounded limitations for this measurement.",
     )
-
 
 
 class _PaperExperimentComparisonToolField(BaseModel):
@@ -396,7 +404,9 @@ class _PaperExperimentDraftExperimentField(BaseModel):
             "paper scope this experiment covers."
         ),
     )
-    series_key: str | None = Field(default=None, description="Response-local experiment series key.")
+    series_key: str | None = Field(
+        default=None, description="Response-local experiment series key."
+    )
     scope_kind: Literal[
         "parent",
         "matrix",
@@ -428,7 +438,9 @@ class _PaperExperimentDraftExperimentField(BaseModel):
         default_factory=list,
         description="Source-label records supporting an independent physical split.",
     )
-    design_type: Literal["parallel", "factorial", "dose_response", "observational", "unknown"] = Field(
+    design_type: Literal[
+        "parallel", "factorial", "dose_response", "observational", "unknown"
+    ] = Field(
         default="unknown",
         description="Paper-supported design shape; use unknown when the design is not stated.",
     )
@@ -455,15 +467,21 @@ class _PaperExperimentDraftExperimentField(BaseModel):
             "variants, both sides' measurement keys, and source-backed relation labels."
         ),
     )
-    reported_interpretations: list[_PaperExperimentReportedInterpretationToolField] = Field(
-        default_factory=list,
-        description=(
-            "Typed paper-author interpretations. Always provide statement, kind, and "
-            "source labels; these are not Lens Findings."
-        ),
+    reported_interpretations: list[_PaperExperimentReportedInterpretationToolField] = (
+        Field(
+            default_factory=list,
+            description=(
+                "Typed paper-author interpretations. Always provide statement, kind, and "
+                "source labels; these are not Lens Findings."
+            ),
+        )
     )
-    source_labels: list[str] = Field(default_factory=list, description="Sxxx labels supporting this experiment.")
-    unresolved_issues: list[dict[str, Any]] = Field(default_factory=list, description="Unknown or unresolved source facts.")
+    source_labels: list[str] = Field(
+        default_factory=list, description="Sxxx labels supporting this experiment."
+    )
+    unresolved_issues: list[dict[str, Any]] = Field(
+        default_factory=list, description="Unknown or unresolved source facts."
+    )
 
 
 class _PaperExperimentDraftFields(BaseModel):
@@ -489,7 +507,9 @@ class _PaperExperimentDraftFields(BaseModel):
 
     def raw_draft(self) -> dict[str, Any]:
         return {
-            "experiments": [item.model_dump(exclude_defaults=True) for item in self.experiments],
+            "experiments": [
+                item.model_dump(exclude_defaults=True) for item in self.experiments
+            ],
             "source_labels": self.source_labels,
             "unresolved_issues": self.unresolved_issues,
         }
@@ -503,13 +523,18 @@ class PaperExperimentRevisionToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     draft_id: str = Field(min_length=1, max_length=128)
-    draft_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    draft_digest: str = Field(
+        min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    )
 
 
 def _draft_id(context: CapabilityExecutionContext, digest: str) -> str:
-    return "pexp_draft_" + sha256(
-        f"{context.session_id}:{context.tool_call_id}:{digest}".encode("utf-8")
-    ).hexdigest()[:24]
+    return (
+        "pexp_draft_"
+        + sha256(
+            f"{context.session_id}:{context.tool_call_id}:{digest}".encode("utf-8")
+        ).hexdigest()[:24]
+    )
 
 
 _DRAFT_TTL = timedelta(hours=24)
@@ -557,7 +582,7 @@ class ProposePaperExperimentDraftCapability:
         input_model=PaperExperimentDraftToolRequest,
     )
 
-    def __init__(self, *, authoring_service: PaperExperimentAuthoringService, chat_repository: Any) -> None:
+    def __init__(self, *, authoring_service: ModuleType, chat_repository: Any) -> None:
         self.authoring_service = authoring_service
         self.chat_repository = chat_repository
 
@@ -598,15 +623,29 @@ class ProposePaperExperimentDraftCapability:
         missing = []
         for label in sorted(labels):
             source = prepared.output.output.source_labels[label]
-            identity = (arguments.document_id, source["source_kind"], source["source_ref"],
-                        prepared.source_digests[(source["source_kind"], source["source_ref"])])
+            identity = (
+                arguments.document_id,
+                source["source_kind"],
+                source["source_ref"],
+                prepared.source_digests[(source["source_kind"], source["source_ref"])],
+            )
             if identity not in completed:
-                missing.append({"source_label": label, "source_kind": source["source_kind"], "source_ref": source["source_ref"]})
+                missing.append(
+                    {
+                        "source_label": label,
+                        "source_kind": source["source_kind"],
+                        "source_ref": source["source_ref"],
+                    }
+                )
         if missing:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED, error_code="source_read_incomplete",
-                error_message=("Read the current complete canonical Sources listed in sources_to_read. "
-                               "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."),
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="source_read_incomplete",
+                error_message=(
+                    "Read the current complete canonical Sources listed in sources_to_read. "
+                    "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."
+                ),
                 data={"document_id": arguments.document_id, "sources_to_read": missing},
             )
         for message in reversed(messages):
@@ -614,13 +653,17 @@ class ProposePaperExperimentDraftCapability:
             if prior is None or prior.status != "succeeded":
                 continue
             data = prior.data
-            if (data.get("document_id") != arguments.document_id
-                    or data.get("draft_digest") != prepared.draft_digest
-                    or data.get("source_fingerprint") != prepared.source_fingerprint
-                    or data.get("draft") != arguments.raw_draft()):
+            if (
+                data.get("document_id") != arguments.document_id
+                or data.get("draft_digest") != prepared.draft_digest
+                or data.get("source_fingerprint") != prepared.source_fingerprint
+                or data.get("draft") != arguments.raw_draft()
+            ):
                 continue
             try:
-                age = datetime.now(timezone.utc) - datetime.fromisoformat(str(data.get("draft_created_at") or ""))
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(
+                    str(data.get("draft_created_at") or "")
+                )
             except (ValueError, TypeError):
                 continue
             if timedelta(0) <= age <= _DRAFT_TTL and data.get("draft_id"):
@@ -636,7 +679,9 @@ class ProposePaperExperimentDraftCapability:
                 "status": "pending_approval",
                 "requires_user_approval": True,
                 "experiment_count": len(prepared.output.output.experiments),
-                "experiments": [item.payload for item in prepared.output.output.experiments],
+                "experiments": [
+                    item.payload for item in prepared.output.output.experiments
+                ],
                 "source_fingerprint": prepared.source_fingerprint,
                 "objective_id": arguments.objective_id,
                 "document_id": arguments.document_id,
@@ -677,7 +722,7 @@ class CreatePaperExperimentRevisionCapability:
     def __init__(
         self,
         *,
-        authoring_service: PaperExperimentAuthoringService,
+        authoring_service: ModuleType,
         chat_repository: Any | None = None,
     ) -> None:
         self.authoring_service = authoring_service
@@ -689,7 +734,9 @@ class CreatePaperExperimentRevisionCapability:
         arguments: PaperExperimentRevisionToolRequest,
     ) -> tuple[str, dict[str, Any]]:
         if self.chat_repository is None:
-            raise PaperExperimentAuthoringError("paper experiment draft store is unavailable")
+            raise PaperExperimentAuthoringError(
+                "paper experiment draft store is unavailable"
+            )
         messages = await self.chat_repository.read_messages(context.session_id)
         for message in reversed(messages):
             result = getattr(message, "tool_result", None)
@@ -700,17 +747,26 @@ class CreatePaperExperimentRevisionCapability:
                 continue
             if getattr(result, "status", None) != "succeeded":
                 continue
-            if str(data.get("draft_digest") or "").casefold() != arguments.draft_digest.casefold():
-                raise PaperExperimentAuthoringError("stored paper experiment draft digest does not match approval")
+            if (
+                str(data.get("draft_digest") or "").casefold()
+                != arguments.draft_digest.casefold()
+            ):
+                raise PaperExperimentAuthoringError(
+                    "stored paper experiment draft digest does not match approval"
+                )
             created_at = str(data.get("draft_created_at") or "")
             try:
-                is_expired = datetime.now(timezone.utc) - datetime.fromisoformat(
-                    created_at.replace("Z", "+00:00")
-                ) > _DRAFT_TTL
+                is_expired = (
+                    datetime.now(timezone.utc)
+                    - datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    > _DRAFT_TTL
+                )
             except (ValueError, TypeError):
                 is_expired = True
             if is_expired:
-                raise PaperExperimentAuthoringError("paper experiment draft has expired; propose it again")
+                raise PaperExperimentAuthoringError(
+                    "paper experiment draft has expired; propose it again"
+                )
             draft = data.get("draft")
             if not isinstance(draft, dict):
                 continue
@@ -718,18 +774,20 @@ class CreatePaperExperimentRevisionCapability:
                 str(data.get("document_id") or ""),
                 draft,
             )
-        raise PaperExperimentAuthoringError("paper experiment draft was not found in this session")
+        raise PaperExperimentAuthoringError(
+            "paper experiment draft was not found in this session"
+        )
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: PaperExperimentRevisionToolRequest,
     ) -> ChatToolResult:
-        document_id, raw_draft = await self._stored_draft(
-            context, arguments
-        )
+        document_id, raw_draft = await self._stored_draft(context, arguments)
         if not document_id:
-            raise PaperExperimentAuthoringError("stored paper experiment draft is missing its scope")
+            raise PaperExperimentAuthoringError(
+                "stored paper experiment draft is missing its scope"
+            )
         prepared = await self.authoring_service.prepare(
             collection_id=context.collection_id,
             user_id=context.user_id,
@@ -737,7 +795,9 @@ class CreatePaperExperimentRevisionCapability:
             raw_draft=raw_draft,
         )
         if prepared.draft_digest.casefold() != arguments.draft_digest.casefold():
-            raise PaperExperimentAuthoringError("paper experiment draft digest changed; review it again")
+            raise PaperExperimentAuthoringError(
+                "paper experiment draft digest changed; review it again"
+            )
         result = await self.authoring_service.write(
             prepared=prepared,
             collection_id=context.collection_id,

@@ -4,13 +4,22 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
-
-from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
+from application.auth import session_service as auth_session_service
+from application.auth.session_service import SESSION_COOKIE_NAME
 from controllers import feedback_case_routes as feedback_cases
+from controllers.exception_router import (
+    general_exception_handler,
+    http_exception_handler,
+    project_exception_handler,
+    request_validation_handler,
+)
+from exceptions import ProjectException
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from httpx import ASGITransport, AsyncClient
 from main import configure_middleware
 from repositories.auth_repository import AuthSessionRecord, AuthUserRecord
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from tests.integration.persistence.test_feedback_workbench import feedback_chain
 
 pytestmark = pytest.mark.anyio
@@ -80,11 +89,14 @@ async def feedback_api(feedback_chain):
     case = await _prepare_case(chain)
 
     app = FastAPI()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     configure_middleware(app)
     app.include_router(feedback_cases.feedback_case_router, prefix="/api/v1")
-    app.state.auth_session_service = AuthSessionService(auth_repository)
-    app.state.collection_service = chain.collection_service
-    app.state.feedback_case_service = chain.case_service
+    feedback_cases.feedback_case_service = chain.case_service
+    auth_session_service.AuthRepo = auth_repository
 
     async with (
         AsyncClient(
@@ -97,7 +109,9 @@ async def feedback_api(feedback_chain):
             base_url="http://test",
             cookies={SESSION_COOKIE_NAME: OTHER_TOKEN},
         ) as other,
-        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as anonymous,
     ):
         yield SimpleNamespace(
             chain=chain,
@@ -120,27 +134,35 @@ def _annotation_payload(*, expected_digest: str | None = None, reason: str = "ch
     }
 
 
-async def test_feedback_api_requires_auth_and_hides_collection_from_other_user(feedback_api):
+async def test_feedback_api_requires_auth_and_hides_collection_from_other_user(
+    feedback_api,
+):
     fixture = feedback_api
     path = "/api/v1/feedback-cases"
-    assert (await fixture.anonymous.get(path)).status_code == 401
+    rejection = await fixture.anonymous.get(path)
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200301
 
-    listing = await fixture.owner.get(path, params={"collection_id": fixture.case.collection_id})
+    listing = await fixture.owner.get(
+        path, params={"collection_id": fixture.case.collection_id}
+    )
     assert listing.status_code == 200, listing.text
-    assert [item["case_id"] for item in listing.json()["items"]] == [fixture.case.case_id]
+    assert [item["case_id"] for item in listing.json()["data"]["items"]] == [
+        fixture.case.case_id
+    ]
 
     detail = await fixture.owner.get(f"{path}/{fixture.case.case_id}")
     assert detail.status_code == 200, detail.text
-    assert detail.json()["case_id"] == fixture.case.case_id
+    assert detail.json()["data"]["case_id"] == fixture.case.case_id
 
-    assert (
-        await fixture.other.get(
-            path, params={"collection_id": fixture.case.collection_id}
-        )
-    ).status_code == 404
-    assert (
-        await fixture.other.get(f"{path}/{fixture.case.case_id}")
-    ).status_code == 404
+    rejection = await fixture.other.get(
+        path, params={"collection_id": fixture.case.collection_id}
+    )
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
+    rejection = await fixture.other.get(f"{path}/{fixture.case.case_id}")
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
 
 
 async def test_annotation_digest_conflict_and_rejected_case_revision_are_http_visible(
@@ -151,15 +173,16 @@ async def test_annotation_digest_conflict_and_rejected_case_revision_are_http_vi
 
     first = await fixture.owner.patch(f"{path}/annotation", json=_annotation_payload())
     assert first.status_code == 200, first.text
-    first_annotation = first.json()
+    first_annotation = first.json()["data"]
     assert first_annotation["version"] == 1
     digest = first_annotation["annotation_digest"]
 
     stale_annotation = await fixture.owner.patch(
         f"{path}/annotation", json=_annotation_payload(reason="stale write")
     )
-    assert stale_annotation.status_code == 409
-    assert stale_annotation.json()["detail"]["code"] == "feedback_case_stale"
+    assert stale_annotation.status_code == 200
+    assert stale_annotation.json()["code"] == 200204
+    assert stale_annotation.json()["data"]["code"] == "feedback_case_stale"
 
     rejected = await fixture.owner.post(
         f"{path}/review",
@@ -171,14 +194,16 @@ async def test_annotation_digest_conflict_and_rejected_case_revision_are_http_vi
         headers={"Idempotency-Key": "reject-v1"},
     )
     assert rejected.status_code == 200, rejected.text
-    assert rejected.json()["decision"] == "reject"
+    assert rejected.json()["data"]["decision"] == "reject"
 
     revised = await fixture.owner.patch(
         f"{path}/annotation",
-        json=_annotation_payload(expected_digest=digest, reason="Clarified source omission."),
+        json=_annotation_payload(
+            expected_digest=digest, reason="Clarified source omission."
+        ),
     )
     assert revised.status_code == 200, revised.text
-    revised_annotation = revised.json()
+    revised_annotation = revised.json()["data"]
     assert revised_annotation["version"] == 2
     assert revised_annotation["annotation_digest"] != digest
 
@@ -191,11 +216,12 @@ async def test_annotation_digest_conflict_and_rejected_case_revision_are_http_vi
         },
         headers={"Idempotency-Key": "stale-review"},
     )
-    assert stale_review.status_code == 409
-    assert stale_review.json()["detail"]["code"] == "feedback_case_stale"
+    assert stale_review.status_code == 200
+    assert stale_review.json()["code"] == 200204
+    assert stale_review.json()["data"]["code"] == "feedback_case_stale"
 
     current = await fixture.owner.get(path)
-    assert current.json()["status"] == "ready_for_review"
+    assert current.json()["data"]["status"] == "ready_for_review"
 
 
 async def test_review_http_retry_replays_one_append_only_decision(feedback_api):
@@ -205,7 +231,7 @@ async def test_review_http_retry_replays_one_append_only_decision(feedback_api):
         f"{path}/annotation", json=_annotation_payload()
     )
     assert annotation.status_code == 200, annotation.text
-    digest = annotation.json()["annotation_digest"]
+    digest = annotation.json()["data"]["annotation_digest"]
     payload = {
         "expected_annotation_digest": digest,
         "decision": "accept",
@@ -217,13 +243,23 @@ async def test_review_http_retry_replays_one_append_only_decision(feedback_api):
     second = await fixture.owner.post(f"{path}/review", json=payload, headers=headers)
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
-    assert second.json() == first.json()
-    assert len((await fixture.owner.get(f"{path}/review-decisions")).json()["items"]) == 1
+    assert second.json()["data"] == first.json()["data"]
+    assert (
+        len(
+            (await fixture.owner.get(f"{path}/review-decisions")).json()["data"][
+                "items"
+            ]
+        )
+        == 1
+    )
 
     conflicting_retry = await fixture.owner.post(
         f"{path}/review",
         json={**payload, "reason": "A different logical request."},
         headers=headers,
     )
-    assert conflicting_retry.status_code == 422
-    assert conflicting_retry.json()["detail"]["code"] == "review_decision_identity_conflict"
+    assert conflicting_retry.status_code == 200
+    assert conflicting_retry.json()["code"] == 200204
+    assert (
+        conflicting_retry.json()["data"]["code"] == "review_decision_identity_conflict"
+    )

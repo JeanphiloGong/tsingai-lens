@@ -1,4 +1,11 @@
+
+from exceptions import ProjectException
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from controllers.exception_router import project_exception_handler, http_exception_handler, request_validation_handler, general_exception_handler
 from infra.persistence import database
+from infra.persistence.file.object_store import FileObjectStore
+
 """Moved execution records preserve publication and failure history in PostgreSQL."""
 
 
@@ -15,9 +22,6 @@ from domain.core.finding import (
 from domain.core.research_objective import (
     PaperContribution,
     ResearchObjective,
-)
-
-from domain.core.research_objective import (
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -42,7 +46,8 @@ OBJECTIVE_ID = "objective-laser-power-strength"
 async def objective_repository(source_repository):
     for document_id in ("doc_a", "doc_b"):
         await source_repository.replace_document(
-            COLLECTION_ID, _source(document_id, title=document_id),
+            COLLECTION_ID,
+            _source(document_id, title=document_id),
         )
     repository = ObjectiveRepository()
     objective = ResearchObjective(
@@ -71,7 +76,9 @@ async def objective_repository(source_repository):
         confidence=0.0,
         reason=None,
     )
-    await repository.replace(COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,)))
+    await repository.replace(
+        COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,))
+    )
     return repository
 
 
@@ -91,7 +98,9 @@ async def _queue_and_claim(repository):
         model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
-    claimed = await repository.claim_analysis(COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version)
+    claimed = await repository.claim_analysis(
+        COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version
+    )
     assert claimed is not None
     return objective, claimed
 
@@ -121,18 +130,17 @@ def _contribution(version: int, document_id: str) -> PaperContribution:
     )
 
 
-async def test_finding_http_revision_and_abstention_are_persisted(source_repository, tmp_path):
-    from application.core.objectives.analysis.experiment_analysis_writer import (
-        ExperimentAnalysisWriter,
+async def test_finding_http_revision_and_abstention_are_persisted(
+    source_repository, tmp_path
+):
+    from application.core.objectives import finding_authoring_service
+    from application.core.objectives.analysis import (
+        experiment_analysis_writer,
+        experiment_query_service,
     )
-    from application.core.objectives.analysis.experiment_query_service import (
-        ExperimentQueryService,
-    )
-    from application.core.objectives.finding_authoring_service import (
-        FindingAuthoringService,
-    )
-    from application.source.collection_service import CollectionService
+    from application.source import collection_service
     from controllers.core.finding_review_routes import finding_review_router as router
+    from controllers.dependencies.auth import get_current_user_id
     from domain.core import PaperContribution
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
@@ -192,12 +200,12 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     )
     analysis = await repository.claim_analysis(COLLECTION_ID, objective.objective_id, 1)
     experiments = PaperExperimentRepository()
-    writer = ExperimentAnalysisWriter(
-        paper_experiment_repository=experiments,
-        experiment_analysis_repository=ExperimentAnalysisRepository(),
-    )
+    experiment_analysis_writer.PaperExperimentRepo = experiments
+    experiment_analysis_writer.ExperimentAnalysisRepo = ExperimentAnalysisRepository()
+    writer = experiment_analysis_writer
     async with database.AsyncSessionLocal() as db, db.begin():
-        source = await writer.write_experiment_analysis(db=db,
+        source = await writer.write_experiment_analysis(
+            db=db,
             collection_id=COLLECTION_ID,
             objective=objective,
             analysis=analysis,
@@ -209,7 +217,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
             objective_id=objective.objective_id or "",
             analysis_version=1,
             document_id=doc or "",
-            analysis_status='analyzed' if doc == 'doc_a' else 'excluded',
+            analysis_status="analyzed" if doc == "doc_a" else "excluded",
             relevance="uncertain",
             paper_role="uncertain",
             contribution_summary=None,
@@ -226,22 +234,32 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         for doc in ("doc_a", "doc_b")
     )
     async with database.AsyncSessionLocal() as db, db.begin():
-        await repository.publish_experiment_analysis(db, COLLECTION_ID, objective.objective_id, 1, contributions=coverage)
-    query = ExperimentQueryService(
-        experiments,
-        ObjectiveExperimentSelectionRepository(),
-        ComparisonGroupRepository(),
-        ExperimentFindingRepository(),
-        objective_repository=repository,
+        await repository.publish_experiment_analysis(
+            db, COLLECTION_ID, objective.objective_id, 1, contributions=coverage
+        )
+    experiment_query_service.PaperExperimentRepo = experiments
+    experiment_query_service.ObjectiveExperimentSelectionRepo = (
+        ObjectiveExperimentSelectionRepository()
     )
+    experiment_query_service.ComparisonGroupRepo = ComparisonGroupRepository()
+    experiment_query_service.ExperimentFindingRepo = ExperimentFindingRepository()
+    experiment_query_service.ObjectiveRepo = repository
+    query = experiment_query_service
     app = FastAPI()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     app.include_router(router, prefix="/api/v1")
-    app.state.finding_authoring_service = FindingAuthoringService(collection_service=CollectionService(CollectionRepository(), FileCollectionWorkspace(tmp_path)), objective_repository=repository, experiment_query_service=query, experiment_analysis_writer=writer)
-
-    @app.middleware("http")
-    async def authenticate(request, call_next):
-        request.state.current_user = {"user_id": "user_source"}
-        return await call_next(request)
+    finding_authoring_service.collection_service = collection_service
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = query
+    finding_authoring_service.experiment_analysis_writer = writer
+    collection_service.CollectionRepo = CollectionRepository()
+    collection_service.workspace = FileCollectionWorkspace(tmp_path)
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
+    app.dependency_overrides[get_current_user_id] = lambda: "user_source"
 
     path = f"/api/v1/collections/{COLLECTION_ID}/objectives/{objective.objective_id}/findings"
     async with AsyncClient(
@@ -258,7 +276,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
                 ],
             },
         )
-        assert revised.status_code == 201, revised.text
+        assert revised.status_code == 200 and revised.json()["code"] == 200, revised.text
         current = await query.read_analysis_bundle(
             COLLECTION_ID, objective.objective_id, 2
         )
@@ -266,21 +284,42 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         assert current.findings[0].origin == "hybrid"
         assert current.findings[0].created_by_user_id == "user_source"
         assert current.findings[0].source_analysis_version == 1
-        assert "Supported only within the tested preheat conditions." in current.findings[0].limitations
+        assert (
+            "Supported only within the tested preheat conditions."
+            in current.findings[0].limitations
+        )
         assert current.findings[0].created_at is not None
-        abstained = await client.post(path, json={
-            "source_analysis_version": 2, "abstention_reason": "insufficient_evidence",
-            "limitations": ["The second paper lacks a comparable elongation measurement."],
-        })
-        assert abstained.status_code == 201, abstained.text
-        assert abstained.json()["finding"] is None
-        assert abstained.json()["abstention_reason"] == "insufficient_evidence"
+        abstained = await client.post(
+            path,
+            json={
+                "source_analysis_version": 2,
+                "abstention_reason": "insufficient_evidence",
+                "limitations": [
+                    "The second paper lacks a comparable elongation measurement."
+                ],
+            },
+        )
+        assert abstained.status_code == 200 and abstained.json()["code"] == 200, abstained.text
+        assert abstained.json()["data"]["finding"] is None
+        assert abstained.json()["data"]["abstention_reason"] == "insufficient_evidence"
     stored = await repository.read_analysis(COLLECTION_ID, objective.objective_id, 3)
     assert stored.abstention_reason == "insufficient_evidence"
-    assert stored.abstention_note == "The second paper lacks a comparable elongation measurement."
-    assert (await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 3)).findings == ()
-    assert (await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 1)).findings == source.findings
-    assert {item.document_id for item in await repository.list_contributions(COLLECTION_ID, objective.objective_id, 3)} == {"doc_a", "doc_b"}
+    assert (
+        stored.abstention_note
+        == "The second paper lacks a comparable elongation measurement."
+    )
+    assert (
+        await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 3)
+    ).findings == ()
+    assert (
+        await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 1)
+    ).findings == source.findings
+    assert {
+        item.document_id
+        for item in await repository.list_contributions(
+            COLLECTION_ID, objective.objective_id, 3
+        )
+    } == {"doc_a", "doc_b"}
 
 
 async def test_published_evidence_gap_survives_a_failed_followup(
@@ -353,7 +392,12 @@ async def test_published_evidence_gap_survives_a_failed_followup(
         diagnostics=(),
     )
     async with database.AsyncSessionLocal() as db, db.begin():
-        published_objective, published = await repository.publish_experiment_analysis(db, *queued.key, abstention_reason='no_comparable_evidence', abstention_note='The selected papers report power settings but no comparable porosity measurements.')
+        published_objective, published = await repository.publish_experiment_analysis(
+            db,
+            *queued.key,
+            abstention_reason="no_comparable_evidence",
+            abstention_note="The selected papers report power settings but no comparable porosity measurements.",
+        )
     assert published_objective.published_analysis_version == queued.analysis_version
     assert published.status == "succeeded"
     assert published.stats.token_usage == TokenUsage(32, 16, 48)

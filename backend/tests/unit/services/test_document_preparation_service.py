@@ -1,28 +1,27 @@
-from infra.persistence import database
 import asyncio
 from dataclasses import replace
 
 import pytest
-
 from application.core.document_profiles.extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
 )
-from application.pipeline import PipelineRunService
+from application.pipeline import pipeline_run_service
+from application.source import document_preparation_service
+from application.source import (
+    reference_extraction_service as source_reference_extraction_service,
+)
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
-    DocumentPreparationService,
     profile_fingerprint,
     source_fingerprint,
 )
-from application.source.reference_extraction_service import (
-    SourceReferenceExtractionService,
-)
 from domain.core import DocumentProfile
 from domain.source import Document, SourceDocument
+from infra.persistence import database
 from repositories.collection_repository import StoredDocument
-from tests.support.postgres import seed_collection
 from repositories.pipeline_run_repository import PipelineRunRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.postgres import seed_collection
 from utils.logger import bind_request_id, clear_request_id, get_request_id
 
 pytestmark = pytest.mark.anyio
@@ -71,8 +70,12 @@ def test_document_preparation_version_covers_only_profile_triage() -> None:
     assert DOCUMENT_ANALYSIS_VERSION == DOCUMENT_PROFILE_PROMPT_VERSION
 
 
-async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(monkeypatch, *, postgres_session_factory) -> None:
-    await seed_collection(postgres_session_factory, "col_trace", document_ids=("doc_trace",))
+async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(
+    monkeypatch, *, postgres_session_factory
+) -> None:
+    await seed_collection(
+        postgres_session_factory, "col_trace", document_ids=("doc_trace",)
+    )
     document = StoredDocument(
         document=Document(
             document_id="doc_trace",
@@ -88,17 +91,21 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
     )
 
     class CollectionService:
+        async def get_collection_for_user(self, collection_id, user_id):
+            assert (collection_id, user_id) == ("col_trace", "user-1")
+            return {"collection_id": collection_id}
+
         async def get_document(self, collection_id, document_id):
             assert (collection_id, document_id) == ("col_trace", "doc_trace")
             return document
 
-    service = DocumentPreparationService(
-        collection_service=CollectionService(),
-        pipeline_run_service=PipelineRunService(PipelineRunRepository()),
-        source_artifact_repository=SourceArtifactRepository(),
-        document_profile_service=object(),
-        max_concurrency=1,
-    )
+    document_preparation_service.collection_service = CollectionService()
+    document_preparation_service.pipeline_run_service = pipeline_run_service
+    document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
+    document_preparation_service.document_profile_service = object()
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = document_preparation_service
     request_finished = asyncio.Event()
     observed_request_ids = []
 
@@ -111,7 +118,9 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
     monkeypatch.setattr(service, "run_document_preparation", run_preparation)
     token = bind_request_id("req_preparation_trace")
     try:
-        run = await service.queue_document_preparation("col_trace", "doc_trace")
+        run = await service.queue_document_preparation(
+            "col_trace", "doc_trace", user_id="user-1"
+        )
         workers = tuple(service._active_workers)
     finally:
         clear_request_id(token)
@@ -122,10 +131,14 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
     assert observed_request_ids == ["req_preparation_trace", "req_preparation_trace"]
 
 
-async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts(*, postgres_session_factory) -> None:
+async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts(
+    *, postgres_session_factory
+) -> None:
     collection_id = "col_restart"
     document_id = "doc_restart"
-    await seed_collection(postgres_session_factory, collection_id, document_ids=(document_id,))
+    await seed_collection(
+        postgres_session_factory, collection_id, document_ids=(document_id,)
+    )
     original = StoredDocument(
         document=Document(
             document_id=document_id,
@@ -164,7 +177,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
             )
             return self.document
 
-    pipeline_run_service = PipelineRunService(PipelineRunRepository())
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     task, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
@@ -174,17 +187,16 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     assert created is True
     await pipeline_run_service.update_run(task["run_id"], status="running")
     collection_service = CollectionService()
-    service = DocumentPreparationService(
-        collection_service=collection_service,
-        pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=SourceArtifactRepository(),
-        document_profile_service=object(),
-        max_concurrency=1,
-    )
+    document_preparation_service.collection_service = collection_service
+    document_preparation_service.pipeline_run_service = pipeline_run_service
+    document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
+    document_preparation_service.document_profile_service = object()
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_service
 
     recovered = await service.recover_interrupted_runs()
 
-    interrupted = await pipeline_run_service.get_run(task["run_id"])
+    interrupted = await pipeline_run_service.get_run(task["run_id"], user_id="user-1")
     assert recovered == 1
     assert interrupted["status"] == "failed"
     assert interrupted["current_node"] == "interrupted"
@@ -205,10 +217,14 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     assert replacement["run_id"] != task["run_id"]
 
 
-async def test_restart_keeps_preparation_active_when_document_reset_fails(*, postgres_session_factory) -> None:
+async def test_restart_keeps_preparation_active_when_document_reset_fails(
+    *, postgres_session_factory
+) -> None:
     collection_id = "col_restart_retry"
     document_id = "doc_restart_retry"
-    await seed_collection(postgres_session_factory, collection_id, document_ids=(document_id,))
+    await seed_collection(
+        postgres_session_factory, collection_id, document_ids=(document_id,)
+    )
     document = StoredDocument(
         document=Document(
             document_id=document_id,
@@ -234,7 +250,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(*, pos
         ) -> StoredDocument:
             raise OSError("database temporarily unavailable")
 
-    pipeline_run_service = PipelineRunService(PipelineRunRepository())
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     task, _created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
@@ -243,23 +259,24 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(*, pos
     )
     await pipeline_run_service.update_run(task["run_id"], status="running")
     collection_service = CollectionService()
-    service = DocumentPreparationService(
-        collection_service=collection_service,
-        pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=SourceArtifactRepository(),
-        document_profile_service=object(),
-        max_concurrency=1,
-    )
+    document_preparation_service.collection_service = collection_service
+    document_preparation_service.pipeline_run_service = pipeline_run_service
+    document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
+    document_preparation_service.document_profile_service = object()
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_service
 
     with pytest.raises(OSError, match="temporarily unavailable"):
         await service.recover_interrupted_runs()
 
-    still_active = await pipeline_run_service.get_run(task["run_id"])
+    still_active = await pipeline_run_service.get_run(task["run_id"], user_id="user-1")
     assert still_active["status"] == "running"
     assert still_active["finished_at"] is None
 
 
-async def test_profile_preparation_reuses_current_source_and_profile(*, postgres_session_factory) -> None:
+async def test_profile_preparation_reuses_current_source_and_profile(
+    *, postgres_session_factory
+) -> None:
     collection_id = "col_test"
     document_id = "doc_test"
     base_document = StoredDocument(
@@ -275,7 +292,7 @@ async def test_profile_preparation_reuses_current_source_and_profile(*, postgres
         storage_key="col_test/inputs/paper.pdf",
         created_at="2026-08-27T10:00:00+00:00",
     )
-    source_identity, profile_identity = DocumentPreparationService.fingerprints_for(
+    source_identity, profile_identity = document_preparation_service.fingerprints_for(
         base_document.document
     )
 
@@ -323,7 +340,7 @@ async def test_profile_preparation_reuses_current_source_and_profile(*, postgres
     )
 
     class ProfileService:
-        async def read_document_profile(self, owner: str, selected: str):
+        async def read(self, owner: str, selected: str):
             assert (owner, selected) == (collection_id, document_id)
             return profile
 
@@ -334,7 +351,9 @@ async def test_profile_preparation_reuses_current_source_and_profile(*, postgres
         raise AssertionError("the current SourceDocument should be reused")
 
     sources = SourceArtifactRepository()
-    await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document_id,))
+    await seed_collection(
+        database.AsyncSessionLocal, collection_id, document_ids=(document_id,)
+    )
     await sources.replace_document(
         collection_id,
         SourceDocument(
@@ -345,14 +364,15 @@ async def test_profile_preparation_reuses_current_source_and_profile(*, postgres
         ),
     )
     collection_service = CollectionService()
-    service = DocumentPreparationService(
-        collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(),
-        source_artifact_repository=sources,
-        document_profile_service=ProfileService(),
-        source_artifact_builder=fail_if_parsed,
-        max_concurrency=1,
-    )
+    document_preparation_service.collection_service = collection_service
+    document_preparation_service.pipeline_run_service = PipelineRunService()
+    document_preparation_service.SourceArtifactRepo = sources
+    profile_service = ProfileService()
+    document_preparation_service.document_profile_service = profile_service
+    document_preparation_service.DocumentProfileRepo = profile_service
+    document_preparation_service._source_artifact_builder = fail_if_parsed
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_service
 
     result = await service.run_document_preparation(
         "task_test",
@@ -364,10 +384,14 @@ async def test_profile_preparation_reuses_current_source_and_profile(*, postgres
     assert collection_service.document.document.status == "ready"
 
 
-async def test_reference_failure_keeps_source_preparation_ready_with_warning(monkeypatch, *, postgres_session_factory) -> None:
+async def test_reference_failure_keeps_source_preparation_ready_with_warning(
+    monkeypatch, *, postgres_session_factory
+) -> None:
     collection_id = "col_reference_warning"
     document_id = "doc_reference_warning"
-    await seed_collection(postgres_session_factory, collection_id, document_ids=(document_id,))
+    await seed_collection(
+        postgres_session_factory, collection_id, document_ids=(document_id,)
+    )
     document = StoredDocument(
         document=Document(
             document_id=document_id,
@@ -407,7 +431,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(mon
             return {"run_id": run_id, **fields}
 
     class ProfileService:
-        async def read_document_profile(self, *_args):
+        async def read(self, *_args):
             return None
 
         async def build_document_profile(self, *_args, **_lineage):
@@ -430,16 +454,19 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(mon
     def fail_reference_extraction(self, _documents):
         raise RuntimeError("reference parser unavailable")
 
-    monkeypatch.setattr(SourceReferenceExtractionService, "extract", fail_reference_extraction)
-    service = DocumentPreparationService(
-        collection_service=CollectionService(),
-        pipeline_run_service=RunService(),
-        source_artifact_repository=SourceArtifactRepository(),
-        document_profile_service=ProfileService(),
-        source_artifact_builder=None,
-        max_concurrency=1,
+    monkeypatch.setattr(
+        source_reference_extraction_service, "extract", fail_reference_extraction
     )
-    service._parse_document = parse_document
+    document_preparation_service.collection_service = CollectionService()
+    document_preparation_service.pipeline_run_service = RunService()
+    document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
+    profile_service = ProfileService()
+    document_preparation_service.document_profile_service = profile_service
+    document_preparation_service.DocumentProfileRepo = profile_service
+    document_preparation_service._source_artifact_builder = None
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_service
+    monkeypatch.setattr(service, "_parse_document", parse_document)
 
     result = await service.run_document_preparation(
         "run_reference_warning",
@@ -453,7 +480,9 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(mon
     ]
 
 
-async def test_document_preparation_does_not_build_paper_map_before_objective_selection(*, postgres_session_factory) -> None:
+async def test_document_preparation_does_not_build_paper_map_before_objective_selection(
+    *, postgres_session_factory
+) -> None:
     collection_id = "col_lazy_map"
     document_id = "doc_lazy_map"
     base_document = StoredDocument(
@@ -469,7 +498,7 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
         storage_key="col_lazy_map/inputs/paper.pdf",
         created_at="2026-08-28T10:00:00+00:00",
     )
-    source_identity, _profile_identity = DocumentPreparationService.fingerprints_for(
+    source_identity, _profile_identity = document_preparation_service.fingerprints_for(
         base_document.document
     )
     base_document = replace(
@@ -505,7 +534,7 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             return {"run_id": run_id, **fields}
 
     class ProfileService:
-        async def read_document_profile(self, owner: str, selected: str):
+        async def read(self, owner: str, selected: str):
             return None
 
         async def build_document_profile(self, owner: str, selected: str, **_lineage):
@@ -519,7 +548,9 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
 
     collection_service = CollectionService()
     source_repository = SourceArtifactRepository()
-    await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document_id,))
+    await seed_collection(
+        database.AsyncSessionLocal, collection_id, document_ids=(document_id,)
+    )
     await source_repository.replace_document(
         collection_id,
         SourceDocument(
@@ -529,13 +560,14 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             text="Abstract",
         ),
     )
-    service = DocumentPreparationService(
-        collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(),
-        source_artifact_repository=source_repository,
-        document_profile_service=ProfileService(),
-        max_concurrency=1,
-    )
+    document_preparation_service.collection_service = collection_service
+    document_preparation_service.pipeline_run_service = PipelineRunService()
+    document_preparation_service.SourceArtifactRepo = source_repository
+    profile_service = ProfileService()
+    document_preparation_service.document_profile_service = profile_service
+    document_preparation_service.DocumentProfileRepo = profile_service
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_service
 
     result = await service.run_document_preparation(
         "task_lazy_map",

@@ -5,27 +5,25 @@ from __future__ import annotations
 import json
 
 from domain.core.research_objective import (
-    PaperSourceUnitCoverageStatus,
     PaperResearchMap,
-    PaperResearchSourceRef,
-    ReviewKnowledgeItem,
-    ReviewSynthesisMap,
     PaperResearchRelationship,
     PaperResearchScope,
     PaperResearchSignal,
+    PaperResearchSourceRef,
     PaperSourceUnitCoverage,
-    build_paper_research_scope_id,
+    PaperSourceUnitCoverageStatus,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
     build_paper_research_relationship,
+    build_paper_research_scope_id,
     build_paper_research_signal,
 )
-
-from sqlalchemy import select
-
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
+from sqlalchemy import select
 
 
 class PaperMapRepository:

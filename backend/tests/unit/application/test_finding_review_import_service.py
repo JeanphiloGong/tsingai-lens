@@ -29,7 +29,9 @@ class _FeedbackService:
         self.export_calls: list[dict[str, str]] = []
         self.validation_calls: list[dict[str, Any]] = []
 
-    async def export_dataset(self, *, collection_id: str, objective_id: str) -> dict:
+    async def export_dataset(
+        self, *, collection_id: str, objective_id: str, user_id: str
+    ) -> dict:
         self.export_calls.append(
             {"collection_id": collection_id, "objective_id": objective_id}
         )
@@ -47,13 +49,13 @@ class _FeedbackService:
             ]
         }
 
-    async def record_feedback(self, **payload: Any) -> None:
+    async def record_feedback(self, *, user_id: str, **payload: Any) -> None:
         self.feedback_calls.append(payload)
 
-    async def record_curation(self, **payload: Any) -> None:
+    async def record_curation(self, *, user_id: str, **payload: Any) -> None:
         self.curation_calls.append(payload)
 
-    async def validate_curation(self, **payload: Any) -> Finding:
+    async def validate_curation(self, *, user_id: str, **payload: Any) -> Finding:
         self.validation_calls.append(payload)
         candidate = payload["curated_finding"]
         if candidate.key != (
@@ -64,6 +66,7 @@ class _FeedbackService:
         ):
             raise ValueError("curation cannot change the published Finding identity")
         return candidate
+
 
 def _identity(**extra: Any) -> dict[str, Any]:
     return {
@@ -122,7 +125,9 @@ def test_curated_finding_preserves_precise_values_and_exact_references() -> None
     payload["certainty"] = 0.735123
     payload["selection_ids"] = ["selection-A", "selection-a", "001"]
     payload["paper_contributions"][0]["supporting_evidence_ids"] = [
-        "evidence-A", "evidence-a", "001",
+        "evidence-A",
+        "evidence-a",
+        "001",
     ]
 
     finding = parse_curated_finding(payload)
@@ -130,7 +135,9 @@ def test_curated_finding_preserves_precise_values_and_exact_references() -> None
     assert finding.certainty == 0.735123
     assert finding.selection_ids == ("selection-A", "selection-a", "001")
     assert finding.paper_contributions[0].supporting_evidence_ids == (
-        "evidence-A", "evidence-a", "001",
+        "evidence-A",
+        "evidence-a",
+        "001",
     )
 
 
@@ -148,6 +155,7 @@ async def test_import_accepts_canonical_finding_identity() -> None:
     result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="accept", note="Evidence and statement agree.")],
         reviewer="expert-1",
+        user_id="user-1",
     )
 
     assert result["status"] == "pass"
@@ -174,6 +182,7 @@ async def test_import_rejects_stale_analysis_version() -> None:
     result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="accept", analysis_version=2)],
         reviewer="expert-1",
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"
@@ -192,6 +201,7 @@ async def test_import_rejects_unknown_finding() -> None:
     result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="reject", finding_id="missing", issue_type="overclaim")],
         reviewer="expert-1",
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"
@@ -208,6 +218,7 @@ async def test_import_applies_curation_with_version_local_evidence() -> None:
             )
         ],
         reviewer="expert-1",
+        user_id="user-1",
     )
 
     assert result["status"] == "pass"
@@ -244,6 +255,7 @@ async def test_import_dry_run_rejects_noncanonical_curated_finding() -> None:
         rows=[_identity(action="correct", curated_finding=malformed)],
         reviewer="expert-1",
         dry_run=True,
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"
@@ -260,10 +272,13 @@ async def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
         rows=[_identity(action="correct", curated_finding=cross_identity)],
         reviewer="expert-1",
         dry_run=True,
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"
-    assert "cannot change the published Finding identity" in result["errors"][0]["message"]
+    assert (
+        "cannot change the published Finding identity" in result["errors"][0]["message"]
+    )
     assert feedback.curation_calls == []
 
 
@@ -280,6 +295,7 @@ async def test_import_dry_run_rejects_invalid_curated_status() -> None:
         ],
         reviewer="expert-1",
         dry_run=True,
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"
@@ -296,6 +312,7 @@ async def test_import_rejects_retired_review_jsonl_aliases() -> None:
         rows=[_identity(expert_action="accept", expert_note="legacy")],
         reviewer="expert-1",
         dry_run=True,
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"
@@ -313,6 +330,7 @@ async def test_import_rejects_claim_identity_instead_of_ignoring_it() -> None:
     result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="accept", claim_id="legacy-claim")],
         reviewer="expert-1",
+        user_id="user-1",
     )
 
     assert result["status"] == "fail"

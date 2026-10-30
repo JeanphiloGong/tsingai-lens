@@ -9,11 +9,6 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from infra.persistence.database import AsyncSessionLocal
-
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
@@ -21,6 +16,7 @@ from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.review_decision import ReviewDecision
 from domain.feedback.tool_failure import ToolFailureAnalysisResult
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.feedback import (
     FeedbackAnalysisResultRow,
     FeedbackAnnotationRow,
@@ -30,6 +26,16 @@ from infra.persistence.postgres.models.feedback import (
     ToolFailureAnalysisResultRow,
 )
 from repositories.feedback_dataset_sample_repository import enqueue_case_samples
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+class FeedbackCaseWriteConflict(ValueError):
+    """A locked case no longer admits the requested annotation or review."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 class FeedbackCaseRepository:
@@ -242,7 +248,8 @@ class FeedbackCaseRepository:
                 )
                 row.signal_analysis_result_ids = list(
                     _ordered_unique(
-                        tuple(row.signal_analysis_result_ids or ()) + (saved_result.result_id,)
+                        tuple(row.signal_analysis_result_ids or ())
+                        + (saved_result.result_id,)
                     )
                 )
                 if context_snapshot:
@@ -611,7 +618,9 @@ class FeedbackCaseRepository:
         elif collection_ids is not None:
             if not collection_ids:
                 return ()
-            statement = statement.where(FeedbackCaseRow.collection_id.in_(collection_ids))
+            statement = statement.where(
+                FeedbackCaseRow.collection_id.in_(collection_ids)
+            )
         if status is not None:
             statement = statement.where(FeedbackCaseRow.status == status)
         statement = statement.order_by(
@@ -640,23 +649,35 @@ class FeedbackCaseRepository:
                 signal_rows: tuple[Any, ...] = ()
                 tool_failure_rows: tuple[Any, ...] = ()
                 if analysis_result_ids:
-                    analysis_rows = tuple(await db.scalars(
-                        select(FeedbackAnalysisResultRow).where(
-                            FeedbackAnalysisResultRow.result_id.in_(analysis_result_ids),
+                    analysis_rows = tuple(
+                        await db.scalars(
+                            select(FeedbackAnalysisResultRow).where(
+                                FeedbackAnalysisResultRow.result_id.in_(
+                                    analysis_result_ids
+                                ),
+                            )
                         )
-                    ))
+                    )
                 if signal_result_ids:
-                    signal_rows = tuple(await db.scalars(
-                        select(FeedbackSignalAnalysisResultRow).where(
-                            FeedbackSignalAnalysisResultRow.result_id.in_(signal_result_ids),
+                    signal_rows = tuple(
+                        await db.scalars(
+                            select(FeedbackSignalAnalysisResultRow).where(
+                                FeedbackSignalAnalysisResultRow.result_id.in_(
+                                    signal_result_ids
+                                ),
+                            )
                         )
-                    ))
+                    )
                 if tool_failure_result_ids:
-                    tool_failure_rows = tuple(await db.scalars(
-                        select(ToolFailureAnalysisResultRow).where(
-                            ToolFailureAnalysisResultRow.result_id.in_(tool_failure_result_ids),
+                    tool_failure_rows = tuple(
+                        await db.scalars(
+                            select(ToolFailureAnalysisResultRow).where(
+                                ToolFailureAnalysisResultRow.result_id.in_(
+                                    tool_failure_result_ids
+                                ),
+                            )
                         )
-                    ))
+                    )
                 by_result_id = {
                     result_row.result_id: result_row
                     for result_row in (*analysis_rows, *signal_rows, *tool_failure_rows)
@@ -665,19 +686,22 @@ class FeedbackCaseRepository:
                     row
                     for row in rows
                     if (
-                        (latest := max(
-                            (
-                                by_result_id[result_id]
-                                for result_id in (
-                                    *(row.analysis_result_ids or ()),
-                                    *(row.signal_analysis_result_ids or ()),
-                                    *(row.tool_failure_analysis_result_ids or ()),
-                                )
-                                if result_id in by_result_id
-                            ),
-                            key=lambda item: (item.created_at, item.result_id),
-                            default=None,
-                        )) is not None
+                        (
+                            latest := max(
+                                (
+                                    by_result_id[result_id]
+                                    for result_id in (
+                                        *(row.analysis_result_ids or ()),
+                                        *(row.signal_analysis_result_ids or ()),
+                                        *(row.tool_failure_analysis_result_ids or ()),
+                                    )
+                                    if result_id in by_result_id
+                                ),
+                                key=lambda item: (item.created_at, item.result_id),
+                                default=None,
+                            )
+                        )
+                        is not None
                         and latest.problem_type == problem_type
                     )
                 ]
@@ -748,23 +772,26 @@ class FeedbackCaseRepository:
                 .with_for_update()
             )
             if case is None:
-                raise FileNotFoundError(f"feedback case not found: {annotation.case_id}")
+                raise FeedbackCaseWriteConflict("feedback_case_not_found")
             if expected_digest != case.annotation_digest:
-                raise ValueError("feedback_case_stale")
+                raise FeedbackCaseWriteConflict("feedback_case_stale")
             if case.status not in {
                 "needs_annotation",
                 "ready_for_review",
                 "rejected",
                 "insufficient",
             }:
-                raise ValueError("feedback_case_not_annotatable")
+                raise FeedbackCaseWriteConflict("feedback_case_not_annotatable")
             current = await db.scalar(
                 select(FeedbackAnnotationRow)
                 .where(FeedbackAnnotationRow.case_id == annotation.case_id)
                 .order_by(FeedbackAnnotationRow.version.desc())
                 .limit(1)
             )
-            if current is not None and current.annotation_digest == annotation.annotation_digest:
+            if (
+                current is not None
+                and current.annotation_digest == annotation.annotation_digest
+            ):
                 return FeedbackAnnotation(
                     annotation_id=current.annotation_id,
                     case_id=current.case_id,
@@ -782,7 +809,7 @@ class FeedbackCaseRepository:
                 )
             expected_version = (current.version + 1) if current is not None else 1
             if annotation.version != expected_version:
-                raise ValueError("annotation_version_conflict")
+                raise FeedbackCaseWriteConflict("annotation_version_conflict")
             row = FeedbackAnnotationRow(
                 annotation_id=annotation.annotation_id,
                 case_id=annotation.case_id,
@@ -856,11 +883,11 @@ class FeedbackCaseRepository:
                 .with_for_update()
             )
             if case is None:
-                raise FileNotFoundError(f"feedback case not found: {decision.case_id}")
+                raise FeedbackCaseWriteConflict("feedback_case_not_found")
             if case.annotation_digest != expected_annotation_digest:
-                raise ValueError("feedback_case_stale")
+                raise FeedbackCaseWriteConflict("feedback_case_stale")
             if case.annotation_digest != decision.annotation_digest:
-                raise ValueError("feedback_case_stale")
+                raise FeedbackCaseWriteConflict("feedback_case_stale")
             existing_decision = await db.get(
                 FeedbackReviewDecisionRow,
                 decision.decision_id,
@@ -869,13 +896,14 @@ class FeedbackCaseRepository:
             if existing_decision is not None:
                 same_identity = (
                     existing_decision.case_id == decision.case_id
-                    and existing_decision.annotation_digest == decision.annotation_digest
+                    and existing_decision.annotation_digest
+                    == decision.annotation_digest
                     and existing_decision.decision == decision.decision
                     and existing_decision.reason == decision.reason
                     and existing_decision.created_by == decision.created_by
                 )
                 if not same_identity:
-                    raise ValueError("review_decision_identity_conflict")
+                    raise FeedbackCaseWriteConflict("review_decision_identity_conflict")
                 return ReviewDecision(
                     decision_id=existing_decision.decision_id,
                     case_id=existing_decision.case_id,
@@ -890,17 +918,18 @@ class FeedbackCaseRepository:
                 select(FeedbackAnnotationRow)
                 .where(
                     FeedbackAnnotationRow.case_id == decision.case_id,
-                    FeedbackAnnotationRow.annotation_digest == decision.annotation_digest,
+                    FeedbackAnnotationRow.annotation_digest
+                    == decision.annotation_digest,
                 )
                 .limit(1)
             )
             if annotation is None:
-                raise ValueError("feedback_case_annotation_required")
+                raise FeedbackCaseWriteConflict("feedback_case_annotation_required")
             if decision.decision == "withdraw":
                 if case.status != "accepted":
-                    raise ValueError("feedback_case_not_withdrawable")
+                    raise FeedbackCaseWriteConflict("feedback_case_not_withdrawable")
             elif case.status != "ready_for_review":
-                raise ValueError("feedback_case_not_reviewable")
+                raise FeedbackCaseWriteConflict("feedback_case_not_reviewable")
             max_seq = await db.scalar(
                 select(func.max(FeedbackReviewDecisionRow.seq)).where(
                     FeedbackReviewDecisionRow.case_id == decision.case_id
@@ -1143,7 +1172,9 @@ async def _save_tool_failure_result_row(
             result.result_message_id,
         )
         if identity != requested_identity:
-            raise ValueError("tool failure analysis result identity cannot be reassigned")
+            raise ValueError(
+                "tool failure analysis result identity cannot be reassigned"
+            )
     if row is None:
         row = by_job or ToolFailureAnalysisResultRow(result_id=result.result_id)
         if by_job is None:
@@ -1171,15 +1202,23 @@ async def _save_tool_failure_result_row(
 
 
 def _merge_context_snapshot(
-    existing: dict[str, Any] | None, incoming: dict[str, Any], *, replace_correction: bool = False
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any],
+    *,
+    replace_correction: bool = False,
 ) -> dict[str, Any]:
     """Merge source projections without erasing facts from another signal."""
 
     merged = dict(existing or {})
     correction_keys = {
-        "correction_signal", "corrected_answer", "corrected_message_id",
-        "corrected_evidence_coverage", "original_message_id", "pairing_basis",
-        "pairing_assessment", "corrected_question",
+        "correction_signal",
+        "corrected_answer",
+        "corrected_message_id",
+        "corrected_evidence_coverage",
+        "original_message_id",
+        "pairing_basis",
+        "pairing_assessment",
+        "corrected_question",
     }
     # A new correction analysis is authoritative for its own answer pair.
     # Other signal types cannot clear or replace that pair.
@@ -1187,7 +1226,11 @@ def _merge_context_snapshot(
         for key in correction_keys:
             merged.pop(key, None)
     coverage_keys = {
-        "requested_scope", "inspected_sources", "omitted_candidates", "claim_support", "gaps",
+        "requested_scope",
+        "inspected_sources",
+        "omitted_candidates",
+        "claim_support",
+        "gaps",
     }
     for key, value in incoming.items():
         if key in correction_keys and not replace_correction and key in merged:
@@ -1195,7 +1238,8 @@ def _merge_context_snapshot(
         if key in coverage_keys:
             values = [*(merged.get(key) or []), *(value or [])]
             unique = {
-                json.dumps(item, ensure_ascii=False, sort_keys=True): item for item in values
+                json.dumps(item, ensure_ascii=False, sort_keys=True): item
+                for item in values
             }
             merged[key] = list(unique.values())
         elif value is not None and value != "":
@@ -1224,7 +1268,7 @@ def _iso(value: datetime) -> str:
     return _datetime(value).isoformat()
 
 
-__all__ = ['FeedbackCaseRepository']
+__all__ = ["FeedbackCaseRepository"]
 
 
 FeedbackCaseRepo = FeedbackCaseRepository()

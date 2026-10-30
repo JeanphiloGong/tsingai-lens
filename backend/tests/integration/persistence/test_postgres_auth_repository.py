@@ -135,11 +135,12 @@ async def test_postgresql_enforces_auth_contract(
 
         me = client.get("/api/v1/auth/me")
         assert me.status_code == 200
-        assert me.json()["user"]["email"] == "admin@example.com"
+        assert me.json()["data"]["user"]["email"] == "admin@example.com"
 
         logout = client.post("/api/v1/auth/logout")
         assert logout.status_code == 200
-        assert client.get("/api/v1/auth/me").status_code == 401
+        assert client.get('/api/v1/auth/me').status_code == 200
+        assert client.get('/api/v1/auth/me').json()["code"] == 200301
 
     async with postgres_session_factory() as database_session:
         stored = await database_session.scalar(

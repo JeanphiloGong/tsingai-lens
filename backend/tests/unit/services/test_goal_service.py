@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-
+from application.goal import brief_service as goal_service
+from exceptions import RequestInvalidException
 from tests.support.collection_service import build_test_collection_service
-from application.goal.brief_service import GoalService
 
 pytestmark = pytest.mark.anyio
 
@@ -13,9 +13,12 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_goal_service_creates_seed_collection_and_contract(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections')
-    service = GoalService(collection_service)
+async def test_goal_service_creates_seed_collection_and_contract(
+    tmp_path, *, postgres_session_factory
+):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    goal_service.collection_service = collection_service
+    service = goal_service
 
     payload = await service.intake_goal(
         material_system="LiFePO4",
@@ -29,7 +32,9 @@ async def test_goal_service_creates_seed_collection_and_contract(tmp_path, *, po
     collection_id = payload["seed_collection"]["collection_id"]
     collection = await collection_service.get_collection(collection_id)
 
-    assert payload["research_brief"]["objective"] == "Assess rate capability for LiFePO4."
+    assert (
+        payload["research_brief"]["objective"] == "Assess rate capability for LiFePO4."
+    )
     assert payload["coverage_assessment"]["level"] == "direct"
     assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
     assert payload["seed_collection"]["created"] is True
@@ -47,11 +52,14 @@ async def test_goal_service_creates_seed_collection_and_contract(tmp_path, *, po
     assert collection["documents"] == []
 
 
-async def test_goal_service_rejects_empty_goal_signal(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections')
-    service = GoalService(collection_service)
+async def test_goal_service_rejects_empty_goal_signal(
+    tmp_path, *, postgres_session_factory
+):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    goal_service.collection_service = collection_service
+    service = goal_service
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(RequestInvalidException) as exc_info:
         await service.intake_goal(
             material_system=None,
             target_property=None,

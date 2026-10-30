@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from infra.persistence import database
-
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from application.core.objectives.finding_authoring_service import (
-    FindingAuthoringService,
-)
+from application.core.objectives import finding_authoring_service
 from domain.core.finding import (
     PAPER_CONTRIBUTION_STATUSES,
 )
@@ -19,16 +15,15 @@ from domain.core.research_objective import (
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
-)
-
-from domain.core.research_objective import (
     normalize_objective_terms,
 )
+from exceptions import RequestInvalidException
+from infra.persistence import database
 from repositories.objective_repository import (
     ExecutionStats,
     ObjectiveAnalysis,
+    ObjectiveRepository,
 )
-from repositories.objective_repository import ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -189,20 +184,33 @@ class _Writer:
             return SimpleNamespace(findings=(), revisions=(), selections=(), groups=())
         selection = kwargs["selections"][0]
         finding = SimpleNamespace(selection_ids=(selection.selection_id,))
-        return SimpleNamespace(findings=(finding,), revisions=(), selections=(), groups=())
+        return SimpleNamespace(
+            findings=(finding,), revisions=(), selections=(), groups=()
+        )
 
 
 @pytest.mark.anyio
-async def test_selection_version_copies_contributions_and_uses_one_transaction(monkeypatch, ):
+async def test_selection_version_copies_contributions_and_uses_one_transaction(
+    monkeypatch,
+):
     repository = _Repository()
     transactions = _Transactions()
     writer = _Writer()
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
-    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        transactions,
+    )
+    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = _Query()
+    finding_authoring_service.experiment_analysis_writer = writer
+    service = finding_authoring_service
 
     result = await service.create_selection_version(
-        collection_id="collection-1", objective_id="objective-1",
-        source_analysis_version=1, selection_ids=("selection-1",),
+        collection_id="collection-1",
+        objective_id="objective-1",
+        source_analysis_version=1,
+        selection_ids=("selection-1",),
         created_by_user_id="user-1",
     )
 
@@ -215,11 +223,20 @@ async def test_selection_version_copies_contributions_and_uses_one_transaction(m
     assert result.finding is not None
 
 
-async def test_selection_revision_preserves_parent_and_expert_limitations(monkeypatch, ):
+async def test_selection_revision_preserves_parent_and_expert_limitations(
+    monkeypatch,
+):
     writer = _Writer()
     repository = _Repository()
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", _Transactions())
-    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        _Transactions(),
+    )
+    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = _Query()
+    finding_authoring_service.experiment_analysis_writer = writer
+    service = finding_authoring_service
     await service.create_selection_version(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -233,11 +250,20 @@ async def test_selection_revision_preserves_parent_and_expert_limitations(monkey
     assert writer.call["limitations"] == ("Only tested conditions.",)
 
 
-async def test_abstention_publishes_explanation_and_coverage_without_finding(monkeypatch, ):
+async def test_abstention_publishes_explanation_and_coverage_without_finding(
+    monkeypatch,
+):
     repository = _Repository()
     transactions = _Transactions()
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
-    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=_Writer())
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        transactions,
+    )
+    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = _Query()
+    finding_authoring_service.experiment_analysis_writer = _Writer()
+    service = finding_authoring_service
     result = await service.create_selection_version(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -257,13 +283,22 @@ async def test_abstention_publishes_explanation_and_coverage_without_finding(mon
     assert repository.published["contributions"][0].analysis_version == 2
 
 
-async def test_unknown_parent_is_rejected_before_creating_a_revision(monkeypatch, ):
+async def test_unknown_parent_is_rejected_before_creating_a_revision(
+    monkeypatch,
+):
     repository = _Repository()
     writer = _Writer()
     transactions = _Transactions()
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
-    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
-    with pytest.raises(ValueError, match="parent Finding"):
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        transactions,
+    )
+    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = _Query()
+    finding_authoring_service.experiment_analysis_writer = writer
+    service = finding_authoring_service
+    with pytest.raises(RequestInvalidException, match="parent Finding"):
         await service.create_selection_version(
             collection_id="collection-1",
             objective_id="objective-1",
@@ -277,16 +312,27 @@ async def test_unknown_parent_is_rejected_before_creating_a_revision(monkeypatch
 
 
 @pytest.mark.anyio
-async def test_selection_version_rolls_back_and_marks_running_snapshot_failed(monkeypatch, ):
+async def test_selection_version_rolls_back_and_marks_running_snapshot_failed(
+    monkeypatch,
+):
     repository = _Repository(fail_publish=True)
     transactions = _Transactions()
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
-    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=_Writer())
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        transactions,
+    )
+    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = _Query()
+    finding_authoring_service.experiment_analysis_writer = _Writer()
+    service = finding_authoring_service
 
     with pytest.raises(RuntimeError, match="publish failed"):
         await service.create_selection_version(
-            collection_id="collection-1", objective_id="objective-1",
-            source_analysis_version=1, selection_ids=("selection-1",),
+            collection_id="collection-1",
+            objective_id="objective-1",
+            source_analysis_version=1,
+            selection_ids=("selection-1",),
             created_by_user_id="user-1",
         )
 
@@ -294,9 +340,16 @@ async def test_selection_version_rolls_back_and_marks_running_snapshot_failed(mo
     assert repository.failed["expected_status"] == "running"
 
 
-async def test_authored_publication_preserves_coverage_with_real_repository(monkeypatch, *, postgres_session_factory):
+async def test_authored_publication_preserves_coverage_with_real_repository(
+    monkeypatch, *, postgres_session_factory
+):
     from tests.support.postgres import seed_collection
-    await seed_collection(postgres_session_factory, "collection-1", document_ids=("paper-1", "paper-2", "paper-3"))
+
+    await seed_collection(
+        postgres_session_factory,
+        "collection-1",
+        document_ids=("paper-1", "paper-2", "paper-3"),
+    )
     repository = ObjectiveRepository()
     objective = replace(_objective(), active_analysis_version=None)
     await repository.replace(
@@ -307,8 +360,12 @@ async def test_authored_publication_preserves_coverage_with_real_repository(monk
         for paper in ("paper-1", "paper-2", "paper-3")
     )
     await repository.queue_analysis(
-        "collection-1", "objective-1", document_inputs=inputs,
-        pipeline_version="test", model_name=None, prompt_versions={},
+        "collection-1",
+        "objective-1",
+        document_inputs=inputs,
+        pipeline_version="test",
+        model_name=None,
+        prompt_versions={},
     )
     await repository.claim_analysis("collection-1", "objective-1", 1)
     coverage = tuple(
@@ -338,14 +395,25 @@ async def test_authored_publication_preserves_coverage_with_real_repository(monk
         )
     )
     async with database.AsyncSessionLocal() as db, db.begin():
-        objective, source = await repository.publish_experiment_analysis(db, 'collection-1', 'objective-1', 1, contributions=coverage)
+        objective, source = await repository.publish_experiment_analysis(
+            db, "collection-1", "objective-1", 1, contributions=coverage
+        )
 
     writer = _Writer()
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", database.AsyncSessionLocal)
-    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        database.AsyncSessionLocal,
+    )
+    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = _Query()
+    finding_authoring_service.experiment_analysis_writer = writer
+    service = finding_authoring_service
     await service.create_selection_version(
-        collection_id="collection-1", objective_id="objective-1",
-        source_analysis_version=1, selection_ids=("selection-1",),
+        collection_id="collection-1",
+        objective_id="objective-1",
+        source_analysis_version=1,
+        selection_ids=("selection-1",),
         created_by_user_id="user-1",
     )
 
@@ -358,12 +426,21 @@ async def test_authored_publication_preserves_coverage_with_real_repository(monk
     assert published.created_by_tool_call_id is None
     with pytest.raises(ValueError, match="source analysis version is stale"):
         await repository.queue_analysis(
-            "collection-1", "objective-1", document_inputs=inputs,
-            pipeline_version="test", model_name=None, prompt_versions={},
-            origin="human_authored", source_analysis_version=1, created_by_user_id="user-1",
+            "collection-1",
+            "objective-1",
+            document_inputs=inputs,
+            pipeline_version="test",
+            model_name=None,
+            prompt_versions={},
+            origin="human_authored",
+            source_analysis_version=1,
+            created_by_user_id="user-1",
         )
-    assert await repository.list_contributions("collection-1", "objective-1", 2) == tuple(
-        replace(item, analysis_version=2) for item in coverage
+    assert await repository.list_contributions(
+        "collection-1", "objective-1", 2
+    ) == tuple(replace(item, analysis_version=2) for item in coverage)
+    assert (
+        await repository.list_contributions("collection-1", "objective-1", 1)
+        == coverage
     )
-    assert await repository.list_contributions("collection-1", "objective-1", 1) == coverage
     assert "contributions" not in writer.call

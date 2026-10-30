@@ -1,16 +1,5 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    PaperResearchRelationship,
-    PaperResearchSourceRef,
-    build_paper_research_scope,
-    build_paper_research_scope_id,
-    build_paper_research_relationship,
-)
-
-from tests.support.source_artifacts import build_source_documents
-
-
 import json
 from threading import Lock
 from time import sleep
@@ -18,26 +7,31 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
+from application.core.objectives import paper_research_map_service
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
-from application.core.objectives.paper_research_map_service import (
-    PaperResearchMapService,
-)
 from application.core.objectives.paper_map_aggregation import PaperMapAggregator
 from application.core.objectives.paper_map_extraction import (
     PaperMapExtractionService,
 )
 from domain.core import PaperResearchMap, PaperResearchScope
+from domain.core.research_objective import (
+    PaperResearchRelationship,
+    PaperResearchSourceRef,
+    build_paper_research_relationship,
+    build_paper_research_scope,
+    build_paper_research_scope_id,
+)
 from domain.source import (
     SourceDocument,
     build_source_document_tree,
 )
 from infra.llm.usage import capture_llm_usage, record_llm_completion
+from tests.support.source_artifacts import build_source_documents
 
 
 def test_experimental_paper_map_accepts_bounded_unresolved_signal_overflow() -> None:
@@ -167,9 +161,7 @@ class _WindowExtractor:
                         "signal_type": signal_type,
                         "label": label,
                         "variable_role": (
-                            "varied"
-                            if signal_type == "variable"
-                            else "not_applicable"
+                            "varied" if signal_type == "variable" else "not_applicable"
                         ),
                         "material_scope": ["316L stainless steel"],
                         "process_context": process_context,
@@ -301,7 +293,7 @@ def _build_skims(
     *,
     progress: list[dict[str, Any]] | None = None,
 ) -> tuple[PaperResearchMap, ...]:
-    return PaperResearchMapService().build_collection_paper_maps(
+    return paper_research_map_service.build_collection_paper_maps(
         "collection-test",
         documents=artifacts,
         profiles_by_document_id={},
@@ -494,8 +486,14 @@ def test_unstructured_paper_map_samples_edges_then_expands_once_without_duplicat
     assert all(len(payload["source_units"]) <= 8 for payload in extractor.payloads)
     covered_refs = [item.source_ref for item in skim.source_unit_coverage]
     assert covered_refs[:8] == [
-        "result-0", "result-1", "result-2", "result-3",
-        "result-21", "result-22", "result-23", "result-24",
+        "result-0",
+        "result-1",
+        "result-2",
+        "result-3",
+        "result-21",
+        "result-22",
+        "result-23",
+        "result-24",
     ]
     assert len(covered_refs) == len(set(covered_refs)) == 25
     assert skim.map_status == "insufficient_map"
@@ -593,9 +591,10 @@ def test_complete_prompt_budget_packs_source_units_beyond_four_thousand_chars():
     skim = _build_skims(artifacts, tree, extractor)[0]
 
     assert len(extractor.payloads) == 1
-    assert [
-        unit["source_ref"] for unit in extractor.payloads[0]["source_units"]
-    ] == ["result-a", "result-b"]
+    assert [unit["source_ref"] for unit in extractor.payloads[0]["source_units"]] == [
+        "result-a",
+        "result-b",
+    ]
     assert len(skim.source_unit_coverage) == 2
 
 
@@ -611,10 +610,12 @@ def test_paper_map_groups_bounded_sources_by_reading_role():
     extractor = _WindowExtractor()
 
     _build_skims(artifacts, tree, extractor)
-    assert [payload["section_paths"] for payload in extractor.payloads] == [[
-        "Materials and Methods",
-        "Validation Methods",
-    ]]
+    assert [payload["section_paths"] for payload in extractor.payloads] == [
+        [
+            "Materials and Methods",
+            "Validation Methods",
+        ]
+    ]
     assert [
         [unit["source_ref"] for unit in payload["source_units"]]
         for payload in extractor.payloads
@@ -1001,7 +1002,10 @@ def test_methods_and_results_windows_retain_distinct_linked_candidates():
         ("scan speed",),
     ]
     assert {payload["window_role"] for payload in extractor.payloads} == {"overview"}
-    assert extractor.payloads[0]["section_paths"] == ["Materials and Methods", "Results and Discussion"]
+    assert extractor.payloads[0]["section_paths"] == [
+        "Materials and Methods",
+        "Results and Discussion",
+    ]
 
 
 def test_later_table_captions_are_assigned_to_a_screening_window():
@@ -1078,17 +1082,14 @@ def test_paper_map_keeps_table_caption_but_defers_table_rows_until_analysis():
     _build_skims(artifacts, tree, extractor)
 
     source_units = [
-        unit
-        for payload in extractor.payloads
-        for unit in payload["source_units"]
+        unit for payload in extractor.payloads for unit in payload["source_units"]
     ]
     assert not any(unit["source_kind"] == "table_row" for unit in source_units)
     assert any(
         unit["source_kind"] == "table"
         and unit["source_ref"] == "table-results"
         and isinstance(unit["content"], dict)
-        and unit["content"]["caption_text"]
-        == "Process conditions and measured density"
+        and unit["content"]["caption_text"] == "Process conditions and measured density"
         for unit in source_units
     )
 
@@ -1138,15 +1139,14 @@ def test_paper_map_compacts_table_metadata_without_losing_axis_headers():
         <= 4000
         for unit in source_units
     )
-    assert {
-        (unit["source_kind"], unit["source_ref"]) for unit in source_units
-    } == {("table", "table-long-metadata")}
+    assert {(unit["source_kind"], unit["source_ref"]) for unit in source_units} == {
+        ("table", "table-long-metadata")
+    }
 
 
 def test_paper_map_compacts_figure_caption_before_model_screening():
     caption = (
-        f"Figure 1. {' '.join(['microstructure detail'] * 600)} "
-        "RESULT_CANDIDATE"
+        f"Figure 1. {' '.join(['microstructure detail'] * 600)} " "RESULT_CANDIDATE"
     )
     artifacts, tree = _artifacts(
         blocks=[
@@ -1182,9 +1182,9 @@ def test_paper_map_compacts_figure_caption_before_model_screening():
         <= 4000
         for unit in source_units
     )
-    assert {
-        (unit["source_kind"], unit["source_ref"]) for unit in source_units
-    } == {("figure", "figure-long-caption")}
+    assert {(unit["source_kind"], unit["source_ref"]) for unit in source_units} == {
+        ("figure", "figure-long-caption")
+    }
     assert skim.studies == ()
 
 
@@ -1236,8 +1236,7 @@ def test_initial_high_level_map_can_expand_to_results_but_still_defers_methods()
         item["content"]["caption_text"]
         for payload in extractor.payloads
         for item in payload["source_units"]
-        if item["source_kind"] == "table"
-        and "caption_text" in item["content"]
+        if item["source_kind"] == "table" and "caption_text" in item["content"]
     ]
     all_figure_captions = [
         item["content"]["caption_text"]
@@ -1321,7 +1320,9 @@ def test_complete_window_candidate_keeps_its_stable_source_reference():
     skim = _build_skims(artifacts, tree, _WindowExtractor())[0]
 
     relationship = skim.studies[0].relationships[0]
-    assert relationship.source_refs == (PaperResearchSourceRef("block", "result-candidate"),)
+    assert relationship.source_refs == (
+        PaperResearchSourceRef("block", "result-candidate"),
+    )
 
 
 @pytest.mark.parametrize(
@@ -1552,7 +1553,9 @@ def test_resolve_window_result_merges_duplicate_relationships_and_preserves_sour
     relationship = skim.studies[0].relationships[0]
     assert relationship.varied_factors == ("laser power",)
     assert relationship.outcome == "porosity"
-    assert {(item.source_kind, item.source_ref) for item in relationship.source_refs} == {
+    assert {
+        (item.source_kind, item.source_ref) for item in relationship.source_refs
+    } == {
         ("block", "results-1"),
         ("table", "table-1"),
     }
@@ -1627,7 +1630,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
                 unresolved_signals=[
                     {
                         "signal_type": "outcome",
-                "variable_role": "not_applicable",
+                        "variable_role": "not_applicable",
                         "label": "porosity",
                         "experiment_label": "Smith et al.",
                         "claim_scope": "background",
@@ -1678,7 +1681,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
             )
 
     extractor = ReviewExtractor()
-    skim = PaperResearchMapService().build_collection_paper_maps(
+    skim = paper_research_map_service.build_collection_paper_maps(
         "collection-test",
         documents=artifacts,
         profiles_by_document_id={
@@ -1704,13 +1707,9 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
         "review-synthesis"
     )
     assert skim.review_synthesis.disputes[0].outcomes == ("porosity",)
-    assert skim.review_synthesis.evidence_gaps[0].conditions == (
-        "in situ validation",
-    )
+    assert skim.review_synthesis.evidence_gaps[0].conditions == ("in situ validation",)
     assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
-    assert all(
-        study.experiment_label != "Miranda et al." for study in skim.studies
-    )
+    assert all(study.experiment_label != "Miranda et al." for study in skim.studies)
 
 
 def test_unknown_source_unit_id_marks_the_window_failed():
@@ -1757,7 +1756,7 @@ def test_equivalent_candidates_from_multiple_windows_are_consolidated_once():
 
 
 def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -1831,13 +1830,14 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
     )
 
     assert len(skim.studies) == 1
-    assert {
-        relationship.outcome for relationship in skim.studies[0].relationships
-    } == {"grain size", "alpha phase fraction"}
+    assert {relationship.outcome for relationship in skim.studies[0].relationships} == {
+        "grain size",
+        "alpha phase fraction",
+    }
 
 
 def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -1919,7 +1919,7 @@ def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
 
 
 def test_different_experiment_labels_keep_equal_relationship_axes_separate():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -2000,7 +2000,10 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
     tensile = merge_for_experiment("tensile")
     hardness = merge_for_experiment("microhardness")
 
-    assert tensile.relationships[0].relationship_id != hardness.relationships[0].relationship_id
+    assert (
+        tensile.relationships[0].relationship_id
+        != hardness.relationships[0].relationship_id
+    )
 
 
 def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids():
@@ -2136,12 +2139,12 @@ def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids
     )
 
     assert len(merged.relationships) == 2
-    assert len(
-        {relationship.relationship_id for relationship in merged.relationships}
-    ) == 2
+    assert (
+        len({relationship.relationship_id for relationship in merged.relationships})
+        == 2
+    )
     assert {
-        tuple(relationship.varied_factors)
-        for relationship in merged.relationships
+        tuple(relationship.varied_factors) for relationship in merged.relationships
     } == {("laser power",), ("scanning speed",)}
 
 
@@ -2161,7 +2164,7 @@ def test_candidates_with_different_variable_outcome_links_are_not_merged():
 
 
 def test_same_axes_with_incompatible_process_context_are_not_merged():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -2237,7 +2240,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
 
 
 def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -2313,7 +2316,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
 
 
 def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -2391,7 +2394,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
 
 
 def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",
@@ -2414,7 +2417,7 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
 
 
 def test_document_profile_owns_the_paper_role_across_windows():
-    service = PaperResearchMapService()
+    service = paper_research_map_service
     window_skims = [
         PaperResearchMap(
             document_id="paper-1",

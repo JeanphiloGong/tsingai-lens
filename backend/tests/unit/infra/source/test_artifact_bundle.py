@@ -4,7 +4,6 @@ import logging
 
 import pandas as pd
 import pytest
-
 from infra.source.artifact_bundle import SourceArtifactBundle, source_table_payload
 
 
@@ -26,13 +25,21 @@ def test_table_header_count_preserves_all_measurement_rows(
         text_units=pd.DataFrame(),
         blocks=pd.DataFrame(),
         figures=pd.DataFrame(),
-        tables=pd.DataFrame([{
-            "table_id": "table_1",
-            "document_id": "doc_1",
-            "column_headers": ["Power", "Density"],
-            "table_matrix": [*header_rows, ["200 W", "99.5%"], ["250 W", "99.9%"]],
-            **header_fields,
-        }]),
+        tables=pd.DataFrame(
+            [
+                {
+                    "table_id": "table_1",
+                    "document_id": "doc_1",
+                    "column_headers": ["Power", "Density"],
+                    "table_matrix": [
+                        *header_rows,
+                        ["200 W", "99.5%"],
+                        ["250 W", "99.9%"],
+                    ],
+                    **header_fields,
+                }
+            ]
+        ),
         table_rows=pd.DataFrame(),
         table_cells=pd.DataFrame(),
         figure_assets={},
@@ -41,8 +48,7 @@ def test_table_header_count_preserves_all_measurement_rows(
     table = bundle.to_documents()[0].tables[0]
     assert table.header_row_count == expected_header_count
     assert source_table_payload(table)["table_markdown"] == (
-        "| Power | Density |\n| --- | --- |\n"
-        "| 200 W | 99.5% |\n| 250 W | 99.9% |"
+        "| Power | Density |\n| --- | --- |\n" "| 200 W | 99.5% |\n| 250 W | 99.9% |"
     )
 
 
@@ -169,7 +175,7 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
     ],
 )
 def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
-    from application.core.document_profiles.service import DocumentProfileService
+    from application.core.document_profiles import service as document_profile_service
 
     bundle = SourceArtifactBundle(
         documents=pd.DataFrame([{"id": "doc_1"}]),
@@ -179,7 +185,7 @@ def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
                 {
                     "block_id": "block_1",
                     "document_id": "doc_1",
-                        "block_type": "paragraph",
+                    "block_type": "paragraph",
                     "text": "Laser power versus porosity.",
                     "page": raw_page,
                 }
@@ -192,7 +198,10 @@ def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
         figure_assets={},
     )
     document = bundle.to_documents()[0]
-    content = DocumentProfileService(None, None, None)._build_document_content_blocks(
+    document_profile_service.collection_service = None
+    document_profile_service.SourceArtifactRepo = None
+    document_profile_service.DocumentProfileRepo = None
+    content = document_profile_service._build_document_content_blocks(
         "", list(document.blocks)
     )
 

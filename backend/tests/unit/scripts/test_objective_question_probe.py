@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import importlib.util
 import json
 import sys
@@ -9,7 +8,6 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import pytest
-
 from domain.core.research_objective import (
     ResearchObjective,
 )
@@ -130,10 +128,12 @@ def run(probe, scenario, payload, *, finish_reason="stop"):
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
+
     def with_options(**options):
         assert options["max_retries"] == 0
         assert 0 < options["timeout"] <= 30
         return client
+
     client.with_options = with_options
     runtime = SimpleNamespace(
         model="test-model",
@@ -145,9 +145,12 @@ def run(probe, scenario, payload, *, finish_reason="stop"):
         path = Path(directory) / "scenarios.json"
         path.write_text(json.dumps({"scenarios": [scenario]}), encoding="utf-8")
         _, paper_maps = probe.load_scenarios(path)
-    return probe.run_proposal(
-        scenario, runtime, client, paper_maps=paper_maps[scenario["scenario_id"]]
-    ), requests
+    return (
+        probe.run_proposal(
+            scenario, runtime, client, paper_maps=paper_maps[scenario["scenario_id"]]
+        ),
+        requests,
+    )
 
 
 def test_core_probe_preserves_reading_scope_original_sources_and_joint_factors(
@@ -191,7 +194,7 @@ def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
         reason=None,
     )
     monkeypatch.setattr(
-        probe.ObjectiveCandidateService,
+        probe.objective_candidate_service,
         "discover_candidate_facts",
         lambda *args, **kwargs: SimpleNamespace(research_objectives=(objective,)),
     )

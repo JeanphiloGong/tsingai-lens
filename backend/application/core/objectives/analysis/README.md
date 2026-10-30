@@ -40,8 +40,8 @@ Only a ready, source-grounded selection can enter Finding synthesis.
 | Prepare | `prepare_model_output` in [`paper_experiment_contract.py`](paper_experiment_contract.py) | Raw response -> validated local keys, source-label use, candidate direction and audit issues | None | None |
 | Reconcile | `reconcile_model_output` | Candidate scopes -> service-owned accepted scopes | None | None |
 | Bind | `bind_model_output` | Reconciled Draft -> formal Source references and `PaperExperimentRevision` | None | None |
-| Write/select | `ExperimentAnalysisWriter.write_experiment_analysis` | Revisions -> immutable revisions and Objective selections | None | Revisions and selections |
-| Synthesize | `ExperimentFindingSynthesisService` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
+| Write/select | `experiment_analysis_writer.write_experiment_analysis` | Revisions -> immutable revisions and Objective selections | None | Revisions and selections |
+| Synthesize | `experiment_finding_synthesis` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
 | Project | `ExperimentCompatibilityProjection` | Fixed experiment graph -> existing Objective/Evidence/Finding response shapes | None | None |
 
 `source_extraction.py` supplies Source payload and context helpers used by

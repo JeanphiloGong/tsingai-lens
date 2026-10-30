@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
-from typing import Any, Mapping
+from dataclasses import asdict
+from typing import Annotated, Any, Mapping
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
-
+from application.chat import session_service as chat_session_service
 from application.chat.inline_citations import format_message_citations
-from application.chat.session_service import (
-    ChatApprovalPendingError,
-    ChatBranchAlreadyStartedError,
-    ChatFeedbackAnalysisEnqueueError,
-    ChatMessageNotFoundError,
-    ChatSessionNotFoundError,
-    ChatSourceContextError,
-)
+from application.chat.session_service import ChatSourceContextError
 from controllers.chat.schemas import (
     ChatBranchRequest,
     ChatMessageFeedbackRequest,
@@ -38,320 +31,302 @@ from controllers.chat.schemas import (
     ChatToolDecisionRequest,
     ChatTreeNodeResponse,
     ChatTreeResponse,
-    SendChatMessageRequest,
     ChatTurnResponse,
+    SendChatMessageRequest,
 )
-from controllers.dependencies.auth import current_user_id
-from domain.chat import ChatResourceRef, ChatSourceContext, ToolPermissionMode
-from repositories.chat_repository import (
-    ChatSessionBusyError,
-    ChatSessionHasBranchesError,
-)
+from controllers.dependencies.auth import get_current_user_id
+from domain.chat import ChatResourceRef, ChatSourceContext
+from exceptions import ProjectException
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import Response, StreamingResponse
+from utils.response import ApiResponse, make_api_response
+
+logger = logging.getLogger(__name__)
 
 chat_session_router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
 
 
-def _model_call_summary(call: Any) -> ChatModelCallSummaryResponse:
-    return ChatModelCallSummaryResponse.model_validate({
-        key: getattr(call, key)
-        for key in (
-            "call_id", "session_id", "trigger_message_id", "response_message_id",
-            "purpose", "model", "request_digest", "status", "started_at", "finished_at",
-            "error_code", "provider_confirmed", "prompt_tokens", "completion_tokens",
-            "total_tokens",
+@chat_session_router.get(
+    "/{session_id}/permissions", response_model=ApiResponse[ChatPermissionResponse]
+)
+async def get_chat_permission(
+    session_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    return make_api_response(
+        data=await chat_session_service.get_permission_for_user(session_id, user_id)
+    )
+
+
+@chat_session_router.put(
+    "/{session_id}/permissions", response_model=ApiResponse[ChatPermissionResponse]
+)
+async def set_chat_permission(
+    session_id: str,
+    payload: ChatPermissionRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    return make_api_response(
+        data=await chat_session_service.set_permission_for_user(
+            session_id, user_id, **payload.model_dump()
         )
-    })
+    )
 
 
-def _model_call_detail(call: Any) -> ChatModelCallResponse:
-    return ChatModelCallResponse.model_validate({
-        **_model_call_summary(call).model_dump(),
-        "request": dict(call.request),
-    })
-
-
-@chat_session_router.get("/{session_id}/permissions", response_model=ChatPermissionResponse)
-async def get_chat_permission(session_id: str, request: Request):
-    service = request.app.state.chat_session_service
-    user_id = await current_user_id(request)
-    try:
-        await service.get_session_for_user(session_id, user_id)
-        return await service.repository.read_permission(session_id, user_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@chat_session_router.put("/{session_id}/permissions", response_model=ChatPermissionResponse)
-async def set_chat_permission(session_id: str, payload: ChatPermissionRequest, request: Request):
-    service = request.app.state.chat_session_service
-    user_id = await current_user_id(request)
-    try:
-        await service.get_session_for_user(session_id, user_id)
-        return await service.repository.set_permission(session_id, user_id, **payload.model_dump())
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
-
-
-def _session_not_found(exc: ChatSessionNotFoundError) -> dict[str, str]:
-    return {
-        "code": "chat_session_not_found",
-        "message": str(exc),
-        "session_id": exc.session_id,
-    }
-
-
-@chat_session_router.get("", response_model=ChatSessionListResponse, summary="List owned Chat sessions")
+@chat_session_router.get(
+    "",
+    response_model=ApiResponse[ChatSessionListResponse],
+    summary="List owned Chat sessions",
+)
 async def list_chat_sessions(
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     collection_id: str = Query(min_length=1, max_length=64),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-) -> ChatSessionListResponse:
-    try:
-        sessions = await request.app.state.chat_session_service.list_sessions_for_user(
-            collection_id=collection_id,
-            user_id=await current_user_id(request),
+) -> Response:
+    sessions = await chat_session_service.list_sessions_for_user(
+        collection_id=collection_id,
+        user_id=user_id,
+        limit=limit,
+        offset=offset,
+    )
+    return make_api_response(
+        data=ChatSessionListResponse(
+            items=[
+                ChatSessionResponse(**{**asdict(item.session), "title": item.title})
+                for item in sessions
+            ],
             limit=limit,
             offset=offset,
         )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ChatSessionListResponse(
-        items=[
-            ChatSessionResponse.model_validate(item.session, from_attributes=True).model_copy(
-                update={"title": item.title}
-            )
-            for item in sessions
-        ],
-        limit=limit,
-        offset=offset,
     )
 
 
 @chat_session_router.post(
     "",
-    response_model=ChatSessionResponse,
-    status_code=status.HTTP_201_CREATED,
+    response_model=ApiResponse[ChatSessionResponse],
+    status_code=200,
     summary="Create a collection-bound Research Agent Chat session",
 )
 async def create_chat_session(
     payload: ChatSessionCreateRequest,
-    request: Request,
-) -> ChatSessionResponse:
-    try:
-        session = await request.app.state.chat_session_service.create_session(
-            collection_id=payload.collection_id,
-            user_id=await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ChatSessionResponse.model_validate(session, from_attributes=True)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    session = await chat_session_service.create_session(
+        collection_id=payload.collection_id,
+        user_id=user_id,
+    )
+    return make_api_response(
+        data=ChatSessionResponse.model_validate(session, from_attributes=True)
+    )
 
 
 @chat_session_router.get(
     "/{session_id}",
-    response_model=ChatSessionResponse,
+    response_model=ApiResponse[ChatSessionResponse],
     summary="Read one owned Research Agent Chat session",
 )
 async def get_chat_session(
     session_id: str,
-    request: Request,
-) -> ChatSessionResponse:
-    try:
-        session = await request.app.state.chat_session_service.get_session_for_user(
-            session_id,
-            await current_user_id(request),
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    return ChatSessionResponse.model_validate(session, from_attributes=True)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    session = await chat_session_service.get_session_for_user(
+        session_id,
+        user_id,
+    )
+    return make_api_response(
+        data=ChatSessionResponse.model_validate(session, from_attributes=True)
+    )
 
 
 @chat_session_router.put(
     "/{session_id}/pin",
-    response_model=ChatSessionResponse,
+    response_model=ApiResponse[ChatSessionResponse],
     summary="Pin or unpin one owned Chat session",
 )
 async def set_chat_session_pin(
-    session_id: str, payload: ChatSessionPinRequest, request: Request,
-) -> ChatSessionResponse:
-    try:
-        session = await request.app.state.chat_session_service.set_session_pin_for_user(
-            session_id, await current_user_id(request), is_pinned=payload.is_pinned,
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    return ChatSessionResponse.model_validate(session, from_attributes=True)
+    session_id: str,
+    payload: ChatSessionPinRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    session = await chat_session_service.set_session_pin_for_user(
+        session_id,
+        user_id,
+        is_pinned=payload.is_pinned,
+    )
+    return make_api_response(
+        data=ChatSessionResponse.model_validate(session, from_attributes=True)
+    )
 
 
 @chat_session_router.put(
     "/{session_id}/title",
-    response_model=ChatSessionResponse,
+    response_model=ApiResponse[ChatSessionResponse],
     summary="Rename one owned Chat session",
 )
 async def set_chat_session_title(
-    session_id: str, payload: ChatSessionTitleRequest, request: Request,
-) -> ChatSessionResponse:
-    try:
-        session = await request.app.state.chat_session_service.set_session_title_for_user(
-            session_id, await current_user_id(request), title=payload.title,
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return ChatSessionResponse.model_validate(session, from_attributes=True)
+    session_id: str,
+    payload: ChatSessionTitleRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    session = await chat_session_service.set_session_title_for_user(
+        session_id,
+        user_id,
+        title=payload.title,
+    )
+    return make_api_response(
+        data=ChatSessionResponse.model_validate(session, from_attributes=True)
+    )
 
 
 @chat_session_router.delete(
     "/{session_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=200,
     summary="Delete one owned Research Agent Chat session",
+    response_model=ApiResponse[dict],
 )
-async def delete_chat_session(session_id: str, request: Request) -> None:
-    try:
-        await request.app.state.chat_session_service.delete_session_for_user(
-            session_id, await current_user_id(request)
-        )
-    except (ChatSessionNotFoundError, FileNotFoundError) as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=_session_not_found(
-                exc if isinstance(exc, ChatSessionNotFoundError) else ChatSessionNotFoundError(session_id)
-            ),
-        ) from exc
-    except ChatSessionBusyError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "chat_session_busy", "message": str(exc)},
-        ) from exc
-    except ChatSessionHasBranchesError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "chat_session_has_branches", "message": str(exc)},
-        ) from exc
+async def delete_chat_session(
+    session_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
+) -> Response:
+    await chat_session_service.delete_session_for_user(session_id, user_id)
+    return make_api_response()
 
 
-@chat_session_router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
+@chat_session_router.post(
+    "/{session_id}/branches",
+    response_model=ApiResponse[ChatSessionResponse],
+    status_code=200,
+)
 async def branch_chat_message(
-    session_id: str, payload: ChatBranchRequest, request: Request,
-) -> ChatSessionResponse:
-    try:
-        session = await request.app.state.chat_session_service.branch_message_for_user(
-            session_id, payload.message_id, await current_user_id(request),
-            request_id=str(payload.request_id), message=payload.message,
-            mode=payload.mode,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (ChatSessionBusyError, ChatApprovalPendingError) as exc:
-        raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"code": "chat_branch_invalid", "message": str(exc)}) from exc
-    return ChatSessionResponse.model_validate(session, from_attributes=True)
+    session_id: str,
+    payload: ChatBranchRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    session = await chat_session_service.branch_message_for_user(
+        session_id,
+        payload.message_id,
+        user_id,
+        request_id=str(payload.request_id),
+        message=payload.message,
+        mode=payload.mode,
+    )
+    return make_api_response(
+        data=ChatSessionResponse.model_validate(session, from_attributes=True)
+    )
 
 
-@chat_session_router.get("/{session_id}/tree", response_model=ChatTreeResponse)
-async def get_chat_tree(session_id: str, request: Request) -> ChatTreeResponse:
-    try:
-        tree = await request.app.state.chat_session_service.get_tree_for_user(
-            session_id, await current_user_id(request),
+@chat_session_router.get(
+    "/{session_id}/tree", response_model=ApiResponse[ChatTreeResponse]
+)
+async def get_chat_tree(
+    session_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
+) -> Response:
+    tree = await chat_session_service.get_tree_for_user(
+        session_id,
+        user_id,
+    )
+    return make_api_response(
+        data=ChatTreeResponse(
+            root_session_id=tree["root_session_id"],
+            active_path=tree["active_path"],
+            nodes=[
+                ChatTreeNodeResponse(
+                    **{
+                        **node,
+                        "message": ChatMessageResponse.model_validate(
+                            node["message"], from_attributes=True
+                        ),
+                    }
+                )
+                for node in tree["nodes"]
+            ],
         )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ChatTreeResponse(
-        root_session_id=tree["root_session_id"], active_path=tree["active_path"],
-        nodes=[ChatTreeNodeResponse(**{**node, "message": _message_response(node["message"])})
-               for node in tree["nodes"]],
     )
 
 
 @chat_session_router.get(
     "/{session_id}/messages",
-    response_model=ChatMessageListResponse,
+    response_model=ApiResponse[ChatMessageListResponse],
     summary="List one owned Chat trajectory",
 )
 async def list_chat_messages(
     session_id: str,
-    request: Request,
-) -> ChatMessageListResponse:
-    try:
-        user_id = await current_user_id(request)
-        trajectory = await request.app.state.chat_session_service.get_trajectory_for_user(session_id, user_id)
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _trajectory_response(trajectory)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    trajectory = await chat_session_service.get_trajectory_for_user(session_id, user_id)
+    return make_api_response(data=_trajectory_response(trajectory))
 
 
 @chat_session_router.get(
     "/{session_id}/model-calls",
-    response_model=dict,
+    response_model=ApiResponse[dict],
     summary="List exact provider calls for an owned Chat session",
 )
 async def list_chat_model_calls(
     session_id: str,
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> dict[str, Any]:
-    try:
-        calls = await request.app.state.chat_session_service.list_model_calls_for_user(
-            session_id, await current_user_id(request), limit=limit, offset=offset,
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {
-        "items": [_model_call_summary(call).model_dump() for call in calls],
-        "limit": limit,
-        "offset": offset,
-    }
+) -> Response:
+    calls = await chat_session_service.list_model_calls_for_user(
+        session_id,
+        user_id,
+        limit=limit,
+        offset=offset,
+    )
+    return make_api_response(
+        data={
+            "items": [
+                ChatModelCallSummaryResponse.model_validate(
+                    call, from_attributes=True
+                ).model_dump()
+                for call in calls
+            ],
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @chat_session_router.get(
     "/{session_id}/model-calls/{call_id}",
-    response_model=ChatModelCallResponse,
+    response_model=ApiResponse[ChatModelCallResponse],
     summary="Read one exact provider call for an owned Chat session",
 )
 async def get_chat_model_call(
-    session_id: str, call_id: str, request: Request,
-) -> ChatModelCallResponse:
-    try:
-        call = await request.app.state.chat_session_service.get_model_call_for_user(
-            session_id, call_id, await current_user_id(request),
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if call is None:
-        raise HTTPException(status_code=404, detail="chat model call not found")
-    return _model_call_detail(call)
-
-
-@chat_session_router.get("/{session_id}/events", summary="Resume updates for one owned Research Agent response")
-async def stream_chat_updates(
-    session_id: str, request: Request, response_id: str = Query(min_length=1, max_length=128),
-) -> StreamingResponse:
-    try:
-        events = await request.app.state.chat_session_service.stream_updates_for_user(
-            session_id, await current_user_id(request), response_id=response_id,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return StreamingResponse(
-        _chat_event_stream(events), media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    session_id: str,
+    call_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    call = await chat_session_service.get_model_call_for_user(
+        session_id,
+        call_id,
+        user_id,
+    )
+    return make_api_response(
+        data=ChatModelCallResponse.model_validate(call, from_attributes=True)
     )
 
 
-def _snapshot_response(snapshot: Any) -> ChatResponseSnapshotResponse:
-    return ChatResponseSnapshotResponse.model_validate(vars(snapshot))
+@chat_session_router.get(
+    "/{session_id}/events",
+    summary="Resume updates for one owned Research Agent response",
+)
+async def stream_chat_updates(
+    session_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    response_id: str = Query(min_length=1, max_length=128),
+) -> Response:
+    events = await chat_session_service.stream_updates_for_user(
+        session_id,
+        user_id,
+        response_id=response_id,
+    )
+    return StreamingResponse(
+        _chat_event_stream(events),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListResponse:
@@ -359,19 +334,28 @@ def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListRespon
     response = trajectory.get("response")
     visible_messages = format_message_citations(trajectory["messages"])
     return ChatMessageListResponse(
-        items=[_message_response(item) for item in visible_messages],
+        items=[
+            ChatMessageResponse.model_validate(item, from_attributes=True)
+            for item in visible_messages
+        ],
         feedback=[
             ChatMessageFeedbackResponse.model_validate(item)
             for item in trajectory["feedback"]
         ],
         branches=trajectory["branches"],
         branch_draft=(
-            _message_response(trajectory["branch_draft"])
+            ChatMessageResponse.model_validate(
+                trajectory["branch_draft"], from_attributes=True
+            )
             if trajectory["branch_draft"]
             else None
         ),
         running=trajectory["running"],
-        response=_snapshot_response(response) if response is not None else None,
+        response=(
+            ChatResponseSnapshotResponse.model_validate(response, from_attributes=True)
+            if response is not None
+            else None
+        ),
         pending_approval=(
             ChatToolCallResponse.model_validate(pending, from_attributes=True)
             if pending is not None
@@ -382,115 +366,71 @@ def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListRespon
 
 @chat_session_router.put(
     "/{session_id}/messages/{message_id}/feedback",
-    response_model=ChatMessageFeedbackResponse | None,
+    response_model=ApiResponse[ChatMessageFeedbackResponse | None],
     summary="Set or withdraw usefulness feedback on an owned assistant answer",
 )
 async def set_chat_message_feedback(
     session_id: str,
     message_id: str,
     payload: ChatMessageFeedbackRequest,
-    request: Request,
-) -> ChatMessageFeedbackResponse | None:
-    try:
-        feedback = await request.app.state.chat_session_service.set_message_feedback_for_user(
-            session_id, message_id, await current_user_id(request),
-            rating=payload.rating, reason=payload.reason, comment=payload.comment,
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except ChatMessageNotFoundError as exc:
-        raise HTTPException(status_code=404, detail={
-            "code": "chat_message_not_found", "message": str(exc),
-        }) from exc
-    except ChatFeedbackAnalysisEnqueueError as exc:
-        raise HTTPException(status_code=503, detail={
-            "code": "feedback_analysis_enqueue_failed",
-            "message": str(exc),
-            "feedback_id": exc.feedback_id,
-        }) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={
-            "code": "chat_feedback_invalid", "message": str(exc),
-        }) from exc
-    return ChatMessageFeedbackResponse.model_validate(feedback) if feedback else None
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    feedback = await chat_session_service.set_message_feedback_for_user(
+        session_id,
+        message_id,
+        user_id,
+        rating=payload.rating,
+        reason=payload.reason,
+        comment=payload.comment,
+    )
+    return make_api_response(
+        data=ChatMessageFeedbackResponse.model_validate(feedback) if feedback else None
+    )
 
 
 @chat_session_router.post(
     "/{session_id}/messages",
-    response_model=ChatTurnResponse,
+    response_model=ApiResponse[ChatTurnResponse],
     summary="Run one Research Agent turn",
 )
 async def send_chat_message(
     session_id: str,
     payload: SendChatMessageRequest,
     request: Request,
-) -> ChatTurnResponse | StreamingResponse:
-    try:
-        user_id = await current_user_id(request)
-        if "text/event-stream" in request.headers.get("accept", ""):
-            permission_kwargs = (
-                {"permission_mode": payload.permission_mode}
-                if payload.permission_mode is not ToolPermissionMode.CONFIRM
-                else {}
-            )
-            events = await request.app.state.chat_session_service.send_message_stream(
-                session_id,
-                user_id,
-                message=payload.message,
-                source_contexts=_map_source_contexts(payload),
-                **permission_kwargs,
-                **({"branch_revision": True} if payload.branch_revision else {}),
-            )
-            return StreamingResponse(
-                _chat_event_stream(events),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                },
-            )
-        permission_kwargs = (
-            {"permission_mode": payload.permission_mode}
-            if payload.permission_mode is not ToolPermissionMode.CONFIRM
-            else {}
-        )
-        turn = await request.app.state.chat_session_service.send_message(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    source_contexts = _map_source_contexts(payload)
+    if "text/event-stream" in request.headers.get("accept", ""):
+        events = await chat_session_service.send_message_stream(
             session_id,
             user_id,
             message=payload.message,
-            source_contexts=_map_source_contexts(payload),
-            **permission_kwargs,
-            **({"branch_revision": True} if payload.branch_revision else {}),
+            source_contexts=source_contexts,
+            permission_mode=payload.permission_mode,
+            branch_revision=payload.branch_revision,
         )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except ChatApprovalPendingError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "chat_tool_approval_pending",
-                "message": str(exc),
-                "tool_call_id": exc.tool_call_id,
+        return StreamingResponse(
+            _chat_event_stream(events),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
             },
-        ) from exc
-    except ChatSessionBusyError as exc:
-        raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
-    except ChatBranchAlreadyStartedError as exc:
-        raise HTTPException(status_code=409, detail={"code": "chat_branch_already_started", "message": str(exc)}) from exc
-    except ChatSourceContextError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "chat_source_context_invalid",
-                "message": str(exc),
-            },
-        ) from exc
-    return _turn_response(turn)
+        )
+    turn = await chat_session_service.send_message(
+        session_id,
+        user_id,
+        message=payload.message,
+        source_contexts=source_contexts,
+        permission_mode=payload.permission_mode,
+        branch_revision=payload.branch_revision,
+    )
+    return make_api_response(data=_turn_response(turn))
 
 
-def _map_source_contexts(payload: SendChatMessageRequest) -> tuple[ChatSourceContext, ...]:
+def _map_source_contexts(
+    payload: SendChatMessageRequest,
+) -> tuple[ChatSourceContext, ...]:
     try:
         return tuple(
             ChatSourceContext(
@@ -519,70 +459,65 @@ def _map_source_contexts(payload: SendChatMessageRequest) -> tuple[ChatSourceCon
 async def _chat_event_stream(
     events: AsyncIterator[Mapping[str, Any]],
 ) -> AsyncIterator[str]:
-    async for item in events:
-        event_type = str(item.get("type") or "error")
-        if event_type == "turn":
-            data: Any = _turn_response(item.get("turn") or {}).model_dump(mode="json")
-        elif event_type == "text_delta":
-            data = {"content": str(item.get("content") or "")}
-        elif event_type == "progress":
-            data = dict(item.get("progress") or {})
-        elif event_type == "snapshot":
-            data = _snapshot_response(item["snapshot"]).model_dump(mode="json")
-        elif event_type == "trajectory":
-            data = _trajectory_response(item["trajectory"]).model_dump(mode="json")
-        else:
-            event_type = "error"
-            data = item.get("error") or {
-                "code": "chat_stream_failed",
-                "message": "The research response could not be completed.",
-            }
-        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-        yield f"event: {event_type}\ndata: {payload}\n\n"
+    try:
+        async for item in events:
+            event_type = str(item.get("type") or "error")
+            if event_type == "turn":
+                data: Any = _turn_response(item.get("turn") or {}).model_dump(
+                    mode="json"
+                )
+            elif event_type == "text_delta":
+                data = {"content": str(item.get("content") or "")}
+            elif event_type == "progress":
+                data = dict(item.get("progress") or {})
+            elif event_type == "snapshot":
+                data = ChatResponseSnapshotResponse.model_validate(
+                    item["snapshot"], from_attributes=True
+                ).model_dump(mode="json")
+            elif event_type == "trajectory":
+                data = _trajectory_response(item["trajectory"]).model_dump(mode="json")
+            else:
+                event_type = "error"
+                data = item.get("error") or {
+                    "code": "chat_stream_failed",
+                    "message": "The research response could not be completed.",
+                }
+            payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            yield f"event: {event_type}\ndata: {payload}\n\n"
+
+    except ProjectException as exc:
+        payload = json.dumps(
+            {
+                "code": (exc.data or {}).get("code", "chat_stream_failed"),
+                "message": exc.message,
+            },
+            ensure_ascii=False,
+        )
+        yield f"event: error\ndata: {payload}\n\n"
+    except Exception:
+        logger.exception("Research response stream failed")
+        yield 'event: error\ndata: {"code":"chat_stream_failed","message":"The research response could not be completed."}\n\n'
 
 
 @chat_session_router.post(
     "/{session_id}/tool-calls/{tool_call_id}/decision",
-    response_model=ChatTurnResponse,
+    response_model=ApiResponse[ChatTurnResponse],
     summary="Approve or reject one exact Research Agent write call",
 )
 async def decide_chat_tool_call(
     session_id: str,
     tool_call_id: str,
     payload: ChatToolDecisionRequest,
-    request: Request,
-) -> ChatTurnResponse:
-    try:
-        turn = await request.app.state.chat_session_service.decide_tool_call_for_user(
-            session_id,
-            tool_call_id,
-            await current_user_id(request),
-            arguments_digest=payload.arguments_digest,
-            decision=payload.decision,
-        )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    except ChatSessionBusyError as exc:
-        raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "chat_tool_call_not_found",
-                "message": str(exc),
-                "tool_call_id": tool_call_id,
-            },
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "chat_tool_decision_conflict",
-                "message": str(exc),
-                "tool_call_id": tool_call_id,
-            },
-        ) from exc
-    return _turn_response(turn)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    turn = await chat_session_service.decide_tool_call_for_user(
+        session_id,
+        tool_call_id,
+        user_id,
+        arguments_digest=payload.arguments_digest,
+        decision=payload.decision,
+    )
+    return make_api_response(data=_turn_response(turn))
 
 
 def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
@@ -592,7 +527,10 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
         completion_reason=turn.get("completion_reason"),
         warnings=list(turn.get("warnings") or ()),
         execution_plan=turn.get("execution_plan"),
-        messages=[_message_response(item) for item in turn.get("messages") or ()],
+        messages=[
+            ChatMessageResponse.model_validate(item, from_attributes=True)
+            for item in turn.get("messages") or ()
+        ],
         pending_approval=(
             ChatToolCallResponse.model_validate(pending, from_attributes=True)
             if pending is not None
@@ -604,8 +542,4 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
     )
 
 
-def _message_response(message: Any) -> ChatMessageResponse:
-    return ChatMessageResponse.model_validate(message, from_attributes=True)
-
-
-__all__ = ['chat_session_router']
+__all__ = ["chat_session_router"]

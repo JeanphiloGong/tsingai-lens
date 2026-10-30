@@ -10,10 +10,6 @@ from typing import (
     Iterable,
 )
 
-from sqlalchemy import select
-
-from infra.persistence.database import AsyncSessionLocal
-
 from domain.source import (
     SourceBlock,
     SourceDocument,
@@ -32,10 +28,12 @@ from domain.source import (
     render_markdown_table,
     render_plain_table_text,
 )
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.document import Document as DocumentRow
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
+from sqlalchemy import select
 
 
 class SourceArtifactRepository:

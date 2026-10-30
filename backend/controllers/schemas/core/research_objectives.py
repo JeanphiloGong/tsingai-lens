@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Literal
 
+from repositories.objective_repository import ObjectiveAnalysis
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AnalysisStatus = Literal["queued", "running", "succeeded", "failed"]
@@ -287,3 +289,32 @@ class ObjectiveEvidenceResponse(BaseModel):
     created_by_tool_call_id: str | None = None
     created_at: str | None = None
     authoring_note: str | None = None
+
+
+def analysis_state_response(
+    analysis: ObjectiveAnalysis | None,
+) -> ObjectiveAnalysisStateResponse | None:
+    if analysis is None:
+        return None
+    return ObjectiveAnalysisStateResponse(
+        **{
+            **asdict(analysis),
+            "stats": {
+                **asdict(analysis.stats),
+                "token_usage": (
+                    asdict(analysis.stats.token_usage)
+                    if analysis.stats.token_usage is not None
+                    else None
+                ),
+            },
+            "created_at": (
+                analysis.created_at.isoformat() if analysis.created_at else None
+            ),
+            "started_at": (
+                analysis.started_at.isoformat() if analysis.started_at else None
+            ),
+            "completed_at": (
+                analysis.completed_at.isoformat() if analysis.completed_at else None
+            ),
+        }
+    )

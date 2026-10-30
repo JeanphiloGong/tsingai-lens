@@ -8,14 +8,12 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from infra.persistence.database import AsyncSessionLocal
-
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class PipelineRunStatus(StrEnum):
@@ -74,7 +72,6 @@ class ExecutionTimestamps:
         ):
             raise ValueError("finished_at cannot be earlier than started_at")
 
-
     def duration_ms(self) -> int | None:
         if self.started_at is None or self.finished_at is None:
             return None
@@ -89,7 +86,6 @@ class TokenUsage:
     input_tokens: int
     output_tokens: int
     total_tokens: int
-
 
     @classmethod
     def sum(cls, values: Iterable["TokenUsage | None"]) -> "TokenUsage | None":
@@ -117,7 +113,6 @@ class ModelUsage:
             raise ValueError(
                 "unreported_request_count must be between zero and request_count"
             )
-
 
     @classmethod
     def aggregate(cls, values: Iterable["ModelUsage"]) -> "ModelUsage":
@@ -150,7 +145,6 @@ class ExecutionStats:
     @property
     def unreported_request_count(self) -> int:
         return sum(usage.unreported_request_count for usage in self.model_usage)
-
 
     @classmethod
     def aggregate(
@@ -498,7 +492,9 @@ class PipelineRunRepository:
         reuse_completed: bool = True,
     ) -> tuple[PipelineRun, bool]:
         if run.scope_type != "document" or run.input_fingerprint is None:
-            raise ValueError("document run requires document scope and input fingerprint")
+            raise ValueError(
+                "document run requires document scope and input fingerprint"
+            )
         async with AsyncSessionLocal() as db, db.begin():
             document = await db.scalar(
                 select(Document)
@@ -523,7 +519,9 @@ class PipelineRunRepository:
                         PipelineRunRow.input_fingerprint == run.input_fingerprint,
                         PipelineRunRow.status.in_(_SUCCESS_STATUSES),
                     )
-                    .order_by(PipelineRunRow.updated_at.desc(), PipelineRunRow.run_id.desc())
+                    .order_by(
+                        PipelineRunRow.updated_at.desc(), PipelineRunRow.run_id.desc()
+                    )
                     .limit(1)
                 )
             if existing is not None:
@@ -792,8 +790,12 @@ class PipelineRunRepository:
             PipelineRunRow.scope_id,
             PipelineRunRow.status,
             PipelineRunRow.updated_at,
-            PipelineRunRow.record_json["current_node"].as_string().label("current_node"),
-            PipelineRunRow.record_json["progress_percent"].as_integer().label("progress_percent"),
+            PipelineRunRow.record_json["current_node"]
+            .as_string()
+            .label("current_node"),
+            PipelineRunRow.record_json["progress_percent"]
+            .as_integer()
+            .label("progress_percent"),
             PipelineRunRow.record_json["progress_detail"].label("progress_detail"),
             PipelineRunRow.record_json["errors"].label("errors"),
             PipelineRunRow.record_json["warnings"].label("warnings"),
@@ -932,7 +934,7 @@ def _iso(value: datetime) -> str:
     return _datetime(value).isoformat()
 
 
-__all__ = ['PipelineRunRepository']
+__all__ = ["PipelineRunRepository"]
 
 
 PipelineRunRepo = PipelineRunRepository()

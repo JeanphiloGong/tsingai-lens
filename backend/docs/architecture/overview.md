@@ -11,12 +11,12 @@ Read this page first, then follow the first entry point that matches the task:
 
 | Research step | First code entry point | Reads | Calls the LLM | Persists |
 |---|---|---|---|---|
-| Upload a paper | `controllers/source/collections.py:upload_collection_document` | upload bytes | No | Document and original bytes |
+| Upload a paper | `controllers/source/collection_routes.py:upload_collection_document` | upload bytes | No | Document and original bytes |
 | Prepare one paper | `application/source/document_preparation_service.py:queue_document_preparation` | current Document and source file | Profile stage only; Docling parses the PDF | Source, Profile, Pipeline Run |
 | Map selected papers | `application/core/objectives/paper_research_map_service.py:build_document_paper_map` | prepared Source, Profile, tree | Extraction and signal reconciliation | None directly; input service stores map |
-| Form candidate questions | `controllers/core/research_objectives.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
+| Form candidate questions | `controllers/core/research_objective_routes.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
 | Create or confirm a question | `application/core/objectives/objective_authoring_service.py:create_chat_assisted_candidate` or `confirm_objective` | exact candidate or approved arguments | No | Objective |
-| Analyze one confirmed question | `controllers/core/research_objectives.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
+| Analyze one confirmed question | `controllers/core/research_objective_routes.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
 | Chat or Agent request | `application/chat/session_service.py:send_message` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
 
 The normal reading path is:
@@ -28,21 +28,31 @@ HTTP controller -> application use case -> concrete repository -> PostgreSQL
 ```
 
 Start with the owning application README before opening a large service file.
-Controllers authorize the request and shape HTTP responses; application
-services organize work; domain records express scientific objects and their
+Controllers parse requests, resolve the session with `Depends(get_current_user_id)`,
+and shape HTTP responses; owning application functions authorize resources and organize work; domain records express scientific objects and their
 invariants; repositories own SQL and record mapping; infrastructure supplies
 database sessions, ORM tables, parsing, and model access.
 The scientific meaning belongs to the Core services and analysis stages.
 
 [`../../main.py`](../../main.py) is the assembly point. `create_app()` configures
 routes, middleware, and the startup lifecycle. On startup,
-`build_application_runtime()` constructs repositories and services;
-`install_application_runtime()` exposes them on `app.state` to controllers.
-Startup then recovers interrupted work before serving requests. Start there to
-understand construction, not to add scientific rules. Start with the owning
-service to change an existing behavior.
+`build_application_runtime()` binds the database session factory, configures the
+Chat runner and model-call observer, and constructs background worker resources.
+Repositories expose concrete singletons beside their implementations. Controllers
+import the owning application module functions directly; they do not look up
+services on `app.state` or call dependency factories. `ApplicationRuntime` owns the
+database engine and workers, with no per-route service fields. Startup recovers
+interrupted preparation, discovery, and analysis; shutdown disposes the engine.
+The four legacy snapshot handlers remain unmounted.
 
-For Paper Maps, read `PaperResearchMapService` as the coordinator. It orders
+`controllers/exception_router.py` owns the four centralized exception handlers;
+`utils/response.py` owns the HTTP 200 JSON envelope. Actual operations raise
+explicit application errors at their owning input, authorization, or state
+boundary. Unexpected database, filesystem, or provider failures remain server
+failures; builtin exception types and message substrings do not classify them.
+The public contract is specified in [the API reference](../specs/api.md).
+
+For Paper Maps, read `paper_research_map_service` as the coordinator. It orders
 Source selection, bounded extraction, optional expansion, reconciliation, and
 status assessment. `paper_map_sources.py` selects Sources and builds windows;
 `paper_map_extraction.py` performs model calls, structured-output recovery, and
@@ -185,7 +195,7 @@ but have separate owners.
 | Pipeline | No scientific objects; a successful technical run is not scientific proof | `repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
 
 Repository-specific result types stay beside the concrete repository that returns them.
-`PipelineRunService` creates execution records from fixed node definitions and
+`pipeline_run_service` creates execution records from fixed node definitions and
 advances them; the repository stores and reads those records. Statistics remain direct
 operations on the execution values. `ObjectiveRepository` retains locked analysis
 claims and publication transitions; the application selects the scientific

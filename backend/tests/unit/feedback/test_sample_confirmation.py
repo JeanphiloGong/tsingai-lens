@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from domain.feedback.sample_revision import SftRevisionContent
-
-
 from dataclasses import replace
+from types import ModuleType
 
 import pytest
-
-from application.feedback.dataset_service import (
-    FeedbackDatasetConflict,
-    FeedbackDatasetService,
-)
+from application.feedback import dataset_service
+from application.feedback.dataset_service import FeedbackDatasetConflict
 from domain.feedback import (
     Dataset,
     DatasetSample,
@@ -18,6 +13,7 @@ from domain.feedback import (
     SampleRevision,
     content_digest_for,
 )
+from domain.feedback.sample_revision import SftRevisionContent
 from repositories.feedback_dataset_sample_repository import (
     source_digest_for_case,
 )
@@ -164,23 +160,28 @@ def _case() -> FeedbackCase:
     )
 
 
-def _service(samples: _Samples, cases: _Cases | None = None) -> FeedbackDatasetService:
-    return FeedbackDatasetService(
-        repository=_Datasets(),
-        collection_service=_Collections(),
-        sample_repository=samples,
-        case_repository=cases or _Cases(),
-    )
+def _service(samples: _Samples, cases: _Cases | None = None) -> ModuleType:
+    dataset_service.FeedbackDatasetRepo = _Datasets()
+    dataset_service.collection_service = _Collections()
+    dataset_service.FeedbackDatasetSampleRepo = samples
+    dataset_service.FeedbackCaseRepo = cases or _Cases()
+    return dataset_service
 
 
 @pytest.mark.anyio
 async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
     samples = _Samples()
-    samples.sample = replace(samples.sample, status="needs_input", current_revision_id=None)
+    samples.sample = replace(
+        samples.sample, status="needs_input", current_revision_id=None
+    )
     service = _service(samples)
-    content = {"schema_version": "literature-sft.v1",
+    content = {
+        "schema_version": "literature-sft.v1",
         "messages": [{"role": "user", "content": "Summarize the research decision."}],
-        "context": [], "evidence": [], "target": "Compare laser power at fixed scan speed."}
+        "context": [],
+        "evidence": [],
+        "target": "Compare laser power at fixed scan speed.",
+    }
     saved = await service.update_sample(
         user_id="user-1",
         dataset_id="fdset-1",
@@ -196,8 +197,12 @@ async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
         ),
     )
     assert saved.status == "needs_confirmation"
-    confirmed = await service.confirm_sample(user_id="user-1", dataset_id="fdset-1", sample_id="sample-1",
-        expected_revision_id=saved.current_revision_id)
+    confirmed = await service.confirm_sample(
+        user_id="user-1",
+        dataset_id="fdset-1",
+        sample_id="sample-1",
+        expected_revision_id=saved.current_revision_id,
+    )
     assert confirmed.status == "confirmed"
     assert samples.appended.provenance["evidence_records"] == []
     assert samples.appended.provenance["session_id"] == "session-1"

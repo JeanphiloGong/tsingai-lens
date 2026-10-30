@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
-from application.core.objectives.analysis.experiment_compatibility_projection import (
-    ExperimentCompatibilityProjection,
-)
+from application.core.objectives.analysis import experiment_compatibility_projection
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveEvidenceResponse,
@@ -29,6 +27,7 @@ from domain.core.scientific_fact import (
     ScientificContext,
     ScientificVariable,
 )
+from exceptions import ResourceNotFoundException
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
@@ -148,14 +147,14 @@ class _Selections:
     async def list_selections(self, db, collection_id, objective_id, analysis_version):
         return (
             ObjectiveExperimentSelection(
-                selection_id='selection-1',
+                selection_id="selection-1",
                 objective_id=objective_id,
                 analysis_version=analysis_version,
-                experiment_id='experiment-1',
+                experiment_id="experiment-1",
                 experiment_version=1,
-                outcome='elongation',
-                measurement_keys=('np-elongation', 'p150-elongation'),
-                comparison_keys=('np-vs-p150',),
+                outcome="elongation",
+                measurement_keys=("np-elongation", "p150-elongation"),
+                comparison_keys=("np-vs-p150",),
             ),
         )
 
@@ -178,7 +177,7 @@ class _Findings:
                 outcome="elongation",
                 direction="increase",
                 assertion_strength="associative",
-                attribution_scope='isolated_effect',
+                attribution_scope="isolated_effect",
                 synthesis_status="single_study",
                 certainty=0.8,
                 display_rank=0,
@@ -202,16 +201,30 @@ class _Experiments:
 
 class _ObjectiveRepository:
     async def read_analysis(self, collection_id, objective_id, analysis_version):
-        return None
+        return None if analysis_version == 99 else SimpleNamespace(status="succeeded")
+
+    async def list_contributions(self, collection_id, objective_id, analysis_version):
+        return ()
 
 
-def _service() -> ExperimentCompatibilityProjection:
-    return ExperimentCompatibilityProjection(
-        paper_experiment_repository=_Experiments(),
-        selection_repository=_Selections(),
-        group_repository=_Groups(),
-        finding_repository=_Findings(),
+def _service() -> ModuleType:
+    experiment_compatibility_projection.ObjectiveRepo = _ObjectiveRepository()
+    experiment_compatibility_projection.experiment_query_service.ObjectiveRepo = (
+        _ObjectiveRepository()
     )
+    experiment_compatibility_projection.experiment_query_service.PaperExperimentRepo = (
+        _Experiments()
+    )
+    experiment_compatibility_projection.experiment_query_service.ObjectiveExperimentSelectionRepo = (
+        _Selections()
+    )
+    experiment_compatibility_projection.experiment_query_service.ComparisonGroupRepo = (
+        _Groups()
+    )
+    experiment_compatibility_projection.experiment_query_service.ExperimentFindingRepo = (
+        _Findings()
+    )
+    return experiment_compatibility_projection
 
 
 async def test_projection_preserves_existing_finding_and_evidence_shapes() -> None:
@@ -248,15 +261,25 @@ async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> No
 
 
 async def test_projection_rejects_unknown_analysis_snapshot() -> None:
-    service = ExperimentCompatibilityProjection(
-        paper_experiment_repository=_Experiments(),
-        selection_repository=_Selections(),
-        group_repository=_Groups(),
-        finding_repository=_Findings(),
-        objective_repository=_ObjectiveRepository(),
+    experiment_compatibility_projection.experiment_query_service.PaperExperimentRepo = (
+        _Experiments()
     )
+    experiment_compatibility_projection.experiment_query_service.ObjectiveExperimentSelectionRepo = (
+        _Selections()
+    )
+    experiment_compatibility_projection.experiment_query_service.ComparisonGroupRepo = (
+        _Groups()
+    )
+    experiment_compatibility_projection.experiment_query_service.ExperimentFindingRepo = (
+        _Findings()
+    )
+    experiment_compatibility_projection.ObjectiveRepo = _ObjectiveRepository()
+    experiment_compatibility_projection.experiment_query_service.ObjectiveRepo = (
+        _ObjectiveRepository()
+    )
+    service = experiment_compatibility_projection
 
-    with pytest.raises(FileNotFoundError, match="analysis snapshot not found"):
+    with pytest.raises(ResourceNotFoundException, match="Analysis snapshot not found"):
         await service.list_findings(
             "collection-1", "objective-1", 99, offset=0, limit=50
         )

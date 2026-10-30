@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
+import json
 from collections.abc import Mapping
 from hashlib import sha256
-import json
 from typing import Any, Literal
 from urllib.parse import urlencode
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
 from application.chat.capabilities.objective_proposal import ObjectiveDraftInput
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field
 
 DerivationBasisKind = Literal["finding", "evidence_gap", "paper_contribution"]
 
@@ -79,8 +75,7 @@ class DeriveObjectiveCapability:
             context.user_id,
         )
         state = await self.objective_analysis_service.get_analysis_state(
-            context.collection_id,
-            arguments.objective_id,
+            context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         published = state.get("published_analysis")
         version = _field(published, "analysis_version")
@@ -197,10 +192,14 @@ class DeriveObjectiveCapability:
         else:
             derivation_status = "abstained"
             abstention_reason = "no_valid_scientific_basis"
-        warnings = [
-            f"{len(rejected)} follow-up draft(s) were rejected because their basis "
-            "was missing, technical, or not part of the published analysis."
-        ] if rejected else []
+        warnings = (
+            [
+                f"{len(rejected)} follow-up draft(s) were rejected because their basis "
+                "was missing, technical, or not part of the published analysis."
+            ]
+            if rejected
+            else []
+        )
         omitted_gap_count = int(evidence_review.get("omitted_gap_count") or 0)
         if omitted_finding_count:
             warnings.append(
@@ -288,8 +287,8 @@ class DeriveObjectiveCapability:
                     None,
                     f"technical_failure_is_not_scientific_basis:{reference_id}",
                 )
-            document_id = (gap.get("document_id") or "")
-            source_ref = (gap.get("source_ref") or "")
+            document_id = gap.get("document_id") or ""
+            source_ref = gap.get("source_ref") or ""
             resource_ref = None
             if document_id and source_ref:
                 resource_ref = ChatResourceRef(
@@ -299,9 +298,7 @@ class DeriveObjectiveCapability:
                     ),
                     href=(
                         f"/collections/{context.collection_id}/documents/{document_id}?"
-                        + urlencode(
-                            {"view": "parsed-paper", "source_ref": source_ref}
-                        )
+                        + urlencode({"view": "parsed-paper", "source_ref": source_ref})
                     ),
                 )
             return (
@@ -322,7 +319,7 @@ class DeriveObjectiveCapability:
         contribution = contributions.get(reference_id)
         if contribution is None:
             return {}, None, f"unknown_paper_contribution:{reference_id}"
-        disposition = (_field(contribution, "evidence_disposition") or "")
+        disposition = _field(contribution, "evidence_disposition") or ""
         if disposition in {"extraction_failed", "excluded"}:
             return (
                 {},
@@ -335,7 +332,9 @@ class DeriveObjectiveCapability:
                 "snapshot": {
                     "document_id": reference_id,
                     "evidence_disposition": disposition,
-                    "reason": (_field(contribution, "evidence_disposition_reason") or "")[:1_000],
+                    "reason": (
+                        _field(contribution, "evidence_disposition_reason") or ""
+                    )[:1_000],
                 },
             },
             ChatResourceRef(
@@ -389,9 +388,6 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(name, default)
     return getattr(value, name, default)
-
-
-
 
 
 def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...]:

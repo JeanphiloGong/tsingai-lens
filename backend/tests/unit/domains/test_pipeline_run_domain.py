@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
-from application.pipeline import PipelineRunService
+from application.pipeline import pipeline_run_service
 from application.pipeline import pipeline_run_service as module
 from repositories.pipeline_run_repository import (
-    ExecutionStats, ExecutionTimestamps, ModelUsage, PipelineNodeStatus,
-    PipelineRunStatus, TokenUsage,
+    ExecutionStats,
+    ExecutionTimestamps,
+    ModelUsage,
+    PipelineNodeStatus,
+    PipelineRunStatus,
+    TokenUsage,
 )
 
 
@@ -31,11 +34,16 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
     times = iter(f"2026-08-11T01:00:0{n}+00:00" for n in range(6))
     monkeypatch.setattr(module, "_now_iso", lambda: next(times))
     runs = _Runs()
-    service = PipelineRunService(runs)
+    pipeline_run_service.PipelineRunRepo = runs
+    service = pipeline_run_service
     runs.run = service._new_run(
-        collection_id="col_1", pipeline_name="document_preparation",
-        scope_type="document", scope_id="doc_1", mode="standard",
-        input_fingerprint="fingerprint", context={"requested_by": "upload"},
+        collection_id="col_1",
+        pipeline_name="document_preparation",
+        scope_type="document",
+        scope_id="doc_1",
+        mode="standard",
+        input_fingerprint="fingerprint",
+        context={"requested_by": "upload"},
     )
     assert [(node.name, node.dependencies) for node in runs.run.nodes] == [
         ("source_parsing", ()),
@@ -46,14 +54,18 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
     running = await service.update_run(run_id, current_node="source_parsing")
     assert running["nodes"]["source_parsing"]["status"] == "running"
     profiling = await service.update_run(
-        run_id, current_node="document_profile", progress_percent=50,
+        run_id,
+        current_node="document_profile",
+        progress_percent=50,
         progress_detail={"unit": "document", "message": "Profiling."},
     )
     assert profiling["nodes"]["source_parsing"]["status"] == "succeeded"
     assert profiling["nodes"]["document_profile"]["status"] == "running"
     assert profiling["progress_percent"] == 50
     result = await service.finish_run(
-        run_id, status="failed", current_node="document_profile",
+        run_id,
+        status="failed",
+        current_node="document_profile",
         errors=["private provider text"],
     )
     assert result["nodes"]["source_parsing"]["status"] == "succeeded"
@@ -70,11 +82,16 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
 @pytest.mark.anyio
 async def test_progress_without_a_node_keeps_reported_errors():
     runs = _Runs()
-    service = PipelineRunService(runs)
+    pipeline_run_service.PipelineRunRepo = runs
+    service = pipeline_run_service
     runs.run = service._new_run(
-        collection_id="col_1", pipeline_name="document_preparation",
-        scope_type="document", scope_id="doc_1", mode="standard",
-        input_fingerprint=None, context=None,
+        collection_id="col_1",
+        pipeline_name="document_preparation",
+        scope_type="document",
+        scope_id="doc_1",
+        mode="standard",
+        input_fingerprint=None,
+        context=None,
     )
     runs.run = replace(runs.run, errors=("dispatch failure",))
     result = await service.update_run(runs.run.run_id, progress_percent=10)
@@ -85,17 +102,24 @@ async def test_progress_without_a_node_keeps_reported_errors():
 @pytest.mark.anyio
 async def test_partial_success_skips_unstarted_nodes():
     runs = _Runs()
-    service = PipelineRunService(runs)
+    pipeline_run_service.PipelineRunRepo = runs
+    service = pipeline_run_service
     runs.run = service._new_run(
-        collection_id="col_1", pipeline_name="objective_discovery",
-        scope_type="collection", scope_id="col_1", mode="standard",
-        input_fingerprint=None, context=None,
+        collection_id="col_1",
+        pipeline_name="objective_discovery",
+        scope_type="collection",
+        scope_id="col_1",
+        mode="standard",
+        input_fingerprint=None,
+        context=None,
     )
     assert [(node.name, node.dependencies) for node in runs.run.nodes] == [
         ("paper_map", ()),
         ("objective_candidates", ("paper_map",)),
     ]
-    await service.update_run(runs.run.run_id, status="running", current_node="paper_map")
+    await service.update_run(
+        runs.run.run_id, status="running", current_node="paper_map"
+    )
     result = await service.finish_run(runs.run.run_id, status="partial_success")
     assert result["nodes"]["paper_map"]["status"] == "succeeded"
     assert result["nodes"]["objective_candidates"]["status"] == "skipped"
@@ -104,7 +128,8 @@ async def test_partial_success_skips_unstarted_nodes():
 
 @pytest.mark.anyio
 async def test_invalid_progress_is_rejected_before_loading():
-    service = PipelineRunService(_Runs())
+    pipeline_run_service.PipelineRunRepo = _Runs()
+    service = pipeline_run_service
     with pytest.raises(ValueError, match="progress_percent"):
         await service.update_run("run-1", progress_percent=101)
 
@@ -114,16 +139,14 @@ def test_execution_stats_aggregate_usage_by_model() -> None:
         (
             ExecutionStats(
                 prompt_versions={"document_profile": "document_profile.v1"},
-                model_usage=(
-                    ModelUsage("model-a", 1, TokenUsage(100, 20, 120)),
-                )
+                model_usage=(ModelUsage("model-a", 1, TokenUsage(100, 20, 120)),),
             ),
             ExecutionStats(
                 prompt_versions={"paper_facts": "paper_facts.v1"},
                 model_usage=(
                     ModelUsage("model-a", 2, TokenUsage(200, 40, 240)),
                     ModelUsage("model-b", 1, TokenUsage(50, 10, 60)),
-                )
+                ),
             ),
         )
     )

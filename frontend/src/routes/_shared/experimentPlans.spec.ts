@@ -13,11 +13,10 @@ beforeEach(() => {
 	globalThis.fetch = fetchMock as typeof fetch;
 });
 
-function jsonResponse(body: unknown, init: ResponseInit = {}) {
-	return new Response(JSON.stringify(body), {
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
 		status: 200,
-		headers: { 'Content-Type': 'application/json' },
-		...init
+		headers: { 'Content-Type': 'application/json' }
 	});
 }
 

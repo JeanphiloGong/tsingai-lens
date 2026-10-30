@@ -6,10 +6,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
-
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
+from sqlalchemy import select, update
 
 
 @dataclass(frozen=True)
@@ -144,7 +143,7 @@ def _optional_iso(value: datetime | None) -> str | None:
     return _iso(value) if value is not None else None
 
 
-__all__ = ['AuthRepository']
+__all__ = ["AuthRepository"]
 
 
 AuthRepo = AuthRepository()

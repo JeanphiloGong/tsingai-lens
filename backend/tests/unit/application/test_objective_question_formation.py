@@ -1,36 +1,34 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    PaperResearchSourceRef,
-    build_paper_research_scope,
-    build_paper_research_relationship,
-)
-
-
-from copy import deepcopy
 import asyncio
-from dataclasses import replace
 import json
+from copy import deepcopy
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import ValidationError
-
-from application.core.objectives.llm.structured_response import (
-    StructuredOutputSaturatedError,
-    StructuredResponseClient,
-)
-from application.core.objectives.objective_candidate_service import (
-    ObjectiveCandidateService,
-)
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
-from application.core.objectives.objective_authoring_service import ObjectiveAuthoringService
+from application.core.objectives import (
+    objective_authoring_service,
+    objective_candidate_service,
+)
+from application.core.objectives.llm.structured_response import (
+    StructuredOutputSaturatedError,
+    StructuredResponseClient,
+)
+from application.core.structured_extraction.json_support import StructuredOutputError
 from domain.core import PaperResearchMap
+from domain.core.research_objective import (
+    PaperResearchSourceRef,
+    build_paper_research_relationship,
+    build_paper_research_scope,
+)
+from pydantic import ValidationError
 
 
 @pytest.fixture
@@ -140,12 +138,13 @@ def model_client(payload, *, finish_reason="stop"):
         ),
         model="test-model",
     )
+    client.client.with_options = lambda **kwargs: client.client
     return client, requests
 
 
 def form(reading, client, **kwargs):
     maps, texts = reading
-    return ObjectiveCandidateService().propose_candidate_questions(
+    return objective_candidate_service.propose_candidate_questions(
         "collection",
         paper_maps=maps,
         source_texts=texts,
@@ -168,29 +167,40 @@ def test_candidate_request_rejects_blank_scope_or_document_identity(field):
 
 def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
     repository = SimpleNamespace(
-        create_authored_candidate=AsyncMock(side_effect=lambda objective, **kwargs: objective),
-    )
-    capability = CreateObjectiveCandidateCapability(
-        objective_authoring_service=ObjectiveAuthoringService(
-            collection_service=SimpleNamespace(
-                get_collection_for_user=AsyncMock(), get_document=AsyncMock(),
-            ),
-            objective_repository=repository,
+        create_authored_candidate=AsyncMock(
+            side_effect=lambda objective, **kwargs: objective
         ),
     )
-    request = CreateObjectiveCandidateToolRequest.model_validate({
-        "question": " How does laser power affect porosity? ",
-        "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"],
-        "variables": ["laser power", "Laser power"],
-        "outcomes": ["porosity"],
-        "constraints": ["LPBF", "lpbf"],
-        "seed_document_ids": ["Paper-A", "paper-a", "Paper-A"],
-        "excluded_document_ids": ["Paper-B", "paper-b", "Paper-B"],
-    })
+    objective_authoring_service.collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock(), get_document=AsyncMock()
+    )
+    objective_authoring_service.ObjectiveRepo = repository
+    capability = CreateObjectiveCandidateCapability(
+        objective_authoring_service=objective_authoring_service,
+    )
+    request = CreateObjectiveCandidateToolRequest.model_validate(
+        {
+            "question": " How does laser power affect porosity? ",
+            "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"],
+            "variables": ["laser power", "Laser power"],
+            "outcomes": ["porosity"],
+            "constraints": ["LPBF", "lpbf"],
+            "seed_document_ids": ["Paper-A", "paper-a", "Paper-A"],
+            "excluded_document_ids": ["Paper-B", "paper-b", "Paper-B"],
+        }
+    )
 
-    result = asyncio.run(capability.execute(CapabilityExecutionContext(
-        session_id="chat-1", user_id="user-1", collection_id="col-1", tool_call_id="call-1",
-    ), request))
+    result = asyncio.run(
+        capability.execute(
+            CapabilityExecutionContext(
+                session_id="chat-1",
+                user_id="user-1",
+                collection_id="col-1",
+                tool_call_id="call-1",
+            ),
+            request,
+        )
+    )
 
     assert result.status.value == "succeeded"
     objective = repository.create_authored_candidate.call_args.args[0]
@@ -237,7 +247,8 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
 def test_reading_question_preserves_case_distinct_paper_selections(reading, proposal):
     maps, texts = reading
     renamed = replace(
-        maps[1], document_id="a",
+        maps[1],
+        document_id="a",
         studies=tuple(replace(study, document_id="a") for study in maps[1].studies),
     )
     renamed_texts = {
@@ -251,7 +262,11 @@ def test_reading_question_preserves_case_distinct_paper_selections(reading, prop
 
     candidate = result.candidates[0]
     assert candidate.objective.seed_document_ids == ("A", "a", "C")
-    assert tuple(paper.paper_map.document_id for paper in candidate.papers) == ("A", "a", "C")
+    assert tuple(paper.paper_map.document_id for paper in candidate.papers) == (
+        "A",
+        "a",
+        "C",
+    )
 
 
 def test_background_selection_survives_without_becoming_an_experimental_seed(
@@ -352,7 +367,7 @@ def test_prompt_scopes_limitations_to_observed_comparisons(reading, proposal):
 @pytest.mark.parametrize(
     "payload,finish,exception",
     [
-        ("not json", "stop", RuntimeError),
+        ("not json", "stop", StructuredOutputError),
         ("{}", "length", StructuredOutputSaturatedError),
         (TimeoutError("provider timeout"), "stop", TimeoutError),
     ],

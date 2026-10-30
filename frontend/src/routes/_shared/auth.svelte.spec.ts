@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
-const { requestJson } = vi.hoisted(() => ({ requestJson: vi.fn() }));
-vi.mock('./api', async () => ({
-	...(await vi.importActual<typeof import('./api')>('./api')),
-	requestJson
-}));
-const { authState, clearAuthState, fetchCurrentSession, login, logout, startAuthSynchronization } =
-	await import('./auth');
+import {
+	authState,
+	clearAuthState,
+	fetchCurrentSession,
+	login,
+	logout,
+	startAuthSynchronization
+} from './auth';
+
+const fetchMock = vi.fn();
+function jsonResponse(data: unknown) {
+	return new Response(JSON.stringify({ code: 200, message: 'success', data, meta: null }), {
+		headers: { 'Content-Type': 'application/json' }
+	});
+}
 const user = { user_id: 'researcher_1', email: 'researcher@example.test' };
 
 describe('account-scoped chat storage', () => {
@@ -15,27 +23,29 @@ describe('account-scoped chat storage', () => {
 		clearAuthState();
 		localStorage.clear();
 		sessionStorage.clear();
-		requestJson.mockReset();
+		fetchMock.mockReset();
+		vi.stubGlobal('fetch', fetchMock);
 	});
 
 	it.each([false, true])(
 		'waits for an earlier logout before signing in, logout failed: %s',
 		async (fails) => {
-			requestJson.mockResolvedValueOnce({ user });
+			fetchMock.mockResolvedValueOnce(jsonResponse({ user }));
 			await login(user.email, 'test-only');
 			let finish!: () => void;
-			requestJson.mockImplementationOnce(
+			fetchMock.mockImplementationOnce(
 				() =>
 					new Promise((resolve, reject) => {
-						finish = () => (fails ? reject(new Error('Connection lost')) : resolve({}));
+						finish = () =>
+							fails ? reject(new Error('Connection lost')) : resolve(jsonResponse({}));
 					})
 			);
 			const signingOut = logout().catch(() => undefined);
 			const nextUser = { user_id: 'researcher_2', email: 'second@example.test' };
-			requestJson.mockResolvedValueOnce({ user: nextUser });
+			fetchMock.mockResolvedValueOnce(jsonResponse({ user: nextUser }));
 			const signingIn = login(nextUser.email, 'test-only');
 			try {
-				expect(requestJson).toHaveBeenCalledTimes(2);
+				expect(fetchMock).toHaveBeenCalledTimes(2);
 				expect(get(authState).status).toBe('anonymous');
 			} finally {
 				finish();
@@ -50,7 +60,7 @@ describe('account-scoped chat storage', () => {
 		'ignores a late %s response after another tab signs out',
 		async (request) => {
 			let complete!: (value: unknown) => void;
-			requestJson.mockImplementationOnce(
+			fetchMock.mockImplementationOnce(
 				() =>
 					new Promise((resolve) => {
 						complete = resolve;
@@ -67,7 +77,7 @@ describe('account-scoped chat storage', () => {
 						newValue: 'other-tab-signout'
 					})
 				);
-				complete({ user });
+				complete(jsonResponse({ user }));
 				if (request === 'session') await expect(session).resolves.toBeNull();
 				else await expect(session).rejects.toThrow('error.authSessionChanged');
 				expect(get(authState).status).toBe('anonymous');
@@ -86,7 +96,7 @@ describe('account-scoped chat storage', () => {
 		sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', 'owned Source');
 		sessionStorage.setItem('lens.chatSourceContext.col_123', 'unscoped Source');
 		localStorage.setItem('lens.theme', 'dark');
-		requestJson.mockResolvedValue({ user });
+		fetchMock.mockImplementation(async () => jsonResponse({ user }));
 		await fetchCurrentSession();
 		expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe('chat_owned');
 		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBe(
@@ -104,12 +114,12 @@ describe('account-scoped chat storage', () => {
 	it.each([false, true])(
 		'clears history and pending Sources when logout fails: %s',
 		async (fails) => {
-			requestJson.mockResolvedValue({ user });
+			fetchMock.mockImplementation(async () => jsonResponse({ user }));
 			await login(user.email, 'test-only');
 			localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', 'private question');
 			sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', 'private selection');
 			if (fails) {
-				requestJson.mockRejectedValueOnce(new Error('503 Unavailable'));
+				fetchMock.mockRejectedValueOnce(new Error('503 Unavailable'));
 				await expect(logout()).rejects.toThrow('503');
 			} else {
 				await logout();

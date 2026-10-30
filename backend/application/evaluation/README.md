@@ -16,7 +16,7 @@ prepare Source documents, discover Objectives, or run Objective analyses.
   Objective or collection Finding datasets.
 - `finding_review_import_service.py`
   Validates human accept, reject, correct, or skip decisions and writes them
-  through `FindingFeedbackService`.
+  through `finding_feedback_service`.
 
 ## Identity Contract
 

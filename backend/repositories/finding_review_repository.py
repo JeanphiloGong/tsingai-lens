@@ -6,9 +6,14 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from domain.core.finding import Finding, FindingMechanismRelation, FindingPaperContribution
+from domain.core.finding import (
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from domain.evaluation.records import FindingCuration, FindingFeedback
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.evaluation import (
     FindingCurationRecord,
     FindingFeedbackRecord,
@@ -18,20 +23,14 @@ from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from infra.persistence.database import AsyncSessionLocal
-
 
 class FindingReviewRepository:
     backend_name = "postgresql"
 
-    async def upsert_feedback(
-        self, feedback: FindingFeedback
-    ) -> FindingFeedback:
+    async def upsert_feedback(self, feedback: FindingFeedback) -> FindingFeedback:
         async with AsyncSessionLocal() as db, db.begin():
             await _require_finding(db, feedback)
-            existing = await db.get(
-                FindingFeedbackRecord, feedback.feedback_id
-            )
+            existing = await db.get(FindingFeedbackRecord, feedback.feedback_id)
             if existing is not None and _feedback_key(existing) != _feedback_key(
                 feedback
             ):
@@ -101,14 +100,10 @@ class FindingReviewRepository:
                 for row in rows
             )
 
-    async def upsert_curation(
-        self, curation: FindingCuration
-    ) -> FindingCuration:
+    async def upsert_curation(self, curation: FindingCuration) -> FindingCuration:
         async with AsyncSessionLocal() as db, db.begin():
             await _require_finding(db, curation)
-            existing = await db.get(
-                FindingCurationRecord, curation.curation_id
-            )
+            existing = await db.get(FindingCurationRecord, curation.curation_id)
             if existing is not None and _curation_key(existing) != _curation_key(
                 curation
             ):
@@ -132,8 +127,16 @@ class FindingReviewRepository:
                         "name": attribute.name,
                         "value": attribute.value,
                         "unit": attribute.unit,
-                        **({"context_scope": attribute.context_scope} if attribute.context_scope != "unknown" else {}),
-                        **({"applies_to_outcomes": list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                        **(
+                            {"context_scope": attribute.context_scope}
+                            if attribute.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                            if attribute.applies_to_outcomes
+                            else {}
+                        ),
                     }
                     for attribute in attributes
                 ]
@@ -158,7 +161,9 @@ class FindingReviewRepository:
                         "target_term": mechanism.target_term,
                         "direction": mechanism.direction,
                         "assertion_strength": mechanism.assertion_strength,
-                        "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
                     }
                     for mechanism in finding.mechanisms
                 ],
@@ -168,7 +173,9 @@ class FindingReviewRepository:
                     {
                         "document_id": contribution.document_id,
                         "analysis_status": contribution.analysis_status,
-                        "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
                         "contradicting_evidence_ids": list(
                             contribution.contradicting_evidence_ids
                         ),
@@ -184,8 +191,14 @@ class FindingReviewRepository:
                 "parent_finding_id": finding.parent_finding_id,
                 "created_by_user_id": finding.created_by_user_id,
                 "created_by_tool_call_id": finding.created_by_tool_call_id,
-                "created_at": finding.created_at.isoformat() if finding.created_at else None,
-                **({"selection_ids": list(finding.selection_ids)} if finding.selection_ids else {}),
+                "created_at": (
+                    finding.created_at.isoformat() if finding.created_at else None
+                ),
+                **(
+                    {"selection_ids": list(finding.selection_ids)}
+                    if finding.selection_ids
+                    else {}
+                ),
                 **(
                     {"comparison_group_ids": list(finding.comparison_group_ids)}
                     if finding.comparison_group_ids
@@ -248,7 +261,9 @@ class FindingReviewRepository:
                             value=item["value"],
                             unit=item.get("unit"),
                             context_scope=item.get("context_scope", "unknown"),
-                            applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
+                            applies_to_outcomes=tuple(
+                                item.get("applies_to_outcomes", ())
+                            ),
                         )
                         for item in context.get(scope, ())
                     )
@@ -273,7 +288,9 @@ class FindingReviewRepository:
                             target_term=item["target_term"],
                             direction=item.get("direction"),
                             assertion_strength=item["assertion_strength"],
-                            supporting_evidence_ids=tuple(item.get("supporting_evidence_ids", ())),
+                            supporting_evidence_ids=tuple(
+                                item.get("supporting_evidence_ids", ())
+                            ),
                         )
                         for item in stored.get("mechanisms", ())
                     ),
@@ -288,10 +305,18 @@ class FindingReviewRepository:
                         FindingPaperContribution(
                             document_id=item["document_id"],
                             analysis_status=item["analysis_status"],
-                            supporting_evidence_ids=tuple(item.get("supporting_evidence_ids", ())),
-                            contradicting_evidence_ids=tuple(item.get("contradicting_evidence_ids", ())),
-                            context_evidence_ids=tuple(item.get("context_evidence_ids", ())),
-                            condition_boundary_evidence_ids=tuple(item.get("condition_boundary_evidence_ids", ())),
+                            supporting_evidence_ids=tuple(
+                                item.get("supporting_evidence_ids", ())
+                            ),
+                            contradicting_evidence_ids=tuple(
+                                item.get("contradicting_evidence_ids", ())
+                            ),
+                            context_evidence_ids=tuple(
+                                item.get("context_evidence_ids", ())
+                            ),
+                            condition_boundary_evidence_ids=tuple(
+                                item.get("condition_boundary_evidence_ids", ())
+                            ),
                         )
                         for item in stored.get("paper_contributions", ())
                     ),
@@ -305,18 +330,20 @@ class FindingReviewRepository:
                     selection_ids=tuple(stored.get("selection_ids", ())),
                     comparison_group_ids=tuple(stored.get("comparison_group_ids", ())),
                 )
-                records.append(FindingCuration(
-                    curation_id=row.curation_id,
-                    collection_id=row.collection_id,
-                    objective_id=row.objective_id,
-                    analysis_version=row.analysis_version,
-                    finding_id=row.finding_id,
-                    curated_status=row.curated_status,
-                    curated_finding=finding,
-                    note=row.note,
-                    reviewer=row.reviewer,
-                    updated_at=_isoformat(row.updated_at),
-                ))
+                records.append(
+                    FindingCuration(
+                        curation_id=row.curation_id,
+                        collection_id=row.collection_id,
+                        objective_id=row.objective_id,
+                        analysis_version=row.analysis_version,
+                        finding_id=row.finding_id,
+                        curated_status=row.curated_status,
+                        curated_finding=finding,
+                        note=row.note,
+                        reviewer=row.reviewer,
+                        updated_at=_isoformat(row.updated_at),
+                    )
+                )
             return tuple(records)
 
 
@@ -377,7 +404,7 @@ async def _require_finding(db: AsyncSession, value: object) -> None:
         )
 
 
-__all__ = ['FindingReviewRepository']
+__all__ = ["FindingReviewRepository"]
 
 
 def _finding_creation_time(value: Any) -> datetime | None:

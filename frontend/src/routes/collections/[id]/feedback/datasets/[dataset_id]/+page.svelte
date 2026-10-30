@@ -15,7 +15,7 @@
 		ShieldCheck,
 		TriangleAlert
 	} from '@lucide/svelte';
-	import { errorMessage, isHttpStatusError } from '../../../../../_shared/api';
+	import { errorMessage, isApiErrorCode } from '../../../../../_shared/api';
 	import { t } from '../../../../../_shared/i18n';
 	import {
 		confirmDatasetSample,
@@ -323,7 +323,7 @@
 			await reloadSelected(generation, $t('taskDatasets.labels.changesSavedConfirmThisVersionAgain'));
 		} catch (err) {
 			if (generation === loadGeneration) {
-				editorError = isHttpStatusError(err, 409)
+				editorError = isApiErrorCode(err, 200204)
 					? $t('taskDatasets.labels.aNewerSampleVersionExistsReloadBefore')
 					: errorMessage(err);
 			}
@@ -365,7 +365,7 @@
 			}
 		} catch (err) {
 			if (generation === loadGeneration) {
-				editorError = isHttpStatusError(err, 409)
+				editorError = isApiErrorCode(err, 200204)
 					? $t('taskDatasets.labels.aNewerSampleVersionExistsReopenIt')
 					: errorMessage(err);
 			}
@@ -396,7 +396,7 @@
 			await reloadSelected(generation, action === 'discard' ? $t('taskDatasets.labels.sampleDiscardedYouCanRestoreItFrom') : action === 'restore' ? $t('taskDatasets.labels.sampleRestoredReviewItAgainBeforeConfirming') : $t('taskDatasets.labels.buildRequestSubmitted'));
 		} catch (err) {
 			if (generation === loadGeneration) {
-				editorError = isHttpStatusError(err, 409)
+				editorError = isApiErrorCode(err, 200204)
 					? $t('taskDatasets.labels.theSampleStatusChangedRefreshBeforeContinuing')
 					: errorMessage(err);
 			}

@@ -1,26 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
-
-from controllers import feedback_case_routes as feedback_cases
 from application.feedback.feedback_case_service import FeedbackCaseSummary
+from controllers import feedback_case_routes as feedback_cases
+from exceptions import ResourceConflictException, ResourceNotFoundException
+from fastapi import HTTPException
 
 
 def _request(service, user_id: str = "user-1"):
-    return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(feedback_case_service=service)),
-        state=SimpleNamespace(current_user={"user_id": user_id}),
-    )
+    feedback_cases.feedback_case_service = service
+    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
 
 class _Service:
     async def list_for_user(self, **kwargs):
         if kwargs["user_id"] != "user-1":
-            raise FileNotFoundError("collection not found")
+            raise ResourceNotFoundException("collection not found")
         return (
             FeedbackCaseSummary(
                 case_id="case-1",
@@ -36,7 +35,7 @@ class _Service:
 
     async def read_for_user(self, case_id: str, user_id: str):
         if user_id != "user-1" or case_id != "case-1":
-            raise FileNotFoundError("feedback case not found")
+            raise ResourceNotFoundException("feedback case not found")
         return {
             "case_id": "case-1",
             "collection_id": "collection-1",
@@ -60,31 +59,71 @@ class _Service:
 
 def test_feedback_case_routes_return_summary_and_detail_without_client_ids():
     request = _request(_Service())
-    listing = asyncio.run(
-        feedback_cases.list_feedback_cases(
-            request, collection_id="collection-1", limit=50, offset=0
-        )
+    listing = feedback_cases.FeedbackCaseListResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    feedback_cases.list_feedback_cases(
+                        user_id=request.state.current_user["user_id"],
+                        collection_id="collection-1",
+                        limit=50,
+                        offset=0,
+                    )
+                )
+            ).body
+        )["data"]
     )
-    detail = asyncio.run(feedback_cases.get_feedback_case("case-1", request))
+    detail = feedback_cases.FeedbackCaseDetailResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    feedback_cases.get_feedback_case(
+                        case_id="case-1", user_id=request.state.current_user["user_id"]
+                    )
+                )
+            ).body
+        )["data"]
+    )
     assert listing.items[0].problem_type == "source_missing"
     assert listing.limit == 50
     assert detail.question == "Question"
 
 
 def test_feedback_case_detail_hides_unauthorized_case():
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(feedback_cases.get_feedback_case("case-1", _request(_Service(), "other-user")))
-    assert error.value.status_code == 404
+    with pytest.raises(ResourceNotFoundException) as error:
+        feedback_cases.FeedbackCaseDetailResponse.model_validate(
+            json.loads(
+                (
+                    asyncio.run(
+                        feedback_cases.get_feedback_case(
+                            case_id="case-1",
+                            user_id=_request(
+                                _Service(), "other-user"
+                            ).state.current_user["user_id"],
+                        )
+                    )
+                ).body
+            )["data"]
+        )
+    assert error.value.code == 200201
 
 
 def test_feedback_case_list_hides_unauthorized_collection():
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(
-            feedback_cases.list_feedback_cases(
-                _request(_Service(), "other-user"),
-                collection_id="collection-1",
-                limit=50,
-                offset=0,
-            )
+    with pytest.raises(ResourceNotFoundException) as error:
+        feedback_cases.FeedbackCaseListResponse.model_validate(
+            json.loads(
+                (
+                    asyncio.run(
+                        feedback_cases.list_feedback_cases(
+                            user_id=_request(
+                                _Service(), "other-user"
+                            ).state.current_user["user_id"],
+                            collection_id="collection-1",
+                            limit=50,
+                            offset=0,
+                        )
+                    )
+                ).body
+            )["data"]
         )
-    assert error.value.status_code == 404
+    assert error.value.code == 200201

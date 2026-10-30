@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    build_research_objective_id,
-    normalize_objective_terms,
-)
-
-
 import json
 import logging
 import re
@@ -39,6 +33,10 @@ from domain.core import (
     PaperStudyDispositionStatus,
     PreparedDocumentInput,
     ResearchObjective,
+)
+from domain.core.research_objective import (
+    build_research_objective_id,
+    normalize_objective_terms,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,175 +143,208 @@ class CandidateQuestionBatch:
     abstention_reason: str | None
 
 
-class ObjectiveCandidateService:
-    """Promote paper-study relationships into collection research objectives."""
+def propose_candidate_questions(
+    collection_id: str,
+    *,
+    paper_maps: tuple[PaperResearchMap, ...],
+    source_texts: Mapping[tuple[str, str], str],
+    response_client: StructuredResponseClient,
+    research_interest: str | None = None,
+    max_prompt_tokens: int = 32000,
+    max_completion_tokens: int = 8192,
+    request_timeout_s: float = 180,
+) -> CandidateQuestionBatch:
+    """Opt-in evaluation only; no default discovery caller or persistence.
 
-    def propose_candidate_questions(
-        self,
-        collection_id: str,
-        *,
-        paper_maps: tuple[PaperResearchMap, ...],
-        source_texts: Mapping[tuple[str, str], str],
-        response_client: StructuredResponseClient,
-        research_interest: str | None = None,
-        max_prompt_tokens: int = 32000,
-        max_completion_tokens: int = 8192,
-        request_timeout_s: float = 180,
-    ) -> CandidateQuestionBatch:
-        """Opt-in evaluation only; no default discovery caller or persistence.
-
-        The caller supplies authorized, prepared papers and original excerpts.
-        Retained reading selections are not a frozen analysis scope.
-        """
-        if not collection_id.strip():
-            raise ValueError("candidate question formation requires collection_id")
-        if min(max_prompt_tokens, max_completion_tokens, request_timeout_s) <= 0:
-            raise ValueError("candidate question request budget must be positive")
-        maps = {paper.document_id: paper for paper in paper_maps}
-        if len(maps) != len(paper_maps):
-            raise ValueError("candidate question papers must have unique document ids")
-        if len(maps) > 12:
-            raise ValueError("candidate question evaluation supports at most 12 papers")
-        for (document_id, source_ref), text in source_texts.items():
-            if document_id not in maps or not source_ref.strip() or not text.strip():
-                raise ValueError(
-                    "candidate question excerpt has invalid ownership or text"
-                )
-        if not maps:
-            return CandidateQuestionBatch((), "No prepared papers were supplied.")
-        papers = []
-        for document_id, paper_map in maps.items():
-            excerpts = [
-                {"source_ref": ref, "text": text}
-                for (owner, ref), text in source_texts.items()
-                if owner == document_id
-            ]
-            if not excerpts:
-                raise ValueError("candidate question paper requires original excerpts")
-            papers.append(
-                {
-                    "document_id": document_id,
-                    "paper_map": {
-                        'document_id': paper_map.document_id,
-                        'doc_role': paper_map.doc_role,
-                        'studies': [{
-                            'study_id': study.study_id,
-                            'document_id': study.document_id,
-                            'design_type': study.design_type,
-                            'claim_scope': study.claim_scope,
-                            'experiment_label': study.experiment_label,
-                            'material_scope': list(study.material_scope),
-                            'process_context': list(study.process_context),
-                            'relationships': [{'relationship_id': item.relationship_id, 'varied_factors': list(item.varied_factors), 'outcome': item.outcome, 'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs], 'confidence': item.confidence} for item in study.relationships],
-                            'confidence': study.confidence,
-                        } for study in paper_map.studies],
-                        'evidence_density': paper_map.evidence_density,
-                        'confidence': paper_map.confidence,
-                        'warnings': list(paper_map.warnings),
-                        'unresolved_signals': [{
-                            'signal_id': signal.signal_id,
-                            'signal_type': signal.signal_type,
-                            'label': signal.label,
-                            'variable_role': signal.variable_role,
-                            'design_type': signal.design_type,
-                            'claim_scope': signal.claim_scope,
-                            'experiment_label': signal.experiment_label,
-                            'material_scope': list(signal.material_scope),
-                            'process_context': list(signal.process_context),
-                            'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in signal.source_refs],
-                            'confidence': signal.confidence,
-                            'reason': signal.reason,
-                        } for signal in paper_map.unresolved_signals],
-                        'source_unit_coverage': [{
-                            'source_unit_id': item.source_unit_id,
-                            'window_id': item.window_id,
-                            'source_kind': item.source_kind,
-                            'source_ref': item.source_ref,
-                            'status': item.status.value,
-                            'reason': item.reason,
-                        } for item in paper_map.source_unit_coverage],
-                        'map_status': paper_map.map_status,
-                        'map_limitations': list(paper_map.map_limitations),
-                        'review_synthesis': {field_name: [{
-                            'content': item.content,
-                            'material_scope': list(item.material_scope),
-                            'variables': list(item.variables),
-                            'outcomes': list(item.outcomes),
-                            'conditions': list(item.conditions),
-                            'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs],
-                            'confidence': item.confidence,
-                        } for item in getattr(paper_map.review_synthesis, field_name)] for field_name in ('synthesis_claims', 'disputes', 'evidence_gaps', 'citation_leads')},
-                        'input_fingerprint': paper_map.input_fingerprint,
-                        'map_version': paper_map.map_version,
-                        'generated_at': paper_map.generated_at,
+    The caller supplies authorized, prepared papers and original excerpts.
+    Retained reading selections are not a frozen analysis scope.
+    """
+    if not collection_id.strip():
+        raise ValueError("candidate question formation requires collection_id")
+    if min(max_prompt_tokens, max_completion_tokens, request_timeout_s) <= 0:
+        raise ValueError("candidate question request budget must be positive")
+    maps = {paper.document_id: paper for paper in paper_maps}
+    if len(maps) != len(paper_maps):
+        raise ValueError("candidate question papers must have unique document ids")
+    if len(maps) > 12:
+        raise ValueError("candidate question evaluation supports at most 12 papers")
+    for (document_id, source_ref), text in source_texts.items():
+        if document_id not in maps or not source_ref.strip() or not text.strip():
+            raise ValueError("candidate question excerpt has invalid ownership or text")
+    if not maps:
+        return CandidateQuestionBatch((), "No prepared papers were supplied.")
+    papers = []
+    for document_id, paper_map in maps.items():
+        excerpts = [
+            {"source_ref": ref, "text": text}
+            for (owner, ref), text in source_texts.items()
+            if owner == document_id
+        ]
+        if not excerpts:
+            raise ValueError("candidate question paper requires original excerpts")
+        papers.append(
+            {
+                "document_id": document_id,
+                "paper_map": {
+                    "document_id": paper_map.document_id,
+                    "doc_role": paper_map.doc_role,
+                    "studies": [
+                        {
+                            "study_id": study.study_id,
+                            "document_id": study.document_id,
+                            "design_type": study.design_type,
+                            "claim_scope": study.claim_scope,
+                            "experiment_label": study.experiment_label,
+                            "material_scope": list(study.material_scope),
+                            "process_context": list(study.process_context),
+                            "relationships": [
+                                {
+                                    "relationship_id": item.relationship_id,
+                                    "varied_factors": list(item.varied_factors),
+                                    "outcome": item.outcome,
+                                    "source_refs": [
+                                        {
+                                            "source_kind": item.source_kind,
+                                            "source_ref": item.source_ref,
+                                        }
+                                        for item in item.source_refs
+                                    ],
+                                    "confidence": item.confidence,
+                                }
+                                for item in study.relationships
+                            ],
+                            "confidence": study.confidence,
+                        }
+                        for study in paper_map.studies
+                    ],
+                    "evidence_density": paper_map.evidence_density,
+                    "confidence": paper_map.confidence,
+                    "warnings": list(paper_map.warnings),
+                    "unresolved_signals": [
+                        {
+                            "signal_id": signal.signal_id,
+                            "signal_type": signal.signal_type,
+                            "label": signal.label,
+                            "variable_role": signal.variable_role,
+                            "design_type": signal.design_type,
+                            "claim_scope": signal.claim_scope,
+                            "experiment_label": signal.experiment_label,
+                            "material_scope": list(signal.material_scope),
+                            "process_context": list(signal.process_context),
+                            "source_refs": [
+                                {
+                                    "source_kind": item.source_kind,
+                                    "source_ref": item.source_ref,
+                                }
+                                for item in signal.source_refs
+                            ],
+                            "confidence": signal.confidence,
+                            "reason": signal.reason,
+                        }
+                        for signal in paper_map.unresolved_signals
+                    ],
+                    "source_unit_coverage": [
+                        {
+                            "source_unit_id": item.source_unit_id,
+                            "window_id": item.window_id,
+                            "source_kind": item.source_kind,
+                            "source_ref": item.source_ref,
+                            "status": item.status.value,
+                            "reason": item.reason,
+                        }
+                        for item in paper_map.source_unit_coverage
+                    ],
+                    "map_status": paper_map.map_status,
+                    "map_limitations": list(paper_map.map_limitations),
+                    "review_synthesis": {
+                        field_name: [
+                            {
+                                "content": item.content,
+                                "material_scope": list(item.material_scope),
+                                "variables": list(item.variables),
+                                "outcomes": list(item.outcomes),
+                                "conditions": list(item.conditions),
+                                "source_refs": [
+                                    {
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                    }
+                                    for item in item.source_refs
+                                ],
+                                "confidence": item.confidence,
+                            }
+                            for item in getattr(paper_map.review_synthesis, field_name)
+                        ]
+                        for field_name in (
+                            "synthesis_claims",
+                            "disputes",
+                            "evidence_gaps",
+                            "citation_leads",
+                        )
                     },
-                    "excerpts": excerpts,
-                }
-            )
-        user_prompt = json.dumps(
-            {"research_interest": research_interest, "papers": papers},
-            ensure_ascii=False,
+                    "input_fingerprint": paper_map.input_fingerprint,
+                    "map_version": paper_map.map_version,
+                    "generated_at": paper_map.generated_at,
+                },
+                "excerpts": excerpts,
+            }
         )
-        prompt_tokens = response_client.estimate_prompt_tokens(
-            system_prompt=QUESTION_FORMATION_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            response_model=CandidateQuestionsModelOutput,
+    user_prompt = json.dumps(
+        {"research_interest": research_interest, "papers": papers},
+        ensure_ascii=False,
+    )
+    prompt_tokens = response_client.estimate_prompt_tokens(
+        system_prompt=QUESTION_FORMATION_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        response_model=CandidateQuestionsModelOutput,
+    )
+    if prompt_tokens > max_prompt_tokens:
+        raise ValueError(
+            "candidate question input exceeds prompt budget; select a smaller reading set"
         )
-        if prompt_tokens > max_prompt_tokens:
-            raise ValueError(
-                "candidate question input exceeds prompt budget; select a smaller reading set"
-            )
 
-        parsed = response_client.complete(
-            system_prompt=QUESTION_FORMATION_SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            response_model=CandidateQuestionsModelOutput,
-            max_completion_tokens=max_completion_tokens,
-            force_json_text=True,
-            json_completion=partial(
-                response_client.complete_json,
-                max_attempts=1,
-                fail_on_output_saturation=True,
-                postprocess_response=lambda result: self._validate_question_selections(
-                    result,
-                    source_texts=source_texts,
-                ),
+    parsed = response_client.complete(
+        system_prompt=QUESTION_FORMATION_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        response_model=CandidateQuestionsModelOutput,
+        max_completion_tokens=max_completion_tokens,
+        force_json_text=True,
+        json_completion=partial(
+            response_client.complete_json,
+            max_attempts=1,
+            fail_on_output_saturation=True,
+            postprocess_response=lambda result: _validate_question_selections(
+                result,
+                source_texts=source_texts,
             ),
-            before_request=lambda: request_timeout_s,
-            task_type="objective_question_formation",
-            prompt_version=QUESTION_FORMATION_PROMPT_VERSION,
-        )
-        candidates = []
-        for rank, proposal in enumerate(parsed.proposals, start=1):
-            selections = tuple(
-                CandidatePaperSelection(
-                    paper_map=maps[paper.document_id],
-                    source_texts=tuple(
-                        (ref, source_texts[paper.document_id, ref])
-                        for ref in paper.source_refs
-                    ),
-                    role=paper.role,
-                    reason=paper.reason,
-                    limitation=paper.limitation,
-                )
-                for paper in proposal.papers
-            )
-            question = proposal.question.strip()
-            material_scope = normalize_objective_terms(proposal.material_scope)
-            variables = normalize_objective_terms(proposal.variables)
-            outcomes = (proposal.outcome.strip(),)
-            constraints = normalize_objective_terms(proposal.constraints)
-            objective = ResearchObjective(
-                collection_id=collection_id,
-                objective_id=build_research_objective_id(
-                    question=question,
-                    material_scope=material_scope,
-                    variables=variables,
-                    outcomes=outcomes,
-                    mechanisms=(),
-                    constraints=constraints,
-                    requested_comparator=None,
+        ),
+        before_request=lambda: request_timeout_s,
+        task_type="objective_question_formation",
+        prompt_version=QUESTION_FORMATION_PROMPT_VERSION,
+    )
+    candidates = []
+    for rank, proposal in enumerate(parsed.proposals, start=1):
+        selections = tuple(
+            CandidatePaperSelection(
+                paper_map=maps[paper.document_id],
+                source_texts=tuple(
+                    (ref, source_texts[paper.document_id, ref])
+                    for ref in paper.source_refs
                 ),
+                role=paper.role,
+                reason=paper.reason,
+                limitation=paper.limitation,
+            )
+            for paper in proposal.papers
+        )
+        question = proposal.question.strip()
+        material_scope = normalize_objective_terms(proposal.material_scope)
+        variables = normalize_objective_terms(proposal.variables)
+        outcomes = (proposal.outcome.strip(),)
+        constraints = normalize_objective_terms(proposal.constraints)
+        objective = ResearchObjective(
+            collection_id=collection_id,
+            objective_id=build_research_objective_id(
                 question=question,
                 material_scope=material_scope,
                 variables=variables,
@@ -321,647 +352,617 @@ class ObjectiveCandidateService:
                 mechanisms=(),
                 constraints=constraints,
                 requested_comparator=None,
-                seed_document_ids=tuple(
-                    paper.paper_map.document_id
-                    for paper in selections
-                    if paper.role == "inspect"
-                ),
-                excluded_document_ids=(),
-                confidence=0,
-                reason=proposal.reason,
-                rank=rank,
-            )
-            candidates.append(CandidateQuestion(objective, selections))
-        return CandidateQuestionBatch(tuple(candidates), parsed.abstention_reason)
-
-    @staticmethod
-    def _validate_question_selections(
-        result: CandidateQuestionsModelOutput,
-        *,
-        source_texts: Mapping[tuple[str, str], str],
-    ) -> CandidateQuestionsModelOutput:
-        if not result.proposals:
-            if not (result.abstention_reason or "").strip():
-                raise ValueError(
-                    "empty question proposal requires an abstention reason"
-                )
-        elif result.abstention_reason is not None:
-            raise ValueError("question proposals cannot also claim abstention")
-        for proposal in result.proposals:
-            seen = set()
-            if not any(p.role == "inspect" for p in proposal.papers):
-                raise ValueError(
-                    "a candidate question needs at least one inspection paper"
-                )
-            for paper in proposal.papers:
-                if paper.document_id in seen:
-                    raise ValueError("duplicate paper selection in candidate question")
-                seen.add(paper.document_id)
-                if len(set(paper.source_refs)) != len(paper.source_refs):
-                    raise ValueError("duplicate Source reference in paper selection")
-                if any(
-                    (paper.document_id, ref) not in source_texts
-                    for ref in paper.source_refs
-                ):
-                    raise ValueError(
-                        "candidate question references an unavailable paper Source"
-                    )
-        return result
-
-    def discover_candidate_facts(
-        self,
-        collection_id: str,
-        *,
-        paper_maps: tuple[PaperResearchMap, ...],
-        document_inputs: tuple[PreparedDocumentInput, ...],
-        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
-        progress_callback: ProgressCallback | None = None,
-    ) -> ObjectiveFactSet:
-        source_relationship_inventory = self._relationship_inventory(paper_maps)
-        relationship_inventory = self._canonicalize_relationship_inventory_axes(
-            collection_id=collection_id,
-            axis_equivalence_classifier=axis_equivalence_classifier,
-            relationship_inventory=source_relationship_inventory,
+            ),
+            question=question,
+            material_scope=material_scope,
+            variables=variables,
+            outcomes=outcomes,
+            mechanisms=(),
+            constraints=constraints,
+            requested_comparator=None,
+            seed_document_ids=tuple(
+                paper.paper_map.document_id
+                for paper in selections
+                if paper.role == "inspect"
+            ),
+            excluded_document_ids=(),
+            confidence=0,
+            reason=proposal.reason,
+            rank=rank,
         )
-        terminal_rejections = {
-            relationship_id: rejection_reason
-            for relationship_id, (_document_id, study, relationship) in (
-                relationship_inventory.items()
+        candidates.append(CandidateQuestion(objective, selections))
+    return CandidateQuestionBatch(tuple(candidates), parsed.abstention_reason)
+
+
+def _validate_question_selections(
+    result: CandidateQuestionsModelOutput,
+    *,
+    source_texts: Mapping[tuple[str, str], str],
+) -> CandidateQuestionsModelOutput:
+    if not result.proposals:
+        if not (result.abstention_reason or "").strip():
+            raise ValueError("empty question proposal requires an abstention reason")
+    elif result.abstention_reason is not None:
+        raise ValueError("question proposals cannot also claim abstention")
+    for proposal in result.proposals:
+        seen = set()
+        if not any(p.role == "inspect" for p in proposal.papers):
+            raise ValueError("a candidate question needs at least one inspection paper")
+        for paper in proposal.papers:
+            if paper.document_id in seen:
+                raise ValueError("duplicate paper selection in candidate question")
+            seen.add(paper.document_id)
+            if len(set(paper.source_refs)) != len(paper.source_refs):
+                raise ValueError("duplicate Source reference in paper selection")
+            if any(
+                (paper.document_id, ref) not in source_texts
+                for ref in paper.source_refs
+            ):
+                raise ValueError(
+                    "candidate question references an unavailable paper Source"
+                )
+    return result
+
+
+def discover_candidate_facts(
+    collection_id: str,
+    *,
+    paper_maps: tuple[PaperResearchMap, ...],
+    document_inputs: tuple[PreparedDocumentInput, ...],
+    axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
+    progress_callback: ProgressCallback | None = None,
+) -> ObjectiveFactSet:
+    source_relationship_inventory = _relationship_inventory(paper_maps)
+    relationship_inventory = _canonicalize_relationship_inventory_axes(
+        collection_id=collection_id,
+        axis_equivalence_classifier=axis_equivalence_classifier,
+        relationship_inventory=source_relationship_inventory,
+    )
+    terminal_rejections = {
+        relationship_id: rejection_reason
+        for relationship_id, (_document_id, study, relationship) in (
+            relationship_inventory.items()
+        )
+        if (
+            rejection_reason := _objective_seed_rejection_reason(
+                study,
+                relationship,
             )
-            if (
-                rejection_reason := self._objective_seed_rejection_reason(
+        )
+        is not None
+    }
+    relationship_groups = _build_relationship_groups(
+        paper_maps,
+        relationship_inventory=relationship_inventory,
+    )
+    _notify_progress(
+        progress_callback,
+        phase="objective_discovery_started",
+        current=0,
+        total=len(relationship_groups),
+        unit="groups",
+        message="Promoting paper research relationships with shared scope.",
+    )
+
+    accepted_objectives: list[ResearchObjective] = []
+    for group_number, group in enumerate(relationship_groups, start=1):
+        relationship_ids = tuple(
+            str(record["relationship"]["relationship_id"]) for record in group
+        )
+        objective, rejection_reason = _objective_from_relationship_group(
+            collection_id,
+            relationship_ids=relationship_ids,
+            relationship_inventory=relationship_inventory,
+        )
+        if objective is not None:
+            accepted_objectives.append(objective)
+            focused_relationship_ids = set(objective.source_relationship_ids)
+            for relationship_id in relationship_ids:
+                if relationship_id not in focused_relationship_ids:
+                    terminal_rejections[relationship_id] = (
+                        "Relationship supports a different local variable topic "
+                        "than the selected cross-paper objective focus."
+                    )
+        else:
+            for relationship_id in relationship_ids:
+                terminal_rejections[relationship_id] = rejection_reason or (
+                    "Study relationship could not form a schema-valid objective."
+                )
+
+        _notify_progress(
+            progress_callback,
+            phase="objective_discovery_batch_finished",
+            current=group_number,
+            total=len(relationship_groups),
+            unit="groups",
+            message="Evaluated one shared-scope study-relationship group.",
+        )
+
+    ranked_objectives = _rank_objectives(
+        tuple(accepted_objectives),
+        relationship_inventory=relationship_inventory,
+    )
+    research_objectives = _select_review_objectives(
+        ranked_objectives,
+        relationship_inventory=relationship_inventory,
+        document_count=len(document_inputs),
+    )
+    selected_relationship_ids = {
+        relationship_id
+        for objective in research_objectives
+        for relationship_id in objective.source_relationship_ids
+    }
+    for objective in ranked_objectives:
+        if objective in research_objectives:
+            continue
+        for relationship_id in objective.source_relationship_ids:
+            if relationship_id not in selected_relationship_ids:
+                terminal_rejections.setdefault(
+                    relationship_id,
+                    "Relationship remains in the Paper Map but was not surfaced "
+                    "in the bounded candidate review set.",
+                )
+    research_objectives = tuple(
+        replace(objective, rank=rank)
+        for rank, objective in enumerate(research_objectives, start=1)
+    )
+    dispositions = _study_dispositions(
+        research_objectives,
+        relationship_inventory=relationship_inventory,
+        terminal_rejections=terminal_rejections,
+    )
+    disposition_counts = {
+        status: sum(disposition.status is status for disposition in dispositions)
+        for status in PaperStudyDispositionStatus
+    }
+    coverage_counts = {
+        status: sum(
+            coverage.status is status
+            for paper_map in paper_maps
+            for coverage in paper_map.source_unit_coverage
+        )
+        for status in PaperSourceUnitCoverageStatus
+    }
+    relationship_accounting_complete = {
+        disposition.relationship_id for disposition in dispositions
+    } == set(relationship_inventory)
+    facts = ObjectiveFactSet(
+        research_objectives_ready=True,
+        document_inputs=document_inputs,
+        research_objectives=research_objectives,
+        study_dispositions=dispositions,
+    )
+    logger.info(
+        "Research objective discovery finished collection_id=%s "
+        "paper_map_count=%s relationship_count=%s group_count=%s "
+        "candidate_pool_count=%s objective_count=%s "
+        "promoted_relationship_count=%s "
+        "rejected_relationship_count=%s pending_relationship_count=%s "
+        "relationship_accounting_complete=%s unresolved_signal_count=%s "
+        "relationship_emitted_count=%s unresolved_signal_emitted_count=%s "
+        "no_study_signal_count=%s extraction_failed_count=%s "
+        "coverage_complete=%s",
+        collection_id,
+        len(paper_maps),
+        len(relationship_inventory),
+        len(relationship_groups),
+        len(research_objectives),
+        len(ranked_objectives),
+        disposition_counts[PaperStudyDispositionStatus.PROMOTED],
+        disposition_counts[PaperStudyDispositionStatus.REJECTED],
+        disposition_counts[PaperStudyDispositionStatus.PENDING],
+        relationship_accounting_complete,
+        sum(len(paper_map.unresolved_signals) for paper_map in paper_maps),
+        coverage_counts[PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED],
+        coverage_counts[PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED],
+        coverage_counts[PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL],
+        coverage_counts[PaperSourceUnitCoverageStatus.EXTRACTION_FAILED],
+        (coverage_counts[PaperSourceUnitCoverageStatus.EXTRACTION_FAILED] == 0),
+    )
+    return facts
+
+
+def _relationship_inventory(
+    paper_maps: tuple[PaperResearchMap, ...],
+) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
+    inventory: dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]] = {}
+    for paper_map in paper_maps:
+        for study in paper_map.studies:
+            if study.document_id != paper_map.document_id:
+                raise ValueError("paper research scope belongs to another map document")
+            for relationship in study.relationships:
+                if relationship.relationship_id in inventory:
+                    raise ValueError(
+                        "paper research relationship ids must be collection-unique"
+                    )
+                inventory[relationship.relationship_id] = (
+                    paper_map.document_id,
                     study,
                     relationship,
                 )
-            )
-            is not None
-        }
-        relationship_groups = self._build_relationship_groups(
-            paper_maps,
-            relationship_inventory=relationship_inventory,
-        )
-        self._notify_progress(
-            progress_callback,
-            phase="objective_discovery_started",
-            current=0,
-            total=len(relationship_groups),
-            unit="groups",
-            message="Promoting paper research relationships with shared scope.",
-        )
+    return inventory
 
-        accepted_objectives: list[ResearchObjective] = []
-        for group_number, group in enumerate(relationship_groups, start=1):
-            relationship_ids = tuple(
-                str(record["relationship"]["relationship_id"]) for record in group
-            )
-            objective, rejection_reason = self._objective_from_relationship_group(
-                collection_id,
-                relationship_ids=relationship_ids,
-                relationship_inventory=relationship_inventory,
-            )
-            if objective is not None:
-                accepted_objectives.append(objective)
-                focused_relationship_ids = set(objective.source_relationship_ids)
-                for relationship_id in relationship_ids:
-                    if relationship_id not in focused_relationship_ids:
-                        terminal_rejections[relationship_id] = (
-                            "Relationship supports a different local variable topic "
-                            "than the selected cross-paper objective focus."
-                        )
-            else:
-                for relationship_id in relationship_ids:
-                    terminal_rejections[relationship_id] = rejection_reason or (
-                        "Study relationship could not form a schema-valid objective."
-                    )
 
-            self._notify_progress(
-                progress_callback,
-                phase="objective_discovery_batch_finished",
-                current=group_number,
-                total=len(relationship_groups),
-                unit="groups",
-                message="Evaluated one shared-scope study-relationship group.",
-            )
-
-        ranked_objectives = self._rank_objectives(
-            tuple(accepted_objectives),
-            relationship_inventory=relationship_inventory,
-        )
-        research_objectives = self._select_review_objectives(
-            ranked_objectives,
-            relationship_inventory=relationship_inventory,
-            document_count=len(document_inputs),
-        )
-        selected_relationship_ids = {
-            relationship_id
-            for objective in research_objectives
-            for relationship_id in objective.source_relationship_ids
-        }
-        for objective in ranked_objectives:
-            if objective in research_objectives:
-                continue
-            for relationship_id in objective.source_relationship_ids:
-                if relationship_id not in selected_relationship_ids:
-                    terminal_rejections.setdefault(
-                        relationship_id,
-                        "Relationship remains in the Paper Map but was not surfaced "
-                        "in the bounded candidate review set.",
-                    )
-        research_objectives = tuple(
-            replace(objective, rank=rank)
-            for rank, objective in enumerate(research_objectives, start=1)
-        )
-        dispositions = self._study_dispositions(
-            research_objectives,
-            relationship_inventory=relationship_inventory,
-            terminal_rejections=terminal_rejections,
-        )
-        disposition_counts = {
-            status: sum(disposition.status is status for disposition in dispositions)
-            for status in PaperStudyDispositionStatus
-        }
-        coverage_counts = {
-            status: sum(
-                coverage.status is status
-                for paper_map in paper_maps
-                for coverage in paper_map.source_unit_coverage
-            )
-            for status in PaperSourceUnitCoverageStatus
-        }
-        relationship_accounting_complete = {
-            disposition.relationship_id for disposition in dispositions
-        } == set(relationship_inventory)
-        facts = ObjectiveFactSet(
-            research_objectives_ready=True,
-            document_inputs=document_inputs,
-            research_objectives=research_objectives,
-            study_dispositions=dispositions,
-        )
-        logger.info(
-            "Research objective discovery finished collection_id=%s "
-            "paper_map_count=%s relationship_count=%s group_count=%s "
-            "candidate_pool_count=%s objective_count=%s "
-            "promoted_relationship_count=%s "
-            "rejected_relationship_count=%s pending_relationship_count=%s "
-            "relationship_accounting_complete=%s unresolved_signal_count=%s "
-            "relationship_emitted_count=%s unresolved_signal_emitted_count=%s "
-            "no_study_signal_count=%s extraction_failed_count=%s "
-            "coverage_complete=%s",
-            collection_id,
-            len(paper_maps),
-            len(relationship_inventory),
-            len(relationship_groups),
-            len(research_objectives),
-            len(ranked_objectives),
-            disposition_counts[PaperStudyDispositionStatus.PROMOTED],
-            disposition_counts[PaperStudyDispositionStatus.REJECTED],
-            disposition_counts[PaperStudyDispositionStatus.PENDING],
-            relationship_accounting_complete,
-            sum(len(paper_map.unresolved_signals) for paper_map in paper_maps),
-            coverage_counts[
-                PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED
-            ],
-            coverage_counts[
-                PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED
-            ],
-            coverage_counts[PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL],
-            coverage_counts[PaperSourceUnitCoverageStatus.EXTRACTION_FAILED],
+def _build_relationship_groups(
+    paper_maps: tuple[PaperResearchMap, ...],
+    *,
+    relationship_inventory: RelationshipInventory | None = None,
+) -> list[list[dict[str, Any]]]:
+    inventory = relationship_inventory or _relationship_inventory(paper_maps)
+    maps_by_document_id = {paper_map.document_id: paper_map for paper_map in paper_maps}
+    eligible_ids = sorted(
+        relationship_id
+        for relationship_id, (_, study, relationship) in inventory.items()
+        if _objective_seed_rejection_reason(study, relationship) is None
+    )
+    base_groups: list[list[str]] = []
+    for relationship_id in eligible_ids:
+        _, study, relationship = inventory[relationship_id]
+        compatible_group = next(
             (
-                coverage_counts[PaperSourceUnitCoverageStatus.EXTRACTION_FAILED]
-                == 0
-            ),
-        )
-        return facts
-
-    @staticmethod
-    def _relationship_inventory(
-        paper_maps: tuple[PaperResearchMap, ...],
-    ) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
-        inventory: dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]] = {}
-        for paper_map in paper_maps:
-            for study in paper_map.studies:
-                if study.document_id != paper_map.document_id:
-                    raise ValueError(
-                        "paper research scope belongs to another map document"
-                    )
-                for relationship in study.relationships:
-                    if relationship.relationship_id in inventory:
-                        raise ValueError(
-                            "paper research relationship ids must be collection-unique"
-                        )
-                    inventory[relationship.relationship_id] = (
-                        paper_map.document_id,
+                group
+                for group in base_groups
+                if all(
+                    _relationship_compatibility(
                         study,
                         relationship,
+                        inventory[other_id][1],
+                        inventory[other_id][2],
                     )
-        return inventory
-
-    def _build_relationship_groups(
-        self,
-        paper_maps: tuple[PaperResearchMap, ...],
-        *,
-        relationship_inventory: RelationshipInventory | None = None,
-    ) -> list[list[dict[str, Any]]]:
-        inventory = relationship_inventory or self._relationship_inventory(paper_maps)
-        maps_by_document_id = {
-            paper_map.document_id: paper_map for paper_map in paper_maps
-        }
-        eligible_ids = sorted(
-            relationship_id
-            for relationship_id, (_, study, relationship) in inventory.items()
-            if self._objective_seed_rejection_reason(study, relationship) is None
-        )
-        base_groups: list[list[str]] = []
-        for relationship_id in eligible_ids:
-            _, study, relationship = inventory[relationship_id]
-            compatible_group = next(
-                (
-                    group
-                    for group in base_groups
-                    if all(
-                        self._relationship_compatibility(
-                            study,
-                            relationship,
-                            inventory[other_id][1],
-                            inventory[other_id][2],
-                        )
-                        is _Compatibility.COMPATIBLE
-                        for other_id in group
-                    )
-                ),
-                None,
-            )
-            if compatible_group is None:
-                base_groups.append([relationship_id])
-            else:
-                compatible_group.append(relationship_id)
-
-        base_groups = self._attach_unambiguous_missing_material_groups(
-            base_groups,
-            relationship_inventory=inventory,
-        )
-
-        return [
-            [
-                self._relationship_record(
-                    maps_by_document_id[inventory[relationship_id][0]],
-                    inventory[relationship_id][1],
-                    inventory[relationship_id][2],
+                    is _Compatibility.COMPATIBLE
+                    for other_id in group
                 )
-                for relationship_id in group
-            ]
-            for group in sorted(base_groups, key=lambda group: tuple(group))
+            ),
+            None,
+        )
+        if compatible_group is None:
+            base_groups.append([relationship_id])
+        else:
+            compatible_group.append(relationship_id)
+
+    base_groups = _attach_unambiguous_missing_material_groups(
+        base_groups,
+        relationship_inventory=inventory,
+    )
+
+    return [
+        [
+            _relationship_record(
+                maps_by_document_id[inventory[relationship_id][0]],
+                inventory[relationship_id][1],
+                inventory[relationship_id][2],
+            )
+            for relationship_id in group
         ]
+        for group in sorted(base_groups, key=lambda group: tuple(group))
+    ]
 
-    @classmethod
-    def _attach_unambiguous_missing_material_groups(
-        cls,
-        groups: list[list[str]],
-        *,
-        relationship_inventory: RelationshipInventory,
-    ) -> list[list[str]]:
-        def has_known_material(group: Iterable[str]) -> bool:
-            return any(
-                any(
-                    property_matching.material_identity_key(value) is not None
-                    for value in relationship_inventory[
-                        relationship_id
-                    ][1].material_scope
-                )
-                for relationship_id in group
-            )
 
-        anchored_groups = [group for group in groups if has_known_material(group)]
-        unanchored_groups = [group for group in groups if not has_known_material(group)]
-        retained_unanchored: list[list[str]] = []
-        for group in unanchored_groups:
-            candidates = [
-                anchor
-                for anchor in anchored_groups
-                if all(
-                    cls._relationship_compatibility(
-                        relationship_inventory[relationship_id][1],
-                        relationship_inventory[relationship_id][2],
-                        relationship_inventory[anchor_id][1],
-                        relationship_inventory[anchor_id][2],
-                    )
-                    is _Compatibility.POSSIBLE
-                    for relationship_id in group
-                    for anchor_id in anchor
-                )
-            ]
-            if len(candidates) != 1:
-                retained_unanchored.append(group)
-                continue
-            candidates[0].extend(group)
-            candidates[0].sort()
-        return [*anchored_groups, *retained_unanchored]
-
-    @staticmethod
-    def _relationship_record(
-        paper_map: PaperResearchMap,
-        study: PaperResearchScope,
-        relationship: PaperResearchRelationship,
-    ) -> dict[str, Any]:
-        study_record = {
-            'study_id': study.study_id,
-            'document_id': study.document_id,
-            'design_type': study.design_type,
-            'claim_scope': study.claim_scope,
-            'experiment_label': study.experiment_label,
-            'material_scope': list(study.material_scope),
-            'process_context': list(study.process_context),
-            'confidence': study.confidence,
-        }
-        return {
-            "document_id": paper_map.document_id,
-            "doc_role": paper_map.doc_role,
-            "study": study_record,
-            "relationship": {
-                'relationship_id': relationship.relationship_id,
-                'varied_factors': list(relationship.varied_factors),
-                'outcome': relationship.outcome,
-                'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in relationship.source_refs],
-                'confidence': relationship.confidence,
-            },
-            "evidence_density": paper_map.evidence_density,
-            "paper_confidence": paper_map.confidence,
-            "warnings": list(paper_map.warnings),
-        }
-
-    @classmethod
-    def _relationship_compatibility(
-        cls,
-        left_study: PaperResearchScope,
-        left: PaperResearchRelationship,
-        right_study: PaperResearchScope,
-        right: PaperResearchRelationship,
-    ) -> _Compatibility:
-        # A shared intervention theme is useful for navigation, but it does not
-        # identify one controlled variable.  Laser power, scan speed, and VED
-        # may all belong to an exposure theme while remaining different
-        # interventions.  Only the complete source-owned factor set can form one
-        # objective group; otherwise a researcher-facing objective would erase
-        # confounding and invent a broad variable that no paper measured.
-        factors_share_scope = cls._axis_collections_are_equivalent(
-            left.varied_factors,
-            right.varied_factors,
-        )
-        if not factors_share_scope or not cls._axis_values_are_equivalent(
-            left.outcome,
-            right.outcome,
-        ):
-            return _Compatibility.INCOMPATIBLE
-        return cls._context_collection_compatibility(
-            left_study.material_scope,
-            right_study.material_scope,
-        )
-
-    @classmethod
-    def _context_collection_compatibility(
-        cls,
-        left: Iterable[str],
-        right: Iterable[str],
-    ) -> _Compatibility:
-        left_values = tuple(
-            value
-            for value in left
-            if property_matching.material_identity_key(value) is not None
-        )
-        right_values = tuple(
-            value
-            for value in right
-            if property_matching.material_identity_key(value) is not None
-        )
-        if not left_values and not right_values:
-            return _Compatibility.COMPATIBLE
-        if not left_values or not right_values:
-            return _Compatibility.POSSIBLE
-
-        qualities = tuple(
-            tuple(
-                property_matching.material_match_quality(left_value, right_value)
-                for right_value in right_values
-            )
-            for left_value in left_values
-        )
-
-        # Multiple labels can describe separate material arms in one paper.
-        # Exclude a pair of scopes only when every possible pairing is an
-        # explicit identity conflict; partial overlap and unknown labels still
-        # require researcher inspection.
-        if all(
-            quality is MaterialMatchQuality.CONFLICT
-            for row in qualities
-            for quality in row
-        ):
-            return _Compatibility.INCOMPATIBLE
-
-        exact_left = all(
-            any(quality is MaterialMatchQuality.EXACT for quality in row)
-            for row in qualities
-        )
-        exact_right = all(
+def _attach_unambiguous_missing_material_groups(
+    groups: list[list[str]],
+    *,
+    relationship_inventory: RelationshipInventory,
+) -> list[list[str]]:
+    def has_known_material(group: Iterable[str]) -> bool:
+        return any(
             any(
-                qualities[row_index][column_index]
-                is MaterialMatchQuality.EXACT
-                for row_index in range(len(left_values))
+                property_matching.material_identity_key(value) is not None
+                for value in relationship_inventory[relationship_id][1].material_scope
             )
-            for column_index in range(len(right_values))
+            for relationship_id in group
         )
-        if exact_left and exact_right:
-            return _Compatibility.COMPATIBLE
+
+    anchored_groups = [group for group in groups if has_known_material(group)]
+    unanchored_groups = [group for group in groups if not has_known_material(group)]
+    retained_unanchored: list[list[str]] = []
+    for group in unanchored_groups:
+        candidates = [
+            anchor
+            for anchor in anchored_groups
+            if all(
+                _relationship_compatibility(
+                    relationship_inventory[relationship_id][1],
+                    relationship_inventory[relationship_id][2],
+                    relationship_inventory[anchor_id][1],
+                    relationship_inventory[anchor_id][2],
+                )
+                is _Compatibility.POSSIBLE
+                for relationship_id in group
+                for anchor_id in anchor
+            )
+        ]
+        if len(candidates) != 1:
+            retained_unanchored.append(group)
+            continue
+        candidates[0].extend(group)
+        candidates[0].sort()
+    return [*anchored_groups, *retained_unanchored]
+
+
+def _relationship_record(
+    paper_map: PaperResearchMap,
+    study: PaperResearchScope,
+    relationship: PaperResearchRelationship,
+) -> dict[str, Any]:
+    study_record = {
+        "study_id": study.study_id,
+        "document_id": study.document_id,
+        "design_type": study.design_type,
+        "claim_scope": study.claim_scope,
+        "experiment_label": study.experiment_label,
+        "material_scope": list(study.material_scope),
+        "process_context": list(study.process_context),
+        "confidence": study.confidence,
+    }
+    return {
+        "document_id": paper_map.document_id,
+        "doc_role": paper_map.doc_role,
+        "study": study_record,
+        "relationship": {
+            "relationship_id": relationship.relationship_id,
+            "varied_factors": list(relationship.varied_factors),
+            "outcome": relationship.outcome,
+            "source_refs": [
+                {"source_kind": item.source_kind, "source_ref": item.source_ref}
+                for item in relationship.source_refs
+            ],
+            "confidence": relationship.confidence,
+        },
+        "evidence_density": paper_map.evidence_density,
+        "paper_confidence": paper_map.confidence,
+        "warnings": list(paper_map.warnings),
+    }
+
+
+def _relationship_compatibility(
+    left_study: PaperResearchScope,
+    left: PaperResearchRelationship,
+    right_study: PaperResearchScope,
+    right: PaperResearchRelationship,
+) -> _Compatibility:
+    # A shared intervention theme is useful for navigation, but it does not
+    # identify one controlled variable.  Laser power, scan speed, and VED
+    # may all belong to an exposure theme while remaining different
+    # interventions.  Only the complete source-owned factor set can form one
+    # objective group; otherwise a researcher-facing objective would erase
+    # confounding and invent a broad variable that no paper measured.
+    factors_share_scope = _axis_collections_are_equivalent(
+        left.varied_factors,
+        right.varied_factors,
+    )
+    if not factors_share_scope or not _axis_values_are_equivalent(
+        left.outcome,
+        right.outcome,
+    ):
+        return _Compatibility.INCOMPATIBLE
+    return _context_collection_compatibility(
+        left_study.material_scope,
+        right_study.material_scope,
+    )
+
+
+def _context_collection_compatibility(
+    left: Iterable[str],
+    right: Iterable[str],
+) -> _Compatibility:
+    left_values = tuple(
+        value
+        for value in left
+        if property_matching.material_identity_key(value) is not None
+    )
+    right_values = tuple(
+        value
+        for value in right
+        if property_matching.material_identity_key(value) is not None
+    )
+    if not left_values and not right_values:
+        return _Compatibility.COMPATIBLE
+    if not left_values or not right_values:
         return _Compatibility.POSSIBLE
 
-    @classmethod
-    def _known_material_keys(cls, values: Iterable[str]) -> frozenset[str]:
-        return frozenset(
-            key
-            for value in values
-            if (key := cls._known_material_scalar(value)) is not None
+    qualities = tuple(
+        tuple(
+            property_matching.material_match_quality(left_value, right_value)
+            for right_value in right_values
         )
+        for left_value in left_values
+    )
 
-    @classmethod
-    def _known_material_scalar(cls, value: Any) -> str | None:
-        return property_matching.material_identity_key(
-            value,
-            include_broad=False,
+    # Multiple labels can describe separate material arms in one paper.
+    # Exclude a pair of scopes only when every possible pairing is an
+    # explicit identity conflict; partial overlap and unknown labels still
+    # require researcher inspection.
+    if all(
+        quality is MaterialMatchQuality.CONFLICT for row in qualities for quality in row
+    ):
+        return _Compatibility.INCOMPATIBLE
+
+    exact_left = all(
+        any(quality is MaterialMatchQuality.EXACT for quality in row)
+        for row in qualities
+    )
+    exact_right = all(
+        any(
+            qualities[row_index][column_index] is MaterialMatchQuality.EXACT
+            for row_index in range(len(left_values))
         )
+        for column_index in range(len(right_values))
+    )
+    if exact_left and exact_right:
+        return _Compatibility.COMPATIBLE
+    return _Compatibility.POSSIBLE
 
-    @classmethod
-    def _known_context_scalar(cls, value: Any) -> str | None:
-        key = cls._axis_identity(value)
-        if not key or key in _MISSING_CONTEXT_VALUES:
-            return None
-        return key
 
-    @classmethod
-    def _axis_identity(cls, value: Any) -> str:
-        literal_key = cls._axis_record_key(value)
-        if not literal_key:
-            return ""
-        if any(character in literal_key for character in "()[]"):
-            return literal_key
-        return cls._verified_axis_synonym_canonical(literal_key)
+def _known_material_keys(values: Iterable[str]) -> frozenset[str]:
+    return frozenset(
+        key for value in values if (key := _known_material_scalar(value)) is not None
+    )
 
-    @staticmethod
-    def _axis_record_key(value: Any) -> str:
-        return " ".join(str(value or "").strip().casefold().split())
 
-    @staticmethod
-    def _verified_axis_synonym_canonical(value: str) -> str:
-        return _VERIFIED_AXIS_SYNONYM_CANONICAL.get(value, value)
+def _known_material_scalar(value: Any) -> str | None:
+    return property_matching.material_identity_key(
+        value,
+        include_broad=False,
+    )
 
-    @classmethod
-    def _axis_values_are_equivalent(cls, left: Any, right: Any) -> bool:
-        left_identity = cls._axis_identity(left)
-        if left_identity and left_identity == cls._axis_identity(right):
-            return True
-        left_property = property_matching.normalize_property_label(left)
-        return bool(
-            left_property
-            and left_property == property_matching.normalize_property_label(right)
-        )
 
-    @classmethod
-    def _axis_collections_are_equivalent(
-        cls,
-        left: Iterable[str],
-        right: Iterable[str],
-    ) -> bool:
-        left_values = tuple(left)
-        remaining_right = list(right)
-        if len(left_values) != len(remaining_right):
-            return False
-        for left_value in left_values:
-            matching_position = next(
-                (
-                    position
-                    for position, right_value in enumerate(remaining_right)
-                    if cls._axis_values_are_equivalent(left_value, right_value)
-                ),
-                None,
-            )
-            if matching_position is None:
-                return False
-            remaining_right.pop(matching_position)
+def _known_context_scalar(value: Any) -> str | None:
+    key = _axis_identity(value)
+    if not key or key in _MISSING_CONTEXT_VALUES:
+        return None
+    return key
+
+
+def _axis_identity(value: Any) -> str:
+    literal_key = _axis_record_key(value)
+    if not literal_key:
+        return ""
+    if any(character in literal_key for character in "()[]"):
+        return literal_key
+    return _verified_axis_synonym_canonical(literal_key)
+
+
+def _axis_record_key(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _verified_axis_synonym_canonical(value: str) -> str:
+    return _VERIFIED_AXIS_SYNONYM_CANONICAL.get(value, value)
+
+
+def _axis_values_are_equivalent(left: Any, right: Any) -> bool:
+    left_identity = _axis_identity(left)
+    if left_identity and left_identity == _axis_identity(right):
         return True
+    left_property = property_matching.normalize_property_label(left)
+    return bool(
+        left_property
+        and left_property == property_matching.normalize_property_label(right)
+    )
 
-    def _objective_from_relationship_group(
-        self,
-        collection_id: str,
-        *,
-        relationship_ids: tuple[str, ...],
-        relationship_inventory: RelationshipInventory,
-    ) -> tuple[ResearchObjective | None, str | None]:
-        relationship_ids, variables = self._relationship_objective_scope(
+
+def _axis_collections_are_equivalent(
+    left: Iterable[str],
+    right: Iterable[str],
+) -> bool:
+    left_values = tuple(left)
+    remaining_right = list(right)
+    if len(left_values) != len(remaining_right):
+        return False
+    for left_value in left_values:
+        matching_position = next(
+            (
+                position
+                for position, right_value in enumerate(remaining_right)
+                if _axis_values_are_equivalent(left_value, right_value)
+            ),
+            None,
+        )
+        if matching_position is None:
+            return False
+        remaining_right.pop(matching_position)
+    return True
+
+
+def _objective_from_relationship_group(
+    collection_id: str,
+    *,
+    relationship_ids: tuple[str, ...],
+    relationship_inventory: RelationshipInventory,
+) -> tuple[ResearchObjective | None, str | None]:
+    relationship_ids, variables = _relationship_objective_scope(
+        relationship_ids,
+        relationship_inventory=relationship_inventory,
+    )
+    if (
+        not relationship_ids
+        or not variables
+        or not _relationships_are_compatible(
             relationship_ids,
             relationship_inventory=relationship_inventory,
         )
+    ):
+        return None, "Study relationships do not form one bounded objective scope."
+    seed_document_ids = tuple(
+        dict.fromkeys(
+            relationship_inventory[relationship_id][0]
+            for relationship_id in relationship_ids
+        )
+    )
+    studies = tuple(
+        relationship_inventory[relationship_id][1]
+        for relationship_id in relationship_ids
+    )
+    relationships = tuple(
+        relationship_inventory[relationship_id][2]
+        for relationship_id in relationship_ids
+    )
+    outcomes: list[str] = []
+    outcome_keys: set[str] = set()
+    for relationship in relationships:
+        source_outcome = relationship.outcome
+        outcome_expansions = property_matching.broad_outcome_expansions(source_outcome)
+        normalized_outcome = property_matching.normalize_property_label(source_outcome)
         if (
-            not relationship_ids
-            or not variables
-            or not self._relationships_are_compatible(
-                relationship_ids,
-                relationship_inventory=relationship_inventory,
-            )
+            len(outcome_expansions) > 1
+            and normalized_outcome is not None
+            and normalized_outcome.rsplit(" ", 1)[-1] in {"property", "properties"}
         ):
-            return None, "Study relationships do not form one bounded objective scope."
-        seed_document_ids = tuple(
-            dict.fromkeys(
-                relationship_inventory[relationship_id][0]
-                for relationship_id in relationship_ids
-            )
-        )
-        studies = tuple(
-            relationship_inventory[relationship_id][1]
-            for relationship_id in relationship_ids
-        )
-        relationships = tuple(
-            relationship_inventory[relationship_id][2]
-            for relationship_id in relationship_ids
-        )
-        outcomes: list[str] = []
-        outcome_keys: set[str] = set()
-        for relationship in relationships:
-            source_outcome = relationship.outcome
-            outcome_expansions = property_matching.broad_outcome_expansions(
-                source_outcome
-            )
-            normalized_outcome = property_matching.normalize_property_label(
-                source_outcome
-            )
-            if (
-                len(outcome_expansions) > 1
-                and normalized_outcome is not None
-                and normalized_outcome.rsplit(" ", 1)[-1] in {"property", "properties"}
-            ):
-                return (
-                    None,
-                    (
-                        f"Outcome '{source_outcome}' requires a specific measurable "
-                        "outcome before it can seed a research objective."
-                    ),
-                )
-            objective_outcome = (
-                outcome_expansions[0]
-                if len(outcome_expansions) == 1
-                else (normalized_outcome or source_outcome)
-            )
-            objective_outcome_key = (
-                property_matching.normalize_property_label(objective_outcome)
-                or self._axis_record_key(objective_outcome)
-            )
-            if objective_outcome_key in outcome_keys:
-                continue
-            outcome_keys.add(objective_outcome_key)
-            outcomes.append(objective_outcome)
-        confidence = self._objective_confidence(studies, relationships)
-        material_scope = tuple(
-            self._shared_study_values(studies, "material_scope")
-        )
-        material_scope_was_missing = any(
-            not self._known_material_keys(study.material_scope) for study in studies
-        )
-        reason_parts = [
-            "Supported by a paper-owned intervention and specific outcome; direct "
-            "comparability remains a later evidence decision.",
-            "The complete jointly varied factor set remains unchanged for every "
-            "supporting paper; paper-specific Source lineage remains unchanged.",
-            (
-                "Confidence is the minimum available non-zero source confidence."
-                if confidence > 0
-                else "No source supplied a non-zero confidence."
-            ),
-        ]
-        if not material_scope:
-            reason_parts.append("No unambiguous shared material scope was available.")
-        elif material_scope_was_missing:
-            reason_parts.append(
-                "Material scope was retained from the unambiguous non-conflicting "
-                "source anchor."
-            )
-        question = self._objective_question(variables, tuple(outcomes))
-        outcome_terms = tuple(outcomes)
-        constraints = tuple(
-            self._shared_study_constraints(
-                studies,
-                excluded_axes=(*variables, *outcomes),
-            )
-        )
-        try:
             return (
-                ResearchObjective(
-                    collection_id=collection_id,
-                    objective_id=build_research_objective_id(
-                        question=question,
-                        material_scope=material_scope,
-                        variables=variables,
-                        outcomes=outcome_terms,
-                        mechanisms=(),
-                        constraints=constraints,
-                        requested_comparator=None,
-                    ),
+                None,
+                (
+                    f"Outcome '{source_outcome}' requires a specific measurable "
+                    "outcome before it can seed a research objective."
+                ),
+            )
+        objective_outcome = (
+            outcome_expansions[0]
+            if len(outcome_expansions) == 1
+            else (normalized_outcome or source_outcome)
+        )
+        objective_outcome_key = property_matching.normalize_property_label(
+            objective_outcome
+        ) or _axis_record_key(objective_outcome)
+        if objective_outcome_key in outcome_keys:
+            continue
+        outcome_keys.add(objective_outcome_key)
+        outcomes.append(objective_outcome)
+    confidence = _objective_confidence(studies, relationships)
+    material_scope = tuple(_shared_study_values(studies, "material_scope"))
+    material_scope_was_missing = any(
+        not _known_material_keys(study.material_scope) for study in studies
+    )
+    reason_parts = [
+        "Supported by a paper-owned intervention and specific outcome; direct "
+        "comparability remains a later evidence decision.",
+        "The complete jointly varied factor set remains unchanged for every "
+        "supporting paper; paper-specific Source lineage remains unchanged.",
+        (
+            "Confidence is the minimum available non-zero source confidence."
+            if confidence > 0
+            else "No source supplied a non-zero confidence."
+        ),
+    ]
+    if not material_scope:
+        reason_parts.append("No unambiguous shared material scope was available.")
+    elif material_scope_was_missing:
+        reason_parts.append(
+            "Material scope was retained from the unambiguous non-conflicting "
+            "source anchor."
+        )
+    question = _objective_question(variables, tuple(outcomes))
+    outcome_terms = tuple(outcomes)
+    constraints = tuple(
+        _shared_study_constraints(
+            studies,
+            excluded_axes=(*variables, *outcomes),
+        )
+    )
+    try:
+        return (
+            ResearchObjective(
+                collection_id=collection_id,
+                objective_id=build_research_objective_id(
                     question=question,
                     material_scope=material_scope,
                     variables=variables,
@@ -969,756 +970,796 @@ class ObjectiveCandidateService:
                     mechanisms=(),
                     constraints=constraints,
                     requested_comparator=None,
-                    seed_document_ids=seed_document_ids,
-                    excluded_document_ids=(),
-                    source_relationship_ids=relationship_ids,
-                    confidence=confidence,
-                    reason=" ".join(reason_parts),
                 ),
-                None,
-            )
-        except (TypeError, ValueError) as exc:
-            return (
-                None,
-                f"Study relationship group cannot form a valid objective: {exc}",
-            )
-
-    def _relationship_objective_scope(
-        self,
-        relationship_ids: tuple[str, ...],
-        *,
-        relationship_inventory: RelationshipInventory,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        records = tuple(
-            relationship_inventory[relationship_id]
-            for relationship_id in relationship_ids
+                question=question,
+                material_scope=material_scope,
+                variables=variables,
+                outcomes=outcome_terms,
+                mechanisms=(),
+                constraints=constraints,
+                requested_comparator=None,
+                seed_document_ids=seed_document_ids,
+                excluded_document_ids=(),
+                source_relationship_ids=relationship_ids,
+                confidence=confidence,
+                reason=" ".join(reason_parts),
+            ),
+            None,
         )
-        if not records:
-            return (), ()
-        precise_variables = records[0][2].varied_factors
-        if not any(
-            not self._axis_collections_are_equivalent(
-                precise_variables,
-                relationship.varied_factors,
-            )
-            for _document_id, _study, relationship in records[1:]
-        ):
-            return (
-                relationship_ids,
-                tuple(self._unique_axis_values(precise_variables)),
-            )
-        shared_theme = property_matching.shared_variable_theme(
-            relationship.varied_factors
-            for _document_id, _study, relationship in records
-        )
-        return (relationship_ids, (shared_theme,)) if shared_theme else ((), ())
-
-    @staticmethod
-    def _objective_question(
-        varied_factors: tuple[str, ...],
-        outcomes: tuple[str, ...],
-    ) -> str:
-        def coordinated(values: tuple[str, ...]) -> str:
-            if len(values) == 1:
-                return values[0]
-            if len(values) == 2:
-                return " and ".join(values)
-            return f"{', '.join(values[:-1])}, and {values[-1]}"
-
-        auxiliary = "does" if len(varied_factors) == 1 else "do"
+    except (TypeError, ValueError) as exc:
         return (
-            f"How {auxiliary} {coordinated(varied_factors)} affect "
-            f"{coordinated(outcomes)}?"
+            None,
+            f"Study relationship group cannot form a valid objective: {exc}",
         )
 
-    def _relationships_are_compatible(
-        self,
-        relationship_ids: Iterable[str],
-        *,
-        relationship_inventory: RelationshipInventory,
-    ) -> bool:
-        ids = tuple(relationship_ids)
-        for position, left_id in enumerate(ids):
-            _left_document_id, left_study, left_relationship = relationship_inventory[
-                left_id
-            ]
-            for right_id in ids[position + 1 :]:
-                _right_document_id, right_study, right_relationship = (
-                    relationship_inventory[right_id]
-                )
-                if (
-                    self._relationship_compatibility(
-                        left_study,
-                        left_relationship,
-                        right_study,
-                        right_relationship,
-                    )
-                    is _Compatibility.INCOMPATIBLE
-                ):
-                    return False
-        return True
 
-    @classmethod
-    def _objective_seed_rejection_reason(
-        cls,
-        study: PaperResearchScope,
-        relationship: PaperResearchRelationship,
-    ) -> str | None:
-        if study.claim_scope != "current_work":
-            return (
-                f"Study relationship has claim_scope={study.claim_scope} and cannot "
-                "directly seed a research objective."
-            )
-        if property_matching.outcome_label_requires_resolution(relationship.outcome):
-            return (
-                f"Outcome '{relationship.outcome}' requires a specific measurable "
-                "outcome before it can seed a research objective."
-            )
-        if any(
-            cls._axis_values_are_equivalent(factor, relationship.outcome)
-            for factor in relationship.varied_factors
-        ):
-            return (
-                "Relationship uses the same variable and outcome; it does not "
-                "define a meaningful research question."
-            )
-        return None
-
-    def _shared_study_values(
-        self,
-        studies: tuple[PaperResearchScope, ...],
-        field_name: str,
-    ) -> list[str]:
-        values_by_study = [tuple(getattr(study, field_name)) for study in studies]
-        material_scope_was_missing = False
-        if field_name == "material_scope":
-            values_by_study = [
-                tuple(
-                    value
-                    for value in values
-                    if self._known_material_scalar(value) is not None
-                )
-                for values in values_by_study
-            ]
-            material_scope_was_missing = any(not values for values in values_by_study)
-            values_by_study = [values for values in values_by_study if values]
-        if not values_by_study or (
-            field_name != "material_scope"
-            and any(not values for values in values_by_study)
-        ):
-            return []
-
-        def values_match(left: str, right: str) -> bool:
-            if field_name != "material_scope":
-                return self._axis_values_are_equivalent(left, right)
-            left_key = self._known_material_scalar(left)
-            return left_key is not None and left_key == self._known_material_scalar(
-                right
-            )
-
-        first, *remaining = values_by_study
-        shared_values = self._unique_axis_values(
-            value
-            for value in first
-            if all(
-                any(values_match(value, candidate) for candidate in values)
-                for values in remaining
-            )
+def _relationship_objective_scope(
+    relationship_ids: tuple[str, ...],
+    *,
+    relationship_inventory: RelationshipInventory,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    records = tuple(
+        relationship_inventory[relationship_id] for relationship_id in relationship_ids
+    )
+    if not records:
+        return (), ()
+    precise_variables = records[0][2].varied_factors
+    if not any(
+        not _axis_collections_are_equivalent(
+            precise_variables,
+            relationship.varied_factors,
         )
-        if field_name == "material_scope":
-            all_values = [value for values in values_by_study for value in values]
-            shared_values = [
-                max(
-                    (
-                        candidate
-                        for candidate in all_values
-                        if self._known_material_scalar(candidate)
-                        == self._known_material_scalar(shared_value)
-                    ),
-                    key=lambda candidate: (
-                        sum(
-                            self._axis_record_key(value)
-                            == self._axis_record_key(candidate)
-                            for value in all_values
-                        ),
-                        -all_values.index(candidate),
-                    ),
-                )
-                for shared_value in shared_values
-            ]
-        if field_name == "material_scope" and material_scope_was_missing:
-            shared_materials = {
-                self._known_material_scalar(value) for value in shared_values
-            }
-            if len(shared_materials) != 1:
-                return []
-        return shared_values
+        for _document_id, _study, relationship in records[1:]
+    ):
+        return (
+            relationship_ids,
+            tuple(_unique_axis_values(precise_variables)),
+        )
+    shared_theme = property_matching.shared_variable_theme(
+        relationship.varied_factors for _document_id, _study, relationship in records
+    )
+    return (relationship_ids, (shared_theme,)) if shared_theme else ((), ())
 
-    @staticmethod
-    def _objective_confidence(
-        studies: tuple[PaperResearchScope, ...],
-        relationships: tuple[PaperResearchRelationship, ...],
-    ) -> float:
-        available = tuple(
-            confidence
-            for confidence in (
-                *(study.confidence for study in studies),
-                *(relationship.confidence for relationship in relationships),
-            )
-            if confidence > 0
-        )
-        return min(available, default=0.0)
 
-    def _shared_study_constraints(
-        self,
-        studies: tuple[PaperResearchScope, ...],
-        *,
-        excluded_axes: Iterable[str] = (),
-    ) -> list[str]:
-        constraints: list[str] = []
-        for field_name in ("process_context",):
-            constraints.extend(self._shared_study_values(studies, field_name))
-        for field_name in ("design_type", "claim_scope"):
-            if value := self._shared_study_scalar(studies, field_name):
-                constraints.append(value)
-        excluded = tuple(excluded_axes)
-        return self._unique_axis_values(
-            value
-            for value in constraints
-            if not any(
-                self._axis_values_are_equivalent(value, axis) for axis in excluded
-            )
-        )
+def _objective_question(
+    varied_factors: tuple[str, ...],
+    outcomes: tuple[str, ...],
+) -> str:
+    def coordinated(values: tuple[str, ...]) -> str:
+        if len(values) == 1:
+            return values[0]
+        if len(values) == 2:
+            return " and ".join(values)
+        return f"{', '.join(values[:-1])}, and {values[-1]}"
 
-    @classmethod
-    def _shared_study_scalar(
-        cls,
-        studies: tuple[PaperResearchScope, ...],
-        field_name: str,
-    ) -> str | None:
-        values = tuple(getattr(study, field_name) for study in studies)
-        keys = tuple(cls._known_context_scalar(value) for value in values)
-        if not keys or any(key is None for key in keys) or len(set(keys)) != 1:
-            return None
-        return str(values[0])
+    auxiliary = "does" if len(varied_factors) == 1 else "do"
+    return (
+        f"How {auxiliary} {coordinated(varied_factors)} affect "
+        f"{coordinated(outcomes)}?"
+    )
 
-    def _canonicalize_relationship_inventory_axes(
-        self,
-        *,
-        collection_id: str,
-        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
-        relationship_inventory: RelationshipInventory,
-    ) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
-        eligible_relationship_inventory = {
-            relationship_id: record
-            for relationship_id, record in relationship_inventory.items()
-            if self._objective_seed_rejection_reason(record[1], record[2]) is None
-        }
-        axis_candidates = self._build_relationship_axis_candidates(
-            eligible_relationship_inventory
-        )
-        axis_pairs = self._build_axis_candidate_pairs(
-            axis_candidates,
-            relationship_inventory=eligible_relationship_inventory,
-        )
-        if not axis_pairs:
-            return dict(relationship_inventory)
-        variable_observations = self._variable_axis_observations(
-            eligible_relationship_inventory
-        )
-        pair_records = [
-            {
-                "pair_id": pair_id,
-                "axis_type": axis_type,
-                "left": left,
-                "right": right,
-                **(
-                    {
-                        "left_observations": variable_observations.get(
-                            self._axis_record_key(left), []
-                        ),
-                        "right_observations": variable_observations.get(
-                            self._axis_record_key(right), []
-                        ),
-                    }
-                    if axis_type == "variable"
-                    else {}
-                ),
-            }
-            for pair_id, (axis_type, left, right) in axis_pairs.items()
+
+def _relationships_are_compatible(
+    relationship_ids: Iterable[str],
+    *,
+    relationship_inventory: RelationshipInventory,
+) -> bool:
+    ids = tuple(relationship_ids)
+    for position, left_id in enumerate(ids):
+        _left_document_id, left_study, left_relationship = relationship_inventory[
+            left_id
         ]
-        decisions: list[dict[str, Any]] = []
-        try:
-            for start in range(0, len(pair_records), _AXIS_PAIR_BATCH_SIZE):
-                plan = axis_equivalence_classifier.classify(
-                    {
-                        "collection_id": collection_id,
-                        "axis_pairs": pair_records[
-                            start : start + _AXIS_PAIR_BATCH_SIZE
-                        ],
-                    }
+        for right_id in ids[position + 1 :]:
+            _right_document_id, right_study, right_relationship = (
+                relationship_inventory[right_id]
+            )
+            if (
+                _relationship_compatibility(
+                    left_study,
+                    left_relationship,
+                    right_study,
+                    right_relationship,
                 )
-                decisions.extend(decision.model_dump() for decision in plan.decisions)
-            canonicalization_plan = AxisCanonicalizationPlanModelOutput(
-                decisions=decisions
-            )
-        except Exception:
-            logger.warning(
-                "Research relationship axis canonicalization failed; using source axes "
-                "collection_id=%s",
-                collection_id,
-                exc_info=True,
-            )
-            return dict(relationship_inventory)
+                is _Compatibility.INCOMPATIBLE
+            ):
+                return False
+    return True
 
-        axis_mapping = self._axis_mapping_from_plan(
-            canonicalization_plan,
-            axis_candidates=axis_candidates,
-            axis_pairs=axis_pairs,
-            relationship_inventory=relationship_inventory,
+
+def _objective_seed_rejection_reason(
+    study: PaperResearchScope,
+    relationship: PaperResearchRelationship,
+) -> str | None:
+    if study.claim_scope != "current_work":
+        return (
+            f"Study relationship has claim_scope={study.claim_scope} and cannot "
+            "directly seed a research objective."
         )
-        if axis_mapping is None:
-            logger.warning(
-                "Research relationship axis canonicalization rejected; using source "
-                "axes "
-                "collection_id=%s",
-                collection_id,
+    if property_matching.outcome_label_requires_resolution(relationship.outcome):
+        return (
+            f"Outcome '{relationship.outcome}' requires a specific measurable "
+            "outcome before it can seed a research objective."
+        )
+    if any(
+        _axis_values_are_equivalent(factor, relationship.outcome)
+        for factor in relationship.varied_factors
+    ):
+        return (
+            "Relationship uses the same variable and outcome; it does not "
+            "define a meaningful research question."
+        )
+    return None
+
+
+def _shared_study_values(
+    studies: tuple[PaperResearchScope, ...],
+    field_name: str,
+) -> list[str]:
+    values_by_study = [tuple(getattr(study, field_name)) for study in studies]
+    material_scope_was_missing = False
+    if field_name == "material_scope":
+        values_by_study = [
+            tuple(
+                value for value in values if _known_material_scalar(value) is not None
             )
-            return dict(relationship_inventory)
-        canonicalized_inventory = {
-            relationship_id: (
-                document_id,
-                replace(
-                    study,
-                    material_scope=tuple(
-                        self._canonicalize_axis_values(
-                            study.material_scope,
-                            axis_type="material",
-                            axis_mapping=axis_mapping,
-                        )
-                    ),
+            for values in values_by_study
+        ]
+        material_scope_was_missing = any(not values for values in values_by_study)
+        values_by_study = [values for values in values_by_study if values]
+    if not values_by_study or (
+        field_name != "material_scope" and any(not values for values in values_by_study)
+    ):
+        return []
+
+    def values_match(left: str, right: str) -> bool:
+        if field_name != "material_scope":
+            return _axis_values_are_equivalent(left, right)
+        left_key = _known_material_scalar(left)
+        return left_key is not None and left_key == _known_material_scalar(right)
+
+    first, *remaining = values_by_study
+    shared_values = _unique_axis_values(
+        value
+        for value in first
+        if all(
+            any(values_match(value, candidate) for candidate in values)
+            for values in remaining
+        )
+    )
+    if field_name == "material_scope":
+        all_values = [value for values in values_by_study for value in values]
+        shared_values = [
+            max(
+                (
+                    candidate
+                    for candidate in all_values
+                    if _known_material_scalar(candidate)
+                    == _known_material_scalar(shared_value)
                 ),
-                replace(
-                    relationship,
-                    varied_factors=tuple(
-                        self._canonicalize_axis_values(
-                            relationship.varied_factors,
-                            axis_type="variable",
-                            axis_mapping=axis_mapping,
-                        )
+                key=lambda candidate: (
+                    sum(
+                        _axis_record_key(value) == _axis_record_key(candidate)
+                        for value in all_values
                     ),
-                    outcome=self._canonicalize_axis_values(
-                        (relationship.outcome,),
-                        axis_type="outcome",
-                        axis_mapping=axis_mapping,
-                    )[0],
+                    -all_values.index(candidate),
                 ),
             )
-            for relationship_id, (
-                document_id,
-                study,
-                relationship,
-            ) in relationship_inventory.items()
-        }
-        return canonicalized_inventory
+            for shared_value in shared_values
+        ]
+    if field_name == "material_scope" and material_scope_was_missing:
+        shared_materials = {_known_material_scalar(value) for value in shared_values}
+        if len(shared_materials) != 1:
+            return []
+    return shared_values
 
-    def _build_relationship_axis_candidates(
-        self,
-        relationship_inventory: RelationshipInventory,
-    ) -> dict[str, list[str]]:
-        return {
-            "material": self._unique_axis_values(
-                material
-                for _document_id, study, _relationship in (
-                    relationship_inventory.values()
-                )
-                for material in study.material_scope
-            ),
-            "variable": self._unique_axis_values(
-                factor
-                for _document_id, _study, relationship in (
-                    relationship_inventory.values()
-                )
-                for factor in relationship.varied_factors
-            ),
-            "outcome": self._unique_axis_values(
-                relationship.outcome
-                for _document_id, _study, relationship in (
-                    relationship_inventory.values()
-                )
-            ),
-        }
 
-    @classmethod
-    def _build_axis_candidate_pairs(
-        cls,
-        axis_candidates: dict[str, list[str]],
-        *,
-        relationship_inventory: RelationshipInventory | None = None,
-    ) -> dict[str, AxisPair]:
-        pairs: dict[str, AxisPair] = {}
-        supported_cross_paper_pairs = (
-            cls._supported_cross_paper_axis_pairs(relationship_inventory)
-            if relationship_inventory is not None
-            else frozenset()
+def _objective_confidence(
+    studies: tuple[PaperResearchScope, ...],
+    relationships: tuple[PaperResearchRelationship, ...],
+) -> float:
+    available = tuple(
+        confidence
+        for confidence in (
+            *(study.confidence for study in studies),
+            *(relationship.confidence for relationship in relationships),
         )
-        for axis_type, values in axis_candidates.items():
-            candidates = [
-                (left, right)
-                for left, right in combinations(values, 2)
-                if cls._axis_pair_might_be_equivalent(axis_type, left, right)
-                or cls._axis_relation_key(axis_type, left, right)
-                in supported_cross_paper_pairs
-            ]
-            candidates.sort(
-                key=lambda pair: (
-                    -int(cls._axis_values_are_equivalent(*pair)),
-                    -SequenceMatcher(
-                        a=cls._axis_record_key(pair[0]),
-                        b=cls._axis_record_key(pair[1]),
-                    ).ratio(),
-                    cls._axis_record_key(pair[0]),
-                    cls._axis_record_key(pair[1]),
-                )
-            )
-            for left, right in candidates:
-                pair_id = f"axis_pair_{len(pairs) + 1:04d}"
-                pairs[pair_id] = (axis_type, left, right)
-        return pairs
+        if confidence > 0
+    )
+    return min(available, default=0.0)
 
-    @classmethod
-    def _variable_axis_observations(
-        cls,
-        relationship_inventory: RelationshipInventory,
-    ) -> dict[str, list[dict[str, list[str]]]]:
-        observations: dict[str, list[dict[str, list[str]]]] = {}
-        records = sorted(
-            relationship_inventory.values(),
-            key=lambda record: (
-                record[0],
-                record[1].study_id,
-                record[2].relationship_id,
-            ),
-        )
-        for _document_id, study, relationship in records:
-            for factor in relationship.varied_factors:
-                key = cls._axis_record_key(factor)
-                if not key:
-                    continue
-                factor_context = (
-                    factor,
-                    *(
-                        candidate
-                        for candidate in relationship.varied_factors
-                        if cls._axis_record_key(candidate) != key
+
+def _shared_study_constraints(
+    studies: tuple[PaperResearchScope, ...],
+    *,
+    excluded_axes: Iterable[str] = (),
+) -> list[str]:
+    constraints: list[str] = []
+    for field_name in ("process_context",):
+        constraints.extend(_shared_study_values(studies, field_name))
+    for field_name in ("design_type", "claim_scope"):
+        if value := _shared_study_scalar(studies, field_name):
+            constraints.append(value)
+    excluded = tuple(excluded_axes)
+    return _unique_axis_values(
+        value
+        for value in constraints
+        if not any(_axis_values_are_equivalent(value, axis) for axis in excluded)
+    )
+
+
+def _shared_study_scalar(
+    studies: tuple[PaperResearchScope, ...],
+    field_name: str,
+) -> str | None:
+    values = tuple(getattr(study, field_name) for study in studies)
+    keys = tuple(_known_context_scalar(value) for value in values)
+    if not keys or any(key is None for key in keys) or len(set(keys)) != 1:
+        return None
+    return str(values[0])
+
+
+def _canonicalize_relationship_inventory_axes(
+    *,
+    collection_id: str,
+    axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
+    relationship_inventory: RelationshipInventory,
+) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
+    eligible_relationship_inventory = {
+        relationship_id: record
+        for relationship_id, record in relationship_inventory.items()
+        if _objective_seed_rejection_reason(record[1], record[2]) is None
+    }
+    axis_candidates = _build_relationship_axis_candidates(
+        eligible_relationship_inventory
+    )
+    axis_pairs = _build_axis_candidate_pairs(
+        axis_candidates,
+        relationship_inventory=eligible_relationship_inventory,
+    )
+    if not axis_pairs:
+        return dict(relationship_inventory)
+    variable_observations = _variable_axis_observations(eligible_relationship_inventory)
+    pair_records = [
+        {
+            "pair_id": pair_id,
+            "axis_type": axis_type,
+            "left": left,
+            "right": right,
+            **(
+                {
+                    "left_observations": variable_observations.get(
+                        _axis_record_key(left), []
                     ),
-                )
-                observation = {
-                    "varied_factors": cls._bounded_axis_observation_values(
-                        factor_context,
-                        limit=_AXIS_OBSERVATION_FACTOR_LIMIT,
-                    ),
-                    "process_context": cls._bounded_axis_observation_values(
-                        study.process_context,
-                        limit=_AXIS_OBSERVATION_CONTEXT_LIMIT,
+                    "right_observations": variable_observations.get(
+                        _axis_record_key(right), []
                     ),
                 }
-                axis_observations = observations.setdefault(key, [])
-                if (
-                    observation not in axis_observations
-                    and len(axis_observations) < _AXIS_OBSERVATION_LIMIT
-                ):
-                    axis_observations.append(observation)
-        return observations
-
-    @staticmethod
-    def _bounded_axis_observation_values(
-        values: Iterable[str],
-        *,
-        limit: int,
-    ) -> list[str]:
-        return [
-            text[:_AXIS_OBSERVATION_TEXT_CHARS]
-            for value in values
-            if (text := " ".join(str(value).strip().split()))
-        ][:limit]
-
-    @classmethod
-    def _axis_pair_might_be_equivalent(
-        cls,
-        axis_type: str,
-        left: str,
-        right: str,
-    ) -> bool:
-        if cls._axis_values_are_equivalent(left, right):
-            return True
-        if axis_type == "material":
-            return property_matching.material_match_quality(left, right) is (
-                MaterialMatchQuality.EXACT
-            )
-        return property_matching.axis_alias_matches_canonical(
-            left, right
-        ) or property_matching.axis_alias_matches_canonical(right, left)
-
-    @classmethod
-    def _supported_cross_paper_axis_pairs(
-        cls,
-        relationship_inventory: RelationshipInventory,
-    ) -> frozenset[AxisPair]:
-        indexed_occurrences: dict[
-            tuple[str, str],
-            dict[str, list[tuple[str, PaperResearchScope, str]]],
-        ] = {}
-        indexed_outcomes: dict[
-            tuple[str, str],
-            dict[str, list[tuple[str, PaperResearchScope, str]]],
-        ] = {}
-        for document_id, study, relationship in relationship_inventory.values():
-            outcome_key = cls._axis_identity(relationship.outcome)
-            if not outcome_key:
-                continue
-            for factor in relationship.varied_factors:
-                factor_key = cls._axis_record_key(factor)
-                if not factor_key:
-                    continue
-                for topic_hint in cls._variable_topic_hints(factor):
-                    indexed_occurrences.setdefault(
-                        (outcome_key, topic_hint), {}
-                    ).setdefault(factor_key, []).append(
-                        (document_id, study, factor)
-                    )
-                for outcome_hint in cls._outcome_identity_hints(
-                    relationship.outcome
-                ):
-                    indexed_outcomes.setdefault(
-                        (cls._axis_identity(factor), outcome_hint), {}
-                    ).setdefault(outcome_key, []).append(
-                        (document_id, study, relationship.outcome)
-                    )
-
-        supported: set[AxisPair] = set()
-        for occurrences_by_factor in indexed_occurrences.values():
-            for left_records, right_records in combinations(
-                occurrences_by_factor.values(), 2
-            ):
-                compatible_pair = next(
-                    (
-                        (left_factor, right_factor)
-                        for left_document_id, left_study, left_factor in left_records
-                        for right_document_id, right_study, right_factor in right_records
-                        if left_document_id != right_document_id
-                        and cls._context_collection_compatibility(
-                            left_study.material_scope,
-                            right_study.material_scope,
-                        )
-                        is not _Compatibility.INCOMPATIBLE
-                    ),
-                    None,
-                )
-                if compatible_pair is not None:
-                    supported.add(
-                        cls._axis_relation_key("variable", *compatible_pair)
-                    )
-        for occurrences_by_outcome in indexed_outcomes.values():
-            for left_records, right_records in combinations(
-                occurrences_by_outcome.values(), 2
-            ):
-                compatible_pair = next(
-                    (
-                        (left_outcome, right_outcome)
-                        for left_document_id, left_study, left_outcome in left_records
-                        for right_document_id, right_study, right_outcome in right_records
-                        if left_document_id != right_document_id
-                        and cls._context_collection_compatibility(
-                            left_study.material_scope,
-                            right_study.material_scope,
-                        )
-                        is not _Compatibility.INCOMPATIBLE
-                    ),
-                    None,
-                )
-                if compatible_pair is not None:
-                    supported.add(
-                        cls._axis_relation_key("outcome", *compatible_pair)
-                    )
-        return frozenset(supported)
-
-    @classmethod
-    def _variable_topic_hints(
-        cls,
-        factor: str,
-    ) -> frozenset[str]:
-        factor_key = cls._axis_record_key(factor)
-        label_tokens = [
-            token
-            for token in re.findall(r"[a-z0-9]+", factor_key)
-            if token not in _VARIABLE_TOPIC_GENERIC_LABEL_TOKENS
-        ]
-        hints = (
-            {f"head:{label_tokens[-1]}"}
-            if label_tokens
-            else set()
-        )
-        hints.update(
-            f"phrase:{left} {right}"
-            for left, right in zip(label_tokens, label_tokens[1:])
-        )
-        hints.update(
-            f"intervention:{property_matching.axis_key(theme)}"
-            for theme in property_matching.variable_theme_labels(factor_key)
-        )
-        return frozenset(hints)
-
-    @classmethod
-    def _outcome_identity_hints(cls, outcome: str) -> frozenset[str]:
-        return frozenset(
-            token
-            for token in re.findall(r"[a-z0-9]+", cls._axis_record_key(outcome))
-            if token in _OUTCOME_IDENTITY_HINT_TOKENS
-        )
-
-    @classmethod
-    def _axis_relation_key(
-        cls,
-        axis_type: str,
-        left: Any,
-        right: Any,
-    ) -> AxisPair:
-        left_key, right_key = sorted(
-            (cls._axis_record_key(left), cls._axis_record_key(right))
-        )
-        return axis_type, left_key, right_key
-
-    @classmethod
-    def _axis_mapping_from_plan(
-        cls,
-        canonicalization_plan: AxisCanonicalizationPlanModelOutput,
-        *,
-        axis_candidates: dict[str, list[str]],
-        axis_pairs: Mapping[str, AxisPair],
-        relationship_inventory: RelationshipInventory,
-    ) -> dict[str, dict[str, str]] | None:
-        decision_ids = tuple(
-            decision.pair_id for decision in canonicalization_plan.decisions
-        )
-        if decision_ids != tuple(axis_pairs) or len(decision_ids) != len(
-            set(decision_ids)
-        ):
-            return None
-        selected_edges = {
-            (
-                axis_type,
-                frozenset((cls._axis_record_key(left), cls._axis_record_key(right))),
-            )
-            for decision in canonicalization_plan.decisions
-            for axis_type, left, right in (axis_pairs[decision.pair_id],)
-            if decision.equivalent or cls._axis_values_are_equivalent(left, right)
+                if axis_type == "variable"
+                else {}
+            ),
         }
-        label_counts = cls._axis_label_counts(relationship_inventory)
-        axis_mapping: dict[str, dict[str, str]] = {
-            axis_type: {
-                cls._axis_record_key(value): value
-                for value in axis_candidates[axis_type]
-                if cls._axis_record_key(value)
-            }
-            for axis_type in axis_candidates
-        }
-        for axis_type, values in axis_candidates.items():
-            groups: list[list[str]] = []
-            for value in sorted(
-                values,
-                key=lambda item: (
-                    -label_counts.get(axis_type, {}).get(cls._axis_record_key(item), 0),
-                    cls._axis_record_key(item),
+        for pair_id, (axis_type, left, right) in axis_pairs.items()
+    ]
+    decisions: list[dict[str, Any]] = []
+    try:
+        for start in range(0, len(pair_records), _AXIS_PAIR_BATCH_SIZE):
+            plan = axis_equivalence_classifier.classify(
+                {
+                    "collection_id": collection_id,
+                    "axis_pairs": pair_records[start : start + _AXIS_PAIR_BATCH_SIZE],
+                }
+            )
+            decisions.extend(decision.model_dump() for decision in plan.decisions)
+        canonicalization_plan = AxisCanonicalizationPlanModelOutput(decisions=decisions)
+    except Exception:
+        logger.warning(
+            "Research relationship axis canonicalization failed; using source axes "
+            "collection_id=%s",
+            collection_id,
+            exc_info=True,
+        )
+        return dict(relationship_inventory)
+
+    axis_mapping = _axis_mapping_from_plan(
+        canonicalization_plan,
+        axis_candidates=axis_candidates,
+        axis_pairs=axis_pairs,
+        relationship_inventory=relationship_inventory,
+    )
+    if axis_mapping is None:
+        logger.warning(
+            "Research relationship axis canonicalization rejected; using source "
+            "axes "
+            "collection_id=%s",
+            collection_id,
+        )
+        return dict(relationship_inventory)
+    canonicalized_inventory = {
+        relationship_id: (
+            document_id,
+            replace(
+                study,
+                material_scope=tuple(
+                    _canonicalize_axis_values(
+                        study.material_scope,
+                        axis_type="material",
+                        axis_mapping=axis_mapping,
+                    )
                 ),
+            ),
+            replace(
+                relationship,
+                varied_factors=tuple(
+                    _canonicalize_axis_values(
+                        relationship.varied_factors,
+                        axis_type="variable",
+                        axis_mapping=axis_mapping,
+                    )
+                ),
+                outcome=_canonicalize_axis_values(
+                    (relationship.outcome,),
+                    axis_type="outcome",
+                    axis_mapping=axis_mapping,
+                )[0],
+            ),
+        )
+        for relationship_id, (
+            document_id,
+            study,
+            relationship,
+        ) in relationship_inventory.items()
+    }
+    return canonicalized_inventory
+
+
+def _build_relationship_axis_candidates(
+    relationship_inventory: RelationshipInventory,
+) -> dict[str, list[str]]:
+    return {
+        "material": _unique_axis_values(
+            material
+            for _document_id, study, _relationship in (relationship_inventory.values())
+            for material in study.material_scope
+        ),
+        "variable": _unique_axis_values(
+            factor
+            for _document_id, _study, relationship in (relationship_inventory.values())
+            for factor in relationship.varied_factors
+        ),
+        "outcome": _unique_axis_values(
+            relationship.outcome
+            for _document_id, _study, relationship in (relationship_inventory.values())
+        ),
+    }
+
+
+def _build_axis_candidate_pairs(
+    axis_candidates: dict[str, list[str]],
+    *,
+    relationship_inventory: RelationshipInventory | None = None,
+) -> dict[str, AxisPair]:
+    pairs: dict[str, AxisPair] = {}
+    supported_cross_paper_pairs = (
+        _supported_cross_paper_axis_pairs(relationship_inventory)
+        if relationship_inventory is not None
+        else frozenset()
+    )
+    for axis_type, values in axis_candidates.items():
+        candidates = [
+            (left, right)
+            for left, right in combinations(values, 2)
+            if _axis_pair_might_be_equivalent(axis_type, left, right)
+            or _axis_relation_key(axis_type, left, right) in supported_cross_paper_pairs
+        ]
+        candidates.sort(
+            key=lambda pair: (
+                -int(_axis_values_are_equivalent(*pair)),
+                -SequenceMatcher(
+                    a=_axis_record_key(pair[0]),
+                    b=_axis_record_key(pair[1]),
+                ).ratio(),
+                _axis_record_key(pair[0]),
+                _axis_record_key(pair[1]),
+            )
+        )
+        for left, right in candidates:
+            pair_id = f"axis_pair_{len(pairs) + 1:04d}"
+            pairs[pair_id] = (axis_type, left, right)
+    return pairs
+
+
+def _variable_axis_observations(
+    relationship_inventory: RelationshipInventory,
+) -> dict[str, list[dict[str, list[str]]]]:
+    observations: dict[str, list[dict[str, list[str]]]] = {}
+    records = sorted(
+        relationship_inventory.values(),
+        key=lambda record: (
+            record[0],
+            record[1].study_id,
+            record[2].relationship_id,
+        ),
+    )
+    for _document_id, study, relationship in records:
+        for factor in relationship.varied_factors:
+            key = _axis_record_key(factor)
+            if not key:
+                continue
+            factor_context = (
+                factor,
+                *(
+                    candidate
+                    for candidate in relationship.varied_factors
+                    if _axis_record_key(candidate) != key
+                ),
+            )
+            observation = {
+                "varied_factors": _bounded_axis_observation_values(
+                    factor_context,
+                    limit=_AXIS_OBSERVATION_FACTOR_LIMIT,
+                ),
+                "process_context": _bounded_axis_observation_values(
+                    study.process_context,
+                    limit=_AXIS_OBSERVATION_CONTEXT_LIMIT,
+                ),
+            }
+            axis_observations = observations.setdefault(key, [])
+            if (
+                observation not in axis_observations
+                and len(axis_observations) < _AXIS_OBSERVATION_LIMIT
             ):
-                compatible_group = next(
-                    (
-                        group
-                        for group in groups
-                        if all(
-                            (
-                                axis_type,
-                                frozenset(
-                                    (
-                                        cls._axis_record_key(value),
-                                        cls._axis_record_key(other),
-                                    )
-                                ),
-                            )
-                            in selected_edges
-                            for other in group
-                        )
-                    ),
-                    None,
-                )
-                if compatible_group is None:
-                    groups.append([value])
-                else:
-                    compatible_group.append(value)
-            for group in groups:
-                canonical = max(
-                    group,
-                    key=lambda value: (
-                        label_counts.get(axis_type, {}).get(
-                            cls._axis_record_key(value), 0
-                        ),
-                        len(value.split()) > 1,
-                        -len(value),
-                        cls._axis_record_key(value),
-                    ),
-                )
-                for value in group:
-                    axis_mapping[axis_type][cls._axis_record_key(value)] = canonical
-        return axis_mapping
+                axis_observations.append(observation)
+    return observations
 
-    @classmethod
-    def _axis_label_counts(
-        cls,
-        relationship_inventory: RelationshipInventory,
-    ) -> dict[str, dict[str, int]]:
-        counts: dict[str, dict[str, int]] = {
-            "material": {},
-            "variable": {},
-            "outcome": {},
+
+def _bounded_axis_observation_values(
+    values: Iterable[str],
+    *,
+    limit: int,
+) -> list[str]:
+    return [
+        text[:_AXIS_OBSERVATION_TEXT_CHARS]
+        for value in values
+        if (text := " ".join(str(value).strip().split()))
+    ][:limit]
+
+
+def _axis_pair_might_be_equivalent(
+    axis_type: str,
+    left: str,
+    right: str,
+) -> bool:
+    if _axis_values_are_equivalent(left, right):
+        return True
+    if axis_type == "material":
+        return property_matching.material_match_quality(left, right) is (
+            MaterialMatchQuality.EXACT
+        )
+    return property_matching.axis_alias_matches_canonical(
+        left, right
+    ) or property_matching.axis_alias_matches_canonical(right, left)
+
+
+def _supported_cross_paper_axis_pairs(
+    relationship_inventory: RelationshipInventory,
+) -> frozenset[AxisPair]:
+    indexed_occurrences: dict[
+        tuple[str, str],
+        dict[str, list[tuple[str, PaperResearchScope, str]]],
+    ] = {}
+    indexed_outcomes: dict[
+        tuple[str, str],
+        dict[str, list[tuple[str, PaperResearchScope, str]]],
+    ] = {}
+    for document_id, study, relationship in relationship_inventory.values():
+        outcome_key = _axis_identity(relationship.outcome)
+        if not outcome_key:
+            continue
+        for factor in relationship.varied_factors:
+            factor_key = _axis_record_key(factor)
+            if not factor_key:
+                continue
+            for topic_hint in _variable_topic_hints(factor):
+                indexed_occurrences.setdefault(
+                    (outcome_key, topic_hint), {}
+                ).setdefault(factor_key, []).append((document_id, study, factor))
+            for outcome_hint in _outcome_identity_hints(relationship.outcome):
+                indexed_outcomes.setdefault(
+                    (_axis_identity(factor), outcome_hint), {}
+                ).setdefault(outcome_key, []).append(
+                    (document_id, study, relationship.outcome)
+                )
+
+    supported: set[AxisPair] = set()
+    for occurrences_by_factor in indexed_occurrences.values():
+        for left_records, right_records in combinations(
+            occurrences_by_factor.values(), 2
+        ):
+            compatible_pair = next(
+                (
+                    (left_factor, right_factor)
+                    for left_document_id, left_study, left_factor in left_records
+                    for right_document_id, right_study, right_factor in right_records
+                    if left_document_id != right_document_id
+                    and _context_collection_compatibility(
+                        left_study.material_scope,
+                        right_study.material_scope,
+                    )
+                    is not _Compatibility.INCOMPATIBLE
+                ),
+                None,
+            )
+            if compatible_pair is not None:
+                supported.add(_axis_relation_key("variable", *compatible_pair))
+    for occurrences_by_outcome in indexed_outcomes.values():
+        for left_records, right_records in combinations(
+            occurrences_by_outcome.values(), 2
+        ):
+            compatible_pair = next(
+                (
+                    (left_outcome, right_outcome)
+                    for left_document_id, left_study, left_outcome in left_records
+                    for right_document_id, right_study, right_outcome in right_records
+                    if left_document_id != right_document_id
+                    and _context_collection_compatibility(
+                        left_study.material_scope,
+                        right_study.material_scope,
+                    )
+                    is not _Compatibility.INCOMPATIBLE
+                ),
+                None,
+            )
+            if compatible_pair is not None:
+                supported.add(_axis_relation_key("outcome", *compatible_pair))
+    return frozenset(supported)
+
+
+def _variable_topic_hints(
+    factor: str,
+) -> frozenset[str]:
+    factor_key = _axis_record_key(factor)
+    label_tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", factor_key)
+        if token not in _VARIABLE_TOPIC_GENERIC_LABEL_TOKENS
+    ]
+    hints = {f"head:{label_tokens[-1]}"} if label_tokens else set()
+    hints.update(
+        f"phrase:{left} {right}" for left, right in zip(label_tokens, label_tokens[1:])
+    )
+    hints.update(
+        f"intervention:{property_matching.axis_key(theme)}"
+        for theme in property_matching.variable_theme_labels(factor_key)
+    )
+    return frozenset(hints)
+
+
+def _outcome_identity_hints(outcome: str) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in re.findall(r"[a-z0-9]+", _axis_record_key(outcome))
+        if token in _OUTCOME_IDENTITY_HINT_TOKENS
+    )
+
+
+def _axis_relation_key(
+    axis_type: str,
+    left: Any,
+    right: Any,
+) -> AxisPair:
+    left_key, right_key = sorted((_axis_record_key(left), _axis_record_key(right)))
+    return axis_type, left_key, right_key
+
+
+def _axis_mapping_from_plan(
+    canonicalization_plan: AxisCanonicalizationPlanModelOutput,
+    *,
+    axis_candidates: dict[str, list[str]],
+    axis_pairs: Mapping[str, AxisPair],
+    relationship_inventory: RelationshipInventory,
+) -> dict[str, dict[str, str]] | None:
+    decision_ids = tuple(
+        decision.pair_id for decision in canonicalization_plan.decisions
+    )
+    if decision_ids != tuple(axis_pairs) or len(decision_ids) != len(set(decision_ids)):
+        return None
+    selected_edges = {
+        (
+            axis_type,
+            frozenset((_axis_record_key(left), _axis_record_key(right))),
+        )
+        for decision in canonicalization_plan.decisions
+        for axis_type, left, right in (axis_pairs[decision.pair_id],)
+        if decision.equivalent or _axis_values_are_equivalent(left, right)
+    }
+    label_counts = _axis_label_counts(relationship_inventory)
+    axis_mapping: dict[str, dict[str, str]] = {
+        axis_type: {
+            _axis_record_key(value): value
+            for value in axis_candidates[axis_type]
+            if _axis_record_key(value)
         }
+        for axis_type in axis_candidates
+    }
+    for axis_type, values in axis_candidates.items():
+        groups: list[list[str]] = []
+        for value in sorted(
+            values,
+            key=lambda item: (
+                -label_counts.get(axis_type, {}).get(_axis_record_key(item), 0),
+                _axis_record_key(item),
+            ),
+        ):
+            compatible_group = next(
+                (
+                    group
+                    for group in groups
+                    if all(
+                        (
+                            axis_type,
+                            frozenset(
+                                (
+                                    _axis_record_key(value),
+                                    _axis_record_key(other),
+                                )
+                            ),
+                        )
+                        in selected_edges
+                        for other in group
+                    )
+                ),
+                None,
+            )
+            if compatible_group is None:
+                groups.append([value])
+            else:
+                compatible_group.append(value)
+        for group in groups:
+            canonical = max(
+                group,
+                key=lambda value: (
+                    label_counts.get(axis_type, {}).get(_axis_record_key(value), 0),
+                    len(value.split()) > 1,
+                    -len(value),
+                    _axis_record_key(value),
+                ),
+            )
+            for value in group:
+                axis_mapping[axis_type][_axis_record_key(value)] = canonical
+    return axis_mapping
 
-        def count(axis_type: str, value: str) -> None:
-            key = cls._axis_record_key(value)
-            counts[axis_type][key] = counts[axis_type].get(key, 0) + 1
 
-        for _document_id, study, relationship in relationship_inventory.values():
-            for material in study.material_scope:
-                count("material", material)
-            for factor in relationship.varied_factors:
-                count("variable", factor)
-            count("outcome", relationship.outcome)
-        return counts
+def _axis_label_counts(
+    relationship_inventory: RelationshipInventory,
+) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {
+        "material": {},
+        "variable": {},
+        "outcome": {},
+    }
 
-    def _canonicalize_axis_values(
-        self,
-        values: tuple[str, ...],
-        *,
-        axis_type: str,
-        axis_mapping: AxisMapping,
-    ) -> list[str]:
-        merged: list[str] = []
-        seen: set[str] = set()
-        mapping = axis_mapping.get(axis_type, {})
-        for value in values:
-            canonical = mapping.get(self._axis_record_key(value), value)
-            self._append_unique_axis(merged, seen, canonical)
-        return merged
+    def count(axis_type: str, value: str) -> None:
+        key = _axis_record_key(value)
+        counts[axis_type][key] = counts[axis_type].get(key, 0) + 1
 
-    @staticmethod
-    def _rank_objectives(
-        objectives: tuple[ResearchObjective, ...],
-        *,
-        relationship_inventory: RelationshipInventory,
-    ) -> tuple[ResearchObjective, ...]:
-        def rank(
+    for _document_id, study, relationship in relationship_inventory.values():
+        for material in study.material_scope:
+            count("material", material)
+        for factor in relationship.varied_factors:
+            count("variable", factor)
+        count("outcome", relationship.outcome)
+    return counts
+
+
+def _canonicalize_axis_values(
+    values: tuple[str, ...],
+    *,
+    axis_type: str,
+    axis_mapping: AxisMapping,
+) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    mapping = axis_mapping.get(axis_type, {})
+    for value in values:
+        canonical = mapping.get(_axis_record_key(value), value)
+        _append_unique_axis(merged, seen, canonical)
+    return merged
+
+
+def _rank_objectives(
+    objectives: tuple[ResearchObjective, ...],
+    *,
+    relationship_inventory: RelationshipInventory,
+) -> tuple[ResearchObjective, ...]:
+    def rank(
+        objective: ResearchObjective,
+    ) -> tuple[float, float, float, float, float, str]:
+        supporting_records = [
+            relationship_inventory[relationship_id]
+            for relationship_id in objective.source_relationship_ids
+        ]
+        supporting_relationships = [
+            relationship for _document_id, _study, relationship in supporting_records
+        ]
+        structured_result_document_count = len(
+            {
+                document_id
+                for document_id, _study, relationship in supporting_records
+                if _structured_result_source_count(relationship)
+            }
+        )
+        structured_result_source_count = sum(
+            _structured_result_source_count(item) for item in supporting_relationships
+        )
+        mean_confidence = (
+            sum(item.confidence for item in supporting_relationships)
+            / len(supporting_relationships)
+            if supporting_relationships
+            else 0.0
+        )
+        return (
+            -float(len(objective.seed_document_ids)),
+            -float(structured_result_document_count),
+            -float(structured_result_source_count),
+            -float(len(objective.source_relationship_ids)),
+            -mean_confidence,
+            objective.objective_id,
+        )
+
+    return tuple(sorted(objectives, key=rank))
+
+
+def _select_review_objectives(
+    ranked_objectives: tuple[ResearchObjective, ...],
+    *,
+    relationship_inventory: RelationshipInventory,
+    document_count: int,
+) -> tuple[ResearchObjective, ...]:
+    """Choose a finite, diverse set of questions for human review.
+
+    Paper Map relationships remain the complete discovery ledger.  The
+    researcher-facing candidate list is intentionally bounded and gives
+    each selected paper a chance to contribute a question before filling
+    the remaining slots with the strongest evidence-backed relationships.
+    """
+
+    review_limit = min(
+        _MAX_OBJECTIVE_CANDIDATES,
+        max(
+            _MIN_OBJECTIVE_CANDIDATES,
+            document_count * _OBJECTIVE_CANDIDATES_PER_DOCUMENT,
+        ),
+    )
+    if len(ranked_objectives) <= review_limit:
+        return ranked_objectives
+
+    remaining = list(ranked_objectives)
+    selected: list[ResearchObjective] = []
+    covered_documents: set[str] = set()
+    selected_document_counts: dict[str, int] = {}
+
+    while remaining and len(selected) < review_limit:
+        uncovered = [
+            objective
+            for objective in remaining
+            if set(objective.seed_document_ids) - covered_documents
+        ]
+        pool = uncovered or remaining
+        capacity_limited_pool = [
+            objective
+            for objective in pool
+            if all(
+                selected_document_counts.get(document_id, 0)
+                < _OBJECTIVE_CANDIDATES_PER_DOCUMENT
+                for document_id in objective.seed_document_ids
+            )
+        ]
+        if capacity_limited_pool:
+            pool = capacity_limited_pool
+
+        def selection_key(
             objective: ResearchObjective,
-        ) -> tuple[float, float, float, float, float, str]:
+        ) -> tuple[int, int, int, int, float, int, str]:
             supporting_records = [
                 relationship_inventory[relationship_id]
                 for relationship_id in objective.source_relationship_ids
@@ -1731,13 +1772,11 @@ class ObjectiveCandidateService:
                 {
                     document_id
                     for document_id, _study, relationship in supporting_records
-                    if ObjectiveCandidateService._structured_result_source_count(
-                        relationship
-                    )
+                    if _structured_result_source_count(relationship)
                 }
             )
             structured_result_source_count = sum(
-                ObjectiveCandidateService._structured_result_source_count(item)
+                _structured_result_source_count(item)
                 for item in supporting_relationships
             )
             mean_confidence = (
@@ -1747,210 +1786,121 @@ class ObjectiveCandidateService:
                 else 0.0
             )
             return (
-                -float(len(objective.seed_document_ids)),
-                -float(structured_result_document_count),
-                -float(structured_result_source_count),
-                -float(len(objective.source_relationship_ids)),
-                -mean_confidence,
+                len(set(objective.seed_document_ids) - covered_documents),
+                len(set(objective.seed_document_ids)),
+                structured_result_document_count,
+                structured_result_source_count,
+                mean_confidence,
+                -len(selected),
                 objective.objective_id,
             )
 
-        return tuple(sorted(objectives, key=rank))
+        chosen = max(pool, key=selection_key)
+        selected.append(chosen)
+        covered_documents.update(chosen.seed_document_ids)
+        for document_id in chosen.seed_document_ids:
+            selected_document_counts[document_id] = (
+                selected_document_counts.get(document_id, 0) + 1
+            )
+        remaining.remove(chosen)
 
-    @classmethod
-    def _select_review_objectives(
-        cls,
-        ranked_objectives: tuple[ResearchObjective, ...],
-        *,
-        relationship_inventory: RelationshipInventory,
-        document_count: int,
-    ) -> tuple[ResearchObjective, ...]:
-        """Choose a finite, diverse set of questions for human review.
+    return tuple(selected)
 
-        Paper Map relationships remain the complete discovery ledger.  The
-        researcher-facing candidate list is intentionally bounded and gives
-        each selected paper a chance to contribute a question before filling
-        the remaining slots with the strongest evidence-backed relationships.
-        """
 
-        review_limit = min(
-            _MAX_OBJECTIVE_CANDIDATES,
-            max(
-                _MIN_OBJECTIVE_CANDIDATES,
-                document_count * _OBJECTIVE_CANDIDATES_PER_DOCUMENT,
-            ),
-        )
-        if len(ranked_objectives) <= review_limit:
-            return ranked_objectives
+def _structured_result_source_count(
+    relationship: PaperResearchRelationship,
+) -> int:
+    """Count structured Source locators that can carry measured results.
 
-        remaining = list(ranked_objectives)
-        selected: list[ResearchObjective] = []
-        covered_documents: set[str] = set()
-        selected_document_counts: dict[str, int] = {}
+    This is only a ranking signal. Tables and figures remain subject to
+    downstream framing, extraction, and comparability checks; their
+    presence must never be treated as scientific proof.
+    """
 
-        while remaining and len(selected) < review_limit:
-            uncovered = [
-                objective
-                for objective in remaining
-                if set(objective.seed_document_ids) - covered_documents
-            ]
-            pool = uncovered or remaining
-            capacity_limited_pool = [
-                objective
-                for objective in pool
-                if all(
-                    selected_document_counts.get(document_id, 0)
-                    < _OBJECTIVE_CANDIDATES_PER_DOCUMENT
-                    for document_id in objective.seed_document_ids
-                )
-            ]
-            if capacity_limited_pool:
-                pool = capacity_limited_pool
+    return sum(
+        source_ref.source_kind in {"table", "table_row", "figure"}
+        for source_ref in relationship.source_refs
+    )
 
-            def selection_key(
-                objective: ResearchObjective,
-            ) -> tuple[int, int, int, int, float, int, str]:
-                supporting_records = [
-                    relationship_inventory[relationship_id]
-                    for relationship_id in objective.source_relationship_ids
-                ]
-                supporting_relationships = [
-                    relationship
-                    for _document_id, _study, relationship in supporting_records
-                ]
-                structured_result_document_count = len(
-                    {
-                        document_id
-                        for document_id, _study, relationship in supporting_records
-                        if cls._structured_result_source_count(relationship)
-                    }
-                )
-                structured_result_source_count = sum(
-                    cls._structured_result_source_count(item)
-                    for item in supporting_relationships
-                )
-                mean_confidence = (
-                    sum(item.confidence for item in supporting_relationships)
-                    / len(supporting_relationships)
-                    if supporting_relationships
-                    else 0.0
-                )
-                return (
-                    len(set(objective.seed_document_ids) - covered_documents),
-                    len(set(objective.seed_document_ids)),
-                    structured_result_document_count,
-                    structured_result_source_count,
-                    mean_confidence,
-                    -len(selected),
-                    objective.objective_id,
-                )
 
-            chosen = max(pool, key=selection_key)
-            selected.append(chosen)
-            covered_documents.update(chosen.seed_document_ids)
-            for document_id in chosen.seed_document_ids:
-                selected_document_counts[document_id] = (
-                    selected_document_counts.get(document_id, 0) + 1
-                )
-            remaining.remove(chosen)
-
-        return tuple(selected)
-
-    @staticmethod
-    def _structured_result_source_count(
-        relationship: PaperResearchRelationship,
-    ) -> int:
-        """Count structured Source locators that can carry measured results.
-
-        This is only a ranking signal. Tables and figures remain subject to
-        downstream framing, extraction, and comparability checks; their
-        presence must never be treated as scientific proof.
-        """
-
-        return sum(
-            source_ref.source_kind in {"table", "table_row", "figure"}
-            for source_ref in relationship.source_refs
-        )
-
-    @staticmethod
-    def _study_dispositions(
-        objectives: tuple[ResearchObjective, ...],
-        *,
-        relationship_inventory: RelationshipInventory,
-        terminal_rejections: Mapping[str, str],
-    ) -> tuple[PaperStudyDisposition, ...]:
-        objective_by_relationship_id = {
-            relationship_id: objective
-            for objective in objectives
-            for relationship_id in objective.source_relationship_ids
-        }
-        dispositions: list[PaperStudyDisposition] = []
-        for relationship_id, (document_id, study, _relationship) in sorted(
-            relationship_inventory.items()
-        ):
-            objective = objective_by_relationship_id.get(relationship_id)
-            if objective is None:
-                dispositions.append(
-                    PaperStudyDisposition(
-                        document_id=document_id,
-                        study_id=study.study_id,
-                        relationship_id=relationship_id,
-                        status=PaperStudyDispositionStatus.REJECTED,
-                        reason=terminal_rejections.get(relationship_id)
-                        or "Study relationship could not form a valid objective.",
-                    )
-                )
-                continue
+def _study_dispositions(
+    objectives: tuple[ResearchObjective, ...],
+    *,
+    relationship_inventory: RelationshipInventory,
+    terminal_rejections: Mapping[str, str],
+) -> tuple[PaperStudyDisposition, ...]:
+    objective_by_relationship_id = {
+        relationship_id: objective
+        for objective in objectives
+        for relationship_id in objective.source_relationship_ids
+    }
+    dispositions: list[PaperStudyDisposition] = []
+    for relationship_id, (document_id, study, _relationship) in sorted(
+        relationship_inventory.items()
+    ):
+        objective = objective_by_relationship_id.get(relationship_id)
+        if objective is None:
             dispositions.append(
                 PaperStudyDisposition(
                     document_id=document_id,
                     study_id=study.study_id,
                     relationship_id=relationship_id,
-                    status=PaperStudyDispositionStatus.PROMOTED,
-                    objective_id=objective.objective_id,
+                    status=PaperStudyDispositionStatus.REJECTED,
+                    reason=terminal_rejections.get(relationship_id)
+                    or "Study relationship could not form a valid objective.",
                 )
             )
-        return tuple(dispositions)
-
-    def _unique_axis_values(self, values: Iterable[Any]) -> list[str]:
-        merged: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            self._append_unique_axis(merged, seen, value)
-        return merged
-
-    @classmethod
-    def _append_unique_axis(
-        cls,
-        target: list[str],
-        seen: set[str],
-        value: Any,
-    ) -> None:
-        text = str(value or "").strip()
-        key = cls._axis_record_key(text)
-        if not text or not key or key in seen:
-            return
-        seen.add(key)
-        target.append(text)
-
-    @staticmethod
-    def _notify_progress(
-        progress_callback: ProgressCallback | None,
-        *,
-        phase: str,
-        current: int,
-        total: int,
-        unit: str,
-        message: str,
-    ) -> None:
-        if progress_callback is None:
-            return
-        progress_callback(
-            {
-                "phase": phase,
-                "current": current,
-                "total": total,
-                "unit": unit,
-                "message": message,
-            }
+            continue
+        dispositions.append(
+            PaperStudyDisposition(
+                document_id=document_id,
+                study_id=study.study_id,
+                relationship_id=relationship_id,
+                status=PaperStudyDispositionStatus.PROMOTED,
+                objective_id=objective.objective_id,
+            )
         )
+    return tuple(dispositions)
+
+
+def _unique_axis_values(values: Iterable[Any]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        _append_unique_axis(merged, seen, value)
+    return merged
+
+
+def _append_unique_axis(
+    target: list[str],
+    seen: set[str],
+    value: Any,
+) -> None:
+    text = str(value or "").strip()
+    key = _axis_record_key(text)
+    if not text or not key or key in seen:
+        return
+    seen.add(key)
+    target.append(text)
+
+
+def _notify_progress(
+    progress_callback: ProgressCallback | None,
+    *,
+    phase: str,
+    current: int,
+    total: int,
+    unit: str,
+    message: str,
+) -> None:
+    if progress_callback is None:
+        return
+    progress_callback(
+        {
+            "phase": phase,
+            "current": current,
+            "total": total,
+            "unit": unit,
+            "message": message,
+        }
+    )

@@ -1,29 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from domain.core.research_objective import PaperResearchSignal, PaperSourceUnitCoverage
-
-from domain.core.research_objective import (
-    PaperSourceUnitCoverageStatus,
-    PaperResearchSourceRef,
-)
-
-
 from itertools import permutations
 from typing import Any
 
 import pytest
-
+from application.core.objectives import objective_candidate_service
 from application.core.objectives.discovery.axis_equivalence import (
     AxisCanonicalizationPlanModelOutput,
-)
-from application.core.objectives.objective_candidate_service import (
-    ObjectiveCandidateService,
 )
 from domain.core import PaperResearchMap, PreparedDocumentInput, ResearchObjective
 from domain.core.research_objective import (
     PaperResearchRelationship,
     PaperResearchScope,
+    PaperResearchSignal,
+    PaperResearchSourceRef,
+    PaperSourceUnitCoverage,
+    PaperSourceUnitCoverageStatus,
 )
 
 
@@ -69,7 +62,7 @@ def test_relationship_groups_preserve_complete_study_relationship_records():
         process_context=("laser powder bed fusion",),
     )
 
-    groups = ObjectiveCandidateService()._build_relationship_groups(
+    groups = objective_candidate_service._build_relationship_groups(
         (skim,),
     )
 
@@ -114,7 +107,7 @@ def test_grouping_uses_existing_domain_objects_without_reparsing():
         for index in range(6)
     )
 
-    groups = ObjectiveCandidateService()._build_relationship_groups(maps)
+    groups = objective_candidate_service._build_relationship_groups(maps)
 
     assert len(groups) == 1
     assert [item["relationship"]["relationship_id"] for item in groups[0]] == [
@@ -140,7 +133,7 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
             material_scope=("Ti-6Al-4V",),
         ),
     )
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
 
     expected_groups: list[tuple[str, ...]] | None = None
     for ordering in permutations(skims):
@@ -160,28 +153,43 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
 
 
 def test_material_context_conflicts_are_strict_but_unknown_labels_remain_reviewable():
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
 
-    assert service._context_collection_compatibility(
-        ("nickel foam",),
-        ("nickel alloy",),
-    ).value == "possible"
-    assert service._context_collection_compatibility(
-        ("titanium alloy",),
-        ("Ti-6Al-4V",),
-    ).value == "possible"
-    assert service._context_collection_compatibility(
-        ("titanium alloy",),
-        ("stainless steel",),
-    ).value == "possible"
-    assert service._context_collection_compatibility(
-        ("316L stainless steel",),
-        ("17-4PH stainless steel",),
-    ).value == "incompatible"
-    assert service._context_collection_compatibility(
-        ("316L stainless steel", "17-4PH stainless steel"),
-        ("316L stainless steel",),
-    ).value == "possible"
+    assert (
+        service._context_collection_compatibility(
+            ("nickel foam",),
+            ("nickel alloy",),
+        ).value
+        == "possible"
+    )
+    assert (
+        service._context_collection_compatibility(
+            ("titanium alloy",),
+            ("Ti-6Al-4V",),
+        ).value
+        == "possible"
+    )
+    assert (
+        service._context_collection_compatibility(
+            ("titanium alloy",),
+            ("stainless steel",),
+        ).value
+        == "possible"
+    )
+    assert (
+        service._context_collection_compatibility(
+            ("316L stainless steel",),
+            ("17-4PH stainless steel",),
+        ).value
+        == "incompatible"
+    )
+    assert (
+        service._context_collection_compatibility(
+            ("316L stainless steel", "17-4PH stainless steel"),
+            ("316L stainless steel",),
+        ).value
+        == "possible"
+    )
 
 
 def test_missing_material_attaches_to_one_unambiguous_known_material_group():
@@ -199,7 +207,7 @@ def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [("relationship-known", "relationship-missing")]
@@ -220,7 +228,7 @@ def test_broad_material_is_not_treated_as_missing_or_rewritten_to_one_grade():
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(paper_maps)
+        objective_candidate_service._build_relationship_groups(paper_maps)
     )
 
     assert groups == [("relationship-broad",), ("relationship-specific",)]
@@ -240,7 +248,7 @@ def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -272,7 +280,7 @@ def test_missing_material_does_not_inherit_an_ambiguous_multi_material_scope():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -302,7 +310,7 @@ def test_missing_confidence_does_not_erase_supported_objective_confidence():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -329,7 +337,7 @@ def test_all_missing_confidence_remains_zero_with_an_explicit_reason():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -357,7 +365,7 @@ def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -388,7 +396,7 @@ def test_microstructure_theme_group_is_rejected_until_an_observation_is_specific
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -417,7 +425,7 @@ def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -449,7 +457,7 @@ def test_material_grade_word_order_does_not_fragment_relationship_groups():
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -487,7 +495,7 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -516,7 +524,7 @@ def test_tial6v4_notation_keeps_different_intervention_sets_separate():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-ti64-notation",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -524,9 +532,7 @@ def test_tial6v4_notation_keeps_different_intervention_sets_separate():
     )
 
     assert len(facts.research_objectives) == 2
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {
+    assert {objective.variables for objective in facts.research_objectives} == {
         ("laser power", "scan rate"),
         ("laser power", "powder layer thickness"),
     }
@@ -547,7 +553,7 @@ def test_two_relationships_with_missing_material_context_share_one_group():
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [("relationship-a", "relationship-b")]
@@ -570,7 +576,7 @@ def test_explicit_axis_synonyms_remain_in_one_compatible_group():
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -612,7 +618,7 @@ def test_study_context_differences_do_not_fragment_objective_membership(
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [("relationship-left", "relationship-right")]
@@ -633,7 +639,7 @@ def test_single_and_joint_factor_relationships_share_a_theme_without_axis_rewrit
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -695,7 +701,7 @@ def test_distinct_thermal_processing_interventions_create_distinct_objectives():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-ti64-thermal-processing",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -703,20 +709,14 @@ def test_distinct_thermal_processing_interventions_create_distinct_objectives():
     )
 
     assert len(facts.research_objectives) == 4
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {
+    assert {objective.variables for objective in facts.research_objectives} == {
         ("annealing temperature",),
         ("solution temperature", "aging temperature"),
         ("HIP temperature",),
         ("base plate preheating temperature",),
     }
-    dispositions = {
-        item.relationship_id: item for item in facts.study_dispositions
-    }
-    assert {
-        item.status.value for item in dispositions.values()
-    } == {"promoted"}
+    dispositions = {item.relationship_id: item for item in facts.study_dispositions}
+    assert {item.status.value for item in dispositions.values()} == {"promoted"}
     assert skims[1].studies[0].relationships[0].varied_factors == (
         "solution temperature",
         "aging temperature",
@@ -761,7 +761,7 @@ def test_shared_topic_preserves_different_joint_interventions():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-ti64-cooling",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -769,9 +769,7 @@ def test_shared_topic_preserves_different_joint_interventions():
     )
 
     assert len(facts.research_objectives) == 2
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {
+    assert {objective.variables for objective in facts.research_objectives} == {
         ("cooling rate after HIP", "HIP temperature", "parent beta grain size"),
         ("HIP cooling rate", "post-processing route"),
     }
@@ -819,7 +817,7 @@ def test_hip_relations_keep_each_intervention_as_a_candidate():
         for position, factor in enumerate(paper_factors, start=1)
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-ti64-hip-topic",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -827,9 +825,9 @@ def test_hip_relations_keep_each_intervention_as_a_candidate():
     )
 
     assert len(facts.research_objectives) == len(paper_factors)
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {(factor,) for factor in paper_factors}
+    assert {objective.variables for objective in facts.research_objectives} == {
+        (factor,) for factor in paper_factors
+    }
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
     assert {
         skim.studies[0].relationships[0].varied_factors[0] for skim in skims
@@ -868,7 +866,7 @@ def test_laser_exposure_theme_does_not_rewrite_precise_axes():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-316l-topic-only",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -876,14 +874,13 @@ def test_laser_exposure_theme_does_not_rewrite_precise_axes():
     )
 
     assert len(facts.research_objectives) == 2
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {
+    assert {objective.variables for objective in facts.research_objectives} == {
         ("laser power",),
         ("volumetric energy density",),
     }
     assert all(
-        "direct comparability remains a later evidence decision" in str(objective.reason)
+        "direct comparability remains a later evidence decision"
+        in str(objective.reason)
         for objective in facts.research_objectives
     )
     assert skims[0].studies[0].relationships[0].varied_factors == ("laser power",)
@@ -931,7 +928,7 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-316l-joint-factor",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -939,19 +936,13 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
     )
 
     assert len(facts.research_objectives) == 2
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {
+    assert {objective.variables for objective in facts.research_objectives} == {
         ("laser power", "scan speed"),
         ("laser power",),
     }
-    dispositions = {
-        item.relationship_id: item for item in facts.study_dispositions
-    }
+    dispositions = {item.relationship_id: item for item in facts.study_dispositions}
     assert dispositions["relationship-cited"].status.value == "rejected"
-    assert "claim_scope=background" in str(
-        dispositions["relationship-cited"].reason
-    )
+    assert "claim_scope=background" in str(dispositions["relationship-cited"].reason)
     assert skims[0].studies[0].relationships[0].varied_factors == (
         "laser power",
         "scan speed",
@@ -968,7 +959,13 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
         factors=("laser power",),
         outcome="relative density",
     )
-    background_study = _paper_map(document_id='paper-accounting', relationship_id='relationship-rejected', factors=('scan speed',), outcome='surface roughness', claim_scope='background').studies[0]
+    background_study = _paper_map(
+        document_id="paper-accounting",
+        relationship_id="relationship-rejected",
+        factors=("scan speed",),
+        outcome="surface roughness",
+        claim_scope="background",
+    ).studies[0]
     skim = replace(
         current_work_skim,
         studies=(
@@ -1035,7 +1032,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
         logger="application.core.objectives.objective_candidate_service",
     )
 
-    ObjectiveCandidateService().discover_candidate_facts(
+    objective_candidate_service.discover_candidate_facts(
         "collection-accounting",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1103,7 +1100,7 @@ def test_shared_parent_theme_keeps_each_papers_complete_intervention():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-local-topic-bridges",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1111,9 +1108,7 @@ def test_shared_parent_theme_keeps_each_papers_complete_intervention():
     )
 
     assert len(facts.research_objectives) == 3
-    assert {
-        objective.variables for objective in facts.research_objectives
-    } == {
+    assert {objective.variables for objective in facts.research_objectives} == {
         ("cooling rate after HIP", "HIP temperature"),
         ("HIP cooling rate", "post-processing route"),
         ("heat treatment temperature", "scan strategy"),
@@ -1184,7 +1179,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-orientation",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1242,7 +1237,7 @@ def test_topic_only_pairs_are_classified_once_without_affecting_objectives():
             outcome="ultimate tensile strength",
         ),
     )
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-confirm-topic",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1271,7 +1266,7 @@ def test_different_measured_outcomes_never_share_an_objective_group():
     )
 
     groups = _group_relationship_ids(
-        ObjectiveCandidateService()._build_relationship_groups(skims)
+        objective_candidate_service._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -1314,7 +1309,7 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-focused-outcome",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1324,9 +1319,7 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
     assert len(facts.research_objectives) == 1
     assert facts.research_objectives[0].variables == ("annealing temperature",)
     assert facts.research_objectives[0].outcomes == ("yield strength",)
-    dispositions = {
-        item.relationship_id: item for item in facts.study_dispositions
-    }
+    dispositions = {item.relationship_id: item for item in facts.study_dispositions}
     assert dispositions["relationship-microstructure"].status.value == "rejected"
     assert dispositions["relationship-strength"].status.value == "promoted"
 
@@ -1366,7 +1359,7 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
     )
     classifier = MartensiteAliasClassifier()
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-outcome-alias",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1420,7 +1413,7 @@ def test_property_aliases_are_not_repeated_in_the_objective_outcomes():
             material_scope=("Ti-6Al-4V",),
         ),
     )
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-ductility-alias",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1453,7 +1446,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1490,7 +1483,7 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1501,11 +1494,16 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 
-@pytest.mark.parametrize("document_ids", [
-    ("paper-0", "paper-1", "paper-2"),
-    ("Paper-A", "paper-a", "paper-b"),
-])
-def test_candidate_build_derives_objective_identity_and_lineage_from_relationships(document_ids):
+@pytest.mark.parametrize(
+    "document_ids",
+    [
+        ("paper-0", "paper-1", "paper-2"),
+        ("Paper-A", "paper-a", "paper-b"),
+    ],
+)
+def test_candidate_build_derives_objective_identity_and_lineage_from_relationships(
+    document_ids,
+):
     skims = tuple(
         _paper_map(
             document_id=document_id,
@@ -1514,7 +1512,7 @@ def test_candidate_build_derives_objective_identity_and_lineage_from_relationshi
         for index, document_id in enumerate(document_ids)
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1550,7 +1548,7 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1583,7 +1581,7 @@ def test_compatible_relationship_group_builds_one_cross_paper_objective():
         )
         for index in range(3)
     )
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1614,7 +1612,7 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
     )
     extractor = _GroupingExtractor()
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1637,7 +1635,7 @@ def test_uncertain_claim_scope_cannot_seed_a_precise_candidate():
         claim_scope="uncertain",
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1690,7 +1688,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1751,7 +1749,7 @@ def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
     )
     extractor = SemanticAxisExtractor()
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1803,7 +1801,7 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
     )
     extractor = MaterialAxisExtractor()
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1842,7 +1840,7 @@ def test_objective_constraints_omit_the_relationship_axes():
         process_context=("LPBF", "heat treatment"),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1874,7 +1872,7 @@ def test_verified_aliases_are_consistent_through_context_and_canonicalization():
             outcome="ultimate tensile strength",
         ),
     )
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
 
     assert _group_relationship_ids(service._build_relationship_groups(skims)) == [
         ("relationship-scan", "relationship-scanning")
@@ -1915,7 +1913,7 @@ def test_verified_aliases_are_consistent_through_context_and_canonicalization():
 
 
 def test_axis_pair_selection_keeps_every_eligible_pair_and_complete_link_is_order_stable():
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
     crowded_candidates = {
         "material": [],
         "variable": [f"scan speed variant {index:03d}" for index in range(40)],
@@ -2019,7 +2017,7 @@ def test_cross_paper_topic_candidates_require_a_focused_shared_signal():
             process_context=("LPBF",),
         ),
     )
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
 
     supported = service._supported_cross_paper_axis_pairs(
         service._relationship_inventory(skims)
@@ -2052,7 +2050,7 @@ def test_shared_variable_does_not_propose_unrelated_outcome_pairs():
             outcome="microstructure",
         ),
     )
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
 
     supported = service._supported_cross_paper_axis_pairs(
         service._relationship_inventory(skims)
@@ -2086,7 +2084,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
     )
     extractor = RecordingExtractor()
 
-    ObjectiveCandidateService().discover_candidate_facts(
+    objective_candidate_service.discover_candidate_facts(
         "collection-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -2150,7 +2148,7 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
         ),
     )
 
-    service = ObjectiveCandidateService()
+    service = objective_candidate_service
     assert _group_relationship_ids(service._build_relationship_groups(skims)) == [
         (
             "relationship-temperature-density-1",
@@ -2218,7 +2216,7 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
             outcome="outcome b",
         ),
     )
-    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    inventory = objective_candidate_service._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
             collection_id="collection-test",
@@ -2258,7 +2256,7 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
         ),
     )
 
-    ranked = ObjectiveCandidateService._rank_objectives(
+    ranked = objective_candidate_service._rank_objectives(
         objectives,
         relationship_inventory=inventory,
     )
@@ -2290,7 +2288,7 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
             relationship_id="relationship-block-b",
         ),
     )
-    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    inventory = objective_candidate_service._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
             collection_id="collection-test",
@@ -2326,7 +2324,7 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
         ),
     )
 
-    ranked = ObjectiveCandidateService._rank_objectives(
+    ranked = objective_candidate_service._rank_objectives(
         objectives,
         relationship_inventory=inventory,
     )
@@ -2374,7 +2372,7 @@ def test_ranking_prefers_structured_results_from_independent_papers():
             relationship_id="relationship-concentrated-b",
         ),
     )
-    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    inventory = objective_candidate_service._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
             collection_id="collection-test",
@@ -2418,7 +2416,7 @@ def test_ranking_prefers_structured_results_from_independent_papers():
         ),
     )
 
-    ranked = ObjectiveCandidateService._rank_objectives(
+    ranked = objective_candidate_service._rank_objectives(
         objectives,
         relationship_inventory=inventory,
     )
@@ -2449,7 +2447,7 @@ def test_repeated_paper_relationships_share_one_candidate_lineage():
         ),
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-repeated",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -2471,7 +2469,7 @@ def test_relationship_with_same_variable_and_outcome_is_not_a_candidate():
         outcome="porosity",
     )
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-self-relation",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -2528,7 +2526,7 @@ def test_candidate_review_set_is_bounded_without_losing_relationship_accounting(
         )
     maps = tuple(paper_maps)
 
-    facts = ObjectiveCandidateService().discover_candidate_facts(
+    facts = objective_candidate_service.discover_candidate_facts(
         "collection-bounded-review",
         paper_maps=maps,
         document_inputs=_document_inputs(maps),

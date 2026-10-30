@@ -8,15 +8,14 @@ from uuid import uuid4
 
 from domain.chat.permissions import change_permission
 from domain.source import Collection
+from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 from repositories.collection_repository import (
-    CollectionRepository,
-    CollectionSummary,
+    PermissionRevisionConflict,
     StoredCollection,
     StoredDocument,
 )
-from repositories.object_store import ObjectStore
 
 
 def _now_iso() -> str:
@@ -43,159 +42,153 @@ def collection_details(record: StoredCollection) -> dict[str, Any]:
     }
 
 
-class CollectionService:
-    """Application operations over a collection and its current documents."""
+from repositories.collection_repository import CollectionRepo
 
-    def __init__(
-        self,
-        repository: CollectionRepository,
-        workspace: FileCollectionWorkspace,
-        object_store: ObjectStore | None = None,
-    ) -> None:
-        self.repository = repository
-        self.workspace = workspace
-        self.root_dir = self.workspace.root_dir
-        self.object_store = object_store or FileObjectStore(self.root_dir)
+workspace = FileCollectionWorkspace()
+root_dir = workspace.root_dir
+object_store = FileObjectStore(root_dir)
 
-    def write_figure_asset(
-        self,
-        collection_id: str,
-        document_id: str,
-        asset_path: str,
-        payload: bytes,
-        expected_sha256: str,
-    ) -> str:
-        suffix = PurePosixPath(str(asset_path)).suffix.lower()
-        storage_key = self._figure_storage_key(
-            collection_id,
-            document_id,
-            expected_sha256,
-            suffix,
+
+def write_figure_asset(
+    collection_id: str,
+    document_id: str,
+    asset_path: str,
+    payload: bytes,
+    expected_sha256: str,
+) -> str:
+    suffix = PurePosixPath(str(asset_path)).suffix.lower()
+    storage_key = _figure_storage_key(
+        collection_id,
+        document_id,
+        expected_sha256,
+        suffix,
+    )
+    object_store.write(storage_key, payload, expected_sha256)
+    return storage_key
+
+
+def read_figure_asset(
+    collection_id: str,
+    storage_key: str,
+    expected_sha256: str,
+) -> bytes:
+    key = PurePosixPath(str(storage_key))
+    if (
+        len(key.parts) != 6
+        or key.parts[:3]
+        != (
+            str(collection_id),
+            "objects",
+            "source",
         )
-        self.object_store.write(storage_key, payload, expected_sha256)
-        return storage_key
+        or key.parts[4] != "figures"
+    ):
+        raise ValueError("invalid figure storage key")
+    expected_key = _figure_storage_key(
+        collection_id,
+        key.parts[3],
+        expected_sha256,
+        key.suffix.lower(),
+    )
+    if str(key) != expected_key:
+        raise ValueError("invalid figure storage key")
+    try:
+        return object_store.read(storage_key, expected_sha256)
+    except ValueError as exc:
+        raise OSError("figure object verification failed") from exc
 
-    def read_figure_asset(
-        self,
-        collection_id: str,
-        storage_key: str,
-        expected_sha256: str,
-    ) -> bytes:
-        key = PurePosixPath(str(storage_key))
-        if (
-            len(key.parts) != 6
-            or key.parts[:3]
-            != (
-                str(collection_id),
-                "objects",
-                "source",
-            )
-            or key.parts[4] != "figures"
-        ):
-            raise ValueError("invalid figure storage key")
-        expected_key = self._figure_storage_key(
-            collection_id,
-            key.parts[3],
-            expected_sha256,
-            key.suffix.lower(),
+
+async def create_collection(
+    name: str,
+    description: str | None = None,
+    owner_user_id: str = "local-user",
+) -> dict:
+    collection_id = f"col_{uuid4().hex[:12]}"
+    now = _now_iso()
+    record = StoredCollection(
+        collection=Collection(
+            collection_id=collection_id,
+            owner_user_id=owner_user_id,
+            name=name,
+            description=description,
+            status="idle",
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+    workspace.create_collection_dirs(collection_id)
+    try:
+        await CollectionRepo.add_collection(record)
+    except Exception:
+        workspace.delete_collection_dir(collection_id)
+        raise
+    return collection_details(record)
+
+
+async def get_collection(collection_id: str) -> dict:
+    record = await CollectionRepo.read_collection(collection_id)
+    if record is None:
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
         )
-        if str(key) != expected_key:
-            raise ValueError("invalid figure storage key")
-        try:
-            return self.object_store.read(storage_key, expected_sha256)
-        except ValueError as exc:
-            raise OSError("figure object verification failed") from exc
+    return collection_details(record)
 
-    async def create_collection(
-        self,
-        name: str,
-        description: str | None = None,
-        owner_user_id: str = "local-user",
-    ) -> dict:
-        collection_id = f"col_{uuid4().hex[:12]}"
-        now = _now_iso()
-        record = StoredCollection(
-            collection=Collection(
-                collection_id=collection_id,
-                owner_user_id=owner_user_id,
-                name=name,
-                description=description,
-                status="idle",
-            ),
-            created_at=now,
-            updated_at=now,
+
+async def get_collection_for_user(collection_id: str, owner_user_id: str) -> dict:
+    record = await get_collection(collection_id)
+    if record["owner_user_id"] != owner_user_id:
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
         )
-        self.workspace.create_collection_dirs(collection_id)
-        try:
-            await self.repository.add_collection(record)
-        except Exception:
-            self.workspace.delete_collection_dir(collection_id)
-            raise
-        return collection_details(record)
+    return record
 
-    async def list_collections(
-        self, owner_user_id: str | None = None
-    ) -> tuple[CollectionSummary, ...]:
-        return await self.repository.list_collections(owner_user_id)
 
-    async def get_collection(self, collection_id: str) -> dict:
-        record = await self.repository.read_collection(collection_id)
-        if record is None:
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        return collection_details(record)
-
-    async def get_collection_for_user(
-        self, collection_id: str, owner_user_id: str
-    ) -> dict:
-        record = await self.get_collection(collection_id)
-        if record["owner_user_id"] != owner_user_id:
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        return record
-
-    async def collection_belongs_to_user(
-        self, collection_id: str, owner_user_id: str
-    ) -> bool:
-        return await self.repository.collection_belongs_to_user(
-            collection_id, owner_user_id
+async def get_agent_default_permission_for_user(
+    collection_id: str, owner_user_id: str
+) -> dict[str, Any]:
+    if not await CollectionRepo.collection_belongs_to_user(
+        collection_id,
+        owner_user_id,
+    ):
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
         )
+    permission = {
+        "mode": "confirm",
+        "actions": [],
+        "expires_at": None,
+        "revision": 0,
+    }
+    saved = await CollectionRepo.read_agent_default_permission(collection_id)
+    if saved:
+        permission.update(saved)
+    return permission
 
-    async def get_agent_default_permission_for_user(
-        self, collection_id: str, owner_user_id: str
-    ) -> dict[str, Any]:
-        if not await self.collection_belongs_to_user(collection_id, owner_user_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        permission = {
-            "mode": "confirm",
-            "actions": [],
-            "expires_at": None,
-            "revision": 0,
-        }
-        saved = await self.repository.read_agent_default_permission(collection_id)
-        if saved:
-            permission.update(saved)
-        return permission
 
-    async def set_agent_default_permission_for_user(
-        self,
-        collection_id: str,
-        owner_user_id: str,
-        *,
-        mode: str,
-        actions: list[str],
-        all_actions: bool = False,
-        expires_at: str | None,
-        expected_revision: int,
-    ) -> dict[str, Any]:
-        await self.get_collection_for_user(collection_id, owner_user_id)
-        current = {
-            "mode": "confirm",
-            "actions": [],
-            "expires_at": None,
-            "revision": 0,
-        }
-        saved = await self.repository.read_agent_default_permission(collection_id)
-        if saved:
-            current.update(saved)
+async def set_agent_default_permission_for_user(
+    collection_id: str,
+    owner_user_id: str,
+    *,
+    mode: str,
+    actions: list[str],
+    all_actions: bool = False,
+    expires_at: str | None,
+    expected_revision: int,
+) -> dict[str, Any]:
+    await get_collection_for_user(collection_id, owner_user_id)
+    current = {
+        "mode": "confirm",
+        "actions": [],
+        "expires_at": None,
+        "revision": 0,
+    }
+    saved = await CollectionRepo.read_agent_default_permission(collection_id)
+    if saved:
+        current.update(saved)
+    try:
         updated = change_permission(
             current,
             mode=mode,
@@ -204,160 +197,199 @@ class CollectionService:
             expires_at=expires_at,
             expected_revision=expected_revision,
         )
-        if not await self.repository.set_agent_default_permission(
+    except ValueError as exc:
+        raise ResourceConflictException(
+            str(exc),
+            data={"code": str(exc), "collection_id": collection_id},
+        ) from exc
+    try:
+        saved = await CollectionRepo.set_agent_default_permission(
             collection_id,
             updated,
             expected_revision=current["revision"],
-        ):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        return updated
+        )
+    except PermissionRevisionConflict as exc:
+        raise ResourceConflictException(
+            "Permission changed. Reload before saving.",
+            data={
+                "code": "permission_revision_conflict",
+                "collection_id": collection_id,
+            },
+        ) from exc
+    if not saved:
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
+        )
+    return updated
 
-    async def get_document(
-        self,
-        collection_id: str,
-        document_id: str,
-    ) -> StoredDocument:
-        record = await self.repository.read_document(collection_id, document_id)
-        if record is None:
-            raise FileNotFoundError(
-                f"document not found: {collection_id}/{document_id}"
-            )
-        return record
 
-    async def update_document_preparation(
-        self,
-        collection_id: str,
-        document_id: str,
-        *,
-        status: str,
-        preparation_fingerprint: str | None = None,
-        source_fingerprint: str | None = None,
-        profile_fingerprint: str | None = None,
-        parser_version: str | None = None,
-        document_analysis_version: str | None = None,
-    ) -> StoredDocument:
-        current = await self.get_document(collection_id, document_id)
-        document = current.document
-        updated = replace(
-            current,
-            updated_at=_now_iso(),
-            document=replace(
-                document,
-                status=str(status),
-                preparation_fingerprint=(
-                    preparation_fingerprint
-                    if preparation_fingerprint is not None
-                    else document.preparation_fingerprint
-                ),
-                source_fingerprint=(
-                    source_fingerprint
-                    if source_fingerprint is not None
-                    else document.source_fingerprint
-                ),
-                profile_fingerprint=(
-                    profile_fingerprint
-                    if profile_fingerprint is not None
-                    else document.profile_fingerprint
-                ),
-                parser_version=(
-                    parser_version
-                    if parser_version is not None
-                    else document.parser_version
-                ),
-                document_analysis_version=(
-                    document_analysis_version
-                    if document_analysis_version is not None
-                    else document.document_analysis_version
-                ),
+async def get_document(
+    collection_id: str,
+    document_id: str,
+) -> StoredDocument:
+    record = await CollectionRepo.read_document(collection_id, document_id)
+    if record is None:
+        raise ResourceNotFoundException(
+            f"document not found: {collection_id}/{document_id}",
+            data={
+                "code": "document_not_found",
+                "collection_id": collection_id,
+                "document_id": document_id,
+            },
+        )
+    return record
+
+
+async def update_document_preparation(
+    collection_id: str,
+    document_id: str,
+    *,
+    status: str,
+    preparation_fingerprint: str | None = None,
+    source_fingerprint: str | None = None,
+    profile_fingerprint: str | None = None,
+    parser_version: str | None = None,
+    document_analysis_version: str | None = None,
+) -> StoredDocument:
+    current = await get_document(collection_id, document_id)
+    document = current.document
+    updated = replace(
+        current,
+        updated_at=_now_iso(),
+        document=replace(
+            document,
+            status=str(status),
+            preparation_fingerprint=(
+                preparation_fingerprint
+                if preparation_fingerprint is not None
+                else document.preparation_fingerprint
             ),
+            source_fingerprint=(
+                source_fingerprint
+                if source_fingerprint is not None
+                else document.source_fingerprint
+            ),
+            profile_fingerprint=(
+                profile_fingerprint
+                if profile_fingerprint is not None
+                else document.profile_fingerprint
+            ),
+            parser_version=(
+                parser_version
+                if parser_version is not None
+                else document.parser_version
+            ),
+            document_analysis_version=(
+                document_analysis_version
+                if document_analysis_version is not None
+                else document.document_analysis_version
+            ),
+        ),
+    )
+    if not await CollectionRepo.update_document(updated):
+        raise ResourceNotFoundException(
+            f"document not found: {collection_id}/{document_id}",
+            data={
+                "code": "document_not_found",
+                "collection_id": collection_id,
+                "document_id": document_id,
+            },
         )
-        if not await self.repository.update_document(updated):
-            raise FileNotFoundError(
-                f"document not found: {collection_id}/{document_id}"
-            )
-        return updated
+    return updated
 
-    async def update_collection(self, collection_id: str, **fields) -> dict:
-        current = await self.repository.read_collection(collection_id)
-        if current is None:
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        allowed_fields = {
-            key: value
-            for key, value in fields.items()
-            if key in {"name", "description", "status"}
-        }
-        normalized = replace(
-            current,
-            collection=replace(current.collection, **allowed_fields),
-            updated_at=_now_iso(),
+
+async def update_collection(collection_id: str, **fields) -> dict:
+    current = await CollectionRepo.read_collection(collection_id)
+    if current is None:
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
         )
-        if not await self.repository.update_collection(normalized):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        return await self.get_collection(collection_id)
+    allowed_fields = {
+        key: value
+        for key, value in fields.items()
+        if key in {"name", "description", "status"}
+    }
+    normalized = replace(
+        current,
+        collection=replace(current.collection, **allowed_fields),
+        updated_at=_now_iso(),
+    )
+    if not await CollectionRepo.update_collection(normalized):
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
+        )
+    return await get_collection(collection_id)
 
-    async def delete_collection(self, collection_id: str) -> dict:
-        paths = self.workspace.get_paths(collection_id)
-        target_dir = paths.collection_dir
-        collection = await self.repository.read_collection(collection_id)
-        if collection is None:
-            raise FileNotFoundError(f"collection not found: {collection_id}")
 
-        resolved_root = self.root_dir.resolve()
-        resolved_target = target_dir.resolve()
-        try:
-            resolved_target.relative_to(resolved_root)
-        except ValueError as exc:
-            raise ValueError("invalid collection path") from exc
-        if target_dir.is_symlink():
-            raise ValueError("collection path cannot be a symlink")
+async def delete_collection(collection_id: str) -> dict:
+    paths = workspace.get_paths(collection_id)
+    target_dir = paths.collection_dir
+    collection = await CollectionRepo.read_collection(collection_id)
+    if collection is None:
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
+        )
 
-        for record in collection.documents:
-            storage_key = record.storage_key
-            stored_filename = record.stored_filename
-            if (
-                not storage_key
-                or not stored_filename
-                or storage_key
-                != self._input_storage_key(collection_id, stored_filename)
-            ):
-                raise ValueError("invalid collection object key")
-        if not await self.repository.delete_collection(collection_id):
-            raise FileNotFoundError(f"collection not found: {collection_id}")
-        self.workspace.delete_collection_dir(collection_id)
-        return {
-            "collection_id": collection_id,
-            "deleted_at": _now_iso(),
-        }
+    resolved_root = root_dir.resolve()
+    resolved_target = target_dir.resolve()
+    try:
+        resolved_target.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("invalid collection path") from exc
+    if target_dir.is_symlink():
+        raise ValueError("collection path cannot be a symlink")
 
-    async def delete_collection_for_user(
-        self, collection_id: str, owner_user_id: str
-    ) -> dict:
-        await self.get_collection_for_user(collection_id, owner_user_id)
-        return await self.delete_collection(collection_id)
-
-    def _input_storage_key(self, collection_id: str, stored_filename: str) -> str:
-        return f"{collection_id}/input/{stored_filename}"
-
-    @staticmethod
-    def _figure_storage_key(
-        collection_id: str,
-        document_id: str,
-        sha256: str,
-        suffix: str,
-    ) -> str:
-        collection_key = str(collection_id).strip()
-        document_key = str(document_id).strip()
-        digest = str(sha256).strip()
-        extension = str(suffix).strip().lower()
+    for record in collection.documents:
+        storage_key = record.storage_key
+        stored_filename = record.stored_filename
         if (
-            not collection_key
-            or not document_key
-            or any(character in collection_key + document_key for character in "/\\")
-            or not extension.startswith(".")
-            or not extension[1:].isalnum()
-            or len(extension) > 10
+            not storage_key
+            or not stored_filename
+            or storage_key != _input_storage_key(collection_id, stored_filename)
         ):
-            raise ValueError("invalid figure storage key")
-        return (
-            f"{collection_key}/objects/source/{document_key}/figures/{digest}{extension}"
+            raise ValueError("invalid collection object key")
+    if not await CollectionRepo.delete_collection(collection_id):
+        raise ResourceNotFoundException(
+            f"collection not found: {collection_id}",
+            data={"code": "collection_not_found", "collection_id": collection_id},
         )
+    workspace.delete_collection_dir(collection_id)
+    return {
+        "collection_id": collection_id,
+        "deleted_at": _now_iso(),
+    }
+
+
+async def delete_collection_for_user(collection_id: str, owner_user_id: str) -> dict:
+    await get_collection_for_user(collection_id, owner_user_id)
+    return await delete_collection(collection_id)
+
+
+def _input_storage_key(collection_id: str, stored_filename: str) -> str:
+    return f"{collection_id}/input/{stored_filename}"
+
+
+def _figure_storage_key(
+    collection_id: str,
+    document_id: str,
+    sha256: str,
+    suffix: str,
+) -> str:
+    collection_key = str(collection_id).strip()
+    document_key = str(document_id).strip()
+    digest = str(sha256).strip()
+    extension = str(suffix).strip().lower()
+    if (
+        not collection_key
+        or not document_key
+        or any(character in collection_key + document_key for character in "/\\")
+        or not extension.startswith(".")
+        or not extension[1:].isalnum()
+        or len(extension) > 10
+    ):
+        raise ValueError("invalid figure storage key")
+    return f"{collection_key}/objects/source/{document_key}/figures/{digest}{extension}"

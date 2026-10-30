@@ -1,29 +1,23 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    PaperResearchSourceRef,
-    build_paper_research_scope,
-    build_paper_research_relationship,
-    build_paper_research_signal,
-)
-
-from tests.support.source_artifacts import build_source_documents
-
-
 import json
 from pathlib import Path
 from typing import Any
 
+from application.core.objectives import paper_research_map_service
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
-from application.core.objectives.paper_research_map_service import (
-    PaperResearchMapService,
-)
 from application.core.objectives.paper_map_aggregation import PaperMapAggregator
 from domain.core import PaperResearchMap
+from domain.core.research_objective import (
+    PaperResearchSourceRef,
+    build_paper_research_relationship,
+    build_paper_research_scope,
+    build_paper_research_signal,
+)
 from domain.source import build_source_document_tree
-
+from tests.support.source_artifacts import build_source_documents
 
 FIXTURE_PATH = (
     Path(__file__).parents[2]
@@ -113,7 +107,7 @@ class _MultiAxisExtractor:
                 signals.append(
                     {
                         "signal_type": "outcome",
-                    "variable_role": "not_applicable",
+                        "variable_role": "not_applicable",
                         "label": outcome,
                         "source_unit_ids": source_ids(marker),
                         "confidence": 0.9,
@@ -225,7 +219,7 @@ def test_tc4_multi_axis_map_reads_results_after_a_visible_relationship():
     artifacts, tree = _artifacts_for_scenario(scenario)
     extractor = _MultiAxisExtractor()
 
-    paper_map = PaperResearchMapService().build_document_paper_map(
+    paper_map = paper_research_map_service.build_document_paper_map(
         "collection-test",
         document=artifacts[0],
         profile=None,
@@ -272,7 +266,7 @@ def test_tc4_paper_map_caps_expansion_sources_and_keeps_round_ids_distinct():
     artifacts, tree = _artifacts_for_scenario(scenario)
     extractor = _BoundedExpansionExtractor()
 
-    PaperResearchMapService().build_document_paper_map(
+    paper_research_map_service.build_document_paper_map(
         "collection-test",
         document=artifacts[0],
         profile=None,
@@ -326,7 +320,7 @@ def test_tc4_expansion_prioritizes_specific_metrics_for_a_broad_outcome():
     artifacts, tree = _artifacts_for_scenario(scenario)
     extractor = _MultiAxisExtractor()
 
-    paper_map = PaperResearchMapService().build_document_paper_map(
+    paper_map = paper_research_map_service.build_document_paper_map(
         "collection-test",
         document=artifacts[0],
         profile=None,
@@ -355,17 +349,14 @@ def test_tc4_concrete_relationship_resolves_same_source_broad_signals():
             {
                 "source_ref": "abstract",
                 "section": "Abstract",
-                "text": (
-                    "VARIABLE_SIGNAL BROAD_MECHANICAL_SIGNAL "
-                    "AXIS_DUCTILITY"
-                ),
+                "text": ("VARIABLE_SIGNAL BROAD_MECHANICAL_SIGNAL " "AXIS_DUCTILITY"),
             }
         ],
     }
     artifacts, tree = _artifacts_for_scenario(scenario)
     extractor = _MultiAxisExtractor()
 
-    paper_map = PaperResearchMapService().build_document_paper_map(
+    paper_map = paper_research_map_service.build_document_paper_map(
         "collection-test",
         document=artifacts[0],
         profile=None,
@@ -374,8 +365,7 @@ def test_tc4_concrete_relationship_resolves_same_source_broad_signals():
     )
 
     assert not any(
-        signal.signal_type == "outcome"
-        for signal in paper_map.unresolved_signals
+        signal.signal_type == "outcome" for signal in paper_map.unresolved_signals
     )
     assert paper_map.map_status == "sufficient"
 
@@ -406,7 +396,7 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
     artifacts, tree = _artifacts_for_scenario(scenario)
     extractor = _MultiAxisExtractor()
 
-    paper_map = PaperResearchMapService().build_document_paper_map(
+    paper_map = paper_research_map_service.build_document_paper_map(
         "collection-test",
         document=artifacts[0],
         profile=None,
@@ -423,8 +413,7 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
     assert "results-31" in expansion_source_refs
     assert len(expansion_source_refs - {"abstract"}) <= 8
     assert not any(
-        signal.signal_type == "outcome"
-        for signal in paper_map.unresolved_signals
+        signal.signal_type == "outcome" for signal in paper_map.unresolved_signals
     )
     assert paper_map.map_status == "sufficient"
 
@@ -480,9 +469,7 @@ def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery
         ),
     )
 
-    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
-        paper_map
-    )
+    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(paper_map)
     assessment = PaperMapAggregator().assess(
         filtered,
         signals=filtered.unresolved_signals,
@@ -546,9 +533,7 @@ def test_tc4_broad_family_signal_matches_expanded_specific_relationship():
         ),
     )
 
-    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
-        paper_map
-    )
+    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(paper_map)
     assert filtered.unresolved_signals == ()
 
 
@@ -603,9 +588,7 @@ def test_tc4_microstructure_family_signal_matches_observed_martensite_axis():
         ),
     )
 
-    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
-        paper_map
-    )
+    filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(paper_map)
     assert filtered.unresolved_signals == ()
 
 
@@ -640,7 +623,7 @@ def test_tc4_later_expansion_reads_methods_after_finding_a_specific_outcome():
     artifacts, tree = _artifacts_for_scenario(scenario)
     extractor = _MultiAxisExtractor()
 
-    PaperResearchMapService().build_document_paper_map(
+    paper_research_map_service.build_document_paper_map(
         "collection-test",
         document=artifacts[0],
         profile=None,

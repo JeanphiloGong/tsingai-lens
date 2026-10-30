@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from infra.persistence import database
-from tests.support.postgres import seed_collection
-
 import pytest
-
-from application.source.reference_extraction_service import (
-    SourceReferenceExtractionService,
+from application.source import (
+    reference_extraction_service as source_reference_extraction_service,
 )
-from application.source.reference_workflow_service import (
-    SourceReferenceWorkflowService,
-)
+from application.source import reference_workflow_service
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
+from exceptions import ResourceConflictException, ResourceNotFoundException
+from infra.persistence import database
 from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio
 
@@ -24,11 +21,17 @@ def anyio_backend() -> str:
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
-        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document.document_id,))
+        await seed_collection(
+            database.AsyncSessionLocal,
+            collection_id,
+            document_ids=(document.document_id,),
+        )
         await repository.replace_document(collection_id, document)
 
 
-async def test_source_reference_workflow_builds_and_persists_refs(tmp_path, *, postgres_session_factory):
+async def test_source_reference_workflow_builds_and_persists_refs(
+    tmp_path, *, postgres_session_factory
+):
     repository = SourceArtifactRepository()
     artifacts = assemble_source_documents(
         documents=(
@@ -66,13 +69,12 @@ async def test_source_reference_workflow_builds_and_persists_refs(tmp_path, *, p
     await _store_source_documents(repository, "col_refs", artifacts)
     await repository.replace_document_references(
         "doc-1",
-        SourceReferenceExtractionService().extract(artifacts),
+        source_reference_extraction_service.extract(artifacts),
     )
-    service = SourceReferenceWorkflowService(
-        source_artifact_repository=repository,
-    )
+    reference_workflow_service.SourceArtifactRepo = repository
+    service = reference_workflow_service
 
-    result = await service.build_collection_references("col_refs")
+    result = await service.build_collection_references("col_refs", user_id="user-1")
 
     assert result.to_summary() == {
         "collection_id": "col_refs",
@@ -81,17 +83,32 @@ async def test_source_reference_workflow_builds_and_persists_refs(tmp_path, *, p
         "resolution_count": 0,
         "candidate_count": 1,
     }
-    restored = await service.read_collection_references("col_refs")
+    restored = await service.read_collection_references("col_refs", user_id="user-1")
     assert restored.references.entries[0].reference_id == "ref-doc-1-0001"
     assert restored.references.mentions[0].reference_id == "ref-doc-1-0001"
     assert restored.references.candidates[0].mention_count == 1
 
 
-async def test_source_reference_workflow_requires_source_artifacts(tmp_path, *, postgres_session_factory):
+async def test_source_reference_workflow_requires_source_artifacts(
+    tmp_path, *, postgres_session_factory
+):
     repository = SourceArtifactRepository()
-    service = SourceReferenceWorkflowService(
-        source_artifact_repository=repository,
-    )
+    reference_workflow_service.SourceArtifactRepo = repository
+    service = reference_workflow_service
 
-    with pytest.raises(FileNotFoundError, match="source artifacts not ready"):
-        await service.build_collection_references("missing_collection")
+    await seed_collection(database.AsyncSessionLocal, "empty_collection")
+    with pytest.raises(ResourceConflictException) as rejected:
+        await service.build_collection_references("empty_collection", user_id="user-1")
+    assert rejected.value.data["code"] == "source_artifacts_not_ready"
+
+
+async def test_source_reference_workflow_rejects_missing_and_foreign_collections(
+    postgres_session_factory,
+):
+    await seed_collection(database.AsyncSessionLocal, "foreign_collection")
+    for collection_id in ("missing_collection", "foreign_collection"):
+        with pytest.raises(ResourceNotFoundException):
+            await reference_workflow_service.build_collection_references(
+                collection_id,
+                user_id="other-user",
+            )

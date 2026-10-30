@@ -73,13 +73,10 @@ function renderReader() {
 	});
 }
 
-function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
-	return new Response(JSON.stringify(body), {
-		status,
-		statusText,
-		headers: {
-			'Content-Type': 'application/json'
-		}
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
+		status: 200,
+		headers: { 'Content-Type': 'application/json' }
 	});
 }
 
@@ -132,6 +129,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			const rawUrl =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 			const url = new URL(rawUrl, 'http://localhost');
+			if (url.pathname.endsWith('/source')) return new Response('%PDF-1.7 mock', {
+				headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline' }
+			});
 
 			if (url.pathname === '/api/v1/collections/col_123/documents/doc_1/content') {
 				return jsonResponse({
@@ -375,7 +375,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 				});
 			}
 
-			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
+			return jsonResponse({}, 200201, 'collection not found: col_123');
 		});
 	});
 
@@ -485,8 +485,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 			if (!url.includes('/doc_2/')) return originalFetch(input, init);
 			const response = await originalFetch(url.replace('/doc_2/', '/doc_1/'), init);
+			if (!response.headers.get('Content-Type')?.includes('application/json')) return response;
 			const body = await response.json();
-			return jsonResponse({ ...body, document_id: 'doc_2', title: 'Paper B' });
+			return jsonResponse({ ...body.data, document_id: 'doc_2', title: 'Paper B' });
 		});
 		const first = document.body.appendChild(document.createElement('div'));
 		const second = document.body.appendChild(document.createElement('div'));

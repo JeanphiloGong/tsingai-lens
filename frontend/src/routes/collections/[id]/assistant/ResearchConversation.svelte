@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
+	import { errorMessage, isApiErrorCode } from '../../../_shared/api';
 	import { authState } from '../../../_shared/auth';
 	import { collections } from '../../../_shared/collections';
 	import {
@@ -604,7 +604,7 @@
 					if (nextSession.collection_id !== activeCollectionId) nextSession = null;
 				} catch (err) {
 					if (!isCurrentSession(generation, activeCollectionId)) return;
-					if (!isHttpStatusError(err, 404)) throw err;
+					if (!isApiErrorCode(err, 200201)) throw err;
 					nextSession = null;
 					clearStoredSessionId();
 					writeHistory(readHistory().filter((item) => item.session_id !== storedSessionId));

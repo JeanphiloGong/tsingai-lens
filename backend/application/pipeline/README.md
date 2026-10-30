@@ -4,7 +4,7 @@ The maintained preparation workflow is owned directly by
 `application/source/document_preparation_service.py`, and Objective execution is
 owned by `application/core/objectives/analysis_service.py`.
 
-`PipelineRunService` owns admission, node transitions, progress, terminal failure,
+`pipeline_run_service` owns admission, node transitions, progress, terminal failure,
 retry lineage, and restart recovery for those executions. It constructs execution
 records directly from the fixed node graphs defined in the service. Tests check
 the preparation and discovery dependencies; creating a run does not revalidate

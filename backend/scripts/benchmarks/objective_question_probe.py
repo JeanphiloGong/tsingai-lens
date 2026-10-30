@@ -10,7 +10,6 @@ Mechanical checks are NOT expert scientific acceptance or full Agent E2E.
 
 from __future__ import annotations
 
-
 import argparse
 import json
 import subprocess
@@ -30,30 +29,29 @@ from pydantic import ValidationError
 
 ensure_backend_root_on_path(Path(__file__).resolve().parents[2])
 
-from domain.core.research_objective import (
-    PaperSourceUnitCoverageStatus,
-    PaperResearchMap,
-    PaperResearchSourceRef,
-    ReviewKnowledgeItem,
-    ReviewSynthesisMap,
-    PaperResearchRelationship,
-    PaperResearchScope,
-    PaperResearchSignal,
-    PaperSourceUnitCoverage,
-    build_paper_research_scope_id,
-    build_paper_research_relationship,
-    build_paper_research_signal,
-)
-
+from application.core.objectives import objective_candidate_service
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_candidate_service import (
     CandidateQuestionBatch,
-    ObjectiveCandidateService,
 )
 from domain.core import PreparedDocumentInput
+from domain.core.research_objective import (
+    PaperResearchMap,
+    PaperResearchRelationship,
+    PaperResearchScope,
+    PaperResearchSignal,
+    PaperResearchSourceRef,
+    PaperSourceUnitCoverage,
+    PaperSourceUnitCoverageStatus,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
+    build_paper_research_relationship,
+    build_paper_research_scope_id,
+    build_paper_research_signal,
+)
 from infra.llm.usage import capture_llm_usage
 
 
@@ -362,7 +360,7 @@ def run_baseline(
     maps = paper_maps
     started = perf_counter()
     with capture_llm_usage() as usage:
-        facts = ObjectiveCandidateService().discover_candidate_facts(
+        facts = objective_candidate_service.discover_candidate_facts(
             "probe",
             paper_maps=maps,
             document_inputs=tuple(
@@ -510,7 +508,7 @@ def run_proposal(
     record = {"input_sha256": payload_hash(scenario)}
     with capture_llm_usage() as usage:
         try:
-            result = ObjectiveCandidateService().propose_candidate_questions(
+            result = objective_candidate_service.propose_candidate_questions(
                 "probe",
                 paper_maps=paper_maps,
                 source_texts={

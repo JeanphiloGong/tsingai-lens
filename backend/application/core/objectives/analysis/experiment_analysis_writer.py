@@ -15,10 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from application.core.objectives.analysis.experiment_finding_synthesis import (
-    ExperimentFindingSynthesisService,
+from application.core.objectives.analysis import (
+    experiment_finding_synthesis as experiment_finding_synthesis_service,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraft,
@@ -30,15 +28,13 @@ from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import ExperimentComparison, PaperExperimentRevision
 from domain.core.research_objective import ResearchObjective
-from repositories.experiment_analysis_repository import (
-    ExperimentAnalysisRepository,
-    ExperimentAnalysisWrite,
-)
+from repositories.experiment_analysis_repository import ExperimentAnalysisWrite
 from repositories.objective_repository import ObjectiveAnalysis
 from repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @dataclass(frozen=True)
@@ -131,10 +127,7 @@ def _identity_value_without_transient_fields(value: Any) -> Any:
             if str(key).strip().casefold() not in _TRANSIENT_IDENTITY_FIELDS
         }
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [
-            _identity_value_without_transient_fields(item)
-            for item in value
-        ]
+        return [_identity_value_without_transient_fields(item) for item in value]
     return value
 
 
@@ -151,9 +144,7 @@ def _physical_split_discriminator(payload: Mapping[str, Any]) -> dict[str, Any] 
     if scope_kind not in _PHYSICAL_SPLIT_KINDS:
         return None
     return {
-        "split_reason": str(payload.get("split_reason") or "")
-        .strip()
-        .casefold(),
+        "split_reason": str(payload.get("split_reason") or "").strip().casefold(),
         "split_evidence": _canonical_identity_value(
             _identity_value_without_transient_fields(
                 payload.get("split_evidence") or ()
@@ -162,7 +153,9 @@ def _physical_split_discriminator(payload: Mapping[str, Any]) -> dict[str, Any] 
     }
 
 
-def _identity_payload(*, document_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+def _identity_payload(
+    *, document_id: str, payload: Mapping[str, Any]
+) -> dict[str, Any]:
     """Build a stable physical-study identity without Objective/source coordinates."""
 
     variants = payload.get("experimental_variants") or payload.get("variants") or ()
@@ -192,7 +185,9 @@ def _identity_payload(*, document_id: str, payload: Mapping[str, Any]) -> dict[s
         if isinstance(item, Mapping)
     ]
     if not physical_variants:
-        raise ValueError("cannot allocate an experiment identity without physical variants")
+        raise ValueError(
+            "cannot allocate an experiment identity without physical variants"
+        )
     identity = {
         "document_id": document_id,
         "physical_variants": sorted(
@@ -340,11 +335,7 @@ def _collect_draft_source_labels(value: Any, labels: set[str]) -> None:
                 "test_binding_source_labels",
             }:
                 values = nested if isinstance(nested, (list, tuple, set)) else (nested,)
-                labels.update(
-                    str(item).strip()
-                    for item in values
-                    if str(item).strip()
-                )
+                labels.update(str(item).strip() for item in values if str(item).strip())
             else:
                 _collect_draft_source_labels(nested, labels)
     elif isinstance(value, (list, tuple, set, frozenset)):
@@ -407,7 +398,9 @@ def _variant_labels_from_revision(revision: PaperExperimentRevision) -> set[str]
     }
 
 
-def _scope_metadata_from_revision(revision: PaperExperimentRevision) -> Mapping[str, Any]:
+def _scope_metadata_from_revision(
+    revision: PaperExperimentRevision,
+) -> Mapping[str, Any]:
     for issue in revision.unresolved_issues:
         if not isinstance(issue, Mapping):
             continue
@@ -449,8 +442,7 @@ def _is_reusable_revision_candidate(
     if not current_variants or not previous_variants:
         return False
     if not (
-        current_variants <= previous_variants
-        or previous_variants <= current_variants
+        current_variants <= previous_variants or previous_variants <= current_variants
     ):
         return False
     current_design = str(payload.get("design_type") or "unknown").strip().casefold()
@@ -483,10 +475,7 @@ def _is_reusable_revision_candidate(
         return False
     return bool(
         current_sources & previous_sources
-        and (
-            current_sources <= previous_sources
-            or previous_sources <= current_sources
-        )
+        and (current_sources <= previous_sources or previous_sources <= current_sources)
     )
 
 
@@ -607,7 +596,12 @@ def _finalize_revision(
             if key in measurements
         ]
         numbers = [
-            (_numeric_value(item.value if item.value is not None else item.result_text), item.unit)
+            (
+                _numeric_value(
+                    item.value if item.value is not None else item.result_text
+                ),
+                item.unit,
+            )
             for item in (*baseline, *target)
         ]
         units = {str(unit or "").strip().casefold() for _, unit in numbers}
@@ -644,9 +638,7 @@ def _finalize_revision(
         direction = (
             "increase"
             if target_value > baseline_value
-            else "decrease"
-            if target_value < baseline_value
-            else "no_change"
+            else "decrease" if target_value < baseline_value else "no_change"
         )
         factors = tuple(comparison.changed_variables)
         attribution = "joint_effect" if len(factors) > 1 else "association_only"
@@ -655,7 +647,9 @@ def _finalize_revision(
                 comparison,
                 direction=direction,
                 status="ready",
-                relation_status="direct" if comparison.basis == "reported" else "derived",
+                relation_status=(
+                    "direct" if comparison.basis == "reported" else "derived"
+                ),
                 attribution_scope=attribution,
                 reasons=tuple(dict.fromkeys(reasons)),
             )
@@ -716,361 +710,60 @@ def _build_selection(
     )
 
 
-class ExperimentAnalysisWriter:
-    """Prepare the complete automatic graph before its single durable write."""
+from repositories.experiment_analysis_repository import ExperimentAnalysisRepo
+from repositories.paper_experiment_repository import PaperExperimentRepo
 
-    def __init__(
-        self,
-        *,
-        paper_experiment_repository: PaperExperimentRepository,
-        experiment_analysis_repository: ExperimentAnalysisRepository,
-        finding_synthesis_service: ExperimentFindingSynthesisService | None = None,
-    ) -> None:
-        self.paper_experiment_repository = paper_experiment_repository
-        self.experiment_analysis_repository = experiment_analysis_repository
-        self.finding_synthesis_service = (
-            finding_synthesis_service or ExperimentFindingSynthesisService()
-        )
 
-    async def write_experiment_analysis(
-        self,
-        *,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis: ObjectiveAnalysis,
-        experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
-        partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput] = (),
-        reused_revisions: Sequence[PaperExperimentRevision] = (),
-        allow_finding: bool = True,
-        created_by: str | None = None,
-        db: AsyncSession,
-    ) -> ExperimentAnalysisWriteResult:
-        """Prepare and commit revisions, selections, groups, and Findings."""
+async def write_experiment_analysis(
+    *,
+    collection_id: str,
+    objective: ResearchObjective,
+    analysis: ObjectiveAnalysis,
+    experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
+    partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput] = (),
+    reused_revisions: Sequence[PaperExperimentRevision] = (),
+    allow_finding: bool = True,
+    created_by: str | None = None,
+    db: AsyncSession,
+) -> ExperimentAnalysisWriteResult:
+    """Prepare and commit revisions, selections, groups, and Findings."""
 
-        prepared = await self._prepare_experiment_selections(
-            collection_id=collection_id,
-            objective=objective,
-            analysis=analysis,
-            experiment_outputs=experiment_outputs,
-            partial_experiment_outputs=partial_experiment_outputs,
-            include_selections=allow_finding,
-            db=db,
-        )
-        reused_selections: list[ObjectiveExperimentSelection] = []
-        seen_documents = {item.document_id for item in prepared.revisions}
-        fingerprints = {
-            item.document_id: item.preparation_fingerprint for item in analysis.document_inputs
-        }
-        seen_experiments: set[str] = set()
-        for revision in reused_revisions:
-            if (
-                revision.document_id in seen_documents
-                or revision.experiment_id in seen_experiments
-                or fingerprints.get(revision.document_id) != revision.source_fingerprint
-                or revision.identity_status == "unknown"
-            ):
-                raise ValueError("reused experiment does not match the analysis read scope")
-            stored_revision = await self.paper_experiment_repository.read_revision(
-                db, revision.experiment_id, revision.experiment_version
-            )
-            if stored_revision is None or stored_revision.archived_at is not None or stored_revision.revision != revision:
-                raise ValueError("reused experiment is not an available fixed revision")
-            seen_experiments.add(revision.experiment_id)
-            if allow_finding:
-                reused_selections.extend(
-                    _build_selection(
-                        collection_id=collection_id, objective=objective,
-                        analysis_version=analysis.analysis_version,
-                        revision=revision, selection_slice=selection_slice,
-                    )
-                    for selection_slice in _selection_slices(revision, objective)
-                )
-        prepared = replace(
-            prepared,
-            revisions=(*prepared.revisions, *reused_revisions),
-            selections=(*prepared.selections, *reused_selections),
-        )
-        if allow_finding and prepared.selections:
-            synthesis = self.finding_synthesis_service.synthesize(
-                collection_id=collection_id,
-                objective=objective,
-                analysis_version=analysis.analysis_version,
-                revisions=prepared.revisions,
-                selections=prepared.selections,
-            )
-        else:
-            synthesis = _EmptySynthesis()
-        stored = await self.experiment_analysis_repository.write_graph(
-            db,
-            ExperimentAnalysisWrite(
-                collection_id=collection_id,
-                objective_id=objective.objective_id,
-                analysis_version=analysis.analysis_version,
-                revisions=prepared.revisions,
-                selections=prepared.selections,
-                groups=synthesis.groups,
-                findings=synthesis.findings,
-                created_by=created_by,
-            ),
-        )
-        return ExperimentAnalysisWriteResult(
-            revisions=stored.revisions,
-            selections=stored.selections,
-            groups=stored.groups,
-            findings=stored.findings,
-            post_bind_diagnostics=prepared.post_bind_diagnostics,
-        )
-
-    async def write_paper_experiment_revisions(
-        self,
-        *,
-        experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
-        db: AsyncSession,
-        created_by: str | None = None,
-    ) -> ExperimentAnalysisWriteResult:
-        """Persist source-grounded revisions without an Objective snapshot.
-
-        Agent authoring records paper facts before a research objective chooses
-        which parts are useful for a comparison. Identity resolution, Source
-        binding, and revision immutability stay on this canonical writer; this
-        path deliberately creates no Objective selections, groups, or Findings.
-        """
-
-        if not experiment_outputs:
-            return ExperimentAnalysisWriteResult(
-                revisions=(),
-                selections=(),
-                groups=(),
-                findings=(),
-            )
-
-        output_specs = tuple(
-            (output, draft, local_key)
-            for output in experiment_outputs
-            for draft, local_key in zip(
-                output.output.experiments,
-                output.accepted_experiment_keys,
-                strict=True,
-            )
-        )
-        for document_id in sorted(
-            {output.output.document_id for output in experiment_outputs}
-        ):
-            await self.paper_experiment_repository.lock_document(db, document_id)
-
-        prepared_revisions: list[PaperExperimentRevision] = []
-        diagnostics: dict[str, tuple[str, ...]] = {}
-        identity_owners: dict[tuple[str, str], tuple[str, str]] = {}
-        for output, draft, local_key in output_specs:
-            revision, revision_diagnostics = await self._prepare_draft(
-                output=output,
-                draft=draft,
-                local_key=local_key,
-                allow_partial_archive=True,
-                db=db,
-            )
-            identity_key = (revision.document_id, revision.experiment_id)
-            owner = (output.output.document_id, local_key)
-            previous_owner = identity_owners.get(identity_key)
-            if previous_owner is not None and previous_owner != owner:
-                raise ValueError(
-                    "experiment identity collision requires manual boundary "
-                    "reconciliation: "
-                    f"{identity_key[1]} is used by {previous_owner[1]!r} "
-                    f"and {owner[1]!r}"
-                )
-            identity_owners.setdefault(identity_key, owner)
-            prepared_revisions.append(revision)
-            if revision_diagnostics:
-                diagnostics[revision.document_id] = tuple(dict.fromkeys(
-                    (*diagnostics.get(revision.document_id, ()), *revision_diagnostics)
-                ))
-
-        revisions: list[StoredPaperExperimentRevision] = []
-        for revision in prepared_revisions:
-            stored = await self.paper_experiment_repository.add_revision(
-                db, revision, created_by=created_by
-            )
-            revisions.append(stored)
-
-        return ExperimentAnalysisWriteResult(
-            revisions=tuple(revisions),
-            selections=(),
-            groups=(),
-            findings=(),
-            post_bind_diagnostics=diagnostics,
-        )
-
-    async def write_selection_finding_revision(
-        self,
-        *,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis: ObjectiveAnalysis,
-        revisions: Sequence[StoredPaperExperimentRevision],
-        selections: Sequence[ObjectiveExperimentSelection],
-        created_by: str | None = None,
-        parent_finding_id: str | None = None,
-        limitations: tuple[str, ...] = (),
-        db: AsyncSession,
-    ) -> ExperimentAnalysisWriteResult:
-        """Copy fixed selections into a new snapshot and synthesize its Finding."""
-        selection_map = {
-            item.selection_id: f"{item.selection_id}:v{analysis.analysis_version}"
-            for item in selections
-        }
-        copied = tuple(
-            replace(
-                item,
-                selection_id=selection_map[item.selection_id],
-                analysis_version=analysis.analysis_version,
-            )
-            for item in selections
-        )
-        source_revisions = tuple(item.revision for item in revisions)
-        synthesis = self.finding_synthesis_service.synthesize(
-            collection_id=collection_id,
-            objective=objective,
-            analysis_version=analysis.analysis_version,
-            revisions=source_revisions,
-            selections=copied,
-        )
-        findings = tuple(
-            replace(
-                item,
-                parent_finding_id=parent_finding_id,
-                limitations=tuple(dict.fromkeys((*item.limitations, *limitations))),
-                origin="hybrid" if parent_finding_id is not None else "human_authored",
-                source_analysis_version=analysis.source_analysis_version,
-                created_by_user_id=created_by,
-                created_at=datetime.now(timezone.utc),
-            )
-            for item in synthesis.findings
-        )
-        stored = await self.experiment_analysis_repository.write_graph(
-            db,
-            ExperimentAnalysisWrite(
-                collection_id=collection_id,
-                objective_id=objective.objective_id,
-                analysis_version=analysis.analysis_version,
-                revisions=source_revisions,
-                selections=copied,
-                groups=synthesis.groups,
-                findings=findings,
-                created_by=created_by,
-            ),
-        )
-        return ExperimentAnalysisWriteResult(
-            revisions=stored.revisions,
-            selections=stored.selections,
-            groups=stored.groups,
-            findings=stored.findings,
-        )
-
-    async def _prepare_experiment_selections(
-        self,
-        *,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis: ObjectiveAnalysis,
-        experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
-        partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
-        include_selections: bool,
-        db: AsyncSession,
-    ) -> _PreparedExperimentSelections:
-        if objective.collection_id != collection_id:
-            raise ValueError("experiment analysis objective belongs to another collection")
+    prepared = await _prepare_experiment_selections(
+        collection_id=collection_id,
+        objective=objective,
+        analysis=analysis,
+        experiment_outputs=experiment_outputs,
+        partial_experiment_outputs=partial_experiment_outputs,
+        include_selections=allow_finding,
+        db=db,
+    )
+    reused_selections: list[ObjectiveExperimentSelection] = []
+    seen_documents = {item.document_id for item in prepared.revisions}
+    fingerprints = {
+        item.document_id: item.preparation_fingerprint
+        for item in analysis.document_inputs
+    }
+    seen_experiments: set[str] = set()
+    for revision in reused_revisions:
         if (
-            analysis.collection_id != collection_id
-            or analysis.objective_id != objective.objective_id
+            revision.document_id in seen_documents
+            or revision.experiment_id in seen_experiments
+            or fingerprints.get(revision.document_id) != revision.source_fingerprint
+            or revision.identity_status == "unknown"
         ):
-            raise ValueError("experiment analysis snapshot does not match objective")
-
-        revisions: list[PaperExperimentRevision] = []
-        selections: list[ObjectiveExperimentSelection] = []
-        diagnostics: dict[str, list[str]] = {}
-        identity_owners: dict[tuple[str, str], tuple[str, str, str]] = {}
-        prepared_by_position: dict[
-            tuple[int, int],
-            tuple[
-                PaperExperimentRevision,
-                tuple[ObjectiveExperimentSelection, ...],
-                tuple[str, ...],
-            ],
-        ] = {}
-        # PostgreSQL's transaction-scoped advisory lock is acquired inside
-        # ``read_latest_revision``.  A concurrent analysis may contain the
-        # same Drafts in a different response order, so construct all work
-        # items first and acquire those locks in one deterministic order.
-        work_items: list[tuple[str, int, int, Any, bool, bool, Any, str]] = []
-        output_specs = (
-            *[(item, include_selections, False) for item in experiment_outputs],
-            *[(item, False, True) for item in partial_experiment_outputs],
+            raise ValueError("reused experiment does not match the analysis read scope")
+        stored_revision = await PaperExperimentRepo.read_revision(
+            db, revision.experiment_id, revision.experiment_version
         )
-        # Serialize all identity resolution for each source document before
-        # taking the finer-grained content-identity locks below.  This covers
-        # rereads whose content hash changed but whose lineage resolves to an
-        # existing physical experiment, and locks documents in one global
-        # order to avoid cross-document deadlocks.
-        document_ids = sorted(
-            {
-                output.output.document_id
-                for output, _, _ in output_specs
-            }
-        )
-        for document_id in document_ids:
-            await self.paper_experiment_repository.lock_document(db, document_id)
-        for output_index, (
-            output,
-            output_include_selections,
-            allow_partial_archive,
-        ) in enumerate(output_specs):
-            for draft_index, (draft, local_key) in enumerate(
-                zip(
-                    output.output.experiments,
-                    output.accepted_experiment_keys,
-                    strict=True,
-                )
-            ):
-                lock_identity = _advisory_lock_identity_for_draft(
-                    output=output,
-                    draft=draft,
-                    local_key=local_key,
-                    allow_partial_archive=allow_partial_archive,
-                )
-                work_items.append(
-                    (
-                        lock_identity,
-                        output_index,
-                        draft_index,
-                        output,
-                        output_include_selections,
-                        allow_partial_archive,
-                        draft,
-                        local_key,
-                    )
-                )
-
-        for (
-            _lock_identity,
-            _output_index,
-            _draft_index,
-            output,
-            output_include_selections,
-            allow_partial_archive,
-            draft,
-            local_key,
-        ) in sorted(work_items, key=lambda item: item[:3]):
-            revision, revision_diagnostics = (
-                await self._prepare_draft(
-                    output=output,
-                    draft=draft,
-                    local_key=local_key,
-                    allow_partial_archive=allow_partial_archive,
-                    db=db,
-                )
-            )
-            revision_selections = tuple(
+        if (
+            stored_revision is None
+            or stored_revision.archived_at is not None
+            or stored_revision.revision != revision
+        ):
+            raise ValueError("reused experiment is not an available fixed revision")
+        seen_experiments.add(revision.experiment_id)
+        if allow_finding:
+            reused_selections.extend(
                 _build_selection(
                     collection_id=collection_id,
                     objective=objective,
@@ -1078,132 +771,417 @@ class ExperimentAnalysisWriter:
                     revision=revision,
                     selection_slice=selection_slice,
                 )
-                for selection_slice in (
-                    _selection_slices(revision, objective)
-                    if output_include_selections else ()
-                )
+                for selection_slice in _selection_slices(revision, objective)
             )
-            identity_key = (revision.document_id, revision.experiment_id)
-            owner = (
-                output.output.document_id,
-                local_key,
-                str(draft.payload.get("scope_kind") or "parent")
-                .strip()
-                .casefold(),
-            )
-            previous_owner = identity_owners.get(identity_key)
-            if previous_owner is not None and previous_owner[:2] != owner[:2]:
-                raise ValueError(
-                    "experiment identity collision requires manual boundary "
-                    "reconciliation: "
-                    f"{identity_key[1]} is used by {previous_owner[1]!r} "
-                    f"and {owner[1]!r}"
-                )
-            identity_owners.setdefault(identity_key, owner)
-            prepared_by_position[(_output_index, _draft_index)] = (
-                revision,
-                revision_selections,
-                revision_diagnostics,
-            )
+    prepared = replace(
+        prepared,
+        revisions=(*prepared.revisions, *reused_revisions),
+        selections=(*prepared.selections, *reused_selections),
+    )
+    if allow_finding and prepared.selections:
+        synthesis = experiment_finding_synthesis_service.synthesize(
+            collection_id=collection_id,
+            objective=objective,
+            analysis_version=analysis.analysis_version,
+            revisions=prepared.revisions,
+            selections=prepared.selections,
+        )
+    else:
+        synthesis = _EmptySynthesis()
+    stored = await ExperimentAnalysisRepo.write_graph(
+        db,
+        ExperimentAnalysisWrite(
+            collection_id=collection_id,
+            objective_id=objective.objective_id,
+            analysis_version=analysis.analysis_version,
+            revisions=prepared.revisions,
+            selections=prepared.selections,
+            groups=synthesis.groups,
+            findings=synthesis.findings,
+            created_by=created_by,
+        ),
+    )
+    return ExperimentAnalysisWriteResult(
+        revisions=stored.revisions,
+        selections=stored.selections,
+        groups=stored.groups,
+        findings=stored.findings,
+        post_bind_diagnostics=prepared.post_bind_diagnostics,
+    )
 
-        # Lock acquisition follows the stable identity order above, while the
-        # returned graph retains the caller/model order for API compatibility.
-        for position in sorted(prepared_by_position):
-            revision, revision_selections, revision_diagnostics = prepared_by_position[
-                position
-            ]
-            revisions.append(revision)
-            selections.extend(revision_selections)
-            if revision_diagnostics:
-                diagnostics.setdefault(revision.document_id, []).extend(
-                    revision_diagnostics
-                )
 
-        return _PreparedExperimentSelections(
-            revisions=tuple(revisions),
-            selections=tuple(selections),
-            post_bind_diagnostics={
-                document_id: tuple(dict.fromkeys(items))
-                for document_id, items in diagnostics.items()
-            },
+async def write_paper_experiment_revisions(
+    *,
+    experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
+    db: AsyncSession,
+    created_by: str | None = None,
+) -> ExperimentAnalysisWriteResult:
+    """Persist source-grounded revisions without an Objective snapshot.
+
+    Agent authoring records paper facts before a research objective chooses
+    which parts are useful for a comparison. Identity resolution, Source
+    binding, and revision immutability stay on this canonical writer; this
+    path deliberately creates no Objective selections, groups, or Findings.
+    """
+
+    if not experiment_outputs:
+        return ExperimentAnalysisWriteResult(
+            revisions=(),
+            selections=(),
+            groups=(),
+            findings=(),
         )
 
-    async def _prepare_draft(
-        self,
-        *,
-        output: ReconciledPaperExperimentOutput,
-        draft: PaperExperimentDraft,
-        local_key: str,
-        allow_partial_archive: bool,
-        db: AsyncSession,
-    ) -> tuple[
-        PaperExperimentRevision,
-        tuple[str, ...],
-    ]:
-        payload = dict(draft.payload)
-        document_id = output.output.document_id
-        source_fingerprint = output.output.source_fingerprint
-        _assert_identity_boundary_is_decidable(
-            payload,
-            allow_partial_archive=allow_partial_archive,
+    output_specs = tuple(
+        (output, draft, local_key)
+        for output in experiment_outputs
+        for draft, local_key in zip(
+            output.output.experiments,
+            output.accepted_experiment_keys,
+            strict=True,
         )
-        variants = payload.get("experimental_variants") or payload.get("variants") or ()
-        has_physical_variants = any(
-            isinstance(item, Mapping) for item in variants
+    )
+    for document_id in sorted(
+        {output.output.document_id for output in experiment_outputs}
+    ):
+        await PaperExperimentRepo.lock_document(db, document_id)
+
+    prepared_revisions: list[PaperExperimentRevision] = []
+    diagnostics: dict[str, tuple[str, ...]] = {}
+    identity_owners: dict[tuple[str, str], tuple[str, str]] = {}
+    for output, draft, local_key in output_specs:
+        revision, revision_diagnostics = await _prepare_draft(
+            output=output,
+            draft=draft,
+            local_key=local_key,
+            allow_partial_archive=True,
+            db=db,
         )
-        if has_physical_variants or not allow_partial_archive:
-            # Keep the strict formal-identity path unchanged.  In particular,
-            # an incomplete ready Draft must still fail instead of being
-            # silently downgraded into an archive.
-            experiment_id, latest = await _resolve_experiment_identity(
-                repository=self.paper_experiment_repository,
+        identity_key = (revision.document_id, revision.experiment_id)
+        owner = (output.output.document_id, local_key)
+        previous_owner = identity_owners.get(identity_key)
+        if previous_owner is not None and previous_owner != owner:
+            raise ValueError(
+                "experiment identity collision requires manual boundary "
+                "reconciliation: "
+                f"{identity_key[1]} is used by {previous_owner[1]!r} "
+                f"and {owner[1]!r}"
+            )
+        identity_owners.setdefault(identity_key, owner)
+        prepared_revisions.append(revision)
+        if revision_diagnostics:
+            diagnostics[revision.document_id] = tuple(
+                dict.fromkeys(
+                    (*diagnostics.get(revision.document_id, ()), *revision_diagnostics)
+                )
+            )
+
+    revisions: list[StoredPaperExperimentRevision] = []
+    for revision in prepared_revisions:
+        stored = await PaperExperimentRepo.add_revision(
+            db, revision, created_by=created_by
+        )
+        revisions.append(stored)
+
+    return ExperimentAnalysisWriteResult(
+        revisions=tuple(revisions),
+        selections=(),
+        groups=(),
+        findings=(),
+        post_bind_diagnostics=diagnostics,
+    )
+
+
+async def write_selection_finding_revision(
+    *,
+    collection_id: str,
+    objective: ResearchObjective,
+    analysis: ObjectiveAnalysis,
+    revisions: Sequence[StoredPaperExperimentRevision],
+    selections: Sequence[ObjectiveExperimentSelection],
+    created_by: str | None = None,
+    parent_finding_id: str | None = None,
+    limitations: tuple[str, ...] = (),
+    db: AsyncSession,
+) -> ExperimentAnalysisWriteResult:
+    """Copy fixed selections into a new snapshot and synthesize its Finding."""
+    selection_map = {
+        item.selection_id: f"{item.selection_id}:v{analysis.analysis_version}"
+        for item in selections
+    }
+    copied = tuple(
+        replace(
+            item,
+            selection_id=selection_map[item.selection_id],
+            analysis_version=analysis.analysis_version,
+        )
+        for item in selections
+    )
+    source_revisions = tuple(item.revision for item in revisions)
+    synthesis = experiment_finding_synthesis_service.synthesize(
+        collection_id=collection_id,
+        objective=objective,
+        analysis_version=analysis.analysis_version,
+        revisions=source_revisions,
+        selections=copied,
+    )
+    findings = tuple(
+        replace(
+            item,
+            parent_finding_id=parent_finding_id,
+            limitations=tuple(dict.fromkeys((*item.limitations, *limitations))),
+            origin="hybrid" if parent_finding_id is not None else "human_authored",
+            source_analysis_version=analysis.source_analysis_version,
+            created_by_user_id=created_by,
+            created_at=datetime.now(timezone.utc),
+        )
+        for item in synthesis.findings
+    )
+    stored = await ExperimentAnalysisRepo.write_graph(
+        db,
+        ExperimentAnalysisWrite(
+            collection_id=collection_id,
+            objective_id=objective.objective_id,
+            analysis_version=analysis.analysis_version,
+            revisions=source_revisions,
+            selections=copied,
+            groups=synthesis.groups,
+            findings=findings,
+            created_by=created_by,
+        ),
+    )
+    return ExperimentAnalysisWriteResult(
+        revisions=stored.revisions,
+        selections=stored.selections,
+        groups=stored.groups,
+        findings=stored.findings,
+    )
+
+
+async def _prepare_experiment_selections(
+    *,
+    collection_id: str,
+    objective: ResearchObjective,
+    analysis: ObjectiveAnalysis,
+    experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
+    partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
+    include_selections: bool,
+    db: AsyncSession,
+) -> _PreparedExperimentSelections:
+    if objective.collection_id != collection_id:
+        raise ValueError("experiment analysis objective belongs to another collection")
+    if (
+        analysis.collection_id != collection_id
+        or analysis.objective_id != objective.objective_id
+    ):
+        raise ValueError("experiment analysis snapshot does not match objective")
+
+    revisions: list[PaperExperimentRevision] = []
+    selections: list[ObjectiveExperimentSelection] = []
+    diagnostics: dict[str, list[str]] = {}
+    identity_owners: dict[tuple[str, str], tuple[str, str, str]] = {}
+    prepared_by_position: dict[
+        tuple[int, int],
+        tuple[
+            PaperExperimentRevision,
+            tuple[ObjectiveExperimentSelection, ...],
+            tuple[str, ...],
+        ],
+    ] = {}
+    # PostgreSQL's transaction-scoped advisory lock is acquired inside
+    # ``read_latest_revision``.  A concurrent analysis may contain the
+    # same Drafts in a different response order, so construct all work
+    # items first and acquire those locks in one deterministic order.
+    work_items: list[tuple[str, int, int, Any, bool, bool, Any, str]] = []
+    output_specs = (
+        *[(item, include_selections, False) for item in experiment_outputs],
+        *[(item, False, True) for item in partial_experiment_outputs],
+    )
+    # Serialize all identity resolution for each source document before
+    # taking the finer-grained content-identity locks below.  This covers
+    # rereads whose content hash changed but whose lineage resolves to an
+    # existing physical experiment, and locks documents in one global
+    # order to avoid cross-document deadlocks.
+    document_ids = sorted({output.output.document_id for output, _, _ in output_specs})
+    for document_id in document_ids:
+        await PaperExperimentRepo.lock_document(db, document_id)
+    for output_index, (
+        output,
+        output_include_selections,
+        allow_partial_archive,
+    ) in enumerate(output_specs):
+        for draft_index, (draft, local_key) in enumerate(
+            zip(
+                output.output.experiments,
+                output.accepted_experiment_keys,
+                strict=True,
+            )
+        ):
+            lock_identity = _advisory_lock_identity_for_draft(
                 output=output,
                 draft=draft,
-                document_id=document_id,
-                payload=payload,
-                db=db,
-            )
-        else:
-            experiment_id = stable_partial_archive_experiment_id(
-                document_id=document_id,
-                source_fingerprint=source_fingerprint,
                 local_key=local_key,
-                payload=payload,
+                allow_partial_archive=allow_partial_archive,
             )
-            latest = await self.paper_experiment_repository.read_latest_revision(
-                db, experiment_id
+            work_items.append(
+                (
+                    lock_identity,
+                    output_index,
+                    draft_index,
+                    output,
+                    output_include_selections,
+                    allow_partial_archive,
+                    draft,
+                    local_key,
+                )
             )
-        candidate_version = (
-            latest.revision.experiment_version + 1 if latest is not None else 1
+
+    for (
+        _lock_identity,
+        _output_index,
+        _draft_index,
+        output,
+        output_include_selections,
+        allow_partial_archive,
+        draft,
+        local_key,
+    ) in sorted(work_items, key=lambda item: item[:3]):
+        revision, revision_diagnostics = await _prepare_draft(
+            output=output,
+            draft=draft,
+            local_key=local_key,
+            allow_partial_archive=allow_partial_archive,
+            db=db,
         )
-        single_output = ReconciledPaperExperimentOutput(
-            output=replace(output.output, experiments=(draft,)),
-            accepted_experiment_keys=(local_key,),
-            audit_issues=output.audit_issues,
+        revision_selections = tuple(
+            _build_selection(
+                collection_id=collection_id,
+                objective=objective,
+                analysis_version=analysis.analysis_version,
+                revision=revision,
+                selection_slice=selection_slice,
+            )
+            for selection_slice in (
+                _selection_slices(revision, objective)
+                if output_include_selections
+                else ()
+            )
         )
-        candidate = bind_model_output(
-            single_output,
-            experiment_ids=(experiment_id,),
-            experiment_versions=(candidate_version,),
+        identity_key = (revision.document_id, revision.experiment_id)
+        owner = (
+            output.output.document_id,
+            local_key,
+            str(draft.payload.get("scope_kind") or "parent").strip().casefold(),
+        )
+        previous_owner = identity_owners.get(identity_key)
+        if previous_owner is not None and previous_owner[:2] != owner[:2]:
+            raise ValueError(
+                "experiment identity collision requires manual boundary "
+                "reconciliation: "
+                f"{identity_key[1]} is used by {previous_owner[1]!r} "
+                f"and {owner[1]!r}"
+            )
+        identity_owners.setdefault(identity_key, owner)
+        prepared_by_position[(_output_index, _draft_index)] = (
+            revision,
+            revision_selections,
+            revision_diagnostics,
+        )
+
+    # Lock acquisition follows the stable identity order above, while the
+    # returned graph retains the caller/model order for API compatibility.
+    for position in sorted(prepared_by_position):
+        revision, revision_selections, revision_diagnostics = prepared_by_position[
+            position
+        ]
+        revisions.append(revision)
+        selections.extend(revision_selections)
+        if revision_diagnostics:
+            diagnostics.setdefault(revision.document_id, []).extend(
+                revision_diagnostics
+            )
+
+    return _PreparedExperimentSelections(
+        revisions=tuple(revisions),
+        selections=tuple(selections),
+        post_bind_diagnostics={
+            document_id: tuple(dict.fromkeys(items))
+            for document_id, items in diagnostics.items()
+        },
+    )
+
+
+async def _prepare_draft(
+    *,
+    output: ReconciledPaperExperimentOutput,
+    draft: PaperExperimentDraft,
+    local_key: str,
+    allow_partial_archive: bool,
+    db: AsyncSession,
+) -> tuple[
+    PaperExperimentRevision,
+    tuple[str, ...],
+]:
+    payload = dict(draft.payload)
+    document_id = output.output.document_id
+    source_fingerprint = output.output.source_fingerprint
+    _assert_identity_boundary_is_decidable(
+        payload,
+        allow_partial_archive=allow_partial_archive,
+    )
+    variants = payload.get("experimental_variants") or payload.get("variants") or ()
+    has_physical_variants = any(isinstance(item, Mapping) for item in variants)
+    if has_physical_variants or not allow_partial_archive:
+        # Keep the strict formal-identity path unchanged.  In particular,
+        # an incomplete ready Draft must still fail instead of being
+        # silently downgraded into an archive.
+        experiment_id, latest = await _resolve_experiment_identity(
+            repository=PaperExperimentRepo,
+            output=output,
+            draft=draft,
+            document_id=document_id,
+            payload=payload,
+            db=db,
+        )
+    else:
+        experiment_id = stable_partial_archive_experiment_id(
             document_id=document_id,
             source_fingerprint=source_fingerprint,
-        )[0]
-        finalized, diagnostics = _finalize_revision(candidate)
-        if (
-            allow_partial_archive
-            and str(payload.get("scope_kind") or "unknown").strip().casefold()
-            == "unknown"
-        ):
-            # Keep an auditable archive record without presenting its unresolved
-            # boundary as an identified reusable experiment. Partial outputs
-            # never create selections, so this identity cannot feed a Finding.
-            finalized = replace(finalized, identity_status="unknown")
-        if latest is not None and same_revision_content(finalized, latest.revision):
-            revision = latest.revision
-        else:
-            revision = finalized
+            local_key=local_key,
+            payload=payload,
+        )
+        latest = await PaperExperimentRepo.read_latest_revision(db, experiment_id)
+    candidate_version = (
+        latest.revision.experiment_version + 1 if latest is not None else 1
+    )
+    single_output = ReconciledPaperExperimentOutput(
+        output=replace(output.output, experiments=(draft,)),
+        accepted_experiment_keys=(local_key,),
+        audit_issues=output.audit_issues,
+    )
+    candidate = bind_model_output(
+        single_output,
+        experiment_ids=(experiment_id,),
+        experiment_versions=(candidate_version,),
+        document_id=document_id,
+        source_fingerprint=source_fingerprint,
+    )[0]
+    finalized, diagnostics = _finalize_revision(candidate)
+    if (
+        allow_partial_archive
+        and str(payload.get("scope_kind") or "unknown").strip().casefold() == "unknown"
+    ):
+        # Keep an auditable archive record without presenting its unresolved
+        # boundary as an identified reusable experiment. Partial outputs
+        # never create selections, so this identity cannot feed a Finding.
+        finalized = replace(finalized, identity_status="unknown")
+    if latest is not None and same_revision_content(finalized, latest.revision):
+        revision = latest.revision
+    else:
+        revision = finalized
 
-        return revision, diagnostics
+    return revision, diagnostics
+
 
 def _revision_outcomes(revision: PaperExperimentRevision) -> tuple[str, ...]:
     values: list[str] = []
@@ -1294,8 +1272,7 @@ def _selection_slices(
         measurement_keys = tuple(
             item.measurement_key
             for item in revision.measurements
-            if _same_term(item.outcome, outcome)
-            and item.binding_status == "direct"
+            if _same_term(item.outcome, outcome) and item.binding_status == "direct"
         )
         if measurement_keys:
             slices.append(
@@ -1326,9 +1303,7 @@ def _term_matches(left: str, right: str) -> bool:
 
 
 def _normalized_term(value: str) -> str:
-    return " ".join(
-        part for part in re.split(r"[_\W]+", value.casefold()) if part
-    )
+    return " ".join(part for part in re.split(r"[_\W]+", value.casefold()) if part)
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:
@@ -1342,4 +1317,9 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:28]}"
 
 
-__all__ = ["ExperimentAnalysisWriteResult", "ExperimentAnalysisWriter"]
+__all__ = [
+    "ExperimentAnalysisWriteResult",
+    "write_experiment_analysis",
+    "write_paper_experiment_revisions",
+    "write_selection_finding_revision",
+]

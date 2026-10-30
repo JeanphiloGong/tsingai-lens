@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import ModuleType
 
 import pytest
-
-from application.feedback.dataset_service import (
-    FeedbackDatasetConflict,
-    FeedbackDatasetService,
-)
+from application.feedback import dataset_service
+from application.feedback.dataset_service import FeedbackDatasetConflict
 from domain.feedback import Dataset, DatasetSample, FeedbackCase
 from domain.feedback.dataset_sample import ensure_action_allowed
 from repositories.feedback_dataset_sample_repository import (
@@ -66,7 +64,11 @@ class _Samples:
         action = kwargs["action"]
         self.sample = replace(
             self.sample,
-            status="pending" if action in {"rebuild", "retry"} else "discarded" if action == "discard" else "needs_input",
+            status=(
+                "pending"
+                if action in {"rebuild", "retry"}
+                else "discarded" if action == "discard" else "needs_input"
+            ),
             generation=self.sample.generation + 1,
             active_job_id=kwargs["job"].job_id if kwargs["job"] else None,
             confirmed_revision_id=None,
@@ -93,13 +95,12 @@ def _sample(status: str = "needs_confirmation") -> DatasetSample:
     )
 
 
-def _service(samples: _Samples) -> FeedbackDatasetService:
-    return FeedbackDatasetService(
-        repository=_Datasets(),
-        collection_service=_Collections(),
-        sample_repository=samples,
-        case_repository=_Cases(),
-    )
+def _service(samples: _Samples) -> ModuleType:
+    dataset_service.FeedbackDatasetRepo = _Datasets()
+    dataset_service.collection_service = _Collections()
+    dataset_service.FeedbackDatasetSampleRepo = samples
+    dataset_service.FeedbackCaseRepo = _Cases()
+    return dataset_service
 
 
 async def test_rebuild_creates_new_generation_and_review_note() -> None:
@@ -131,8 +132,12 @@ async def test_service_surfaces_concurrent_generation_change() -> None:
     samples = _RacingSamples(_sample())
     with pytest.raises(FeedbackDatasetConflict, match="sample_revision_stale"):
         await _service(samples).apply_sample_action_for_user(
-            user_id="user-1", dataset_id="fdset-1", sample_id="sample-1",
-            action="discard", expected_revision_id="revision-1", reason=None,
+            user_id="user-1",
+            dataset_id="fdset-1",
+            sample_id="sample-1",
+            action="discard",
+            expected_revision_id="revision-1",
+            reason=None,
             idempotency_key="action-1",
         )
 
@@ -142,6 +147,8 @@ def test_action_state_machine_and_digest() -> None:
     ensure_action_allowed("discarded", "restore")
     with pytest.raises(ValueError, match="sample_action_not_allowed"):
         ensure_action_allowed("confirmed", "restore")
-    assert sample_action_digest(action="rebuild", expected_revision_id="rev", reason=" note ") == sample_action_digest(
+    assert sample_action_digest(
+        action="rebuild", expected_revision_id="rev", reason=" note "
+    ) == sample_action_digest(
         action="rebuild", expected_revision_id="rev", reason="note"
     )

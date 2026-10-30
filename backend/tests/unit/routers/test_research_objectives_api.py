@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from domain.core.research_objective import PaperStudyDispositionStatus
-
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-
+from application.core.objectives import analysis_service as actual_analysis_service
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
@@ -15,7 +15,17 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopeDecision,
     ObjectiveScopePreview,
 )
-from controllers.core.research_objective_routes import research_objective_router as router
+from controllers.core import research_objective_routes
+from controllers.core.research_objective_routes import (
+    research_objective_router as router,
+)
+from controllers.dependencies.auth import get_current_user_id
+from controllers.exception_router import (
+    general_exception_handler,
+    http_exception_handler,
+    project_exception_handler,
+    request_validation_handler,
+)
 from controllers.schemas.core.research_objectives import (
     ObjectiveEvidenceAttributeResponse,
 )
@@ -37,6 +47,7 @@ from domain.core.research_objective import (
     ObjectiveEvidence,
     PaperContribution,
     PaperStudyDisposition,
+    PaperStudyDispositionStatus,
     ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
@@ -48,7 +59,9 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
+from exceptions import ProjectException
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 from repositories.objective_repository import (
     ObjectiveAnalysis,
@@ -59,6 +72,7 @@ from repositories.pipeline_run_repository import (
     ModelUsage,
     TokenUsage,
 )
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 def _objective() -> ResearchObjective:
@@ -134,7 +148,7 @@ def _finding() -> Finding:
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope='isolated_effect',
+        attribution_scope="isolated_effect",
         synthesis_status="insufficient_confirmation",
         certainty=0.5,
         display_rank=0,
@@ -223,7 +237,9 @@ def _paper_contribution() -> PaperContribution:
     )
 
 
-def test_evidence_attribute_response_preserves_scope_and_outcome_applicability() -> None:
+def test_evidence_attribute_response_preserves_scope_and_outcome_applicability() -> (
+    None
+):
     simulation = ObjectiveEvidenceAttributeResponse.model_validate(
         {
             "name": "solver",
@@ -261,9 +277,7 @@ class _DiscoveryService:
         self.scope_calls: list[tuple[str, str]] = []
         self.scope_error = scope_error
 
-    async def start_objective_discovery(
-        self, collection_id, document_ids
-    ):
+    async def start_objective_discovery(self, collection_id, document_ids, *, user_id):
         self.discovery_calls.append((collection_id, document_ids))
         return {
             "run_id": "run-discovery-1",
@@ -290,7 +304,7 @@ class _DiscoveryService:
             "finished_at": None,
         }
 
-    async def preview_objective_scope(self, collection_id, objective_id):
+    async def preview_objective_scope(self, collection_id, objective_id, *, user_id):
         self.scope_calls.append((collection_id, objective_id))
         if self.scope_error is not None:
             raise self.scope_error
@@ -326,50 +340,84 @@ class _Service:
         self.dispatch_failure_version: int | None = None
         self.start_calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-    async def start_analysis(self, collection_id, objective_id, document_ids):
+    async def start_analysis(
+        self, collection_id, objective_id, document_ids, *, user_id
+    ):
         self.start_calls.append((collection_id, objective_id, document_ids))
         return await self.queue_analysis(collection_id, objective_id, document_ids)
 
     async def queue_analysis(self, collection_id, objective_id, document_ids):
-        return await self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(
+            collection_id, objective_id, user_id="user-researcher"
+        )
 
     async def execute_queued_analysis(
         self, collection_id, objective_id, analysis_version
     ):
-        return await self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(
+            collection_id, objective_id, user_id="user-researcher"
+        )
 
     async def fail_analysis_dispatch(
         self, collection_id, objective_id, analysis_version
     ):
         self.analysis_status = "failed"
         self.dispatch_failure_version = analysis_version
-        return await self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(
+            collection_id, objective_id, user_id="user-researcher"
+        )
 
-    async def get_analysis_state(self, collection_id, objective_id):
+    async def get_analysis_state(self, collection_id, objective_id, *, user_id):
         return {
             "collection_id": collection_id,
             "objective": StoredObjective(_objective()),
             "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
-            "paper_contributions": (_paper_contribution(),),
+            "paper_contributions": (
+                {
+                    **asdict(_paper_contribution()),
+                    "evidence_status_counts": dict(
+                        _paper_contribution().evidence_status_counts
+                    ),
+                },
+            ),
+            "evidence_review": {
+                "total_evidence_count": 0,
+                "result_count": 0,
+                "comparable_evidence_count": 0,
+                "gap_count": 0,
+                "omitted_gap_count": 0,
+                "status_counts": {},
+                "gaps": [],
+            },
             "warnings": [],
         }
 
-    async def get_analysis_status(self, collection_id, objective_id):
+    async def get_analysis_status(self, collection_id, objective_id, *, user_id):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "status": self.analysis_status,
-            "phase": "started" if self.analysis_status == "running" else self.analysis_status,
+            "phase": (
+                "started" if self.analysis_status == "running" else self.analysis_status
+            ),
             "processed_document_count": 0,
             "total_document_count": 1,
-            "current_document_id": "paper-1" if self.analysis_status == "running" else None,
-            "progress_message": "Analysis is running." if self.analysis_status == "running" else None,
+            "current_document_id": (
+                "paper-1" if self.analysis_status == "running" else None
+            ),
+            "progress_message": (
+                "Analysis is running." if self.analysis_status == "running" else None
+            ),
             "error_code": None,
             "error_message": None,
             "created_at": "2026-08-31T00:00:00+00:00",
-            "started_at": "2026-08-31T00:00:01+00:00" if self.analysis_status == "running" else None,
+            "started_at": (
+                "2026-08-31T00:00:01+00:00"
+                if self.analysis_status == "running"
+                else None
+            ),
             "completed_at": None,
         }
 
@@ -553,9 +601,7 @@ class _Service:
             "total": 1,
         }
 
-    async def get_finding(
-        self, collection_id, objective_id, finding_id, **kwargs
-    ):
+    async def get_finding(self, collection_id, objective_id, finding_id, **kwargs):
         expected_finding = _finding()
         return {
             "collection_id": collection_id,
@@ -918,7 +964,7 @@ class _Service:
             "total": 1,
         }
 
-    async def get_evidence_map(self, collection_id, objective_id):
+    async def get_evidence_map(self, collection_id, objective_id, *, user_id):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -1022,11 +1068,21 @@ def _client(
     raise_server_exceptions: bool = True,
 ) -> TestClient:
     app = FastAPI()
-    app.state.objective_repository = repository or _Repository()
-    app.state.objective_analysis_service = service or _Service()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
+    actual_analysis_service.ObjectiveRepo = repository or _Repository()
+    actual_analysis_service.collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock(
+            return_value={"owner_user_id": "user-researcher"}
+        )
+    )
+    research_objective_routes.objective_analysis_service = service or _Service()
     scope_and_discovery = discovery_service or _DiscoveryService()
-    app.state.objective_discovery_service = scope_and_discovery
-    app.state.experiment_analysis_service = scope_and_discovery
+    research_objective_routes.objective_discovery_service = scope_and_discovery
+    research_objective_routes.objective_scope_service = scope_and_discovery
+    app.dependency_overrides[get_current_user_id] = lambda: "user-researcher"
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -1112,7 +1168,7 @@ def test_objective_list_returns_every_ranked_candidate_when_limit_is_omitted() -
     response = _client(repository=repository).get("/collections/col-1/objectives")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["total"] == 8
     assert payload["offset"] == 0
     assert payload["limit"] is None
@@ -1133,7 +1189,7 @@ def test_objective_list_exposes_candidates_after_rank_six() -> None:
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["total"] == 8
     assert [objective["objective_id"] for objective in payload["objectives"]] == [
         "obj-7",
@@ -1152,8 +1208,8 @@ def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["objectives"] == []
-    assert response.json()["total"] == 0
+    assert response.json()["data"]["objectives"] == []
+    assert response.json()["data"]["total"] == 0
 
 
 def test_objective_scope_returns_complete_analysis_ids_and_decisions() -> None:
@@ -1164,7 +1220,7 @@ def test_objective_scope_returns_complete_analysis_ids_and_decisions() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["data"] == {
         "collection_id": "col-1",
         "objective_id": "obj-1",
         "counts": {
@@ -1211,23 +1267,24 @@ def test_objective_scope_returns_404_when_objective_does_not_exist() -> None:
         "/collections/col-1/objectives/obj-missing/scope"
     )
 
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "research_objective_not_found"
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
+    assert response.json()["data"]["code"] == "research_objective_not_found"
 
 
 def test_objective_scope_returns_409_when_paper_maps_are_not_ready() -> None:
     service = _DiscoveryService(
-        scope_error=ObjectiveScopeNotReadyError("col-1")
+        scope_error=ObjectiveScopeNotReadyError("col-1", "obj-1")
     )
 
     response = _client(discovery_service=service).get(
         "/collections/col-1/objectives/obj-1/scope"
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == {
+    assert response.status_code == 200
+    assert response.json()["code"] == 200204
+    assert response.json()["data"] == {
         "code": "objective_scope_not_ready",
-        "message": "objective paper scope not ready: col-1",
         "collection_id": "col-1",
         "objective_id": "obj-1",
     }
@@ -1242,11 +1299,13 @@ def test_start_analysis_uses_the_canonical_service_dispatch() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["active_analysis"]["status"] == "queued"
+    assert response.json()["data"]["active_analysis"]["status"] == "queued"
     assert service.start_calls == [("col-1", "obj-1", ("paper-1",))]
 
 
-def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents() -> None:
+def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents() -> (
+    None
+):
     document_ids = [f"paper-{index}" for index in range(1, 132)]
     discovery_service = _DiscoveryService()
     analysis_service = _Service(queued=True)
@@ -1266,9 +1325,9 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
     assert discovery_response.status_code == 200
     assert analysis_response.status_code == 200
-    assert discovery_response.json()["run_id"] == "run-discovery-1"
-    assert discovery_response.json()["pipeline_name"] == "objective_discovery"
-    assert discovery_response.json()["status"] == "queued"
+    assert discovery_response.json()["data"]["run_id"] == "run-discovery-1"
+    assert discovery_response.json()["data"]["pipeline_name"] == "objective_discovery"
+    assert discovery_response.json()["data"]["status"] == "queued"
     assert discovery_service.discovery_calls == [
         ("col-1", tuple(document_ids)),
     ]
@@ -1279,7 +1338,9 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
 def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:
     class DispatchFailureService(_Service):
-        async def start_analysis(self, collection_id, objective_id, document_ids):
+        async def start_analysis(
+            self, collection_id, objective_id, document_ids, *, user_id
+        ):
             raise ObjectiveAnalysisDispatchError(collection_id, objective_id, 1)
 
     response = _client(DispatchFailureService(), raise_server_exceptions=False).post(
@@ -1287,29 +1348,33 @@ def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:
         json={"document_ids": ["paper-1"]},
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "objective_analysis_dispatch_failed"
-    assert response.json()["detail"]["analysis_version"] == 1
+    assert response.status_code == 200
+    assert response.json()["code"] == 200205
+    assert response.json()["data"]["code"] == "objective_analysis_dispatch_failed"
+    assert response.json()["data"]["analysis_version"] == 1
 
 
 def test_duplicate_objective_detail_route_is_not_registered() -> None:
     response = _client().get("/collections/col-1/objectives/obj-1")
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
 def test_confirm_objective_route_is_not_registered() -> None:
     response = _client().post("/collections/col-1/objectives/obj-1/confirm")
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
-def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
-) -> None:
+def test_objective_analysis_api_exposes_definition_and_separate_analysis_state() -> (
+    None
+):
     response = _client().get("/collections/col-1/objectives/obj-1/analysis")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["objective"]["confirmation_status"] == "confirmed"
     assert payload["active_analysis"]["status"] == "succeeded"
     assert payload["published_analysis"]["analysis_version"] == 1
@@ -1391,7 +1456,7 @@ def test_objective_analysis_status_api_returns_only_progress_state() -> None:
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["status"] == "queued"
     assert payload["analysis_version"] == 1
     assert "paper_contributions" not in payload
@@ -1406,7 +1471,7 @@ def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["total"] == 1
     assert payload["items"][0]["finding_id"] == "finding-1"
     assert payload["items"][0]["factors"] == ["temperature"]
@@ -1427,7 +1492,7 @@ def test_evidence_api_returns_exact_source_excerpt_and_locator() -> None:
     )
 
     assert response.status_code == 200
-    evidence = response.json()["items"][0]
+    evidence = response.json()["data"]["items"][0]
     assert evidence["source_excerpt"] == (
         "At 500 C, tensile strength increased to 620 MPa."
     )
@@ -1446,7 +1511,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
     created_at = datetime(2026, 9, 1, tzinfo=UTC)
 
     class AgentAuthoredService(_Service):
-        async def get_analysis_state(self, collection_id, objective_id):
+        async def get_analysis_state(self, collection_id, objective_id, *, user_id):
             analysis = replace(
                 _analysis(),
                 origin="agent_authored",
@@ -1459,7 +1524,23 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "objective": StoredObjective(_objective()),
                 "analysis": analysis,
                 "published_analysis": analysis,
-                "paper_contributions": (_paper_contribution(),),
+                "paper_contributions": (
+                    {
+                        **asdict(_paper_contribution()),
+                        "evidence_status_counts": dict(
+                            _paper_contribution().evidence_status_counts
+                        ),
+                    },
+                ),
+                "evidence_review": {
+                    "total_evidence_count": 0,
+                    "result_count": 0,
+                    "comparable_evidence_count": 0,
+                    "gap_count": 0,
+                    "omitted_gap_count": 0,
+                    "status_counts": {},
+                    "gaps": [],
+                },
                 "warnings": [],
             }
 
@@ -1844,40 +1925,34 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
 
     client = _client(AgentAuthoredService())
 
-    analysis_response = client.get(
-        "/collections/col-1/objectives/obj-1/analysis"
-    )
-    findings_response = client.get(
-        "/collections/col-1/objectives/obj-1/findings"
-    )
-    evidence_response = client.get(
-        "/collections/col-1/objectives/obj-1/evidence"
-    )
+    analysis_response = client.get("/collections/col-1/objectives/obj-1/analysis")
+    findings_response = client.get("/collections/col-1/objectives/obj-1/findings")
+    evidence_response = client.get("/collections/col-1/objectives/obj-1/evidence")
 
     assert analysis_response.status_code == 200
     assert findings_response.status_code == 200
     assert evidence_response.status_code == 200
     assert (
-        analysis_response.json()["published_analysis"]["created_by_tool_call_id"]
+        analysis_response.json()["data"]["published_analysis"][
+            "created_by_tool_call_id"
+        ]
         == "call-agent-analysis"
     )
     assert (
-        findings_response.json()["items"][0]["created_by_tool_call_id"]
+        findings_response.json()["data"]["items"][0]["created_by_tool_call_id"]
         == "call-agent-finding"
     )
     assert (
-        evidence_response.json()["items"][0]["created_by_tool_call_id"]
+        evidence_response.json()["data"]["items"][0]["created_by_tool_call_id"]
         == "call-agent-evidence"
     )
 
 
 def test_evidence_map_api_returns_the_published_objective_projection() -> None:
-    response = _client().get(
-        "/collections/col-1/objectives/obj-1/evidence-map"
-    )
+    response = _client().get("/collections/col-1/objectives/obj-1/evidence-map")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["projection_version"] == "objective-evidence-map.v1"
     assert payload["analysis_version"] == 1
     assert [node["type"] for node in payload["nodes"]] == [

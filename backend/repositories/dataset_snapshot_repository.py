@@ -5,12 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
-
-from infra.persistence.database import AsyncSessionLocal
-
 from domain.feedback.dataset_snapshot import DatasetSnapshot
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.feedback import FeedbackDatasetSnapshotRow
+from sqlalchemy import select
 
 
 class DatasetSnapshotRepository:

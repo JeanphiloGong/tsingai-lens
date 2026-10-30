@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import pytest
+from types import ModuleType
 
-from application.goal.experiment_plan_service import (
-    ExperimentPlanNotFoundError,
-    ExperimentPlanService,
-)
+import pytest
+from application.goal import experiment_plan_service
+from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
 from domain.goal import ExperimentPlanRecord
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 pytestmark = pytest.mark.anyio
@@ -28,11 +32,17 @@ class _FindingFeedbackService:
         return self.validity, reasons
 
 
-def _service(repository: ExperimentPlanRepository | None=None, *, validity: str='current', postgres_session_factory) -> ExperimentPlanService:
-    return ExperimentPlanService(
-        repository=repository or ExperimentPlanRepository(),
-        finding_feedback_service=_FindingFeedbackService(validity),
+def _service(
+    repository: ExperimentPlanRepository | None = None,
+    *,
+    validity: str = "current",
+    postgres_session_factory,
+) -> ModuleType:
+    experiment_plan_service.ExperimentPlanRepo = (
+        repository or ExperimentPlanRepository()
     )
+    experiment_plan_service.finding_feedback_service = _FindingFeedbackService(validity)
+    return experiment_plan_service
 
 
 def _structured_plan(hypothesis: str) -> dict:
@@ -68,7 +78,7 @@ def _structured_plan(hypothesis: str) -> dict:
 
 def _historical_plan() -> ExperimentPlanRecord:
     return ExperimentPlanRecord(
-        **        {
+        **{
             "plan_id": "exp_historical",
             "collection_id": "col_1",
             "objective_id": "objective_1",
@@ -101,7 +111,9 @@ def _historical_plan() -> ExperimentPlanRecord:
     )
 
 
-async def test_manual_plan_creation_has_no_chat_provenance(*, postgres_session_factory) -> None:
+async def test_manual_plan_creation_has_no_chat_provenance(
+    *, postgres_session_factory
+) -> None:
     repository = ExperimentPlanRepository()
     service = _service(repository, postgres_session_factory=postgres_session_factory)
 
@@ -143,10 +155,14 @@ async def test_manual_plan_creation_has_no_chat_provenance(*, postgres_session_f
     assert draft.updated_by == "expert-a"
     assert draft.structured_plan is not None
     assert draft.structured_plan["hypothesis"] == "Laser power changes porosity."
-    assert await service.list_plans("col_1", "objective_1") == (draft,)
+    assert await service.list_plans("col_1", "objective_1", user_id="expert-a") == (
+        draft,
+    )
 
 
-async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(*, postgres_session_factory) -> None:
+async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(
+    *, postgres_session_factory
+) -> None:
     service = _service(postgres_session_factory=postgres_session_factory)
     draft = await service.create_plan(
         collection_id="col_1",
@@ -164,7 +180,7 @@ async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(*
         content="Reviewed plan with explicit controls.",
         status="ready_for_review",
         structured_plan=_structured_plan("Reviewed hypothesis."),
-        updated_by="expert-b",
+        updated_by="expert-a",
     )
 
     assert updated.plan_id != draft.plan_id
@@ -173,21 +189,27 @@ async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(*
     assert updated.source_message_id is None
     assert updated.plan_version == 2
     assert updated.parent_plan_id == draft.plan_id
-    assert updated.updated_by == "expert-b"
+    assert updated.updated_by == "expert-a"
     assert updated.structured_plan == _structured_plan("Reviewed hypothesis.")
-    assert await service.read_plan(
-        "col_1", "objective_1", draft.plan_id
-    ) == draft
-    assert await service.list_plans("col_1", "objective_1") == (updated,)
+    assert (
+        await service.read_plan(
+            "col_1", "objective_1", draft.plan_id, user_id="expert-a"
+        )
+        == draft
+    )
+    assert await service.list_plans("col_1", "objective_1", user_id="expert-a") == (
+        updated,
+    )
 
 
-async def test_agent_plan_persists_current_finding_sources_after_approval(*, postgres_session_factory) -> None:
+async def test_agent_plan_persists_current_finding_sources_after_approval(
+    *, postgres_session_factory
+) -> None:
     repository = ExperimentPlanRepository()
     feedback_service = _FindingFeedbackService()
-    service = ExperimentPlanService(
-        repository=repository,
-        finding_feedback_service=feedback_service,
-    )
+    experiment_plan_service.ExperimentPlanRepo = repository
+    experiment_plan_service.finding_feedback_service = feedback_service
+    service = experiment_plan_service
     source_findings = [
         {
             "finding_id": "finding-1",
@@ -244,11 +266,17 @@ async def test_agent_plan_persists_current_finding_sources_after_approval(*, pos
     assert plan.updated_by == "expert-a"
 
 
-async def test_agent_plan_is_not_saved_when_finding_sources_are_stale(*, postgres_session_factory) -> None:
+async def test_agent_plan_is_not_saved_when_finding_sources_are_stale(
+    *, postgres_session_factory
+) -> None:
     repository = ExperimentPlanRepository()
-    service = _service(repository, validity='stale', postgres_session_factory=postgres_session_factory)
+    service = _service(
+        repository, validity="stale", postgres_session_factory=postgres_session_factory
+    )
 
-    with pytest.raises(ValueError, match="research plan sources are stale"):
+    with pytest.raises(
+        ResourceConflictException, match="research plan sources are stale"
+    ):
         await service.create_agent_plan(
             collection_id="col_1",
             objective_id="objective_1",
@@ -284,7 +312,9 @@ async def test_agent_plan_is_not_saved_when_finding_sources_are_stale(*, postgre
     assert await repository.list_plans("col_1", "objective_1") == ()
 
 
-async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis(*, postgres_session_factory) -> None:
+async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis(
+    *, postgres_session_factory
+) -> None:
     repository = ExperimentPlanRepository()
     service = _service(repository, postgres_session_factory=postgres_session_factory)
     manual = await service.create_plan(
@@ -319,7 +349,7 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
         ),
         status="draft",
         structured_plan=_structured_plan("Preheating changes elongation."),
-        updated_by="expert-b",
+        updated_by="expert-a",
         source_links=[
             {
                 "kind": "evidence",
@@ -333,12 +363,17 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
 
     assert revised.parent_plan_id == manual.plan_id
     assert revised.plan_version == 2
-    assert revised.updated_by == "expert-b"
+    assert revised.updated_by == "expert-a"
     assert revised.source_links[0]["label"] == "Evidence 1"
     assert revised.metadata["source"] == "research_agent"
     assert revised.metadata["source_findings"] == source_findings
     assert revised.metadata["updated_by_tool_call_id"] == "call-plan-revision"
-    assert await service.read_plan("col_1", "objective_1", manual.plan_id) == manual
+    assert (
+        await service.read_plan(
+            "col_1", "objective_1", manual.plan_id, user_id="expert-a"
+        )
+        == manual
+    )
 
 
 async def test_missing_plan_update_is_explicit(*, postgres_session_factory) -> None:
@@ -355,12 +390,16 @@ async def test_missing_plan_update_is_explicit(*, postgres_session_factory) -> N
         )
 
 
-async def test_historical_grounded_plan_remains_auditable_after_chat_cutover(*, postgres_session_factory) -> None:
+async def test_historical_grounded_plan_remains_auditable_after_chat_cutover(
+    *, postgres_session_factory
+) -> None:
     repository = ExperimentPlanRepository()
     historical = _historical_plan()
     await repository.upsert_plan(historical)
 
-    listed = await _service(repository, postgres_session_factory=postgres_session_factory).list_plans("col_1", "objective_1")
+    listed = await _service(
+        repository, postgres_session_factory=postgres_session_factory
+    ).list_plans("col_1", "objective_1", user_id="expert-a")
 
     assert listed[0].source_message_id == "msg_legacy"
     assert listed[0].source_links == historical.source_links
@@ -368,13 +407,21 @@ async def test_historical_grounded_plan_remains_auditable_after_chat_cutover(*, 
     assert listed[0].metadata["source_validity_reasons"] == []
 
 
-async def test_stale_historical_plan_cannot_be_promoted(*, postgres_session_factory) -> None:
+async def test_stale_historical_plan_cannot_be_promoted(
+    *, postgres_session_factory
+) -> None:
     repository = ExperimentPlanRepository()
     historical = _historical_plan()
     await repository.upsert_plan(historical)
 
-    with pytest.raises(ValueError, match="historical source Findings are stale"):
-        await _service(repository, validity='stale', postgres_session_factory=postgres_session_factory).update_plan(
+    with pytest.raises(
+        ResourceConflictException, match="historical source Findings are stale"
+    ):
+        await _service(
+            repository,
+            validity="stale",
+            postgres_session_factory=postgres_session_factory,
+        ).update_plan(
             collection_id="col_1",
             objective_id="objective_1",
             plan_id=historical.plan_id,
@@ -388,15 +435,29 @@ async def test_stale_historical_plan_cannot_be_promoted(*, postgres_session_fact
 
 @pytest.fixture(autouse=True)
 async def research_records(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_objective, seed_user
+    from tests.support.postgres import seed_collection, seed_objective, seed_user
 
+    await seed_collection(postgres_session_factory, "col_1", user_id="expert-a")
     await seed_objective(postgres_session_factory, "col_1", "objective_1")
     await seed_user(postgres_session_factory, "expert-a")
     await seed_user(postgres_session_factory, "expert-b")
+    from domain.chat import ChatMessage, ChatSession
     from repositories.chat_repository import ChatRepository
-    from domain.chat import ChatSession, ChatMessage
+
     chat = ChatRepository()
-    session = ChatSession.create(collection_id="col_1", user_id="user-1", session_id="chat_legacy", created_at="2026-07-13T00:00:00+00:00")
+    session = ChatSession.create(
+        collection_id="col_1",
+        user_id="user-1",
+        session_id="chat_legacy",
+        created_at="2026-07-13T00:00:00+00:00",
+    )
     await chat.add_session(session)
-    message = ChatMessage.assistant(message_id="msg_legacy", session_id=session.session_id, content="Historical research plan.", created_at=session.created_at)
-    await chat.save_trajectory(chat_session=session, messages=(message,), tool_calls=(), tool_results=())
+    message = ChatMessage.assistant(
+        message_id="msg_legacy",
+        session_id=session.session_id,
+        content="Historical research plan.",
+        created_at=session.created_at,
+    )
+    await chat.save_trajectory(
+        chat_session=session, messages=(message,), tool_calls=(), tool_results=()
+    )

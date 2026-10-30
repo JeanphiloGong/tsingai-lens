@@ -4,28 +4,24 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from infra.persistence.database import AsyncSessionLocal
-
 from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.chat import ChatMessageRow, ChatSessionRow
 from infra.persistence.postgres.models.objective_workspace import (
     ObjectiveExperimentPlan,
 )
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ExperimentPlanRepository:
     backend_name = "postgresql"
 
-    async def upsert_plan(
-        self, plan: ExperimentPlanRecord
-    ) -> ExperimentPlanRecord:
+    async def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord:
         if plan.parent_plan_id is not None:
             raise ValueError("use append_plan_revision for a successor revision")
         async with AsyncSessionLocal() as db, db.begin():
@@ -268,9 +264,7 @@ async def _validate_source_message(
         else None
     )
     if message is None or chat is None or chat.collection_id != plan.collection_id:
-        raise ValueError(
-            "historical source message must belong to the plan collection"
-        )
+        raise ValueError("historical source message must belong to the plan collection")
 
 
 def _validate_successor(
@@ -304,7 +298,7 @@ def _isoformat(value: datetime) -> str:
     return value.isoformat()
 
 
-__all__ = ['ExperimentPlanRepository']
+__all__ = ["ExperimentPlanRepository"]
 
 
 ExperimentPlanRepo = ExperimentPlanRepository()

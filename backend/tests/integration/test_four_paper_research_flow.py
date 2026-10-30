@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 
-from fastapi.testclient import TestClient
-
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentDraftEnvelope,
+)
 from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,
-)
-from application.core.objectives.analysis.paper_experiment_extraction import (
-    PaperExperimentDraftEnvelope,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
@@ -22,14 +20,16 @@ from application.core.objectives.discovery.paper_understanding.paper_map_outputs
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
+from fastapi.testclient import TestClient
 from tests.support.fake_domain_model_extractor import (
     FakeDomainModelExtractor,
     _input_payload,
 )
 
-
 API_PREFIX = "/api/v1"
-FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "four_paper_research_flow"
+FIXTURE_DIR = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "four_paper_research_flow"
+)
 
 
 class _FourPaperResearchModel(FakeDomainModelExtractor):
@@ -160,7 +160,9 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         result_label = str(result_source.get("source_label") or labels[-1]).strip()
         method_label = str(method_source.get("source_label") or labels[0]).strip()
         combined_text = " ".join(source_text(source) for source in sources)
-        stress_relaxed = "stress-relief" in combined_text or "stress-relieved" in combined_text
+        stress_relaxed = (
+            "stress-relief" in combined_text or "stress-relieved" in combined_text
+        )
         state = "stress-relieved" if stress_relaxed else "as-built"
 
         import re
@@ -327,7 +329,9 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             )
 
         paper_kind = (
-            "stress_relaxed" if "stress-relief" in source_text.casefold() else "as_built"
+            "stress_relaxed"
+            if "stress-relief" in source_text.casefold()
+            else "as_built"
         )
         studies: list[dict[str, Any]] = []
         if "decreased porosity from" in source_text.casefold() and source_labels:
@@ -440,7 +444,8 @@ def _wait_for_run(client: TestClient, run_id: str) -> dict[str, Any]:
     while monotonic() < deadline:
         response = client.get(f"{API_PREFIX}/pipeline-runs/{run_id}")
         assert response.status_code == 200
-        run = response.json()
+        assert response.json()["code"] == 200, response.text
+        run = response.json()["data"]
         if run["status"] not in {"queued", "running"}:
             return run
         sleep(0.02)
@@ -453,11 +458,14 @@ def _wait_for_analysis(
     objective_id: str,
 ) -> dict[str, Any]:
     deadline = monotonic() + 20
-    path = f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/analysis"
+    path = (
+        f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/analysis"
+    )
     while monotonic() < deadline:
         response = client.get(path)
         assert response.status_code == 200
-        analysis = response.json()
+        assert response.json()["code"] == 200, response.text
+        analysis = response.json()["data"]
         active = analysis.get("active_analysis")
         if active is not None and active["status"] not in {"queued", "running"}:
             return analysis
@@ -475,18 +483,26 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     monkeypatch.setenv("LENS_DATABASE_URL", test_database_url)
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "four-paper@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "test-password")
-    monkeypatch.setattr("infra.persistence.file.collection_workspace.DATA_DIR", tmp_path)
+    monkeypatch.setattr(
+        "infra.persistence.file.collection_workspace.DATA_DIR", tmp_path
+    )
 
     from main import create_app
 
     model = _FourPaperResearchModel()
-    with TestClient(create_app(chat_session_service=object())) as client:
-        client.app.state.document_profile_service._document_profile_extractor = model
-        client.app.state.document_preparation_service._response_client = model
-        research_service = client.app.state.experiment_analysis_service
-        research_service.objective_input_service._response_client = model
-        client.app.state.objective_discovery_service._response_client = model
+    from application.core.document_profiles import service as document_profile_service
+    from application.core.objectives import (
+        objective_analysis_service,
+        objective_discovery_service,
+        objective_input_service,
+    )
 
+    monkeypatch.setattr(document_profile_service, "_document_profile_extractor", model)
+    monkeypatch.setattr(objective_input_service, "_response_client", model)
+    monkeypatch.setattr(objective_discovery_service, "_response_client", model)
+    monkeypatch.setattr(objective_analysis_service, "_objective_source_screener", None)
+    monkeypatch.setattr(objective_analysis_service, "_paper_experiment_extractor", None)
+    with TestClient(create_app()) as client:
         login = client.post(
             f"{API_PREFIX}/auth/login",
             json={
@@ -495,6 +511,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             },
         )
         assert login.status_code == 200
+        assert login.json()["code"] == 200, login.text
 
         created = client.post(
             f"{API_PREFIX}/collections",
@@ -504,7 +521,8 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             },
         )
         assert created.status_code == 200
-        collection_id = created.json()["collection_id"]
+        assert created.json()["code"] == 200, created.text
+        collection_id = created.json()["data"]["collection_id"]
 
         document_ids_by_filename: dict[str, str] = {}
         for fixture_path in sorted(FIXTURE_DIR.glob("*.txt")):
@@ -519,27 +537,31 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
                 },
             )
             assert uploaded.status_code == 200
-            document_id = uploaded.json()["document_id"]
+            assert uploaded.json()["code"] == 200, uploaded.text
+            document_id = uploaded.json()["data"]["document_id"]
             document_ids_by_filename[fixture_path.name] = document_id
             queued = client.post(
                 f"{API_PREFIX}/collections/{collection_id}/documents/"
                 f"{document_id}/preparation",
             )
             assert queued.status_code == 200
+            assert queued.json()["code"] == 200, queued.text
 
         run_history = client.get(
             f"{API_PREFIX}/collections/{collection_id}/pipeline-runs",
             params={"limit": 20},
         )
         assert run_history.status_code == 200
-        for run in run_history.json()["items"]:
+        assert run_history.json()["code"] == 200, run_history.text
+        for run in run_history.json()["data"]["items"]:
             completed_run = _wait_for_run(client, run["run_id"])
             assert completed_run["status"] == "completed", completed_run
 
         document_ids = tuple(document_ids_by_filename.values())
         collection = client.get(f"{API_PREFIX}/collections/{collection_id}")
         assert collection.status_code == 200
-        assert {item["status"] for item in collection.json()["documents"]} == {
+        assert collection.json()["code"] == 200, collection.text
+        assert {item["status"] for item in collection.json()["data"]["documents"]} == {
             "ready"
         }
 
@@ -548,7 +570,8 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             json={"document_ids": list(document_ids)},
         )
         assert discovered.status_code == 200, discovered.text
-        discovery_run = discovered.json()
+        assert discovered.json()["code"] == 200, discovered.text
+        discovery_run = discovered.json()["data"]
         assert discovery_run["run_id"]
         completed_discovery = _wait_for_run(
             client,
@@ -559,7 +582,8 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             f"{API_PREFIX}/collections/{collection_id}/objectives"
         )
         assert listed_objectives.status_code == 200, listed_objectives.text
-        objectives = listed_objectives.json()["objectives"]
+        assert listed_objectives.json()["code"] == 200, listed_objectives.text
+        objectives = listed_objectives.json()["data"]["objectives"]
         objective = next(
             item
             for item in objectives
@@ -574,6 +598,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             json={"document_ids": list(document_ids)},
         )
         assert queued_analysis.status_code == 200, queued_analysis.text
+        assert queued_analysis.json()["code"] == 200, queued_analysis.text
         analysis = _wait_for_analysis(client, collection_id, objective_id)
         assert analysis["published_analysis"]["status"] == "succeeded", analysis
 
@@ -585,12 +610,15 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/evidence"
         )
         assert evidence.status_code == 200
+        assert evidence.json()["code"] == 200, evidence.text
         direct_evidence = [
             item
-            for item in evidence.json()["items"]
+            for item in evidence.json()["data"]["items"]
             if item["reported_result"] is not None
         ]
-        assert all(item["scientific_context"]["process"] for item in direct_evidence), direct_evidence
+        assert all(
+            item["scientific_context"]["process"] for item in direct_evidence
+        ), direct_evidence
         assert {item["document_id"] for item in direct_evidence} == {
             paper_a_id,
             paper_b_id,
@@ -616,8 +644,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/findings"
         )
         assert findings.status_code == 200
-        assert findings.json()["total"] == 2
-        finding_items = findings.json()["items"]
+        assert findings.json()["code"] == 200, findings.text
+        assert findings.json()["data"]["total"] == 2
+        finding_items = findings.json()["data"]["items"]
         assert {
             tuple(
                 attribute["value"]
@@ -673,7 +702,11 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
                 f"{item['document_id']}/content"
             )
             assert document_content.status_code == 200
-            assert item["source_excerpt"] in document_content.json()["content_text"]
+            assert document_content.json()["code"] == 200, document_content.text
+            assert (
+                item["source_excerpt"]
+                in document_content.json()["data"]["content_text"]
+            )
             assert item["source_ref"]
 
         published_again = client.get(
@@ -681,6 +714,8 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             f"{objective_id}/analysis"
         )
         assert published_again.status_code == 200
-        assert published_again.json()["published_analysis"] == analysis[
-            "published_analysis"
-        ]
+        assert published_again.json()["code"] == 200, published_again.text
+        assert (
+            published_again.json()["data"]["published_analysis"]
+            == analysis["published_analysis"]
+        )

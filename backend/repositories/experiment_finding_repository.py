@@ -65,7 +65,9 @@ class ExperimentFindingRepository:
                     ExperimentFindingRow.objective_id == objective_id,
                     ExperimentFindingRow.analysis_version == analysis_version,
                 )
-                .order_by(ExperimentFindingRow.display_rank, ExperimentFindingRow.finding_id)
+                .order_by(
+                    ExperimentFindingRow.display_rank, ExperimentFindingRow.finding_id
+                )
             )
         )
         records: list[Finding] = []
@@ -290,7 +292,9 @@ async def _validate_context(
         )
         member_ids = {item.selection_id for item in group_members}
         if not set(finding.selection_ids) <= member_ids:
-            raise ValueError("finding selection is not a member of its comparison group")
+            raise ValueError(
+                "finding selection is not a member of its comparison group"
+            )
 
     return selection_rows, group_rows
 
@@ -378,7 +382,7 @@ async def load_experiment_finding(
                     applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
                 )
                 for item in row.scientific_context_json["test"]
-            )
+            ),
         ),
         limitations=tuple(row.limitations_json),
         paper_contributions=(),
@@ -394,7 +398,7 @@ async def load_experiment_finding(
     )
 
 
-__all__ = ['ExperimentFindingRepository']
+__all__ = ["ExperimentFindingRepository"]
 
 
 ExperimentFindingRepo = ExperimentFindingRepository()

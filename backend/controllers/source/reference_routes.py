@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
-
+from application.source import reference_workflow_service
 from application.source.reference_workflow_service import SourceReferenceWorkflowResult
+from controllers.dependencies.auth import get_current_user_id
+from fastapi import APIRouter, Depends
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
+from utils.response import ApiResponse, make_api_response
 
 
 class SourceReferenceEntryResponse(BaseModel):
@@ -129,42 +132,38 @@ reference_router = APIRouter(
     prefix="/collections/{collection_id}/references",
     tags=["source-references"],
 )
+
+
 @reference_router.post(
     "/build",
-    response_model=SourceReferenceSummaryResponse,
+    response_model=ApiResponse[SourceReferenceSummaryResponse],
     summary="Build the collection reference candidate pool",
 )
 async def build_collection_references(
     collection_id: str,
-    request: Request,
-) -> SourceReferenceSummaryResponse:
-    try:
-        await request.app.state.collection_service.get_collection(collection_id)
-        result = await request.app.state.reference_workflow_service.build_collection_references(
-            collection_id
-        )
-    except FileNotFoundError as exc:
-        raise _not_ready_or_missing(collection_id, exc) from exc
-    return SourceReferenceSummaryResponse(**result.to_summary())
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    result = await reference_workflow_service.build_collection_references(
+        collection_id,
+        user_id=user_id,
+    )
+    return make_api_response(data=SourceReferenceSummaryResponse(**result.to_summary()))
 
 
 @reference_router.get(
     "",
-    response_model=SourceReferenceSetResponse,
+    response_model=ApiResponse[SourceReferenceSetResponse],
     summary="Read the collection reference candidate pool",
 )
 async def get_collection_references(
     collection_id: str,
-    request: Request,
-) -> SourceReferenceSetResponse:
-    try:
-        await request.app.state.collection_service.get_collection(collection_id)
-        result = await request.app.state.reference_workflow_service.read_collection_references(
-            collection_id
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return _reference_set_response(result)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    result = await reference_workflow_service.read_collection_references(
+        collection_id,
+        user_id=user_id,
+    )
+    return make_api_response(data=_reference_set_response(result))
 
 
 def _reference_set_response(
@@ -198,17 +197,3 @@ def _reference_set_response(
             for candidate in references.candidates
         ],
     )
-
-
-def _not_ready_or_missing(collection_id: str, exc: FileNotFoundError) -> HTTPException:
-    message = str(exc)
-    if "source artifacts not ready" in message:
-        return HTTPException(
-            status_code=409,
-            detail={
-                "code": "source_artifacts_not_ready",
-                "collection_id": collection_id,
-                "message": message,
-            },
-        )
-    return HTTPException(status_code=404, detail=message)

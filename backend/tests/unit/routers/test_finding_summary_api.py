@@ -2,18 +2,39 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from application.core.objectives.finding_summary import FindingSummaryUnavailable
-from controllers.core.research_objective_routes import research_objective_router as router
+from controllers.core import research_objective_routes
+from controllers.core.research_objective_routes import (
+    research_objective_router as router,
+)
+from controllers.dependencies.auth import get_current_user_id
+from controllers.exception_router import (
+    general_exception_handler,
+    http_exception_handler,
+    project_exception_handler,
+    request_validation_handler,
+)
+from exceptions import (
+    ProjectException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 @pytest.fixture
 def api():
     app = FastAPI()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     service = SimpleNamespace(summarize_finding=AsyncMock())
-    app.state.objective_analysis_service = service
+    research_objective_routes.objective_analysis_service = service
+    app.dependency_overrides[get_current_user_id] = lambda: "owner-1"
     app.include_router(router, prefix="/api/v1")
     with TestClient(app) as client:
         yield client, service
@@ -48,13 +69,13 @@ def test_summary_returns_versioned_citations_without_publishing(api):
     }
     response = client.post(URL, json={"analysis_version": 2, "language": "zh"})
     assert response.status_code == 200
-    assert response.json()["text"] == "Paper A reports a strength change."
+    assert response.json()["data"]["text"] == "Paper A reports a strength change."
     assert not {"basis", "differences", "limitations", "counts"}.intersection(
-        response.json()
+        response.json()["data"]
     )
-    assert response.json()["references"][0]["page_numbers"] == [5]
+    assert response.json()["data"]["references"][0]["page_numbers"] == [5]
     service.summarize_finding.assert_awaited_once_with(
-        "col-1", "obj-1", "f-1", analysis_version=2, language="zh"
+        "col-1", "obj-1", "f-1", analysis_version=2, language="zh", user_id="owner-1"
     )
 
 
@@ -69,18 +90,26 @@ def test_summary_returns_versioned_citations_without_publishing(api):
 )
 def test_summary_rejects_unversioned_or_client_supplied_facts(api, payload):
     client, service = api
-    assert client.post(URL, json=payload).status_code == 422
+    assert client.post(URL, json=payload).status_code == 200
+    assert client.post(URL, json=payload).json()["code"] == 200100
     service.summarize_finding.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
     "error,status,code",
     [
-        (FileNotFoundError("private detail"), 404, None),
-        (ValueError("old version"), 409, "summary_stale_analysis"),
+        (ResourceNotFoundException("Published Finding not found."), 200201, None),
+        (
+            ResourceConflictException(
+                "The published analysis has changed.",
+                data={"code": "summary_stale_analysis"},
+            ),
+            200204,
+            "summary_stale_analysis",
+        ),
         (
             FindingSummaryUnavailable("summary_input_too_large"),
-            503,
+            200205,
             "summary_input_too_large",
         ),
     ],
@@ -89,30 +118,51 @@ def test_optional_summary_errors_are_explicit_and_safe(api, error, status, code)
     client, service = api
     service.summarize_finding.side_effect = error
     response = client.post(URL, json={"analysis_version": 1})
-    assert response.status_code == status
+    assert response.status_code == 200
+    assert response.json()["code"] == status
     assert "private detail" not in response.text
     if code:
-        assert response.json()["detail"]["code"] == code
+        assert response.json()["data"]["code"] == code
 
 
-@pytest.mark.parametrize("access,status", [("anonymous", 401), ("other-owner", 404)])
-def test_summary_uses_collection_owner_authorization(access, status):
+@pytest.mark.parametrize(
+    "access,code", [("anonymous", 200301), ("other-owner", 200201)]
+)
+def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
     from application.auth import SessionNotFoundError
-    from main import configure_middleware
+    from application.core.objectives import analysis_service
 
     app = FastAPI()
-    resolve_session = AsyncMock(return_value={"user_id": "owner-1"})
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    resolve_session = AsyncMock(return_value={"user_id": "other-owner"})
     if access == "anonymous":
         resolve_session.side_effect = SessionNotFoundError()
-    app.state.auth_session_service = SimpleNamespace(resolve_session=resolve_session)
-    app.state.collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock(side_effect=FileNotFoundError())
+    monkeypatch.setattr(
+        "application.auth.session_service.resolve_session", resolve_session
     )
-    summary_service = SimpleNamespace(summarize_finding=AsyncMock())
-    app.state.objective_analysis_service = summary_service
+    authorize = AsyncMock(
+        side_effect=ResourceNotFoundException("Collection not found.")
+    )
+    monkeypatch.setattr(
+        analysis_service,
+        "collection_service",
+        SimpleNamespace(get_collection_for_user=authorize),
+    )
+    repository = SimpleNamespace(read_objective=AsyncMock())
+    monkeypatch.setattr(analysis_service, "ObjectiveRepo", repository)
+    generate = AsyncMock()
+    monkeypatch.setattr(analysis_service, "summarize_finding_evidence", generate)
+    monkeypatch.setattr(
+        research_objective_routes, "objective_analysis_service", analysis_service
+    )
     app.include_router(router, prefix="/api/v1")
-    configure_middleware(app)
     with TestClient(app) as client:
         response = client.post(URL, json={"analysis_version": 1})
-    assert response.status_code == status
-    summary_service.summarize_finding.assert_not_awaited()
+    assert response.status_code == 200
+    assert response.json()["code"] == code
+    repository.read_objective.assert_not_awaited()
+    generate.assert_not_called()
+    if access == "anonymous":
+        authorize.assert_not_awaited()
+    else:
+        authorize.assert_awaited_once_with("col-1", "other-owner")

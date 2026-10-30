@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from hashlib import sha256
+from types import ModuleType
+from typing import Any
+
+from application.core.document_profiles import service as document_profile_module
+from application.core.objectives import (
+    objective_analysis_service as experiment_analysis_service,
+)
+from application.core.objectives import (
+    objective_input_service as objective_input_module,
+)
+from application.core.objectives import paper_research_map_service
+from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -7,27 +21,12 @@ from domain.core.research_objective import (
     build_research_objective_id,
     normalize_objective_terms,
 )
-
-from datetime import datetime, timezone
-from hashlib import sha256
-from typing import Any
-
-from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.objective_analysis_service import (
-    ObjectiveExperimentAnalysisService,
-)
-from application.core.objectives.objective_input_service import ObjectiveInputService
-from application.core.objectives.paper_research_map_service import (
-    PaperResearchMapService,
-)
-from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
 from domain.source import Document
 from repositories.collection_repository import StoredDocument
-from repositories.objective_repository import ObjectiveAnalysis
 from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 from repositories.paper_map_repository import PaperMapRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
-from repositories.objective_repository import ObjectiveRepository
 
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
@@ -36,46 +35,44 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
         objective_id=payload.get("objective_id", None)
         or build_research_objective_id(
             question=payload.get(
-                    "question", "How does process condition affect the target outcome?"
-                )
+                "question", "How does process condition affect the target outcome?"
+            )
             or "",
-            material_scope=normalize_objective_terms(
-                payload.get('material_scope', ())
-            ),
+            material_scope=normalize_objective_terms(payload.get("material_scope", ())),
             variables=normalize_objective_terms(
                 payload.get("variables", ["process condition"])
             ),
             outcomes=normalize_objective_terms(
                 payload.get("outcomes", ["target outcome"])
             ),
-            mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
-            constraints=normalize_objective_terms(payload.get('constraints', ())),
+            mechanisms=normalize_objective_terms(payload.get("mechanisms", ())),
+            constraints=normalize_objective_terms(payload.get("constraints", ())),
             requested_comparator=payload.get("requested_comparator", None),
             parent_objective_id=payload.get("parent_objective_id", None),
             parent_analysis_version=payload.get("parent_analysis_version", None),
         ),
         question=payload.get(
-                "question", "How does process condition affect the target outcome?"
-            )
+            "question", "How does process condition affect the target outcome?"
+        )
         or "",
-        material_scope=normalize_objective_terms(payload.get('material_scope', ())),
+        material_scope=normalize_objective_terms(payload.get("material_scope", ())),
         variables=normalize_objective_terms(
             payload.get("variables", ["process condition"])
         ),
         outcomes=normalize_objective_terms(payload.get("outcomes", ["target outcome"])),
-        mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
-        constraints=normalize_objective_terms(payload.get('constraints', ())),
+        mechanisms=normalize_objective_terms(payload.get("mechanisms", ())),
+        constraints=normalize_objective_terms(payload.get("constraints", ())),
         requested_comparator=payload.get("requested_comparator", None),
         seed_document_ids=normalize_objective_terms(
-            payload.get('seed_document_ids', ())
+            payload.get("seed_document_ids", ())
         ),
         excluded_document_ids=normalize_objective_terms(
-            payload.get('excluded_document_ids', ())
+            payload.get("excluded_document_ids", ())
         ),
-        confidence=payload.get('confidence', 0.0),
+        confidence=payload.get("confidence", 0.0),
         reason=payload.get("reason", None),
         source_relationship_ids=normalize_objective_terms(
-            payload.get('source_relationship_ids', ())
+            payload.get("source_relationship_ids", ())
         ),
         parent_objective_id=payload.get("parent_objective_id", None),
         parent_analysis_version=payload.get("parent_analysis_version", None),
@@ -94,17 +91,20 @@ def build_research_objective_service(
     *,
     collection_service,
     **kwargs,
-) -> ObjectiveExperimentAnalysisService:
+) -> ModuleType:
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
         kwargs.setdefault("objective_source_screener", objective_judgments)
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
-        source_repository = getattr(
-            kwargs.get("document_profile_service"),
-            "source_artifact_repository",
-            None,
-        ) or SourceArtifactRepository()
+        source_repository = (
+            getattr(
+                kwargs.get("document_profile_service"),
+                "source_artifact_repository",
+                None,
+            )
+            or SourceArtifactRepository()
+        )
     document_profile_repository = kwargs.pop(
         "document_profile_repository",
         DocumentProfileRepository(),
@@ -117,42 +117,48 @@ def build_research_objective_service(
         "objective_repository",
         ObjectiveRepository(),
     )
-    document_profile_service = kwargs.pop("document_profile_service", None)
-    if document_profile_service is None:
-        document_profile_service = DocumentProfileService(
-            collection_service=collection_service,
-            source_artifact_repository=source_repository,
-            document_profile_repository=document_profile_repository,
-        )
+    document_profile_service = kwargs.pop(
+        "document_profile_service", document_profile_module
+    )
+    document_profile_service.collection_service = collection_service
+    document_profile_service.SourceArtifactRepo = source_repository
+    document_profile_service.DocumentProfileRepo = document_profile_repository
     objective_input_service = kwargs.pop(
         "objective_input_service",
-        ObjectiveInputService(
-            collection_service=collection_service,
-            source_artifact_repository=source_repository,
-            paper_map_repository=paper_map_repository,
-            document_profile_service=document_profile_service,
-            paper_map_service=kwargs.pop("paper_map_service", PaperResearchMapService()),
-            response_client=objective_judgments,
-        ),
+        objective_input_module,
     )
-    return ObjectiveExperimentAnalysisService(
-        collection_service=collection_service,
-        paper_map_repository=paper_map_repository,
-        objective_repository=objective_repository,
-        objective_input_service=objective_input_service,
-        **kwargs,
+    objective_input_service.collection_service = collection_service
+    objective_input_service.SourceArtifactRepo = source_repository
+    objective_input_service.PaperMapRepo = paper_map_repository
+    objective_input_service.document_profile_service = document_profile_service
+    objective_input_service.paper_research_map_service = kwargs.pop(
+        "paper_map_service", paper_research_map_service
     )
+    objective_input_service._response_client = objective_judgments
+    experiment_analysis_service.collection_service = collection_service
+    experiment_analysis_service.PaperMapRepo = paper_map_repository
+    experiment_analysis_service.ObjectiveRepo = objective_repository
+    experiment_analysis_service.objective_input_service = objective_input_service
+    experiment_analysis_service._objective_source_screener = kwargs.pop(
+        "objective_source_screener", None
+    )
+    experiment_analysis_service._paper_experiment_extractor = kwargs.pop(
+        "paper_experiment_extractor", None
+    )
+    if kwargs:
+        raise TypeError(f"Unexpected test service options: {', '.join(kwargs)}")
+    return experiment_analysis_service
 
 
 async def seed_document_profiles(
-    service: ObjectiveExperimentAnalysisService,
+    service: ModuleType,
     collection_id: str,
 ) -> None:
-    documents = await service.objective_input_service.source_artifact_repository.read_collection_documents(
+    documents = await service.objective_input_service.SourceArtifactRepo.read_collection_documents(
         collection_id
     )
-    current_collection = await service.collection_service.repository.read_collection(
-        collection_id
+    current_collection = (
+        await service.collection_service.CollectionRepo.read_collection(collection_id)
     )
     assert current_collection is not None
     existing_document_ids = {
@@ -187,7 +193,7 @@ async def seed_document_profiles(
         if document.document_id not in existing_document_ids
     )
     if new_documents:
-        await service.collection_service.repository.add_documents(
+        await service.collection_service.CollectionRepo.add_documents(
             collection_id,
             new_documents,
             updated_at=now,
@@ -205,14 +211,13 @@ async def seed_document_profiles(
             )
         )
     for profile in profiles:
-        await service.objective_input_service.document_profile_service.document_profile_repository.replace(
-            collection_id,
-            profile
+        await service.objective_input_service.document_profile_service.DocumentProfileRepo.replace(
+            collection_id, profile
         )
 
 
 async def queue_running_analysis(
-    service: ObjectiveExperimentAnalysisService,
+    service: ModuleType,
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:
@@ -224,9 +229,11 @@ async def queue_running_analysis(
             objective_id,
         )
         assert objective is not None
-        document_inputs = await service.objective_input_service.resolve_prepared_document_inputs(
-            collection_id,
-            tuple(objective.seed_document_ids),
+        document_inputs = (
+            await service.objective_input_service.resolve_prepared_document_inputs(
+                collection_id,
+                tuple(objective.seed_document_ids),
+            )
         )
     _, queued = await service.objective_repository.queue_analysis(
         collection_id,

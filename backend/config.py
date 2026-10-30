@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Project root
@@ -24,3 +25,6 @@ LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 LLM_API_KEY = os.environ.get("LLM_API_KEY")
 LLM_MAX_TOKENS = 512
+
+# Browser session cookie transport setting.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes"}

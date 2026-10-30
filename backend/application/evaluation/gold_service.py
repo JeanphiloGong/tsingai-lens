@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any, Sequence
 
-from application.source.collection_service import CollectionService
 from domain.evaluation import EvaluationGoldItem, EvaluationGoldSet
 from domain.evaluation.records import (
     EVALUATION_TARGET_LAYERS,
@@ -15,7 +15,7 @@ class EvaluationGoldService:
 
     def __init__(
         self,
-        collection_service: CollectionService,
+        collection_service: ModuleType,
         evaluation_repository: EvaluationRepository,
     ) -> None:
         self.collection_service = collection_service
@@ -34,9 +34,7 @@ class EvaluationGoldService:
         items: Sequence[EvaluationGoldItem],
     ) -> EvaluationGoldSet:
         await self.collection_service.get_collection(collection_id)
-        collection_document_ids = await self._collection_document_ids(
-            collection_id
-        )
+        collection_document_ids = await self._collection_document_ids(collection_id)
         if target_layer not in EVALUATION_TARGET_LAYERS:
             raise ValueError(f"unsupported evaluation target layer: {target_layer}")
         gold_set = EvaluationGoldSet(

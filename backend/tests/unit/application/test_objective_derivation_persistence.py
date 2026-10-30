@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from types import ModuleType, SimpleNamespace
+
+import pytest
+from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.capabilities.objective_candidate import (
+    CreateObjectiveCandidateCapability,
+    CreateObjectiveCandidateToolRequest,
+)
+from application.core.objectives import objective_authoring_service
+from domain.core import ResearchObjective
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -8,21 +19,6 @@ from domain.core.research_objective import (
     build_research_objective_id,
     normalize_objective_terms,
 )
-
-from dataclasses import replace
-from types import SimpleNamespace
-
-import pytest
-
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.objective_candidate import (
-    CreateObjectiveCandidateCapability,
-    CreateObjectiveCandidateToolRequest,
-)
-from application.core.objectives.objective_authoring_service import (
-    ObjectiveAuthoringService,
-)
-from domain.core import ResearchObjective
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
@@ -38,7 +34,9 @@ class _CollectionService:
         assert (collection_id, user_id) == ("col-1", "user-1")
         return {"collection_id": collection_id}
 
-    async def get_document(self, collection_id: str, document_id: str) -> SimpleNamespace:
+    async def get_document(
+        self, collection_id: str, document_id: str
+    ) -> SimpleNamespace:
         assert collection_id == "col-1"
         return SimpleNamespace(document_id=document_id)
 
@@ -53,24 +51,22 @@ class _ObjectiveAuthoringService:
             collection_id=kwargs.get("collection_id", None) or "",
             objective_id="objective-derived",
             question=kwargs.get("question", None) or "",
-            material_scope=normalize_objective_terms(
-                kwargs.get('material_scope', ())
-            ),
-            variables=normalize_objective_terms(kwargs.get('variables', ())),
-            outcomes=normalize_objective_terms(kwargs.get('outcomes', ())),
-            mechanisms=normalize_objective_terms(kwargs.get('mechanisms', ())),
-            constraints=normalize_objective_terms(kwargs.get('constraints', ())),
+            material_scope=normalize_objective_terms(kwargs.get("material_scope", ())),
+            variables=normalize_objective_terms(kwargs.get("variables", ())),
+            outcomes=normalize_objective_terms(kwargs.get("outcomes", ())),
+            mechanisms=normalize_objective_terms(kwargs.get("mechanisms", ())),
+            constraints=normalize_objective_terms(kwargs.get("constraints", ())),
             requested_comparator=kwargs.get("requested_comparator", None),
             seed_document_ids=normalize_objective_terms(
-                kwargs.get('seed_document_ids', ())
+                kwargs.get("seed_document_ids", ())
             ),
             excluded_document_ids=normalize_objective_terms(
-                kwargs.get('excluded_document_ids', ())
+                kwargs.get("excluded_document_ids", ())
             ),
             confidence=0.0,
             reason=kwargs.get("reason", None),
             source_relationship_ids=normalize_objective_terms(
-                kwargs.get('source_relationship_ids', ())
+                kwargs.get("source_relationship_ids", ())
             ),
             parent_objective_id=kwargs.get("parent_objective_id", None),
             parent_analysis_version=kwargs.get("parent_analysis_version", None),
@@ -135,7 +131,9 @@ class _ParentObjectiveRepository:
 
     async def read_analysis(self, collection_id, objective_id, analysis_version):
         if (collection_id, objective_id, analysis_version) != (
-            "col-1", "objective-parent", self.parent.published_analysis_version
+            "col-1",
+            "objective-parent",
+            self.parent.published_analysis_version,
         ):
             return None
         return ObjectiveAnalysis(
@@ -147,6 +145,10 @@ class _ParentObjectiveRepository:
             model_name=None,
             prompt_versions={},
             status="succeeded",
+            origin="agent_authored",
+            scientific_record_source="authored_snapshot",
+            created_by_user_id="user-1",
+            created_by_tool_call_id="call-parent",
             phase="completed",
             processed_document_count=1,
             total_document_count=1,
@@ -321,7 +323,9 @@ def _all_lineage_with_untrusted_snapshots() -> list[dict]:
     ]
 
 
-async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call() -> None:
+async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call() -> (
+    None
+):
     service = _ObjectiveAuthoringService()
     capability = CreateObjectiveCandidateCapability(
         objective_authoring_service=service,
@@ -348,7 +352,9 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
     assert service.calls[0]["derivation_basis"] == _lineage()
 
 
-async def test_derived_candidate_lineage_round_trips_through_postgres_repository(*, postgres_session_factory) -> None:
+async def test_derived_candidate_lineage_round_trips_through_postgres_repository(
+    *, postgres_session_factory
+) -> None:
     repository = ObjectiveRepository()
     objective = ResearchObjective(
         collection_id="col-1",
@@ -385,7 +391,9 @@ async def test_derived_candidate_lineage_round_trips_through_postgres_repository
     assert restored.derivation_basis == tuple(_lineage())
 
 
-async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(*, postgres_session_factory) -> None:
+async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(
+    *, postgres_session_factory
+) -> None:
     repository = ObjectiveRepository()
     first = ResearchObjective(
         collection_id="col-1",
@@ -425,7 +433,9 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(*, post
         )
 
 
-async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(*, postgres_session_factory) -> None:
+async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(
+    *, postgres_session_factory
+) -> None:
     repository = ObjectiveRepository()
     first = ResearchObjective(
         collection_id="col-1",
@@ -463,11 +473,10 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(*, 
     assert retried.rank == 1
 
 
-def _service(*, repository: ObjectiveRepository) -> ObjectiveAuthoringService:
-    return ObjectiveAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-    )
+def _service(*, repository: ObjectiveRepository) -> ModuleType:
+    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.ObjectiveRepo = repository
+    return objective_authoring_service
 
 
 def _published_parent() -> ResearchObjective:
@@ -494,7 +503,9 @@ def _published_parent() -> ResearchObjective:
     )
 
 
-async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published(*, postgres_session_factory) -> None:
+async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published(
+    *, postgres_session_factory
+) -> None:
     repository = ObjectiveRepository()
     await repository.create_authored_candidate(
         _published_parent(),
@@ -582,8 +593,22 @@ async def test_service_persists_derived_candidate_against_published_parent() -> 
     )
 
 
-async def test_derived_objective_reads_parent_basis_from_experiment_projection() -> None:
+async def test_derived_objective_reads_parent_basis_from_experiment_projection() -> (
+    None
+):
+    from unittest.mock import AsyncMock
+
     repository = _ParentObjectiveRepository()
+    analysis = await repository.read_analysis("col-1", "objective-parent", 3)
+    repository.read_analysis = AsyncMock(
+        return_value=replace(
+            analysis,
+            origin="system_generated",
+            scientific_record_source="experiment_graph",
+            created_by_user_id=None,
+            created_by_tool_call_id=None,
+        )
+    )
     projection = _ParentExperimentProjection(repository)
 
     async def reject_legacy_read(*args, **kwargs):  # noqa: ARG001
@@ -592,11 +617,10 @@ async def test_derived_objective_reads_parent_basis_from_experiment_projection()
     repository.read_finding = reject_legacy_read
     repository.list_evidence = reject_legacy_read
     repository.list_contributions = reject_legacy_read
-    service = ObjectiveAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-        experiment_projection=projection,
-    )
+    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.ObjectiveRepo = repository
+    objective_authoring_service.experiment_compatibility_projection = projection
+    service = objective_authoring_service
 
     created = await service.create_chat_assisted_candidate(
         collection_id="col-1",
@@ -738,12 +762,13 @@ async def test_service_rejects_noncanonical_derivation_basis_before_persistence(
     assert repository.created == []
 
 
-async def test_derived_candidate_requires_the_current_published_parent_version() -> None:
+async def test_derived_candidate_requires_the_current_published_parent_version() -> (
+    None
+):
     repository = _ParentObjectiveRepository(published_version=3)
-    service = ObjectiveAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-    )
+    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.ObjectiveRepo = repository
+    service = objective_authoring_service
     kwargs = {
         "collection_id": "col-1",
         "user_id": "user-1",
@@ -790,34 +815,32 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         objective_id=common.get("objective_id", None)
         or build_research_objective_id(
             question=common.get("question", None) or "",
-            material_scope=normalize_objective_terms(
-                common.get('material_scope', ())
-            ),
-            variables=normalize_objective_terms(common.get('variables', ())),
-            outcomes=normalize_objective_terms(common.get('outcomes', ())),
-            mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
-            constraints=normalize_objective_terms(common.get('constraints', ())),
+            material_scope=normalize_objective_terms(common.get("material_scope", ())),
+            variables=normalize_objective_terms(common.get("variables", ())),
+            outcomes=normalize_objective_terms(common.get("outcomes", ())),
+            mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+            constraints=normalize_objective_terms(common.get("constraints", ())),
             requested_comparator=common.get("requested_comparator", None),
             parent_objective_id="objective-parent-a",
             parent_analysis_version=common.get("parent_analysis_version", None),
         ),
         question=common.get("question", None) or "",
-        material_scope=normalize_objective_terms(common.get('material_scope', ())),
-        variables=normalize_objective_terms(common.get('variables', ())),
-        outcomes=normalize_objective_terms(common.get('outcomes', ())),
-        mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
-        constraints=normalize_objective_terms(common.get('constraints', ())),
+        material_scope=normalize_objective_terms(common.get("material_scope", ())),
+        variables=normalize_objective_terms(common.get("variables", ())),
+        outcomes=normalize_objective_terms(common.get("outcomes", ())),
+        mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+        constraints=normalize_objective_terms(common.get("constraints", ())),
         requested_comparator=common.get("requested_comparator", None),
         seed_document_ids=normalize_objective_terms(
-            common.get('seed_document_ids', ())
+            common.get("seed_document_ids", ())
         ),
         excluded_document_ids=normalize_objective_terms(
-            common.get('excluded_document_ids', ())
+            common.get("excluded_document_ids", ())
         ),
-        confidence=common.get('confidence', 0.0),
+        confidence=common.get("confidence", 0.0),
         reason=common.get("reason", None),
         source_relationship_ids=normalize_objective_terms(
-            common.get('source_relationship_ids', ())
+            common.get("source_relationship_ids", ())
         ),
         parent_objective_id="objective-parent-a",
         parent_analysis_version=common.get("parent_analysis_version", None),
@@ -835,34 +858,32 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         objective_id=common.get("objective_id", None)
         or build_research_objective_id(
             question=common.get("question", None) or "",
-            material_scope=normalize_objective_terms(
-                common.get('material_scope', ())
-            ),
-            variables=normalize_objective_terms(common.get('variables', ())),
-            outcomes=normalize_objective_terms(common.get('outcomes', ())),
-            mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
-            constraints=normalize_objective_terms(common.get('constraints', ())),
+            material_scope=normalize_objective_terms(common.get("material_scope", ())),
+            variables=normalize_objective_terms(common.get("variables", ())),
+            outcomes=normalize_objective_terms(common.get("outcomes", ())),
+            mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+            constraints=normalize_objective_terms(common.get("constraints", ())),
             requested_comparator=common.get("requested_comparator", None),
             parent_objective_id="objective-parent-b",
             parent_analysis_version=common.get("parent_analysis_version", None),
         ),
         question=common.get("question", None) or "",
-        material_scope=normalize_objective_terms(common.get('material_scope', ())),
-        variables=normalize_objective_terms(common.get('variables', ())),
-        outcomes=normalize_objective_terms(common.get('outcomes', ())),
-        mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
-        constraints=normalize_objective_terms(common.get('constraints', ())),
+        material_scope=normalize_objective_terms(common.get("material_scope", ())),
+        variables=normalize_objective_terms(common.get("variables", ())),
+        outcomes=normalize_objective_terms(common.get("outcomes", ())),
+        mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+        constraints=normalize_objective_terms(common.get("constraints", ())),
         requested_comparator=common.get("requested_comparator", None),
         seed_document_ids=normalize_objective_terms(
-            common.get('seed_document_ids', ())
+            common.get("seed_document_ids", ())
         ),
         excluded_document_ids=normalize_objective_terms(
-            common.get('excluded_document_ids', ())
+            common.get("excluded_document_ids", ())
         ),
-        confidence=common.get('confidence', 0.0),
+        confidence=common.get("confidence", 0.0),
         reason=common.get("reason", None),
         source_relationship_ids=normalize_objective_terms(
-            common.get('source_relationship_ids', ())
+            common.get("source_relationship_ids", ())
         ),
         parent_objective_id="objective-parent-b",
         parent_analysis_version=common.get("parent_analysis_version", None),

@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-
 import json
+from dataclasses import asdict
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-
-from controllers.dependencies.auth import current_user_id
+from application.core.objectives import finding_authoring_service
+from application.evaluation import finding_feedback_service
+from application.evaluation.finding_feedback_service import finding_training_rows
+from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveAnalysisStateResponse,
     ObjectiveEvidenceAttributeResponse,
     ObjectiveEvidenceResponse,
+    analysis_state_response,
 )
 from domain.core.finding import (
     Finding,
@@ -20,10 +22,11 @@ from domain.core.finding import (
     FindingPaperContribution,
 )
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
-from domain.evaluation.records import FindingFeedbackDecisionError
-from fastapi import APIRouter, HTTPException, Query, Request
+from exceptions import RequestInvalidException
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from utils.response import ApiResponse, make_api_response
 
 FindingReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
 FindingIssueType = Literal[
@@ -63,7 +66,7 @@ class FindingAuthoringCreateRequest(BaseModel):
     abstention_reason: FindingAbstentionReason | None = None
 
     @model_validator(mode="after")
-    def validate_authoring_mode(self) -> "FindingAuthoringCreateRequest":
+    def validate_text_lengths(self) -> "FindingAuthoringCreateRequest":
         if any(len(value.strip()) > 1000 for value in self.limitations):
             raise ValueError("Finding limitations cannot exceed 1000 characters")
         selected = self.selection_ids + self.comparison_group_ids
@@ -71,14 +74,6 @@ class FindingAuthoringCreateRequest(BaseModel):
             raise ValueError(
                 "experiment reference IDs must be non-empty and at most 128 characters"
             )
-        if self.abstention_reason is not None:
-            if selected or self.parent_finding_id is not None:
-                raise ValueError("abstention cannot contain experiment selections")
-            if not any(value.strip() for value in self.limitations):
-                raise ValueError("abstention requires an explanation")
-            return self
-        if not self.selection_ids:
-            raise ValueError("Finding requires at least one experiment selection")
         return self
 
 
@@ -96,7 +91,6 @@ class FindingFeedbackCreateRequest(BaseModel):
     issue_type: FindingIssueType = Field(default="none")
     note: str | None = Field(default=None, max_length=2000)
     reviewer: str | None = Field(default=None, max_length=120)
-
 
 
 class FindingFeedbackResponse(BaseModel):
@@ -194,265 +188,51 @@ finding_review_router = APIRouter(prefix="/collections", tags=["finding-review"]
 
 @finding_review_router.post(
     "/{collection_id}/objectives/{objective_id}/findings",
-    response_model=FindingAuthoringResponse,
-    status_code=201,
+    response_model=ApiResponse[FindingAuthoringResponse],
+    status_code=200,
     summary="Create a researcher-authored Finding version",
 )
 async def create_finding_version(
     collection_id: str,
     objective_id: str,
     payload: FindingAuthoringCreateRequest,
-    request: Request,
-) -> FindingAuthoringResponse:
-    try:
-        result = (
-            await request.app.state.finding_authoring_service.create_selection_version(
-                collection_id=collection_id,
-                objective_id=objective_id,
-                source_analysis_version=payload.source_analysis_version,
-                created_by_user_id=await current_user_id(request),
-                selection_ids=tuple(payload.selection_ids),
-                comparison_group_ids=tuple(payload.comparison_group_ids),
-                parent_finding_id=payload.parent_finding_id,
-                limitations=tuple(payload.limitations),
-                abstention_reason=payload.abstention_reason,
-            )
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingAuthoringResponse(
-        analysis={
-            "collection_id": result.analysis.collection_id,
-            "objective_id": result.analysis.objective_id,
-            "analysis_version": result.analysis.analysis_version,
-            "document_inputs": [
-                {
-                    "document_id": document_input.document_id,
-                    "preparation_fingerprint": document_input.preparation_fingerprint,
-                }
-                for document_input in result.analysis.document_inputs
-            ],
-            "pipeline_version": result.analysis.pipeline_version,
-            "model_name": result.analysis.model_name,
-            "prompt_versions": dict(result.analysis.prompt_versions),
-            "stats": {
-                "duration_ms": result.analysis.stats.duration_ms,
-                "token_usage": (
-                    asdict(result.analysis.stats.token_usage)
-                    if result.analysis.stats.token_usage is not None
-                    else None
-                ),
-                "model_usage": [
-                    asdict(item) for item in result.analysis.stats.model_usage
-                ],
-                "unreported_request_count": result.analysis.stats.unreported_request_count,
-                "prompt_versions": dict(result.analysis.stats.prompt_versions),
-            },
-            "status": result.analysis.status,
-            "phase": result.analysis.phase,
-            "processed_document_count": result.analysis.processed_document_count,
-            "total_document_count": result.analysis.total_document_count,
-            "current_document_id": result.analysis.current_document_id,
-            "progress_message": result.analysis.progress_message,
-            "error_code": result.analysis.error_code,
-            "error_message": result.analysis.error_message,
-            "created_at": (
-                result.analysis.created_at.isoformat()
-                if result.analysis.created_at is not None
-                else None
-            ),
-            "started_at": (
-                result.analysis.started_at.isoformat()
-                if result.analysis.started_at is not None
-                else None
-            ),
-            "completed_at": (
-                result.analysis.completed_at.isoformat()
-                if result.analysis.completed_at is not None
-                else None
-            ),
-            "origin": result.analysis.origin,
-            "scientific_record_source": result.analysis.scientific_record_source,
-            "source_analysis_version": result.analysis.source_analysis_version,
-            "created_by_user_id": result.analysis.created_by_user_id,
-            "created_by_tool_call_id": result.analysis.created_by_tool_call_id,
-            "abstention_reason": result.analysis.abstention_reason,
-            "abstention_note": result.analysis.abstention_note,
-        },
-        finding=(
-            {
-                "collection_id": result.finding.collection_id,
-                "objective_id": result.finding.objective_id,
-                "analysis_version": result.finding.analysis_version,
-                "finding_id": result.finding.finding_id,
-                "statement": result.finding.statement,
-                "factors": list(result.finding.factors),
-                "outcome": result.finding.outcome,
-                "direction": result.finding.direction,
-                "assertion_strength": result.finding.assertion_strength,
-                "attribution_scope": result.finding.attribution_scope,
-                "synthesis_status": result.finding.synthesis_status,
-                "certainty": result.finding.certainty,
-                "display_rank": result.finding.display_rank,
-                "mechanisms": [
-                    {
-                        "source_term": mechanism.source_term,
-                        "relation_type": mechanism.relation_type,
-                        "target_term": mechanism.target_term,
-                        "direction": mechanism.direction,
-                        "assertion_strength": mechanism.assertion_strength,
-                        "supporting_evidence_ids": list(
-                            mechanism.supporting_evidence_ids
-                        ),
-                    }
-                    for mechanism in result.finding.mechanisms
-                ],
-                "scientific_context": {
-                    "material": [
-                        {
-                            "name": attribute.name,
-                            "value": attribute.value,
-                            "unit": attribute.unit,
-                            **(
-                                {"context_scope": attribute.context_scope}
-                                if attribute.context_scope != "unknown"
-                                else {}
-                            ),
-                            **(
-                                {
-                                    "applies_to_outcomes": list(
-                                        attribute.applies_to_outcomes
-                                    )
-                                }
-                                if attribute.applies_to_outcomes
-                                else {}
-                            ),
-                        }
-                        for attribute in result.finding.scientific_context.material
-                    ],
-                    "sample": [
-                        {
-                            "name": attribute.name,
-                            "value": attribute.value,
-                            "unit": attribute.unit,
-                            **(
-                                {"context_scope": attribute.context_scope}
-                                if attribute.context_scope != "unknown"
-                                else {}
-                            ),
-                            **(
-                                {
-                                    "applies_to_outcomes": list(
-                                        attribute.applies_to_outcomes
-                                    )
-                                }
-                                if attribute.applies_to_outcomes
-                                else {}
-                            ),
-                        }
-                        for attribute in result.finding.scientific_context.sample
-                    ],
-                    "process": [
-                        {
-                            "name": attribute.name,
-                            "value": attribute.value,
-                            "unit": attribute.unit,
-                            **(
-                                {"context_scope": attribute.context_scope}
-                                if attribute.context_scope != "unknown"
-                                else {}
-                            ),
-                            **(
-                                {
-                                    "applies_to_outcomes": list(
-                                        attribute.applies_to_outcomes
-                                    )
-                                }
-                                if attribute.applies_to_outcomes
-                                else {}
-                            ),
-                        }
-                        for attribute in result.finding.scientific_context.process
-                    ],
-                    "test": [
-                        {
-                            "name": attribute.name,
-                            "value": attribute.value,
-                            "unit": attribute.unit,
-                            **(
-                                {"context_scope": attribute.context_scope}
-                                if attribute.context_scope != "unknown"
-                                else {}
-                            ),
-                            **(
-                                {
-                                    "applies_to_outcomes": list(
-                                        attribute.applies_to_outcomes
-                                    )
-                                }
-                                if attribute.applies_to_outcomes
-                                else {}
-                            ),
-                        }
-                        for attribute in result.finding.scientific_context.test
-                    ],
-                },
-                "limitations": list(result.finding.limitations),
-                "paper_contributions": [
-                    {
-                        "document_id": contribution.document_id,
-                        "analysis_status": contribution.analysis_status,
-                        "supporting_evidence_ids": list(
-                            contribution.supporting_evidence_ids
-                        ),
-                        "contradicting_evidence_ids": list(
-                            contribution.contradicting_evidence_ids
-                        ),
-                        "context_evidence_ids": list(contribution.context_evidence_ids),
-                        "condition_boundary_evidence_ids": list(
-                            contribution.condition_boundary_evidence_ids
-                        ),
-                    }
-                    for contribution in result.finding.paper_contributions
-                ],
-                "origin": result.finding.origin,
-                "source_analysis_version": result.finding.source_analysis_version,
-                "parent_finding_id": result.finding.parent_finding_id,
-                "created_by_user_id": result.finding.created_by_user_id,
-                "created_by_tool_call_id": result.finding.created_by_tool_call_id,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    result = await finding_authoring_service.create_selection_version(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        source_analysis_version=payload.source_analysis_version,
+        created_by_user_id=user_id,
+        selection_ids=tuple(payload.selection_ids),
+        comparison_group_ids=tuple(payload.comparison_group_ids),
+        parent_finding_id=payload.parent_finding_id,
+        limitations=tuple(payload.limitations),
+        abstention_reason=payload.abstention_reason,
+    )
+    finding = None
+    if result.finding is not None:
+        finding = FindingResponse(
+            **{
+                **asdict(result.finding),
                 "created_at": (
                     result.finding.created_at.isoformat()
                     if result.finding.created_at
                     else None
                 ),
-                **(
-                    {"selection_ids": list(result.finding.selection_ids)}
-                    if result.finding.selection_ids
-                    else {}
-                ),
-                **(
-                    {"comparison_group_ids": list(result.finding.comparison_group_ids)}
-                    if result.finding.comparison_group_ids
-                    else {}
-                ),
-                **(
-                    {"warnings": list(result.finding.warnings)}
-                    if result.finding.warnings
-                    else {}
-                ),
             }
-            if result.finding is not None
-            else None
-        ),
-        abstention_reason=result.analysis.abstention_reason,
+        )
+    return make_api_response(
+        data=FindingAuthoringResponse(
+            analysis=analysis_state_response(result.analysis),
+            finding=finding,
+            abstention_reason=result.analysis.abstention_reason,
+        )
     )
 
 
 @finding_review_router.post(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
-    response_model=FindingFeedbackResponse,
+    response_model=ApiResponse[FindingFeedbackResponse],
     summary="Record Finding feedback",
 )
 async def record_finding_feedback(
@@ -460,66 +240,60 @@ async def record_finding_feedback(
     objective_id: str,
     finding_id: str,
     payload: FindingFeedbackCreateRequest,
-    request: Request,
-) -> FindingFeedbackResponse:
-    try:
-        feedback = await request.app.state.finding_feedback_service.record_feedback(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=payload.analysis_version,
-            finding_id=finding_id,
-            review_status=payload.review_status,
-            issue_type=payload.issue_type,
-            note=payload.note,
-            reviewer=payload.reviewer,
-        )
-    except FindingFeedbackDecisionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingFeedbackResponse.model_validate(feedback, from_attributes=True)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    feedback = await finding_feedback_service.record_feedback(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=payload.analysis_version,
+        finding_id=finding_id,
+        review_status=payload.review_status,
+        issue_type=payload.issue_type,
+        note=payload.note,
+        reviewer=payload.reviewer,
+        user_id=user_id,
+    )
+    return make_api_response(
+        data=FindingFeedbackResponse.model_validate(feedback, from_attributes=True)
+    )
 
 
 @finding_review_router.get(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
-    response_model=FindingFeedbackListResponse,
+    response_model=ApiResponse[FindingFeedbackListResponse],
     summary="List Finding feedback",
 )
 async def list_finding_feedback(
     collection_id: str,
     objective_id: str,
     finding_id: str,
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int = Query(..., ge=1),
-) -> FindingFeedbackListResponse:
-    try:
-        records = await request.app.state.finding_feedback_service.list_feedback(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-            finding_id=finding_id,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingFeedbackListResponse(
+) -> Response:
+    records = await finding_feedback_service.list_feedback(
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
-        items=[
-            FindingFeedbackResponse.model_validate(item, from_attributes=True)
-            for item in records
-        ],
+        user_id=user_id,
+    )
+    return make_api_response(
+        data=FindingFeedbackListResponse(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            finding_id=finding_id,
+            items=[
+                FindingFeedbackResponse.model_validate(item, from_attributes=True)
+                for item in records
+            ],
+        )
     )
 
 
 @finding_review_router.put(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation",
-    response_model=FindingCurationResponse,
+    response_model=ApiResponse[FindingCurationResponse],
     summary="Curate a Finding",
 )
 async def record_finding_curation(
@@ -527,8 +301,8 @@ async def record_finding_curation(
     objective_id: str,
     finding_id: str,
     payload: FindingCurationCreateRequest,
-    request: Request,
-) -> FindingCurationResponse:
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
     try:
         value = payload.curated_finding
         candidate = Finding(
@@ -590,66 +364,71 @@ async def record_finding_curation(
             ),
             warnings=tuple(value.warnings),
         )
-        curation = await request.app.state.finding_feedback_service.record_curation(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=payload.analysis_version,
-            finding_id=finding_id,
-            curated_status=payload.curated_status,
-            curated_finding=candidate,
-            note=payload.note,
-            reviewer=payload.reviewer,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingCurationResponse.model_validate(curation, from_attributes=True)
+        raise RequestInvalidException(
+            str(exc), data={"code": "curation_invalid"}
+        ) from exc
+    curation = await finding_feedback_service.record_curation(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=payload.analysis_version,
+        finding_id=finding_id,
+        curated_status=payload.curated_status,
+        curated_finding=candidate,
+        note=payload.note,
+        reviewer=payload.reviewer,
+        user_id=user_id,
+    )
+    return make_api_response(
+        data=FindingCurationResponse.model_validate(curation, from_attributes=True)
+    )
 
 
 @finding_review_router.get(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation",
-    response_model=FindingCurationListResponse,
+    response_model=ApiResponse[FindingCurationListResponse],
     summary="List Finding curations",
 )
 async def list_finding_curations(
     collection_id: str,
     objective_id: str,
     finding_id: str,
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int = Query(..., ge=1),
-) -> FindingCurationListResponse:
-    try:
-        records = await request.app.state.finding_feedback_service.list_curations(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-            finding_id=finding_id,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingCurationListResponse(
+) -> Response:
+    records = await finding_feedback_service.list_curations(
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
-        items=[
-            FindingCurationResponse.model_validate(item, from_attributes=True)
-            for item in records
-        ],
+        user_id=user_id,
+    )
+    return make_api_response(
+        data=FindingCurationListResponse(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            finding_id=finding_id,
+            items=[
+                FindingCurationResponse.model_validate(item, from_attributes=True)
+                for item in records
+            ],
+        )
     )
 
 
 @finding_review_router.get(
     "/{collection_id}/objectives/{objective_id}/finding-dataset",
     summary="Export one Objective Finding dataset",
+    response_model=ApiResponse[FindingDatasetResponse],
+    responses={
+        200: {"content": {"application/x-ndjson": {"schema": {"type": "string"}}}}
+    },
 )
 async def export_objective_finding_dataset(
     collection_id: str,
     objective_id: str,
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     format: str = Query(
         default="json",
         pattern="^(json|training_jsonl|llamafactory_alpaca)$",
@@ -657,27 +436,27 @@ async def export_objective_finding_dataset(
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
-    try:
-        payload = await request.app.state.finding_feedback_service.export_dataset(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            label_status=label_status,
-            dataset_use_status=dataset_use_status,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    payload = await finding_feedback_service.export_dataset(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        label_status=label_status,
+        dataset_use_status=dataset_use_status,
+        user_id=user_id,
+    )
     return _dataset_response(payload, format)
 
 
 @finding_review_router.get(
     "/{collection_id}/finding-dataset",
     summary="Export the collection Finding dataset",
+    response_model=ApiResponse[FindingDatasetResponse],
+    responses={
+        200: {"content": {"application/x-ndjson": {"schema": {"type": "string"}}}}
+    },
 )
 async def export_collection_finding_dataset(
     collection_id: str,
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     format: str = Query(
         default="json",
         pattern="^(json|training_jsonl|llamafactory_alpaca)$",
@@ -685,87 +464,41 @@ async def export_collection_finding_dataset(
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
-    payload = await request.app.state.finding_feedback_service.export_collection_dataset(
+    payload = await finding_feedback_service.export_collection_dataset(
         collection_id=collection_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
+        user_id=user_id,
     )
     return _dataset_response(payload, format)
 
 
 @finding_review_router.get(
     "/{collection_id}/finding-gold-draft",
-    response_model=FindingGoldDraftResponse,
+    response_model=ApiResponse[FindingGoldDraftResponse],
     summary="Export expert-confirmed Finding gold draft",
 )
 async def export_finding_gold_draft(
     collection_id: str,
-    request: Request,
-) -> FindingGoldDraftResponse:
-    payload = await request.app.state.finding_feedback_service.export_gold_draft(
-        collection_id=collection_id,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    payload = await finding_feedback_service.export_gold_draft(
+        collection_id=collection_id, user_id=user_id
     )
-    return FindingGoldDraftResponse(**payload)
+    return make_api_response(data=FindingGoldDraftResponse(**payload))
 
 
 def _dataset_response(payload: dict, format: str):
     if format == "json":
-        return FindingDatasetResponse(**payload)
-    if format == "llamafactory_alpaca":
-        body = "\n".join(
-            json.dumps(row, ensure_ascii=False)
-            for row in _llamafactory_alpaca_rows(payload)
-        )
-        return Response(
-            content=f"{body}\n" if body else "",
-            media_type="application/x-ndjson",
-        )
+        return make_api_response(data=FindingDatasetResponse(**payload))
     body = "\n".join(
-        json.dumps(
-            {"messages": item["training_messages"], "metadata": item["metadata"]},
-            ensure_ascii=False,
-        )
-        for item in payload["items"]
-        if item["dataset_use_status"] == "training_ready"
-        and item["training_messages"]
+        json.dumps(row, ensure_ascii=False)
+        for row in finding_training_rows(payload, format)
     )
     return Response(
         content=f"{body}\n" if body else "",
         media_type="application/x-ndjson",
     )
-
-
-def _llamafactory_alpaca_rows(payload: dict):
-    """Project Lens training rows into LlamaFactory's Alpaca contract."""
-
-    for item in payload["items"]:
-        if item["dataset_use_status"] != "training_ready":
-            continue
-        messages = item["training_messages"]
-        instruction = next(
-            (
-                message["content"]
-                for message in messages
-                if message.get("role") == "user" and message.get("content")
-            ),
-            None,
-        )
-        output = next(
-            (
-                message["content"]
-                for message in messages
-                if message.get("role") == "assistant" and message.get("content")
-            ),
-            None,
-        )
-        if not instruction or not output:
-            continue
-        yield {
-            "instruction": instruction,
-            "input": "",
-            "output": output,
-            "metadata": item["metadata"],
-        }
 
 
 def _review_context_attributes(

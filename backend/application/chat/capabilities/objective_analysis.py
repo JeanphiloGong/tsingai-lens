@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
 from collections.abc import Mapping
-from typing import Any, Annotated
+from typing import Annotated, Any
 from urllib.parse import urlencode
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -17,8 +13,8 @@ from application.chat.capabilities.contracts import (
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=240)]
 _QUALITY_INSPECTION_LIMIT = 12
@@ -79,7 +75,8 @@ class ConfirmObjectiveCapability:
             )
         except (ValueError, FileNotFoundError):
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
                 error_code="objective_confirmation_rejected",
                 error_message="The Objective could not be confirmed. Check that it exists, has one outcome and still meets its derivation prerequisites.",
             )
@@ -160,11 +157,11 @@ class StartObjectiveAnalysisCapability:
                 context.collection_id,
                 arguments.objective_id,
                 tuple(arguments.document_ids),
+                user_id=context.user_id,
             )
         except ObjectiveAnalysisDispatchError:
             payload = await self.objective_analysis_service.get_analysis_state(
-                context.collection_id,
-                arguments.objective_id,
+                context.collection_id, arguments.objective_id, user_id=context.user_id
             )
         projection = _project_analysis(payload)
         status = projection["analysis"]["status"]
@@ -186,7 +183,11 @@ class StartObjectiveAnalysisCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status=ToolResultStatus.QUEUED if status in {"queued", "running"} else ToolResultStatus.SUCCEEDED,
+            status=(
+                ToolResultStatus.QUEUED
+                if status in {"queued", "running"}
+                else ToolResultStatus.SUCCEEDED
+            ),
             data=projection,
             resource_refs=(ref,),
             warnings=tuple(payload.get("warnings") or ()),
@@ -205,7 +206,9 @@ class InspectObjectiveAnalysisCapability:
         input_model=InspectObjectiveAnalysisToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, objective_analysis_service: Any) -> None:
+    def __init__(
+        self, *, collection_service: Any, objective_analysis_service: Any
+    ) -> None:
         self.collection_service = collection_service
         self.objective_analysis_service = objective_analysis_service
 
@@ -219,8 +222,7 @@ class InspectObjectiveAnalysisCapability:
             context.user_id,
         )
         payload = await self.objective_analysis_service.get_analysis_state(
-            context.collection_id,
-            arguments.objective_id,
+            context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         projection = _project_analysis(payload)
         return ChatToolResult(
@@ -271,8 +273,7 @@ class AssessObjectiveQualityCapability:
             context.user_id,
         )
         payload = await self.objective_analysis_service.get_analysis_state(
-            context.collection_id,
-            arguments.objective_id,
+            context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         published = payload.get("published_analysis")
         active = payload.get("analysis")
@@ -307,17 +308,13 @@ class AssessObjectiveQualityCapability:
         ]
         findings = tuple(payload.get("findings") or ())
         finding_count = len(findings)
-        total_evidence_count = int(
-            evidence_review.get("total_evidence_count") or 0
-        )
+        total_evidence_count = int(evidence_review.get("total_evidence_count") or 0)
         contributions = tuple(payload.get("paper_contributions") or ())
         contribution_records = [
             {
-                "document_id": str(_field(item, "document_id", "") or ""),
-                "evidence_disposition": _field(
-                    item, "evidence_disposition"
-                ),
-                "reason": _field(item, "evidence_disposition_reason"),
+                "document_id": item["document_id"],
+                "evidence_disposition": item["evidence_disposition"],
+                "reason": item["evidence_disposition_reason"],
             }
             for item in contributions
         ]
@@ -340,13 +337,10 @@ class AssessObjectiveQualityCapability:
         runtime_state = (
             "previous_published_result_available"
             if newer_failed_analysis and published is not None
-            else "failed"
-            if newer_failed_analysis
-            else "stable"
+            else "failed" if newer_failed_analysis else "stable"
         )
         next_inspections = [
-            _quality_gap_summary(item)
-            for item in gaps[:_QUALITY_INSPECTION_LIMIT]
+            _quality_gap_summary(item) for item in gaps[:_QUALITY_INSPECTION_LIMIT]
         ]
         source_refs = tuple(
             ChatResourceRef(
@@ -408,7 +402,10 @@ class AssessObjectiveQualityCapability:
                 )
                 + int(evidence_review.get("omitted_gap_count") or 0),
                 "requires_researcher_review": bool(
-                    published is None or gaps or not finding_count or newer_failed_analysis
+                    published is None
+                    or gaps
+                    or not finding_count
+                    or newer_failed_analysis
                 ),
                 "support_is_evidence": False,
             },
@@ -485,9 +482,7 @@ def _quality_gap_summary(item: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_status": str(item.get("evidence_status") or "")[:80],
         "reason": str(item.get("reason") or "")[:_QUALITY_TEXT_LIMIT],
         "outcome": str(item.get("outcome") or "")[:240] or None,
-        "source_excerpt": str(item.get("source_excerpt") or "")[
-            :_QUALITY_TEXT_LIMIT
-        ],
+        "source_excerpt": str(item.get("source_excerpt") or "")[:_QUALITY_TEXT_LIMIT],
     }
 
 
@@ -499,7 +494,9 @@ def _analysis_ref(
     version = projection["analysis"]["analysis_version"]
     return ChatResourceRef(
         resource_type="objective_analysis",
-        resource_id=(f"{objective_id}:{version}" if version is not None else objective_id),
+        resource_id=(
+            f"{objective_id}:{version}" if version is not None else objective_id
+        ),
         href=f"/collections/{collection_id}/objectives/{objective_id}",
     )
 

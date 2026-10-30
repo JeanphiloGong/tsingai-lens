@@ -85,9 +85,9 @@ class is in `infra/persistence/postgres/models`.
 
 | Logic flow | Owning backend modules | Tables | What the rows mean |
 | --- | --- | --- | --- |
-| Authenticate and authorize | `application/auth`, `controllers/auth.py` | `auth_users`, `auth_sessions` | Normalized user identity and revocable browser sessions. |
-| Create a collection and add papers | `application/source`, `controllers/source/collections.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
-| Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_runs.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
+| Authenticate and authorize | `application/auth`, `controllers/auth_routes.py` | `auth_users`, `auth_sessions` | Normalized user identity and revocable browser sessions. |
+| Create a collection and add papers | `application/source`, `controllers/source/collection_routes.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
+| Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_run_routes.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
 | Parse and analyze a paper | `infra/source`, `application/source`, `application/core/document_profiles` | `document_preparations` | One document-keyed preparation aggregate containing Source, Profile, Paper Map, and the provenance for each generated section. |
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `collections`, `document_preparations`, `research_objectives` | Collection-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
 | Inspect experiments and compare papers | `application/core/objectives`, `application/core/paper_facts` | `paper_experiment`, `objective_experiment_selection`, `comparison_group`, `experiment_finding`, `objective_analyses` | Automatic analysis stores immutable experiment revisions, explicit selections, optional cross-paper groups, and Finding references. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
@@ -121,7 +121,7 @@ without weakening identity, versioning, or audit boundaries.
 
 ### 1. Authentication
 
-`AuthSessionService` owns the access boundary.
+`application.auth.session_service` owns the access boundary.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
@@ -133,7 +133,7 @@ tokens are not database fields and must not appear in logs or documentation.
 
 ### 2. Collection Intake and Current Documents
 
-`CollectionService` owns the collection aggregate and the current Document
+`collection_service` owns the collection aggregate and the current Document
 membership used by every downstream flow.
 
 | Table | Primary identity | Important columns and constraints |
@@ -149,14 +149,14 @@ the storage key is globally unique.
 
 The object store writes immutable input bytes before the Document is exposed as
 ready. PostgreSQL records their identity and integrity metadata. Collection
-deletion is coordinated by `CollectionService`: it removes the collection
+deletion is coordinated by `collection_service`: it removes the collection
 directory/object files and deletes the PostgreSQL aggregate, allowing database
 cascades to remove dependent rows.
 
 ### 3. Pipeline Execution and Progress
 
-`PipelineRunService` records technical execution while
-`DocumentPreparationService` and Objective discovery write their scientific
+`pipeline_run_service` records technical execution while
+`document_preparation_service` and Objective discovery write their scientific
 results to the owning Source, Profile, Collection, and Objective tables.
 
 | Table | Primary identity | Important columns and constraints |
@@ -222,7 +222,7 @@ record.
 
 ### 6. Objective Analysis, Evidence, and Findings
 
-`ObjectiveExperimentAnalysisService` and the experiment analysis writer implement
+`objective_analysis_service` and the experiment analysis writer implement
 the evidence-first comparison flow: frame each selected paper, route exact
 Sources, extract and ground facts, reconstruct within-paper experiments, select
 the results needed by the Objective, compare only compatible selections, and
@@ -249,7 +249,7 @@ migration `20260924_0075` and is not used at runtime.
 
 ### 7. Collection-Bound Agent Chat
 
-`ChatSessionService`, `ResearchAgentRunner`, and the Chat capability registry
+`application.chat.session_service`, `ResearchAgentRunner`, and the Chat capability registry
 persist an auditable trajectory. Chat references Core records; it does not
 create a parallel paper-fact model.
 
@@ -268,7 +268,7 @@ recorded in the trajectory.
 
 ### 8. Objective-Scoped Experiment Plans
 
-`ExperimentPlanService` stores an optional downstream decision artifact after a
+`experiment_plan_service` stores an optional downstream decision artifact after a
 researcher has reviewed the evidence. It is not the primary Lens v1 workflow.
 
 | Table | Primary identity | Important columns and constraints |
@@ -580,7 +580,7 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 | `owner_user_id` | `VARCHAR(64)` | No | FK -> `auth_users.user_id`; IDX; `ON DELETE RESTRICT` | User who owns the collection; the user cannot be deleted while the collection remains. |
 | `name` | `TEXT` | No | — | Human-readable collection name. |
 | `description` | `TEXT` | Yes | — | Optional research purpose or background for the collection. |
-| `status` | `VARCHAR(64)` | No | — | Current collection lifecycle state, maintained by `CollectionService`. |
+| `status` | `VARCHAR(64)` | No | — | Current collection lifecycle state, maintained by `collection_service`. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
 | `discovery_ready` | `BOOLEAN` | No | default `false` | Whether the current collection discovery result is ready for review or confirmation. |

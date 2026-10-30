@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
 import json
 from dataclasses import replace
 from typing import Annotated, Any, Mapping
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
 _OBJECTIVE_LIMIT = 12
@@ -95,9 +92,7 @@ class QueryPublishedFindingsCapability:
         ]
         missing_ids = [item for item in requested_ids if item not in objectives_by_id]
         selected = [
-            objectives_by_id[item]
-            for item in requested_ids
-            if item in objectives_by_id
+            objectives_by_id[item] for item in requested_ids if item in objectives_by_id
         ]
 
         records: list[dict[str, Any]] = []
@@ -116,6 +111,7 @@ class QueryPublishedFindingsCapability:
                 analysis_version=version,
                 offset=0,
                 limit=arguments.finding_limit_per_objective,
+                user_id=context.user_id,
             )
             evidence = await self.objective_analysis_service.list_evidence(
                 context.collection_id,
@@ -123,14 +119,11 @@ class QueryPublishedFindingsCapability:
                 analysis_version=version,
                 offset=0,
                 limit=arguments.evidence_limit_per_objective,
+                user_id=context.user_id,
             )
-            finding_items = [
-                self._finding_summary(item)
-                for item in findings["items"]
-            ]
+            finding_items = [self._finding_summary(item) for item in findings["items"]]
             evidence_items = [
-                self._evidence_summary(item)
-                for item in evidence["items"]
+                self._evidence_summary(item) for item in evidence["items"]
             ]
             finding_count += len(finding_items)
             evidence_count += len(evidence_items)
@@ -146,7 +139,9 @@ class QueryPublishedFindingsCapability:
                     "evidence": evidence_items,
                 }
             )
-            refs.append(self._objective_ref(context.collection_id, objective.objective_id))
+            refs.append(
+                self._objective_ref(context.collection_id, objective.objective_id)
+            )
             refs.extend(
                 self._finding_ref(
                     context.collection_id,
@@ -289,8 +284,13 @@ class InspectPublishedFindingCapability:
         input_model=InspectPublishedFindingToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, objective_analysis_service: Any,
-                 finding_feedback_service: Any) -> None:
+    def __init__(
+        self,
+        *,
+        collection_service: Any,
+        objective_analysis_service: Any,
+        finding_feedback_service: Any,
+    ) -> None:
         self.collection_service = collection_service
         self.objective_analysis_service = objective_analysis_service
         self.finding_feedback_service = finding_feedback_service
@@ -309,12 +309,21 @@ class InspectPublishedFindingCapability:
             arguments.objective_id,
             arguments.finding_id,
             analysis_version=arguments.analysis_version,
+            user_id=context.user_id,
         )
         version = detail["analysis_version"]
-        review_key = dict(collection_id=context.collection_id, objective_id=arguments.objective_id,
-                          analysis_version=version, finding_id=arguments.finding_id)
-        feedback = await self.finding_feedback_service.list_feedback(**review_key)
-        curations = await self.finding_feedback_service.list_curations(**review_key)
+        review_key = dict(
+            collection_id=context.collection_id,
+            objective_id=arguments.objective_id,
+            analysis_version=version,
+            finding_id=arguments.finding_id,
+        )
+        feedback = await self.finding_feedback_service.list_feedback(
+            **review_key, user_id=context.user_id
+        )
+        curations = await self.finding_feedback_service.list_curations(
+            **review_key, user_id=context.user_id
+        )
         evidence = await self.objective_analysis_service.list_evidence(
             context.collection_id,
             arguments.objective_id,
@@ -322,21 +331,27 @@ class InspectPublishedFindingCapability:
             finding_id=arguments.finding_id,
             offset=arguments.evidence_offset,
             limit=arguments.evidence_limit,
+            user_id=context.user_id,
         )
         evidence_items = evidence["items"]
         evidence_total = evidence["total"]
         review = detail.get("evidence_review", {})
         replacements = review.get("evidence_replacements", {})
         pending_ids = {
-            replacements[item["evidence_id"]] for item in evidence_items
+            replacements[item["evidence_id"]]
+            for item in evidence_items
             if replacements.get(item["evidence_id"])
         }
         replacement_evidence = []
         offset = 0
         while pending_ids:
             candidates = await self.objective_analysis_service.list_evidence(
-                context.collection_id, arguments.objective_id,
-                analysis_version=version, offset=offset, limit=100,
+                context.collection_id,
+                arguments.objective_id,
+                analysis_version=version,
+                offset=offset,
+                limit=100,
+                user_id=context.user_id,
             )
             items = candidates.get("items", ())
             for item in items:
@@ -368,118 +383,206 @@ class InspectPublishedFindingCapability:
                 "objective_id": arguments.objective_id,
                 "analysis_version": version,
                 "finding": detail["finding"],
-                "feedback_records": [{
-                    'feedback_id': item.feedback_id,
-                    'collection_id': item.collection_id,
-                    'objective_id': item.objective_id,
-                    'analysis_version': item.analysis_version,
-                    'finding_id': item.finding_id,
-                    'review_status': item.review_status,
-                    'issue_type': item.issue_type,
-                    'note': item.note,
-                    'reviewer': item.reviewer,
-                    'created_at': item.created_at,
-                } for item in feedback],
-                "curation_records": [{
-                    'curation_id': item.curation_id,
-                    'collection_id': item.collection_id,
-                    'objective_id': item.objective_id,
-                    'analysis_version': item.analysis_version,
-                    'finding_id': item.finding_id,
-                    'curated_status': item.curated_status,
-                    'curated_finding': {
-                        'collection_id': item.curated_finding.collection_id,
-                        'objective_id': item.curated_finding.objective_id,
-                        'analysis_version': item.curated_finding.analysis_version,
-                        'finding_id': item.curated_finding.finding_id,
-                        'statement': item.curated_finding.statement,
-                        'factors': list(item.curated_finding.factors),
-                        'outcome': item.curated_finding.outcome,
-                        'direction': item.curated_finding.direction,
-                        'assertion_strength': item.curated_finding.assertion_strength,
-                        'attribution_scope': item.curated_finding.attribution_scope,
-                        'synthesis_status': item.curated_finding.synthesis_status,
-                        'certainty': item.curated_finding.certainty,
-                        'display_rank': item.curated_finding.display_rank,
-                        'mechanisms': [
-                            {
-                                'source_term': mechanism.source_term,
-                                'relation_type': mechanism.relation_type,
-                                'target_term': mechanism.target_term,
-                                'direction': mechanism.direction,
-                                'assertion_strength': mechanism.assertion_strength,
-                                'supporting_evidence_ids': list(mechanism.supporting_evidence_ids),
-                            }
-                            for mechanism in item.curated_finding.mechanisms
-                        ],
-                        'scientific_context': {
-                            'material': [
+                "feedback_records": [
+                    {
+                        "feedback_id": item.feedback_id,
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "finding_id": item.finding_id,
+                        "review_status": item.review_status,
+                        "issue_type": item.issue_type,
+                        "note": item.note,
+                        "reviewer": item.reviewer,
+                        "created_at": item.created_at,
+                    }
+                    for item in feedback
+                ],
+                "curation_records": [
+                    {
+                        "curation_id": item.curation_id,
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "finding_id": item.finding_id,
+                        "curated_status": item.curated_status,
+                        "curated_finding": {
+                            "collection_id": item.curated_finding.collection_id,
+                            "objective_id": item.curated_finding.objective_id,
+                            "analysis_version": item.curated_finding.analysis_version,
+                            "finding_id": item.curated_finding.finding_id,
+                            "statement": item.curated_finding.statement,
+                            "factors": list(item.curated_finding.factors),
+                            "outcome": item.curated_finding.outcome,
+                            "direction": item.curated_finding.direction,
+                            "assertion_strength": item.curated_finding.assertion_strength,
+                            "attribution_scope": item.curated_finding.attribution_scope,
+                            "synthesis_status": item.curated_finding.synthesis_status,
+                            "certainty": item.curated_finding.certainty,
+                            "display_rank": item.curated_finding.display_rank,
+                            "mechanisms": [
                                 {
-                                    'name': attribute.name,
-                                    'value': attribute.value,
-                                    'unit': attribute.unit,
-                                    **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
-                                    **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    "source_term": mechanism.source_term,
+                                    "relation_type": mechanism.relation_type,
+                                    "target_term": mechanism.target_term,
+                                    "direction": mechanism.direction,
+                                    "assertion_strength": mechanism.assertion_strength,
+                                    "supporting_evidence_ids": list(
+                                        mechanism.supporting_evidence_ids
+                                    ),
                                 }
-                                for attribute in item.curated_finding.scientific_context.material
+                                for mechanism in item.curated_finding.mechanisms
                             ],
-                            'sample': [
+                            "scientific_context": {
+                                "material": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.material
+                                ],
+                                "sample": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.sample
+                                ],
+                                "process": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.process
+                                ],
+                                "test": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.test
+                                ],
+                            },
+                            "limitations": list(item.curated_finding.limitations),
+                            "paper_contributions": [
                                 {
-                                    'name': attribute.name,
-                                    'value': attribute.value,
-                                    'unit': attribute.unit,
-                                    **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
-                                    **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    "document_id": contribution.document_id,
+                                    "analysis_status": contribution.analysis_status,
+                                    "supporting_evidence_ids": list(
+                                        contribution.supporting_evidence_ids
+                                    ),
+                                    "contradicting_evidence_ids": list(
+                                        contribution.contradicting_evidence_ids
+                                    ),
+                                    "context_evidence_ids": list(
+                                        contribution.context_evidence_ids
+                                    ),
+                                    "condition_boundary_evidence_ids": list(
+                                        contribution.condition_boundary_evidence_ids
+                                    ),
                                 }
-                                for attribute in item.curated_finding.scientific_context.sample
+                                for contribution in item.curated_finding.paper_contributions
                             ],
-                            'process': [
+                            "origin": item.curated_finding.origin,
+                            "source_analysis_version": item.curated_finding.source_analysis_version,
+                            "parent_finding_id": item.curated_finding.parent_finding_id,
+                            "created_by_user_id": item.curated_finding.created_by_user_id,
+                            "created_by_tool_call_id": item.curated_finding.created_by_tool_call_id,
+                            "created_at": (
+                                item.curated_finding.created_at.isoformat()
+                                if item.curated_finding.created_at
+                                else None
+                            ),
+                            **(
                                 {
-                                    'name': attribute.name,
-                                    'value': attribute.value,
-                                    'unit': attribute.unit,
-                                    **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
-                                    **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    "selection_ids": list(
+                                        item.curated_finding.selection_ids
+                                    )
                                 }
-                                for attribute in item.curated_finding.scientific_context.process
-                            ],
-                            'test': [
+                                if item.curated_finding.selection_ids
+                                else {}
+                            ),
+                            **(
                                 {
-                                    'name': attribute.name,
-                                    'value': attribute.value,
-                                    'unit': attribute.unit,
-                                    **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
-                                    **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    "comparison_group_ids": list(
+                                        item.curated_finding.comparison_group_ids
+                                    )
                                 }
-                                for attribute in item.curated_finding.scientific_context.test
-                            ],
+                                if item.curated_finding.comparison_group_ids
+                                else {}
+                            ),
+                            **(
+                                {"warnings": list(item.curated_finding.warnings)}
+                                if item.curated_finding.warnings
+                                else {}
+                            ),
                         },
-                        'limitations': list(item.curated_finding.limitations),
-                        'paper_contributions': [
-                            {
-                                'document_id': contribution.document_id,
-                                'analysis_status': contribution.analysis_status,
-                                'supporting_evidence_ids': list(contribution.supporting_evidence_ids),
-                                'contradicting_evidence_ids': list(contribution.contradicting_evidence_ids),
-                                'context_evidence_ids': list(contribution.context_evidence_ids),
-                                'condition_boundary_evidence_ids': list(contribution.condition_boundary_evidence_ids),
-                            }
-                            for contribution in item.curated_finding.paper_contributions
-                        ],
-                        'origin': item.curated_finding.origin,
-                        'source_analysis_version': item.curated_finding.source_analysis_version,
-                        'parent_finding_id': item.curated_finding.parent_finding_id,
-                        'created_by_user_id': item.curated_finding.created_by_user_id,
-                        'created_by_tool_call_id': item.curated_finding.created_by_tool_call_id,
-                        'created_at': item.curated_finding.created_at.isoformat() if item.curated_finding.created_at else None,
-                        **({'selection_ids': list(item.curated_finding.selection_ids)} if item.curated_finding.selection_ids else {}),
-                        **({'comparison_group_ids': list(item.curated_finding.comparison_group_ids)} if item.curated_finding.comparison_group_ids else {}),
-                        **({'warnings': list(item.curated_finding.warnings)} if item.curated_finding.warnings else {}),
-                    },
-                    'note': item.note,
-                    'reviewer': item.reviewer,
-                    'updated_at': item.updated_at,
-                } for item in curations],
+                        "note": item.note,
+                        "reviewer": item.reviewer,
+                        "updated_at": item.updated_at,
+                    }
+                    for item in curations
+                ],
                 "review_scope": {**review_key, "includes_ancestor_reviews": False},
                 "evidence_review": review,
                 "replacement_evidence": replacement_evidence,
@@ -506,25 +609,35 @@ class InspectPublishedFindingCapability:
         )
         # Measure the actual escaped tool message, rather than raw excerpt text.
         budget = max(0, min(context.max_result_tokens, 12_000) - 256)
-        while ChatContextBuilder.estimate_tokens({
-            "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps({
-                "tool_call_id": result.tool_call_id,
-                "status": result.status.value,
-                "data": result.data,
-                "resource_refs": [
-                    {
-                        "resource_type": item.resource_type,
-                        "resource_id": item.resource_id,
-                        "href": item.href,
-                    }
-                    for item in result.resource_refs
-                ],
-                "warnings": list(result.warnings),
-                "error_code": result.error_code,
-                "error_message": result.error_message,
-            }, ensure_ascii=True, separators=(",", ":")),
-        }) > budget:
+        while (
+            ChatContextBuilder.estimate_tokens(
+                {
+                    "role": "tool",
+                    "tool_call_id": result.tool_call_id,
+                    "content": json.dumps(
+                        {
+                            "tool_call_id": result.tool_call_id,
+                            "status": result.status.value,
+                            "data": result.data,
+                            "resource_refs": [
+                                {
+                                    "resource_type": item.resource_type,
+                                    "resource_id": item.resource_id,
+                                    "href": item.href,
+                                }
+                                for item in result.resource_refs
+                            ],
+                            "warnings": list(result.warnings),
+                            "error_code": result.error_code,
+                            "error_message": result.error_message,
+                        },
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+            > budget
+        ):
             if not evidence_items:
                 return ChatToolResult(
                     tool_call_id=context.tool_call_id,
@@ -539,21 +652,38 @@ class InspectPublishedFindingCapability:
                 )
             evidence_items.pop()
             pending = {replacements.get(item["evidence_id"]) for item in evidence_items}
-            replacement_evidence = [item for item in replacement_evidence if item["evidence_id"] in pending]
+            replacement_evidence = [
+                item for item in replacement_evidence if item["evidence_id"] in pending
+            ]
             next_offset = arguments.evidence_offset + len(evidence_items)
             if not evidence_items and next_offset < evidence_total:
                 # A zero-length page must never ask the Agent to repeat its offset.
                 continue
-            visible_ids = {item["evidence_id"] for item in (*evidence_items, *replacement_evidence)}
+            visible_ids = {
+                item["evidence_id"] for item in (*evidence_items, *replacement_evidence)
+            }
             result = replace(
                 result,
-                data={**result.data, "evidence": list(evidence_items),
-                      "replacement_evidence": replacement_evidence,
-                      "next_evidence_offset": next_offset if next_offset < evidence_total else None},
-                resource_refs=(finding_ref, *(ref for ref in result.resource_refs[1:]
-                    if ref.resource_id.rsplit(":", 1)[-1] in visible_ids)),
-                warnings=("Additional Finding Evidence was omitted to fit the read budget; "
-                          "continue with next_evidence_offset before a complete review.",),
+                data={
+                    **result.data,
+                    "evidence": list(evidence_items),
+                    "replacement_evidence": replacement_evidence,
+                    "next_evidence_offset": (
+                        next_offset if next_offset < evidence_total else None
+                    ),
+                },
+                resource_refs=(
+                    finding_ref,
+                    *(
+                        ref
+                        for ref in result.resource_refs[1:]
+                        if ref.resource_id.rsplit(":", 1)[-1] in visible_ids
+                    ),
+                ),
+                warnings=(
+                    "Additional Finding Evidence was omitted to fit the read budget; "
+                    "continue with next_evidence_offset before a complete review.",
+                ),
             )
         return result
 

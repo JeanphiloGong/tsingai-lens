@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
 from dataclasses import asdict
+from types import ModuleType
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-
-from application.core.objectives.finding_authoring_service import (
-    FindingAuthoringService,
-)
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -31,7 +26,9 @@ class CreateFindingVersionToolRequest(BaseModel):
     def validate_authoring_mode(self) -> "CreateFindingVersionToolRequest":
         selected = self.selection_ids + self.comparison_group_ids
         if any(not value.strip() or len(value) > 128 for value in selected):
-            raise ValueError("experiment reference IDs must be non-empty and at most 128 characters")
+            raise ValueError(
+                "experiment reference IDs must be non-empty and at most 128 characters"
+            )
         if not self.selection_ids:
             raise ValueError("Finding requires experiment selections")
         return self
@@ -59,7 +56,7 @@ class CreateFindingDraftCapability:
         input_model=CreateFindingDraftToolRequest,
     )
 
-    def __init__(self, *, finding_authoring_service: FindingAuthoringService | None = None) -> None:
+    def __init__(self, *, finding_authoring_service: ModuleType | None = None) -> None:
         self.finding_authoring_service = finding_authoring_service
 
     async def execute(
@@ -150,7 +147,7 @@ class CreateFindingVersionCapability:
     def __init__(
         self,
         *,
-        finding_authoring_service: FindingAuthoringService,
+        finding_authoring_service: ModuleType,
     ) -> None:
         self.finding_authoring_service = finding_authoring_service
 
@@ -171,7 +168,8 @@ class CreateFindingVersionCapability:
             )
         except (ValueError, FileNotFoundError):
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
                 error_code="finding_version_rejected",
                 error_message="The Finding version was rejected. Check the published analysis version, experiment selections and comparison groups.",
             )

@@ -6,19 +6,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from infra.persistence.database import AsyncSessionLocal
-
 from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
 from repositories.feedback_dataset_repository import ensure_system_datasets
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @dataclass(frozen=True)
@@ -60,6 +58,14 @@ class CollectionSummary:
     documents: tuple[CollectionDocumentSummary, ...]
 
 
+class DocumentContentAlreadyExists(ValueError):
+    """The collection already contains the uploaded content digest."""
+
+
+class PermissionRevisionConflict(ValueError):
+    """The permission revision changed before the locked write."""
+
+
 class CollectionRepository:
     async def add_collection(self, record: StoredCollection) -> None:
         async with AsyncSessionLocal() as db, db.begin():
@@ -76,7 +82,8 @@ class CollectionRepository:
             )
             await db.flush()
             await ensure_system_datasets(
-                db, collection_id=record.collection.collection_id,
+                db,
+                collection_id=record.collection.collection_id,
                 owner_user_id=record.collection.owner_user_id,
                 now=_datetime(record.created_at),
             )
@@ -86,8 +93,12 @@ class CollectionRepository:
         owner_user_id: str | None = None,
     ) -> tuple[CollectionSummary, ...]:
         statement = select(
-            Collection.collection_id, Collection.name, Collection.description,
-            Collection.status, Collection.created_at, Collection.updated_at,
+            Collection.collection_id,
+            Collection.name,
+            Collection.description,
+            Collection.status,
+            Collection.created_at,
+            Collection.updated_at,
         ).order_by(Collection.created_at)
         if owner_user_id is not None:
             statement = statement.where(Collection.owner_user_id == owner_user_id)
@@ -100,9 +111,14 @@ class CollectionRepository:
             }
             documents = await db.execute(
                 select(
-                    Document.collection_id, Document.document_id,
-                    Document.original_filename, Document.media_type, Document.status,
-                    Document.size_bytes, Document.created_at, Document.updated_at,
+                    Document.collection_id,
+                    Document.document_id,
+                    Document.original_filename,
+                    Document.media_type,
+                    Document.status,
+                    Document.size_bytes,
+                    Document.created_at,
+                    Document.updated_at,
                 )
                 .where(Document.collection_id.in_(documents_by_collection))
                 .order_by(Document.document_order)
@@ -169,17 +185,19 @@ class CollectionRepository:
         document_id: str,
     ) -> StoredDocument | None:
         async with AsyncSessionLocal() as db:
-            row = (await db.execute(
-                select(Document, DocumentPreparationRow)
-                .outerjoin(
-                    DocumentPreparationRow,
-                    DocumentPreparationRow.document_id == Document.document_id,
+            row = (
+                await db.execute(
+                    select(Document, DocumentPreparationRow)
+                    .outerjoin(
+                        DocumentPreparationRow,
+                        DocumentPreparationRow.document_id == Document.document_id,
+                    )
+                    .where(
+                        Document.collection_id == collection_id,
+                        Document.document_id == document_id,
+                    )
                 )
-                .where(
-                    Document.collection_id == collection_id,
-                    Document.document_id == document_id,
-                )
-            )).one_or_none()
+            ).one_or_none()
             if row is None:
                 return None
             document, preparation = row
@@ -240,7 +258,7 @@ class CollectionRepository:
                 return False
             current_revision = (row.agent_default_permission or {}).get("revision", 0)
             if current_revision != expected_revision:
-                raise ValueError("permission_revision_conflict")
+                raise PermissionRevisionConflict("permission_revision_conflict")
             row.agent_default_permission = dict(permission)
             return True
 
@@ -282,14 +300,19 @@ class CollectionRepository:
             if len({item.document.sha256 for item in documents}) != len(
                 documents
             ) or any(item.document.sha256 in existing_hashes for item in documents):
-                raise ValueError("document content already exists in collection")
-            next_order = int(
-                await db.scalar(
-                    select(func.coalesce(func.max(Document.document_order), -1)).where(
-                        Document.collection_id == collection_id
+                raise DocumentContentAlreadyExists(
+                    "document content already exists in collection"
+                )
+            next_order = (
+                int(
+                    await db.scalar(
+                        select(
+                            func.coalesce(func.max(Document.document_order), -1)
+                        ).where(Document.collection_id == collection_id)
                     )
                 )
-            ) + 1
+                + 1
+            )
             db.add_all(
                 Document(
                     document_id=item.document.document_id,
@@ -353,26 +376,28 @@ async def load_collection_documents(
         profile = dict(preparation.profile_json or {}) if preparation else {}
         source_fingerprint = preparation.source_fingerprint if preparation else None
         profile_fingerprint = profile.get("profile_fingerprint")
-        documents.append(StoredDocument(
-            document=DocumentAggregate(
-                document_id=document.document_id,
-                original_filename=document.original_filename,
-                sha256=document.sha256,
-                media_type=document.media_type,
-                status=document.status,
-                size_bytes=document.size_bytes,
-                parser_version=preparation.parser_version if preparation else None,
-                document_analysis_version=profile.get("profile_version"),
-                source_fingerprint=source_fingerprint,
-                profile_fingerprint=profile_fingerprint,
-                # The source identity remains usable until profiling completes.
-                preparation_fingerprint=profile_fingerprint or source_fingerprint,
-            ),
-            stored_filename=document.stored_filename,
-            storage_key=document.storage_key,
-            created_at=_iso(document.created_at),
-            updated_at=_iso(document.updated_at),
-        ))
+        documents.append(
+            StoredDocument(
+                document=DocumentAggregate(
+                    document_id=document.document_id,
+                    original_filename=document.original_filename,
+                    sha256=document.sha256,
+                    media_type=document.media_type,
+                    status=document.status,
+                    size_bytes=document.size_bytes,
+                    parser_version=preparation.parser_version if preparation else None,
+                    document_analysis_version=profile.get("profile_version"),
+                    source_fingerprint=source_fingerprint,
+                    profile_fingerprint=profile_fingerprint,
+                    # The source identity remains usable until profiling completes.
+                    preparation_fingerprint=profile_fingerprint or source_fingerprint,
+                ),
+                stored_filename=document.stored_filename,
+                storage_key=document.storage_key,
+                created_at=_iso(document.created_at),
+                updated_at=_iso(document.updated_at),
+            )
+        )
     return tuple(documents)
 
 
@@ -393,7 +418,7 @@ def _iso(value: datetime) -> str:
     return _datetime(value).isoformat()
 
 
-__all__ = ['CollectionRepository']
+__all__ = ["CollectionRepository"]
 
 
 CollectionRepo = CollectionRepository()

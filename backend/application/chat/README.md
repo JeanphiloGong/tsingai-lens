@@ -56,11 +56,11 @@ that arithmetic remains possible and mechanisms use only the allowed premises.
 
 ## Start Here
 
-- HTTP entry: `controllers/chat/sessions.py`
-- Turn orchestration: `ChatSessionService.send_message()`
+- HTTP entry: `controllers/chat/chat_session_routes.py`
+- Turn orchestration: `application.chat.session_service.send_message()`
 - Agent loop: `ResearchAgentRunner.run_turn()`
 - Tool lookup: `CapabilityRegistry`
-- Approval continuation: `ChatSessionService.decide_tool_call_for_user()`
+- Approval continuation: `application.chat.session_service.decide_tool_call_for_user()`
 
 One turn follows this sequence:
 
@@ -80,7 +80,7 @@ choose read-only, confirmation, or an automatic grant for new sessions; a
 session permission can then override that authority. An automatic grant may
 be persistent (`expires_at: null`, until revoked or changed) or temporary (up
 to 24 hours). Both scopes can authorize any currently registered write action
-selected by the user, and the backend expands an all-actions request. ChatSessionService
+selected by the user, and the backend expands an all-actions request. application.chat.session_service
 claims every automatic write in the repository before resuming the same Runner;
 it never sends write calls through the parallel read executor. Revocation and
 claim share the session row lock. Chat never owns a second Objective,
@@ -110,7 +110,7 @@ Saving a revision does not create an Objective Selection or publish an analysis.
 
 ```text
 authenticated user + collection
-  -> ChatSessionService validates and persists the user message
+  -> application.chat.session_service validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
   -> ResearchAgentRunner exposes a catalog of registered read, draft and write tools
   -> ChatModel selects names through discover_research_tools when needed
@@ -118,7 +118,7 @@ authenticated user + collection
   -> ChatModel returns an answer, independent reads, or one draft/write call
   -> Runner checkpoints the complete ordered request before execution
   -> capabilities return paired observations or exact approval_required
-  -> ChatSessionService checkpoints the trajectory and final response
+  -> application.chat.session_service checkpoints the trajectory and final response
 ```
 
 Exact Finding reads return review_scope:
@@ -546,7 +546,7 @@ review status of their supporting Findings and unverified feasibility checks.
 
 A researcher may leave while the Agent explains the conditions needed to compare
 LPBF tensile results, then return from history to read what has already been
-generated and continue waiting for the answer. `ChatSessionService` captures
+generated and continue waiting for the answer. `application.chat.session_service` captures
 the exact partial response and current progress independently of its browser
 connection. The runner allocates each assistant message ID before emitting text;
 the final checkpoint keeps that identity. A bounded PostgreSQL snapshot permits
@@ -647,7 +647,7 @@ structural model errors may retain a bounded message and source location for
 diagnosis. Model failure, invalid tool arguments, rejected approval, and incomplete work
 are recorded in the trajectory. They never become Evidence or a negative
 scientific answer. After a turn stops, the next user message or exact approval
-decision starts its continuation through `ChatSessionService`.
+decision starts its continuation through `application.chat.session_service`.
 
 ## Tests
 

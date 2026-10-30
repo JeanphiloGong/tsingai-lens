@@ -70,9 +70,7 @@ class PaperExperimentRepository:
         await db.execute(
             select(
                 func.pg_advisory_xact_lock(
-                    func.hashtextextended(
-                        f"paper-experiment-document:{document_id}", 0
-                    )
+                    func.hashtextextended(f"paper-experiment-document:{document_id}", 0)
                 )
             )
         )
@@ -84,7 +82,6 @@ class PaperExperimentRepository:
         *,
         created_by: str | None = None,
         created_at: datetime | None = None,
-
     ) -> StoredPaperExperimentRevision:
         return await _add_revision(
             db,
@@ -121,11 +118,7 @@ class PaperExperimentRepository:
         experiment_id: str,
     ) -> StoredPaperExperimentRevision | None:
         await db.execute(
-            select(
-                func.pg_advisory_xact_lock(
-                    func.hashtextextended(experiment_id, 0)
-                )
-            )
+            select(func.pg_advisory_xact_lock(func.hashtextextended(experiment_id, 0)))
         )
         row = await db.scalar(
             select(PaperExperimentRow)
@@ -157,9 +150,7 @@ class PaperExperimentRepository:
                 continue
             seen.add(row.experiment_id)
             latest_rows.append(row)
-        return tuple(
-            [await load_experiment_revision(db, row) for row in latest_rows]
-        )
+        return tuple([await load_experiment_revision(db, row) for row in latest_rows])
 
 
 async def _add_revision(
@@ -584,8 +575,7 @@ async def load_experiment_revision(
         await db.scalars(
             select(ExperimentComparisonMeasurementRow)
             .where(
-                ExperimentComparisonMeasurementRow.paper_experiment_id
-                == revision_id
+                ExperimentComparisonMeasurementRow.paper_experiment_id == revision_id
             )
             .order_by(
                 ExperimentComparisonMeasurementRow.comparison_key,
@@ -627,35 +617,47 @@ async def load_experiment_revision(
                     variant_label=item.variant_label,
                     subject_attributes=tuple(
                         ScientificAttribute(
-                            name=value["name"], value=value["value"],
+                            name=value["name"],
+                            value=value["value"],
                             unit=value["unit"],
                             context_scope=value.get("context_scope", "unknown"),
-                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                            applies_to_outcomes=tuple(
+                                value.get("applies_to_outcomes", ())
+                            ),
                         )
                         for value in item.subject_attributes_json
                     ),
                     intervention_attributes=tuple(
                         ScientificAttribute(
-                            name=value["name"], value=value["value"],
+                            name=value["name"],
+                            value=value["value"],
                             unit=value["unit"],
                             context_scope=value.get("context_scope", "unknown"),
-                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                            applies_to_outcomes=tuple(
+                                value.get("applies_to_outcomes", ())
+                            ),
                         )
                         for value in item.intervention_attributes_json
                     ),
                     state=tuple(
                         ScientificAttribute(
-                            name=value["name"], value=value["value"],
+                            name=value["name"],
+                            value=value["value"],
                             unit=value["unit"],
                             context_scope=value.get("context_scope", "unknown"),
-                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                            applies_to_outcomes=tuple(
+                                value.get("applies_to_outcomes", ())
+                            ),
                         )
                         for value in item.state_json
                     ),
                     population_scope=item.population_scope_json,
-                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    source_refs=tuple(
+                        SourceReference(**value) for value in item.source_refs_json
+                    ),
                     binding_source_refs=tuple(
-                        SourceReference(**value) for value in item.binding_source_refs_json
+                        SourceReference(**value)
+                        for value in item.binding_source_refs_json
                     ),
                     binding_status=item.binding_status,
                     notes=tuple(item.notes_json),
@@ -671,15 +673,20 @@ async def load_experiment_revision(
                     test_type=item.test_type,
                     parameters=tuple(
                         ScientificAttribute(
-                            name=value["name"], value=value["value"],
+                            name=value["name"],
+                            value=value["value"],
                             unit=value["unit"],
                             context_scope=value.get("context_scope", "unknown"),
-                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                            applies_to_outcomes=tuple(
+                                value.get("applies_to_outcomes", ())
+                            ),
                         )
                         for value in item.parameters_json
                     ),
                     population_scope=item.population_scope_json,
-                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    source_refs=tuple(
+                        SourceReference(**value) for value in item.source_refs_json
+                    ),
                     binding_status=item.binding_status,
                     notes=tuple(item.notes_json),
                     protocol_specificity=item.protocol_specificity,
@@ -690,7 +697,8 @@ async def load_experiment_revision(
                     standard=item.standard,
                     outcome_scope=tuple(item.outcome_scope_json),
                     binding_source_refs=tuple(
-                        SourceReference(**value) for value in item.binding_source_refs_json
+                        SourceReference(**value)
+                        for value in item.binding_source_refs_json
                     ),
                     protocol_evidence=tuple(item.protocol_evidence_json),
                 )
@@ -708,9 +716,12 @@ async def load_experiment_revision(
                     statistics=item.statistics_json,
                     measurement_scope=item.measurement_scope_json,
                     result_kind=item.result_kind,
-                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    source_refs=tuple(
+                        SourceReference(**value) for value in item.source_refs_json
+                    ),
                     binding_source_refs=tuple(
-                        SourceReference(**value) for value in item.binding_source_refs_json
+                        SourceReference(**value)
+                        for value in item.binding_source_refs_json
                     ),
                     binding_status=item.binding_status,
                     notes=tuple(item.notes_json),
@@ -730,14 +741,18 @@ async def load_experiment_revision(
                         links_by_comparison[item.comparison_key]["target"]
                     ),
                     changed_variables=tuple(
-                        ScientificVariable(**value) for value in item.changed_variables_json
+                        ScientificVariable(**value)
+                        for value in item.changed_variables_json
                     ),
                     matched_conditions=tuple(
                         ScientificAttribute(
-                            name=value["name"], value=value["value"],
+                            name=value["name"],
+                            value=value["value"],
                             unit=value["unit"],
                             context_scope=value.get("context_scope", "unknown"),
-                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                            applies_to_outcomes=tuple(
+                                value.get("applies_to_outcomes", ())
+                            ),
                         )
                         for value in item.matched_conditions_json
                     ),
@@ -747,9 +762,12 @@ async def load_experiment_revision(
                     attribution_scope=item.attribution_scope,
                     status=item.status,
                     reasons=tuple(item.reasons_json),
-                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    source_refs=tuple(
+                        SourceReference(**value) for value in item.source_refs_json
+                    ),
                     binding_source_refs=tuple(
-                        SourceReference(**value) for value in item.binding_source_refs_json
+                        SourceReference(**value)
+                        for value in item.binding_source_refs_json
                     ),
                     relation_status=item.relation_status,
                 )
@@ -761,11 +779,15 @@ async def load_experiment_revision(
                     kind=item.kind,
                     measurement_keys=tuple(item.measurement_keys_json),
                     comparison_keys=tuple(item.comparison_keys_json),
-                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    source_refs=tuple(
+                        SourceReference(**value) for value in item.source_refs_json
+                    ),
                 )
                 for item in interpretations
             ),
-            source_refs=tuple(SourceReference(**value) for value in row.source_refs_json),
+            source_refs=tuple(
+                SourceReference(**value) for value in row.source_refs_json
+            ),
             unresolved_issues=tuple(row.unresolved_issues_json),
         ),
         created_at=_aware(row.created_at),
@@ -802,7 +824,11 @@ def _constraint_name(exc: IntegrityError) -> str | None:
     return str(value) if value else None
 
 
-__all__ = ['PaperExperimentRepository', 'PaperExperimentRevisionConflictError', 'StoredPaperExperimentRevision']
+__all__ = [
+    "PaperExperimentRepository",
+    "PaperExperimentRevisionConflictError",
+    "StoredPaperExperimentRevision",
+]
 
 
 PaperExperimentRepo = PaperExperimentRepository()

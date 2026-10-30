@@ -8,10 +8,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from application.feedback.dataset_service import (
-    FeedbackDatasetError,
-    FeedbackDatasetService,
-)
+from application.feedback import dataset_service
+from application.feedback.dataset_service import FeedbackDatasetConflict
 from domain.feedback.dataset import DatasetTaskType
 from domain.feedback.dataset_export import (
     DatasetExport,
@@ -30,22 +28,24 @@ from domain.feedback.sample_revision import (
     PreferenceRevisionContent,
     SftRevisionContent,
 )
+from exceptions import RequestInvalidException, ResourceNotFoundException
 from repositories.feedback_dataset_export_repository import (
     DatasetExportConflict,
     DatasetExportDraft,
     DatasetExportIdempotencyConflict,
     DatasetExportSummary,
-    FeedbackDatasetExportRepository,
 )
 from repositories.feedback_dataset_sample_repository import (
     ConfirmedDatasetMember,
     DatasetSampleRevisionConflict,
-    FeedbackDatasetSampleRepository,
 )
 
 
-class DatasetExportError(ValueError):
+class DatasetExportError(RequestInvalidException):
     """A user-correctable preview or publication request."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(message=reason, data={"code": reason})
 
 
 @dataclass(frozen=True)
@@ -55,235 +55,254 @@ class DatasetExportListResult:
     offset: int
 
 
-class FeedbackDatasetExportService:
-    def __init__(
-        self,
-        *,
-        dataset_service: FeedbackDatasetService,
-        sample_repository: FeedbackDatasetSampleRepository,
-        repository: FeedbackDatasetExportRepository,
-    ) -> None:
-        self.dataset_service = dataset_service
-        self.sample_repository = sample_repository
-        self.repository = repository
+from repositories.feedback_dataset_export_repository import FeedbackDatasetExportRepo
+from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
 
-    async def preview_for_user(
-        self, *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
-    ) -> ExportPreview:
-        dataset = await self.dataset_service.read_for_user(
-            user_id=user_id, dataset_id=dataset_id
-        )
-        if sample_ids is not None and (not sample_ids or len(set(sample_ids)) != len(sample_ids)):
-            raise DatasetExportError("export_sample_selection_invalid")
-        members = await self._read_confirmed_members(dataset_id, sample_ids=sample_ids)
-        if sample_ids is not None:
-            selected = set(sample_ids)
-            available = {item.sample.sample_id for item in members}
-            if not selected or len(selected) != len(sample_ids) or not selected <= available:
-                raise DatasetExportError("export_sample_selection_invalid")
-            members = tuple(item for item in members if item.sample.sample_id in selected)
-        export_members = tuple(
-            ExportMember(
-                sample_id=item.sample.sample_id,
-                source_case_id=item.sample.source_case_id,
-                revision_id=item.revision.revision_id,
-                revision_no=item.revision.revision_no,
-                content=item.revision.content,
-                content_digest=item.revision.content_digest,
-                input_digest=item.revision.input_digest,
-                provenance=item.revision.provenance,
-            )
-            for item in members
-        )
-        issues = tuple(
-            issue
-            for member in export_members
-            for issue in _validate_member(member, dataset.task_type)
-        )
-        created = datetime.now(timezone.utc)
-        preview = ExportPreview.build(
-            preview_id=f"preview_{uuid4().hex[:32]}",
-            dataset_id=dataset_id,
-            members=export_members,
-            issues=issues,
-            created_at=created.isoformat(),
-            expires_at=(created + timedelta(minutes=15)).isoformat(),
-        )
-        return await self.repository.save_preview(preview)
 
-    async def publish_for_user(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        preview_id: str,
-        preview_digest: str,
-        allow_partial: bool,
-        idempotency_key: str,
-    ) -> DatasetExport:
-        dataset = await self.dataset_service.read_for_user(
-            user_id=user_id, dataset_id=dataset_id
-        )
-        if not idempotency_key.strip() or len(idempotency_key) > 128:
-            raise DatasetExportError("export_idempotency_key_invalid")
-        preview = await self.repository.read_preview(preview_id)
-        if preview is None or preview.dataset_id != dataset_id:
-            raise DatasetExportError("export_preview_not_found")
-        if preview.preview_digest != preview_digest:
-            raise DatasetExportError("export_preview_stale")
-        if datetime.fromisoformat(preview.expires_at.replace("Z", "+00:00")) <= datetime.now(
-            timezone.utc
+async def preview_for_user(
+    *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
+) -> ExportPreview:
+    dataset = await dataset_service.read_for_user(
+        user_id=user_id, dataset_id=dataset_id
+    )
+    if sample_ids is not None and (
+        not sample_ids or len(set(sample_ids)) != len(sample_ids)
+    ):
+        raise DatasetExportError("export_sample_selection_invalid")
+    members = await _read_confirmed_members(dataset_id, sample_ids=sample_ids)
+    if sample_ids is not None:
+        selected = set(sample_ids)
+        available = {item.sample.sample_id for item in members}
+        if (
+            not selected
+            or len(selected) != len(sample_ids)
+            or not selected <= available
         ):
-            raise DatasetExportError("export_preview_expired")
-        if preview.issues and not allow_partial:
-            raise DatasetExportError("export_preview_has_issues")
-
-        selected = {member.sample_id for member in preview.members}
-        current = tuple(
-            ExportMember(
-                sample_id=item.sample.sample_id,
-                source_case_id=item.sample.source_case_id,
-                revision_id=item.revision.revision_id,
-                revision_no=item.revision.revision_no,
-                content=item.revision.content,
-                content_digest=item.revision.content_digest,
-                input_digest=item.revision.input_digest,
-                provenance=item.revision.provenance,
-            )
-            for item in await self._read_confirmed_members(dataset_id, sample_ids=list(selected))
+            raise DatasetExportError("export_sample_selection_invalid")
+        members = tuple(item for item in members if item.sample.sample_id in selected)
+    export_members = tuple(
+        ExportMember(
+            sample_id=item.sample.sample_id,
+            source_case_id=item.sample.source_case_id,
+            revision_id=item.revision.revision_id,
+            revision_no=item.revision.revision_no,
+            content=item.revision.content,
+            content_digest=item.revision.content_digest,
+            input_digest=item.revision.input_digest,
+            provenance=item.revision.provenance,
         )
-        if member_digest(current) != member_digest(preview.members):
-            raise DatasetExportError("export_preview_stale")
-        issues_by_sample = {issue.sample_id for issue in preview.issues}
-        included = tuple(member for member in current if member.sample_id not in issues_by_sample)
-        if not included:
-            raise DatasetExportError("empty_export")
+        for item in members
+    )
+    issues = tuple(
+        issue
+        for member in export_members
+        for issue in _validate_member(member, dataset.task_type)
+    )
+    created = datetime.now(timezone.utc)
+    preview = ExportPreview.build(
+        preview_id=f"preview_{uuid4().hex[:32]}",
+        dataset_id=dataset_id,
+        members=export_members,
+        issues=issues,
+        created_at=created.isoformat(),
+        expires_at=(created + timedelta(minutes=15)).isoformat(),
+    )
+    return await FeedbackDatasetExportRepo.save_preview(preview)
 
-        rows: list[dict[str, Any]] = []
-        provenance: list[dict[str, Any]] = []
-        for member in included:
-            row, trace = _serialize_member(member, dataset.task_type)
-            rows.append(row)
-            provenance.append(trace)
-        row_tuple = tuple(rows)
-        provenance_tuple = tuple(provenance)
-        content_digest = content_digest_for_rows(row_tuple)
-        provenance_digest = provenance_digest_for_rows(provenance_tuple)
-        export_id = f"export_{uuid4().hex[:32]}"
-        created_at = datetime.now(timezone.utc).isoformat()
-        manifest = {
-            "manifest_schema_version": "feedback-dataset-export-manifest.v1",
-            "schema_version": f"literature-{dataset.task_type}.v2",
-            "data_format": {
-                "sft": "messages-sft",
-                "preference": "trl-conversational-dpo",
-                "evaluation": "messages-evaluation",
-            }[dataset.task_type],
-            "input_template": "literature-context.v1",
-            "dataset_type": dataset.task_type,
-            "dataset_id": dataset_id,
-            "dataset_name": dataset.name,
-            "collection_id": dataset.collection_id,
-            "export_id": export_id,
-            "preview_id": preview_id,
-            "preview_digest": preview_digest,
-            "member_digest": member_digest(current),
-            "row_count": len(row_tuple),
-            "main_file": "data.jsonl",
-            "provenance_file": "provenance.jsonl",
-            "content_digest": content_digest,
-            "provenance_digest": provenance_digest,
-            "created_at": created_at,
-        }
-        draft = DatasetExportDraft(
+
+async def publish_for_user(
+    *,
+    user_id: str,
+    dataset_id: str,
+    preview_id: str,
+    preview_digest: str,
+    allow_partial: bool,
+    idempotency_key: str,
+) -> DatasetExport:
+    dataset = await dataset_service.read_for_user(
+        user_id=user_id, dataset_id=dataset_id
+    )
+    if not idempotency_key.strip() or len(idempotency_key) > 128:
+        raise DatasetExportError("export_idempotency_key_invalid")
+    preview = await FeedbackDatasetExportRepo.read_preview(preview_id)
+    if preview is None or preview.dataset_id != dataset_id:
+        raise ResourceNotFoundException(
+            "Export preview not found.",
+            data={
+                "code": "export_preview_not_found",
+                "dataset_id": dataset_id,
+                "preview_id": preview_id,
+            },
+        )
+    if preview.preview_digest != preview_digest:
+        raise FeedbackDatasetConflict("export_preview_stale")
+    if datetime.fromisoformat(
+        preview.expires_at.replace("Z", "+00:00")
+    ) <= datetime.now(timezone.utc):
+        raise FeedbackDatasetConflict("export_preview_expired")
+    if preview.issues and not allow_partial:
+        raise DatasetExportError("export_preview_has_issues")
+
+    selected = {member.sample_id for member in preview.members}
+    current = tuple(
+        ExportMember(
+            sample_id=item.sample.sample_id,
+            source_case_id=item.sample.source_case_id,
+            revision_id=item.revision.revision_id,
+            revision_no=item.revision.revision_no,
+            content=item.revision.content,
+            content_digest=item.revision.content_digest,
+            input_digest=item.revision.input_digest,
+            provenance=item.revision.provenance,
+        )
+        for item in await _read_confirmed_members(dataset_id, sample_ids=list(selected))
+    )
+    if member_digest(current) != member_digest(preview.members):
+        raise FeedbackDatasetConflict("export_preview_stale")
+    issues_by_sample = {issue.sample_id for issue in preview.issues}
+    included = tuple(
+        member for member in current if member.sample_id not in issues_by_sample
+    )
+    if not included:
+        raise DatasetExportError("empty_export")
+
+    rows: list[dict[str, Any]] = []
+    provenance: list[dict[str, Any]] = []
+    for member in included:
+        row, trace = _serialize_member(member, dataset.task_type)
+        rows.append(row)
+        provenance.append(trace)
+    row_tuple = tuple(rows)
+    provenance_tuple = tuple(provenance)
+    content_digest = content_digest_for_rows(row_tuple)
+    provenance_digest = provenance_digest_for_rows(provenance_tuple)
+    export_id = f"export_{uuid4().hex[:32]}"
+    created_at = datetime.now(timezone.utc).isoformat()
+    manifest = {
+        "manifest_schema_version": "feedback-dataset-export-manifest.v1",
+        "schema_version": f"literature-{dataset.task_type}.v2",
+        "data_format": {
+            "sft": "messages-sft",
+            "preference": "trl-conversational-dpo",
+            "evaluation": "messages-evaluation",
+        }[dataset.task_type],
+        "input_template": "literature-context.v1",
+        "dataset_type": dataset.task_type,
+        "dataset_id": dataset_id,
+        "dataset_name": dataset.name,
+        "collection_id": dataset.collection_id,
+        "export_id": export_id,
+        "preview_id": preview_id,
+        "preview_digest": preview_digest,
+        "member_digest": member_digest(current),
+        "row_count": len(row_tuple),
+        "main_file": "data.jsonl",
+        "provenance_file": "provenance.jsonl",
+        "content_digest": content_digest,
+        "provenance_digest": provenance_digest,
+        "created_at": created_at,
+    }
+    draft = DatasetExportDraft(
+        dataset_id=dataset_id,
+        preview_id=preview_id,
+        preview_digest=preview_digest,
+        member_digest=member_digest(current),
+        rows=row_tuple,
+        provenance=provenance_tuple,
+        members=included,
+        content_digest=content_digest,
+        provenance_digest=provenance_digest,
+        manifest_digest=digest_for_value(manifest),
+        manifest=manifest,
+        created_by=user_id,
+        idempotency_key=idempotency_key,
+        created_at=created_at,
+    )
+    try:
+        return await FeedbackDatasetExportRepo.publish_if_current(draft=draft)
+    except DatasetExportIdempotencyConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
+    except DatasetExportConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
+
+
+async def list_for_user(
+    *, user_id: str, dataset_id: str, limit: int = 50, offset: int = 0
+) -> DatasetExportListResult:
+    await dataset_service.read_for_user(user_id=user_id, dataset_id=dataset_id)
+    if limit < 1 or limit > 200 or offset < 0:
+        raise DatasetExportError("pagination_invalid")
+    items = await FeedbackDatasetExportRepo.list_exports(
+        dataset_id=dataset_id, limit=limit, offset=offset
+    )
+    return DatasetExportListResult(items=items, limit=limit, offset=offset)
+
+
+async def read_for_user(
+    *, user_id: str, dataset_id: str, export_id: str
+) -> DatasetExport:
+    await dataset_service.read_for_user(user_id=user_id, dataset_id=dataset_id)
+    export = await FeedbackDatasetExportRepo.read_export(export_id)
+    if export is None or export.dataset_id != dataset_id:
+        raise ResourceNotFoundException(
+            "Dataset export not found.",
+            data={
+                "code": "dataset_export_not_found",
+                "dataset_id": dataset_id,
+                "export_id": export_id,
+            },
+        )
+    return export
+
+
+async def download_for_user(
+    *,
+    user_id: str,
+    dataset_id: str,
+    export_id: str,
+    format: ExportFormat,
+) -> tuple[DatasetExport, bytes, str, str]:
+    export = await read_for_user(
+        user_id=user_id, dataset_id=dataset_id, export_id=export_id
+    )
+    if format == "jsonl":
+        return (
+            export,
+            jsonl_bytes_for_rows(export.rows),
+            "application/x-ndjson",
+            "data.jsonl",
+        )
+    if format == "json":
+        payload = json.dumps(
+            list(export.rows), ensure_ascii=False, sort_keys=True, indent=2
+        ).encode("utf-8")
+        return export, payload, "application/json", "data.json"
+    if format == "provenance":
+        return (
+            export,
+            jsonl_bytes_for_rows(export.provenance),
+            "application/x-ndjson",
+            "provenance.jsonl",
+        )
+    if format == "manifest":
+        manifest = {**export.manifest, "manifest_digest": export.manifest_digest}
+        payload = (
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+        ).encode("utf-8")
+        return export, payload, "application/json", "manifest.json"
+    raise DatasetExportError("export_format_invalid")
+
+
+async def _read_confirmed_members(
+    dataset_id: str, *, sample_ids: list[str] | None = None
+) -> tuple[ConfirmedDatasetMember, ...]:
+    try:
+        return await FeedbackDatasetSampleRepo.read_confirmed_members(
             dataset_id=dataset_id,
-            preview_id=preview_id,
-            preview_digest=preview_digest,
-            member_digest=member_digest(current),
-            rows=row_tuple,
-            provenance=provenance_tuple,
-            members=included,
-            content_digest=content_digest,
-            provenance_digest=provenance_digest,
-            manifest_digest=digest_for_value(manifest),
-            manifest=manifest,
-            created_by=user_id,
-            idempotency_key=idempotency_key,
-            created_at=created_at,
+            sample_ids=tuple(sample_ids) if sample_ids is not None else None,
         )
-        try:
-            return await self.repository.publish_if_current(draft=draft)
-        except DatasetExportIdempotencyConflict as exc:
-            raise DatasetExportError(str(exc)) from exc
-        except DatasetExportConflict as exc:
-            raise DatasetExportError(str(exc)) from exc
-
-    async def list_for_user(
-        self, *, user_id: str, dataset_id: str, limit: int = 50, offset: int = 0
-    ) -> DatasetExportListResult:
-        await self.dataset_service.read_for_user(
-            user_id=user_id, dataset_id=dataset_id
-        )
-        if limit < 1 or limit > 200 or offset < 0:
-            raise DatasetExportError("pagination_invalid")
-        items = await self.repository.list_exports(
-            dataset_id=dataset_id, limit=limit, offset=offset
-        )
-        return DatasetExportListResult(items=items, limit=limit, offset=offset)
-
-    async def read_for_user(
-        self, *, user_id: str, dataset_id: str, export_id: str
-    ) -> DatasetExport:
-        await self.dataset_service.read_for_user(
-            user_id=user_id, dataset_id=dataset_id
-        )
-        export = await self.repository.read_export(export_id)
-        if export is None or export.dataset_id != dataset_id:
-            raise FileNotFoundError("dataset export not found")
-        return export
-
-    async def download_for_user(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        export_id: str,
-        format: ExportFormat,
-    ) -> tuple[DatasetExport, bytes, str, str]:
-        export = await self.read_for_user(
-            user_id=user_id, dataset_id=dataset_id, export_id=export_id
-        )
-        if format == "jsonl":
-            return export, jsonl_bytes_for_rows(export.rows), "application/x-ndjson", "data.jsonl"
-        if format == "json":
-            payload = json.dumps(
-                list(export.rows), ensure_ascii=False, sort_keys=True, indent=2
-            ).encode("utf-8")
-            return export, payload, "application/json", "data.json"
-        if format == "provenance":
-            return (
-                export,
-                jsonl_bytes_for_rows(export.provenance),
-                "application/x-ndjson",
-                "provenance.jsonl",
-            )
-        if format == "manifest":
-            manifest = {**export.manifest, "manifest_digest": export.manifest_digest}
-            payload = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
-                "utf-8"
-            )
-            return export, payload, "application/json", "manifest.json"
-        raise DatasetExportError("export_format_invalid")
-
-    async def _read_confirmed_members(
-        self, dataset_id: str, *, sample_ids: list[str] | None = None
-    ) -> tuple[ConfirmedDatasetMember, ...]:
-        try:
-            return await self.sample_repository.read_confirmed_members(
-                dataset_id=dataset_id, sample_ids=tuple(sample_ids) if sample_ids is not None else None
-            )
-        except DatasetSampleRevisionConflict as exc:
-            raise DatasetExportError(str(exc)) from exc
+    except DatasetSampleRevisionConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
 
 
 def _validate_member(
@@ -304,7 +323,9 @@ def _validate_member(
         (item["content"] for item in content.messages if item["role"] == "user"), ""
     )
     issues: list[ExportIssue] = []
-    if (content.context or content.evidence) and not member.provenance.get("evidence_records"):
+    if (content.context or content.evidence) and not member.provenance.get(
+        "evidence_records"
+    ):
         issues.append(
             ExportIssue(
                 sample_id=member.sample_id,
@@ -326,7 +347,9 @@ def _validate_member(
                 question=question,
             )
         )
-    if isinstance(content, PreferenceRevisionContent) and content.human_preference not in {"a", "b"}:
+    if isinstance(
+        content, PreferenceRevisionContent
+    ) and content.human_preference not in {"a", "b"}:
         issues.append(
             ExportIssue(
                 sample_id=member.sample_id,
@@ -365,9 +388,13 @@ def _serialize_sft(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]
     return row, trace
 
 
-def _serialize_preference(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]]:
+def _serialize_preference(
+    member: ExportMember,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     content = member.content
-    if not isinstance(content, PreferenceRevisionContent) or content.human_preference not in {"a", "b"}:
+    if not isinstance(
+        content, PreferenceRevisionContent
+    ) or content.human_preference not in {"a", "b"}:
         raise DatasetExportError("preference_not_pairwise")
     chosen, rejected = (
         (content.response_a, content.response_b)
@@ -390,7 +417,9 @@ def _serialize_preference(member: ExportMember) -> tuple[dict[str, Any], dict[st
     return row, trace
 
 
-def _serialize_evaluation(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]]:
+def _serialize_evaluation(
+    member: ExportMember,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     content = member.content
     if not isinstance(content, EvaluationRevisionContent):
         raise DatasetExportError("unsupported_schema")
@@ -401,14 +430,20 @@ def _serialize_evaluation(member: ExportMember) -> tuple[dict[str, Any], dict[st
         "evaluation_mode": content.evaluation_mode,
     }
     trace = _trace(member, row)
-    trace.update({"task_type": "evaluation", "evaluation_mode": content.evaluation_mode})
+    trace.update(
+        {"task_type": "evaluation", "evaluation_mode": content.evaluation_mode}
+    )
     return row, trace
 
 
-def _input_messages(content: SftRevisionContent | PreferenceRevisionContent | EvaluationRevisionContent) -> list[dict[str, str]]:
+def _input_messages(
+    content: SftRevisionContent | PreferenceRevisionContent | EvaluationRevisionContent,
+) -> list[dict[str, str]]:
     """Attach the reviewed context to the last user turn, without review targets."""
     messages = [dict(message) for message in content.messages]
-    snippets = dict.fromkeys((item["document_title"], item["text"]) for item in content.context)
+    snippets = dict.fromkeys(
+        (item["document_title"], item["text"]) for item in content.context
+    )
     if not snippets:
         return messages
     material = "\n\n".join(f"文献：{title}\n原文：{text}" for title, text in snippets)
@@ -455,8 +490,14 @@ def _schema_for_task(task_type: DatasetTaskType) -> str:
         "preference": "literature-preference.v1",
         "evaluation": "literature-evaluation.v1",
     }[task_type]
+
+
 __all__ = [
     "DatasetExportError",
     "DatasetExportListResult",
-    "FeedbackDatasetExportService",
+    "preview_for_user",
+    "publish_for_user",
+    "list_for_user",
+    "read_for_user",
+    "download_for_user",
 ]

@@ -33,6 +33,7 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
@@ -48,8 +49,6 @@ from repositories.pipeline_run_repository import (
 )
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from infra.persistence.database import AsyncSessionLocal
 
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"queued", "running", "succeeded", "failed"}
@@ -73,14 +72,6 @@ OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     "succeeded": frozenset(),
     "failed": frozenset(),
 }
-
-
-
-
-
-
-
-
 
 
 def _datetime_or_none(value: datetime | str | None) -> datetime | None:
@@ -299,7 +290,9 @@ class ObjectiveRepository:
             if objective.collection_id != collection_id:
                 raise ValueError("objective belongs to another collection")
             if objective.origin != "system_discovered":
-                raise ValueError("Objective discovery can only replace system candidates")
+                raise ValueError(
+                    "Objective discovery can only replace system candidates"
+                )
 
         now = datetime.now(timezone.utc)
         objective_ids = [item.objective_id for item in facts.research_objectives]
@@ -355,9 +348,15 @@ class ObjectiveRepository:
                         raise ValueError("research objective identity collision")
                     objective = replace(
                         objective,
-                        confirmation_status=row.payload.get("confirmation_status", "candidate"),
-                        active_analysis_version=row.payload.get("active_analysis_version"),
-                        published_analysis_version=row.payload.get("published_analysis_version"),
+                        confirmation_status=row.payload.get(
+                            "confirmation_status", "candidate"
+                        ),
+                        active_analysis_version=row.payload.get(
+                            "active_analysis_version"
+                        ),
+                        published_analysis_version=row.payload.get(
+                            "published_analysis_version"
+                        ),
                     )
                     row.rank = objective.rank or row.rank
                     row.origin = objective.origin
@@ -397,7 +396,7 @@ class ObjectiveRepository:
                 row.objective_id: ResearchObjective(
                     collection_id=row.collection_id,
                     objective_id=row.objective_id,
-                    question=row.payload['question'],
+                    question=row.payload["question"],
                     material_scope=tuple(row.payload.get("material_scope", ())),
                     variables=tuple(row.payload.get("variables", ())),
                     outcomes=tuple(row.payload.get("outcomes", ())),
@@ -417,12 +416,12 @@ class ObjectiveRepository:
                     parent_analysis_version=row.payload.get("parent_analysis_version"),
                     derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                     rank=row.payload.get("rank"),
-                    confirmation_status=row.payload['confirmation_status'],
+                    confirmation_status=row.payload["confirmation_status"],
                     active_analysis_version=row.payload.get("active_analysis_version"),
                     published_analysis_version=row.payload.get(
                         "published_analysis_version"
                     ),
-                    origin=row.payload['origin'],
+                    origin=row.payload["origin"],
                     created_by_user_id=row.payload.get("created_by_user_id"),
                     created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
                 )
@@ -475,7 +474,7 @@ class ObjectiveRepository:
                 ResearchObjective(
                     collection_id=row.collection_id,
                     objective_id=row.objective_id,
-                    question=row.payload['question'],
+                    question=row.payload["question"],
                     material_scope=tuple(row.payload.get("material_scope", ())),
                     variables=tuple(row.payload.get("variables", ())),
                     outcomes=tuple(row.payload.get("outcomes", ())),
@@ -495,12 +494,12 @@ class ObjectiveRepository:
                     parent_analysis_version=row.payload.get("parent_analysis_version"),
                     derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                     rank=row.payload.get("rank"),
-                    confirmation_status=row.payload['confirmation_status'],
+                    confirmation_status=row.payload["confirmation_status"],
                     active_analysis_version=row.payload.get("active_analysis_version"),
                     published_analysis_version=row.payload.get(
                         "published_analysis_version"
                     ),
-                    origin=row.payload['origin'],
+                    origin=row.payload["origin"],
                     created_by_user_id=row.payload.get("created_by_user_id"),
                     created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
                 )
@@ -528,7 +527,7 @@ class ObjectiveRepository:
                     objective=ResearchObjective(
                         collection_id=row.collection_id,
                         objective_id=row.objective_id,
-                        question=row.payload['question'],
+                        question=row.payload["question"],
                         material_scope=tuple(row.payload.get("material_scope", ())),
                         variables=tuple(row.payload.get("variables", ())),
                         outcomes=tuple(row.payload.get("outcomes", ())),
@@ -552,14 +551,14 @@ class ObjectiveRepository:
                         ),
                         derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                         rank=row.payload.get("rank"),
-                        confirmation_status=row.payload['confirmation_status'],
+                        confirmation_status=row.payload["confirmation_status"],
                         active_analysis_version=row.payload.get(
                             "active_analysis_version"
                         ),
                         published_analysis_version=row.payload.get(
                             "published_analysis_version"
                         ),
-                        origin=row.payload['origin'],
+                        origin=row.payload["origin"],
                         created_by_user_id=row.payload.get("created_by_user_id"),
                         created_by_tool_call_id=row.payload.get(
                             "created_by_tool_call_id"
@@ -596,7 +595,7 @@ class ObjectiveRepository:
                 existing = ResearchObjective(
                     collection_id=prior.collection_id,
                     objective_id=prior.objective_id,
-                    question=prior.payload['question'],
+                    question=prior.payload["question"],
                     material_scope=tuple(prior.payload.get("material_scope", ())),
                     variables=tuple(prior.payload.get("variables", ())),
                     outcomes=tuple(prior.payload.get("outcomes", ())),
@@ -618,14 +617,14 @@ class ObjectiveRepository:
                     ),
                     derivation_basis=tuple(prior.payload.get("derivation_basis", ())),
                     rank=prior.payload.get("rank"),
-                    confirmation_status=prior.payload['confirmation_status'],
+                    confirmation_status=prior.payload["confirmation_status"],
                     active_analysis_version=prior.payload.get(
                         "active_analysis_version"
                     ),
                     published_analysis_version=prior.payload.get(
                         "published_analysis_version"
                     ),
-                    origin=prior.payload['origin'],
+                    origin=prior.payload["origin"],
                     created_by_user_id=prior.payload.get("created_by_user_id"),
                     created_by_tool_call_id=prior.payload.get(
                         "created_by_tool_call_id"
@@ -684,7 +683,7 @@ class ObjectiveRepository:
                 ResearchObjective(
                     collection_id=row.collection_id,
                     objective_id=row.objective_id,
-                    question=row.payload['question'],
+                    question=row.payload["question"],
                     material_scope=tuple(row.payload.get("material_scope", ())),
                     variables=tuple(row.payload.get("variables", ())),
                     outcomes=tuple(row.payload.get("outcomes", ())),
@@ -704,12 +703,12 @@ class ObjectiveRepository:
                     parent_analysis_version=row.payload.get("parent_analysis_version"),
                     derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                     rank=row.payload.get("rank"),
-                    confirmation_status=row.payload['confirmation_status'],
+                    confirmation_status=row.payload["confirmation_status"],
                     active_analysis_version=row.payload.get("active_analysis_version"),
                     published_analysis_version=row.payload.get(
                         "published_analysis_version"
                     ),
-                    origin=row.payload['origin'],
+                    origin=row.payload["origin"],
                     created_by_user_id=row.payload.get("created_by_user_id"),
                     created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
                 )
@@ -732,7 +731,7 @@ class ObjectiveRepository:
                     objective=ResearchObjective(
                         collection_id=row.collection_id,
                         objective_id=row.objective_id,
-                        question=row.payload['question'],
+                        question=row.payload["question"],
                         material_scope=tuple(row.payload.get("material_scope", ())),
                         variables=tuple(row.payload.get("variables", ())),
                         outcomes=tuple(row.payload.get("outcomes", ())),
@@ -756,14 +755,14 @@ class ObjectiveRepository:
                         ),
                         derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                         rank=row.payload.get("rank"),
-                        confirmation_status=row.payload['confirmation_status'],
+                        confirmation_status=row.payload["confirmation_status"],
                         active_analysis_version=row.payload.get(
                             "active_analysis_version"
                         ),
                         published_analysis_version=row.payload.get(
                             "published_analysis_version"
                         ),
-                        origin=row.payload['origin'],
+                        origin=row.payload["origin"],
                         created_by_user_id=row.payload.get("created_by_user_id"),
                         created_by_tool_call_id=row.payload.get(
                             "created_by_tool_call_id"
@@ -786,7 +785,7 @@ class ObjectiveRepository:
             objective = ResearchObjective(
                 collection_id=row.collection_id,
                 objective_id=row.objective_id,
-                question=row.payload['question'],
+                question=row.payload["question"],
                 material_scope=tuple(row.payload.get("material_scope", ())),
                 variables=tuple(row.payload.get("variables", ())),
                 outcomes=tuple(row.payload.get("outcomes", ())),
@@ -806,12 +805,12 @@ class ObjectiveRepository:
                 parent_analysis_version=row.payload.get("parent_analysis_version"),
                 derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                 rank=row.payload.get("rank"),
-                confirmation_status=row.payload['confirmation_status'],
+                confirmation_status=row.payload["confirmation_status"],
                 active_analysis_version=row.payload.get("active_analysis_version"),
                 published_analysis_version=row.payload.get(
                     "published_analysis_version"
                 ),
-                origin=row.payload['origin'],
+                origin=row.payload["origin"],
                 created_by_user_id=row.payload.get("created_by_user_id"),
                 created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
             )
@@ -845,7 +844,7 @@ class ObjectiveRepository:
             objective = ResearchObjective(
                 collection_id=row.collection_id,
                 objective_id=row.objective_id,
-                question=row.payload['question'],
+                question=row.payload["question"],
                 material_scope=tuple(row.payload.get("material_scope", ())),
                 variables=tuple(row.payload.get("variables", ())),
                 outcomes=tuple(row.payload.get("outcomes", ())),
@@ -865,12 +864,12 @@ class ObjectiveRepository:
                 parent_analysis_version=row.payload.get("parent_analysis_version"),
                 derivation_basis=tuple(row.payload.get("derivation_basis", ())),
                 rank=row.payload.get("rank"),
-                confirmation_status=row.payload['confirmation_status'],
+                confirmation_status=row.payload["confirmation_status"],
                 active_analysis_version=row.payload.get("active_analysis_version"),
                 published_analysis_version=row.payload.get(
                     "published_analysis_version"
                 ),
-                origin=row.payload['origin'],
+                origin=row.payload["origin"],
                 created_by_user_id=row.payload.get("created_by_user_id"),
                 created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
             )
@@ -893,19 +892,19 @@ class ObjectiveRepository:
             )
             if active_row is not None:
                 active = ObjectiveAnalysis(
-                    collection_id=active_row.payload['collection_id'],
-                    objective_id=active_row.payload['objective_id'],
-                    analysis_version=active_row.payload['analysis_version'],
+                    collection_id=active_row.payload["collection_id"],
+                    objective_id=active_row.payload["objective_id"],
+                    analysis_version=active_row.payload["analysis_version"],
                     document_inputs=tuple(
                         (
                             PreparedDocumentInput(
-                                document_id=item['document_id'],
-                                preparation_fingerprint=item['preparation_fingerprint'],
+                                document_id=item["document_id"],
+                                preparation_fingerprint=item["preparation_fingerprint"],
                             )
                             for item in active_row.payload.get("document_inputs", ())
                         )
                     ),
-                    pipeline_version=active_row.payload['pipeline_version'],
+                    pipeline_version=active_row.payload["pipeline_version"],
                     model_name=active_row.payload.get("model_name"),
                     prompt_versions=active_row.payload.get("prompt_versions", {}),
                     stats=ExecutionStats(
@@ -943,10 +942,12 @@ class ObjectiveRepository:
                             "prompt_versions", {}
                         ),
                     ),
-                    status=active_row.payload['status'],
-                    phase=active_row.payload['phase'],
-                    processed_document_count=active_row.payload['processed_document_count'],
-                    total_document_count=active_row.payload['total_document_count'],
+                    status=active_row.payload["status"],
+                    phase=active_row.payload["phase"],
+                    processed_document_count=active_row.payload[
+                        "processed_document_count"
+                    ],
+                    total_document_count=active_row.payload["total_document_count"],
                     current_document_id=active_row.payload.get("current_document_id"),
                     progress_message=active_row.payload.get("progress_message"),
                     error_code=active_row.payload.get("error_code"),
@@ -956,9 +957,7 @@ class ObjectiveRepository:
                     completed_at=_datetime_or_none(
                         active_row.payload.get("completed_at")
                     ),
-                    diagnostics=tuple(
-                        active_row.payload.get("diagnostics", ())
-                    ),
+                    diagnostics=tuple(active_row.payload.get("diagnostics", ())),
                     origin=active_row.payload.get("origin", "system_generated"),
                     scientific_record_source=active_row.payload.get(
                         "scientific_record_source",
@@ -1090,7 +1089,7 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
             db.add(
                 ObjectiveAnalysisRecord(
                     collection_id=analysis.collection_id,
@@ -1120,19 +1119,19 @@ class ObjectiveRepository:
             if row.status != "queued":
                 return None
             analysis = ObjectiveAnalysis(
-                collection_id=row.payload['collection_id'],
-                objective_id=row.payload['objective_id'],
-                analysis_version=row.payload['analysis_version'],
+                collection_id=row.payload["collection_id"],
+                objective_id=row.payload["objective_id"],
+                analysis_version=row.payload["analysis_version"],
                 document_inputs=tuple(
                     (
                         PreparedDocumentInput(
-                            document_id=item['document_id'],
-                            preparation_fingerprint=item['preparation_fingerprint'],
+                            document_id=item["document_id"],
+                            preparation_fingerprint=item["preparation_fingerprint"],
                         )
                         for item in row.payload.get("document_inputs", ())
                     )
                 ),
-                pipeline_version=row.payload['pipeline_version'],
+                pipeline_version=row.payload["pipeline_version"],
                 model_name=row.payload.get("model_name"),
                 prompt_versions=row.payload.get("prompt_versions", {}),
                 stats=ExecutionStats(
@@ -1162,10 +1161,10 @@ class ObjectiveRepository:
                         "prompt_versions", {}
                     ),
                 ),
-                status=row.payload['status'],
-                phase=row.payload['phase'],
-                processed_document_count=row.payload['processed_document_count'],
-                total_document_count=row.payload['total_document_count'],
+                status=row.payload["status"],
+                phase=row.payload["phase"],
+                processed_document_count=row.payload["processed_document_count"],
+                total_document_count=row.payload["total_document_count"],
                 current_document_id=row.payload.get("current_document_id"),
                 progress_message=row.payload.get("progress_message"),
                 error_code=row.payload.get("error_code"),
@@ -1173,9 +1172,7 @@ class ObjectiveRepository:
                 created_at=_datetime_or_none(row.payload.get("created_at")),
                 started_at=_datetime_or_none(row.payload.get("started_at")),
                 completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                diagnostics=tuple(
-                    row.payload.get("diagnostics", ())
-                ),
+                diagnostics=tuple(row.payload.get("diagnostics", ())),
                 origin=row.payload.get("origin", "system_generated"),
                 scientific_record_source=row.payload.get(
                     "scientific_record_source",
@@ -1253,8 +1250,8 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
-            for key in ('paper_contributions', 'evidence_records', 'findings'):
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
+            for key in ("paper_contributions", "evidence_records", "findings"):
                 if key in previous:
                     next_analysis_payload[key] = previous[key]
             row.payload = next_analysis_payload
@@ -1278,19 +1275,19 @@ class ObjectiveRepository:
                 db, collection_id, objective_id, analysis_version
             )
             analysis = ObjectiveAnalysis(
-                collection_id=row.payload['collection_id'],
-                objective_id=row.payload['objective_id'],
-                analysis_version=row.payload['analysis_version'],
+                collection_id=row.payload["collection_id"],
+                objective_id=row.payload["objective_id"],
+                analysis_version=row.payload["analysis_version"],
                 document_inputs=tuple(
                     (
                         PreparedDocumentInput(
-                            document_id=item['document_id'],
-                            preparation_fingerprint=item['preparation_fingerprint'],
+                            document_id=item["document_id"],
+                            preparation_fingerprint=item["preparation_fingerprint"],
                         )
                         for item in row.payload.get("document_inputs", ())
                     )
                 ),
-                pipeline_version=row.payload['pipeline_version'],
+                pipeline_version=row.payload["pipeline_version"],
                 model_name=row.payload.get("model_name"),
                 prompt_versions=row.payload.get("prompt_versions", {}),
                 stats=ExecutionStats(
@@ -1320,10 +1317,10 @@ class ObjectiveRepository:
                         "prompt_versions", {}
                     ),
                 ),
-                status=row.payload['status'],
-                phase=row.payload['phase'],
-                processed_document_count=row.payload['processed_document_count'],
-                total_document_count=row.payload['total_document_count'],
+                status=row.payload["status"],
+                phase=row.payload["phase"],
+                processed_document_count=row.payload["processed_document_count"],
+                total_document_count=row.payload["total_document_count"],
                 current_document_id=row.payload.get("current_document_id"),
                 progress_message=row.payload.get("progress_message"),
                 error_code=row.payload.get("error_code"),
@@ -1331,9 +1328,7 @@ class ObjectiveRepository:
                 created_at=_datetime_or_none(row.payload.get("created_at")),
                 started_at=_datetime_or_none(row.payload.get("started_at")),
                 completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                diagnostics=tuple(
-                    row.payload.get("diagnostics", ())
-                ),
+                diagnostics=tuple(row.payload.get("diagnostics", ())),
                 origin=row.payload.get("origin", "system_generated"),
                 scientific_record_source=row.payload.get(
                     "scientific_record_source",
@@ -1416,8 +1411,8 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
-            for key in ('paper_contributions', 'evidence_records', 'findings'):
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
+            for key in ("paper_contributions", "evidence_records", "findings"):
                 if key in previous:
                     next_analysis_payload[key] = previous[key]
             row.payload = next_analysis_payload
@@ -1441,19 +1436,19 @@ class ObjectiveRepository:
             )
             analysis = replace(
                 ObjectiveAnalysis(
-                    collection_id=row.payload['collection_id'],
-                    objective_id=row.payload['objective_id'],
-                    analysis_version=row.payload['analysis_version'],
+                    collection_id=row.payload["collection_id"],
+                    objective_id=row.payload["objective_id"],
+                    analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
                         (
                             PreparedDocumentInput(
-                                document_id=item['document_id'],
-                                preparation_fingerprint=item['preparation_fingerprint'],
+                                document_id=item["document_id"],
+                                preparation_fingerprint=item["preparation_fingerprint"],
                             )
                             for item in row.payload.get("document_inputs", ())
                         )
                     ),
-                    pipeline_version=row.payload['pipeline_version'],
+                    pipeline_version=row.payload["pipeline_version"],
                     model_name=row.payload.get("model_name"),
                     prompt_versions=row.payload.get("prompt_versions", {}),
                     stats=ExecutionStats(
@@ -1489,10 +1484,10 @@ class ObjectiveRepository:
                             "prompt_versions", {}
                         ),
                     ),
-                    status=row.payload['status'],
-                    phase=row.payload['phase'],
-                    processed_document_count=row.payload['processed_document_count'],
-                    total_document_count=row.payload['total_document_count'],
+                    status=row.payload["status"],
+                    phase=row.payload["phase"],
+                    processed_document_count=row.payload["processed_document_count"],
+                    total_document_count=row.payload["total_document_count"],
                     current_document_id=row.payload.get("current_document_id"),
                     progress_message=row.payload.get("progress_message"),
                     error_code=row.payload.get("error_code"),
@@ -1500,9 +1495,7 @@ class ObjectiveRepository:
                     created_at=_datetime_or_none(row.payload.get("created_at")),
                     started_at=_datetime_or_none(row.payload.get("started_at")),
                     completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                    diagnostics=tuple(
-                        row.payload.get("diagnostics", ())
-                    ),
+                    diagnostics=tuple(row.payload.get("diagnostics", ())),
                     origin=row.payload.get("origin", "system_generated"),
                     scientific_record_source=row.payload.get(
                         "scientific_record_source",
@@ -1584,8 +1577,8 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
-            for key in ('paper_contributions', 'evidence_records', 'findings'):
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
+            for key in ("paper_contributions", "evidence_records", "findings"):
                 if key in previous:
                     next_analysis_payload[key] = previous[key]
             row.payload = next_analysis_payload
@@ -1608,19 +1601,19 @@ class ObjectiveRepository:
                 db, collection_id, objective_id, analysis_version
             )
             analysis = ObjectiveAnalysis(
-                collection_id=row.payload['collection_id'],
-                objective_id=row.payload['objective_id'],
-                analysis_version=row.payload['analysis_version'],
+                collection_id=row.payload["collection_id"],
+                objective_id=row.payload["objective_id"],
+                analysis_version=row.payload["analysis_version"],
                 document_inputs=tuple(
                     (
                         PreparedDocumentInput(
-                            document_id=item['document_id'],
-                            preparation_fingerprint=item['preparation_fingerprint'],
+                            document_id=item["document_id"],
+                            preparation_fingerprint=item["preparation_fingerprint"],
                         )
                         for item in row.payload.get("document_inputs", ())
                     )
                 ),
-                pipeline_version=row.payload['pipeline_version'],
+                pipeline_version=row.payload["pipeline_version"],
                 model_name=row.payload.get("model_name"),
                 prompt_versions=row.payload.get("prompt_versions", {}),
                 stats=ExecutionStats(
@@ -1650,10 +1643,10 @@ class ObjectiveRepository:
                         "prompt_versions", {}
                     ),
                 ),
-                status=row.payload['status'],
-                phase=row.payload['phase'],
-                processed_document_count=row.payload['processed_document_count'],
-                total_document_count=row.payload['total_document_count'],
+                status=row.payload["status"],
+                phase=row.payload["phase"],
+                processed_document_count=row.payload["processed_document_count"],
+                total_document_count=row.payload["total_document_count"],
                 current_document_id=row.payload.get("current_document_id"),
                 progress_message=row.payload.get("progress_message"),
                 error_code=row.payload.get("error_code"),
@@ -1661,9 +1654,7 @@ class ObjectiveRepository:
                 created_at=_datetime_or_none(row.payload.get("created_at")),
                 started_at=_datetime_or_none(row.payload.get("started_at")),
                 completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                diagnostics=tuple(
-                    row.payload.get("diagnostics", ())
-                ),
+                diagnostics=tuple(row.payload.get("diagnostics", ())),
                 origin=row.payload.get("origin", "system_generated"),
                 scientific_record_source=row.payload.get(
                     "scientific_record_source",
@@ -1759,8 +1750,8 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
-            for key in ('paper_contributions', 'evidence_records', 'findings'):
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
+            for key in ("paper_contributions", "evidence_records", "findings"):
                 if key in previous:
                     next_analysis_payload[key] = previous[key]
             row.payload = next_analysis_payload
@@ -1779,19 +1770,19 @@ class ObjectiveRepository:
             )
             for row in rows:
                 analysis = ObjectiveAnalysis(
-                    collection_id=row.payload['collection_id'],
-                    objective_id=row.payload['objective_id'],
-                    analysis_version=row.payload['analysis_version'],
+                    collection_id=row.payload["collection_id"],
+                    objective_id=row.payload["objective_id"],
+                    analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
                         (
                             PreparedDocumentInput(
-                                document_id=item['document_id'],
-                                preparation_fingerprint=item['preparation_fingerprint'],
+                                document_id=item["document_id"],
+                                preparation_fingerprint=item["preparation_fingerprint"],
                             )
                             for item in row.payload.get("document_inputs", ())
                         )
                     ),
-                    pipeline_version=row.payload['pipeline_version'],
+                    pipeline_version=row.payload["pipeline_version"],
                     model_name=row.payload.get("model_name"),
                     prompt_versions=row.payload.get("prompt_versions", {}),
                     stats=ExecutionStats(
@@ -1827,10 +1818,10 @@ class ObjectiveRepository:
                             "prompt_versions", {}
                         ),
                     ),
-                    status=row.payload['status'],
-                    phase=row.payload['phase'],
-                    processed_document_count=row.payload['processed_document_count'],
-                    total_document_count=row.payload['total_document_count'],
+                    status=row.payload["status"],
+                    phase=row.payload["phase"],
+                    processed_document_count=row.payload["processed_document_count"],
+                    total_document_count=row.payload["total_document_count"],
                     current_document_id=row.payload.get("current_document_id"),
                     progress_message=row.payload.get("progress_message"),
                     error_code=row.payload.get("error_code"),
@@ -1838,9 +1829,7 @@ class ObjectiveRepository:
                     created_at=_datetime_or_none(row.payload.get("created_at")),
                     started_at=_datetime_or_none(row.payload.get("started_at")),
                     completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                    diagnostics=tuple(
-                        row.payload.get("diagnostics", ())
-                    ),
+                    diagnostics=tuple(row.payload.get("diagnostics", ())),
                     origin=row.payload.get("origin", "system_generated"),
                     scientific_record_source=row.payload.get(
                         "scientific_record_source",
@@ -1924,8 +1913,8 @@ class ObjectiveRepository:
                     "abstention_reason": analysis.abstention_reason,
                     "abstention_note": analysis.abstention_note,
                 }
-                next_analysis_payload['diagnostics'] = analysis.diagnostics
-                for key in ('paper_contributions', 'evidence_records', 'findings'):
+                next_analysis_payload["diagnostics"] = analysis.diagnostics
+                for key in ("paper_contributions", "evidence_records", "findings"):
                     if key in previous:
                         next_analysis_payload[key] = previous[key]
                 row.payload = next_analysis_payload
@@ -1951,19 +1940,19 @@ class ObjectiveRepository:
                 db, collection_id, objective_id
             )
             analysis = ObjectiveAnalysis(
-                collection_id=analysis_row.payload['collection_id'],
-                objective_id=analysis_row.payload['objective_id'],
-                analysis_version=analysis_row.payload['analysis_version'],
+                collection_id=analysis_row.payload["collection_id"],
+                objective_id=analysis_row.payload["objective_id"],
+                analysis_version=analysis_row.payload["analysis_version"],
                 document_inputs=tuple(
                     (
                         PreparedDocumentInput(
-                            document_id=item['document_id'],
-                            preparation_fingerprint=item['preparation_fingerprint'],
+                            document_id=item["document_id"],
+                            preparation_fingerprint=item["preparation_fingerprint"],
                         )
                         for item in analysis_row.payload.get("document_inputs", ())
                     )
                 ),
-                pipeline_version=analysis_row.payload['pipeline_version'],
+                pipeline_version=analysis_row.payload["pipeline_version"],
                 model_name=analysis_row.payload.get("model_name"),
                 prompt_versions=analysis_row.payload.get("prompt_versions", {}),
                 stats=ExecutionStats(
@@ -1995,10 +1984,12 @@ class ObjectiveRepository:
                         "prompt_versions", {}
                     ),
                 ),
-                status=analysis_row.payload['status'],
-                phase=analysis_row.payload['phase'],
-                processed_document_count=analysis_row.payload['processed_document_count'],
-                total_document_count=analysis_row.payload['total_document_count'],
+                status=analysis_row.payload["status"],
+                phase=analysis_row.payload["phase"],
+                processed_document_count=analysis_row.payload[
+                    "processed_document_count"
+                ],
+                total_document_count=analysis_row.payload["total_document_count"],
                 current_document_id=analysis_row.payload.get("current_document_id"),
                 progress_message=analysis_row.payload.get("progress_message"),
                 error_code=analysis_row.payload.get("error_code"),
@@ -2008,9 +1999,7 @@ class ObjectiveRepository:
                 completed_at=_datetime_or_none(
                     analysis_row.payload.get("completed_at")
                 ),
-                diagnostics=tuple(
-                    analysis_row.payload.get("diagnostics", ())
-                ),
+                diagnostics=tuple(analysis_row.payload.get("diagnostics", ())),
                 origin=analysis_row.payload.get("origin", "system_generated"),
                 scientific_record_source=analysis_row.payload.get(
                     "scientific_record_source",
@@ -2065,7 +2054,7 @@ class ObjectiveRepository:
             objective = ResearchObjective(
                 collection_id=objective_row.collection_id,
                 objective_id=objective_row.objective_id,
-                question=objective_row.payload['question'],
+                question=objective_row.payload["question"],
                 material_scope=tuple(objective_row.payload.get("material_scope", ())),
                 variables=tuple(objective_row.payload.get("variables", ())),
                 outcomes=tuple(objective_row.payload.get("outcomes", ())),
@@ -2087,16 +2076,18 @@ class ObjectiveRepository:
                 parent_analysis_version=objective_row.payload.get(
                     "parent_analysis_version"
                 ),
-                derivation_basis=tuple(objective_row.payload.get("derivation_basis", ())),
+                derivation_basis=tuple(
+                    objective_row.payload.get("derivation_basis", ())
+                ),
                 rank=objective_row.payload.get("rank"),
-                confirmation_status=objective_row.payload['confirmation_status'],
+                confirmation_status=objective_row.payload["confirmation_status"],
                 active_analysis_version=objective_row.payload.get(
                     "active_analysis_version"
                 ),
                 published_analysis_version=objective_row.payload.get(
                     "published_analysis_version"
                 ),
-                origin=objective_row.payload['origin'],
+                origin=objective_row.payload["origin"],
                 created_by_user_id=objective_row.payload.get("created_by_user_id"),
                 created_by_tool_call_id=objective_row.payload.get(
                     "created_by_tool_call_id"
@@ -2167,8 +2158,8 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
-            for key in ('paper_contributions', 'evidence_records', 'findings'):
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
+            for key in ("paper_contributions", "evidence_records", "findings"):
                 if key in previous:
                     next_analysis_payload[key] = previous[key]
             analysis_row.payload = next_analysis_payload
@@ -2190,7 +2181,6 @@ class ObjectiveRepository:
         contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
-
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         """Publish the Objective lifecycle after experiment records are written.
 
@@ -2211,19 +2201,19 @@ class ObjectiveRepository:
             objective_id,
         )
         analysis = ObjectiveAnalysis(
-            collection_id=analysis_row.payload['collection_id'],
-            objective_id=analysis_row.payload['objective_id'],
-            analysis_version=analysis_row.payload['analysis_version'],
+            collection_id=analysis_row.payload["collection_id"],
+            objective_id=analysis_row.payload["objective_id"],
+            analysis_version=analysis_row.payload["analysis_version"],
             document_inputs=tuple(
                 (
                     PreparedDocumentInput(
-                        document_id=item['document_id'],
-                        preparation_fingerprint=item['preparation_fingerprint'],
+                        document_id=item["document_id"],
+                        preparation_fingerprint=item["preparation_fingerprint"],
                     )
                     for item in analysis_row.payload.get("document_inputs", ())
                 )
             ),
-            pipeline_version=analysis_row.payload['pipeline_version'],
+            pipeline_version=analysis_row.payload["pipeline_version"],
             model_name=analysis_row.payload.get("model_name"),
             prompt_versions=analysis_row.payload.get("prompt_versions", {}),
             stats=ExecutionStats(
@@ -2255,22 +2245,18 @@ class ObjectiveRepository:
                     "prompt_versions", {}
                 ),
             ),
-            status=analysis_row.payload['status'],
-            phase=analysis_row.payload['phase'],
-            processed_document_count=analysis_row.payload['processed_document_count'],
-            total_document_count=analysis_row.payload['total_document_count'],
+            status=analysis_row.payload["status"],
+            phase=analysis_row.payload["phase"],
+            processed_document_count=analysis_row.payload["processed_document_count"],
+            total_document_count=analysis_row.payload["total_document_count"],
             current_document_id=analysis_row.payload.get("current_document_id"),
             progress_message=analysis_row.payload.get("progress_message"),
             error_code=analysis_row.payload.get("error_code"),
             error_message=analysis_row.payload.get("error_message"),
             created_at=_datetime_or_none(analysis_row.payload.get("created_at")),
             started_at=_datetime_or_none(analysis_row.payload.get("started_at")),
-            completed_at=_datetime_or_none(
-                analysis_row.payload.get("completed_at")
-            ),
-            diagnostics=tuple(
-                analysis_row.payload.get("diagnostics", ())
-            ),
+            completed_at=_datetime_or_none(analysis_row.payload.get("completed_at")),
+            diagnostics=tuple(analysis_row.payload.get("diagnostics", ())),
             origin=analysis_row.payload.get("origin", "system_generated"),
             scientific_record_source=analysis_row.payload.get(
                 "scientific_record_source",
@@ -2281,13 +2267,9 @@ class ObjectiveRepository:
                     else "authored_snapshot"
                 ),
             ),
-            source_analysis_version=analysis_row.payload.get(
-                "source_analysis_version"
-            ),
+            source_analysis_version=analysis_row.payload.get("source_analysis_version"),
             created_by_user_id=analysis_row.payload.get("created_by_user_id"),
-            created_by_tool_call_id=analysis_row.payload.get(
-                "created_by_tool_call_id"
-            ),
+            created_by_tool_call_id=analysis_row.payload.get("created_by_tool_call_id"),
             abstention_reason=analysis_row.payload.get("abstention_reason"),
             abstention_note=analysis_row.payload.get("abstention_note"),
         )
@@ -2298,7 +2280,10 @@ class ObjectiveRepository:
             contribution_documents = {item.document_id for item in contributions}
             if contribution_documents != input_documents:
                 raise ValueError("paper contributions must cover every analysis input")
-            if any(item.key[:3] != (collection_id, objective_id, analysis_version) for item in contributions):
+            if any(
+                item.key[:3] != (collection_id, objective_id, analysis_version)
+                for item in contributions
+            ):
                 raise ValueError("paper contribution belongs to another analysis")
             self._write_contributions(analysis_row, contributions)
         analysis = replace(
@@ -2313,16 +2298,14 @@ class ObjectiveRepository:
         objective = ResearchObjective(
             collection_id=objective_row.collection_id,
             objective_id=objective_row.objective_id,
-            question=objective_row.payload['question'],
+            question=objective_row.payload["question"],
             material_scope=tuple(objective_row.payload.get("material_scope", ())),
             variables=tuple(objective_row.payload.get("variables", ())),
             outcomes=tuple(objective_row.payload.get("outcomes", ())),
             mechanisms=tuple(objective_row.payload.get("mechanisms", ())),
             constraints=tuple(objective_row.payload.get("constraints", ())),
             requested_comparator=objective_row.payload.get("requested_comparator"),
-            seed_document_ids=tuple(
-                objective_row.payload.get("seed_document_ids", ())
-            ),
+            seed_document_ids=tuple(objective_row.payload.get("seed_document_ids", ())),
             excluded_document_ids=tuple(
                 objective_row.payload.get("excluded_document_ids", ())
             ),
@@ -2337,14 +2320,14 @@ class ObjectiveRepository:
             ),
             derivation_basis=tuple(objective_row.payload.get("derivation_basis", ())),
             rank=objective_row.payload.get("rank"),
-            confirmation_status=objective_row.payload['confirmation_status'],
+            confirmation_status=objective_row.payload["confirmation_status"],
             active_analysis_version=objective_row.payload.get(
                 "active_analysis_version"
             ),
             published_analysis_version=objective_row.payload.get(
                 "published_analysis_version"
             ),
-            origin=objective_row.payload['origin'],
+            origin=objective_row.payload["origin"],
             created_by_user_id=objective_row.payload.get("created_by_user_id"),
             created_by_tool_call_id=objective_row.payload.get(
                 "created_by_tool_call_id"
@@ -2378,9 +2361,7 @@ class ObjectiveRepository:
                     if analysis.stats.token_usage is not None
                     else None
                 ),
-                "model_usage": [
-                    asdict(item) for item in analysis.stats.model_usage
-                ],
+                "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                 "unreported_request_count": analysis.stats.unreported_request_count,
                 "prompt_versions": dict(analysis.stats.prompt_versions),
             },
@@ -2415,8 +2396,8 @@ class ObjectiveRepository:
             "abstention_reason": analysis.abstention_reason,
             "abstention_note": analysis.abstention_note,
         }
-        next_analysis_payload['diagnostics'] = analysis.diagnostics
-        for key in ('paper_contributions', 'evidence_records', 'findings'):
+        next_analysis_payload["diagnostics"] = analysis.diagnostics
+        for key in ("paper_contributions", "evidence_records", "findings"):
             if key in previous:
                 next_analysis_payload[key] = previous[key]
         analysis_row.payload = next_analysis_payload
@@ -2446,7 +2427,7 @@ class ObjectiveRepository:
             objective = ResearchObjective(
                 collection_id=objective_row.collection_id,
                 objective_id=objective_row.objective_id,
-                question=objective_row.payload['question'],
+                question=objective_row.payload["question"],
                 material_scope=tuple(objective_row.payload.get("material_scope", ())),
                 variables=tuple(objective_row.payload.get("variables", ())),
                 outcomes=tuple(objective_row.payload.get("outcomes", ())),
@@ -2468,16 +2449,18 @@ class ObjectiveRepository:
                 parent_analysis_version=objective_row.payload.get(
                     "parent_analysis_version"
                 ),
-                derivation_basis=tuple(objective_row.payload.get("derivation_basis", ())),
+                derivation_basis=tuple(
+                    objective_row.payload.get("derivation_basis", ())
+                ),
                 rank=objective_row.payload.get("rank"),
-                confirmation_status=objective_row.payload['confirmation_status'],
+                confirmation_status=objective_row.payload["confirmation_status"],
                 active_analysis_version=objective_row.payload.get(
                     "active_analysis_version"
                 ),
                 published_analysis_version=objective_row.payload.get(
                     "published_analysis_version"
                 ),
-                origin=objective_row.payload['origin'],
+                origin=objective_row.payload["origin"],
                 created_by_user_id=objective_row.payload.get("created_by_user_id"),
                 created_by_tool_call_id=objective_row.payload.get(
                     "created_by_tool_call_id"
@@ -2517,13 +2500,9 @@ class ObjectiveRepository:
             input_documents = {item.document_id for item in analysis.document_inputs}
             contribution_documents = {item.document_id for item in contributions}
             if contribution_documents != input_documents:
-                raise ValueError(
-                    "paper contributions must cover every analysis input"
-                )
+                raise ValueError("paper contributions must cover every analysis input")
             if {item.document_id for item in evidence_records} - contribution_documents:
-                raise ValueError(
-                    "objective evidence lacks owning paper contribution"
-                )
+                raise ValueError("objective evidence lacks owning paper contribution")
             for evidence in evidence_records:
                 await self._require_source_locator(db, collection_id, evidence)
             for finding in findings:
@@ -2588,7 +2567,7 @@ class ObjectiveRepository:
                 "abstention_reason": analysis.abstention_reason,
                 "abstention_note": analysis.abstention_note,
             }
-            next_analysis_payload['diagnostics'] = analysis.diagnostics
+            next_analysis_payload["diagnostics"] = analysis.diagnostics
             analysis_row = ObjectiveAnalysisRecord(
                 collection_id=analysis.collection_id,
                 objective_id=analysis.objective_id,
@@ -2629,7 +2608,7 @@ class ObjectiveRepository:
                 )
                 if objective_row is None:
                     return None
-                analysis_version = objective_row.payload.get('active_analysis_version')
+                analysis_version = objective_row.payload.get("active_analysis_version")
             if analysis_version is None:
                 return None
             row = await db.get(
@@ -2638,19 +2617,19 @@ class ObjectiveRepository:
             )
             return (
                 ObjectiveAnalysis(
-                    collection_id=row.payload['collection_id'],
-                    objective_id=row.payload['objective_id'],
-                    analysis_version=row.payload['analysis_version'],
+                    collection_id=row.payload["collection_id"],
+                    objective_id=row.payload["objective_id"],
+                    analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
                         (
                             PreparedDocumentInput(
-                                document_id=item['document_id'],
-                                preparation_fingerprint=item['preparation_fingerprint'],
+                                document_id=item["document_id"],
+                                preparation_fingerprint=item["preparation_fingerprint"],
                             )
                             for item in row.payload.get("document_inputs", ())
                         )
                     ),
-                    pipeline_version=row.payload['pipeline_version'],
+                    pipeline_version=row.payload["pipeline_version"],
                     model_name=row.payload.get("model_name"),
                     prompt_versions=row.payload.get("prompt_versions", {}),
                     stats=ExecutionStats(
@@ -2686,10 +2665,10 @@ class ObjectiveRepository:
                             "prompt_versions", {}
                         ),
                     ),
-                    status=row.payload['status'],
-                    phase=row.payload['phase'],
-                    processed_document_count=row.payload['processed_document_count'],
-                    total_document_count=row.payload['total_document_count'],
+                    status=row.payload["status"],
+                    phase=row.payload["phase"],
+                    processed_document_count=row.payload["processed_document_count"],
+                    total_document_count=row.payload["total_document_count"],
                     current_document_id=row.payload.get("current_document_id"),
                     progress_message=row.payload.get("progress_message"),
                     error_code=row.payload.get("error_code"),
@@ -2697,9 +2676,7 @@ class ObjectiveRepository:
                     created_at=_datetime_or_none(row.payload.get("created_at")),
                     started_at=_datetime_or_none(row.payload.get("started_at")),
                     completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                    diagnostics=tuple(
-                        row.payload.get("diagnostics", ())
-                    ),
+                    diagnostics=tuple(row.payload.get("diagnostics", ())),
                     origin=row.payload.get("origin", "system_generated"),
                     scientific_record_source=row.payload.get(
                         "scientific_record_source",
@@ -2732,7 +2709,7 @@ class ObjectiveRepository:
             )
             if objective_row is None:
                 return None
-            version = objective_row.payload.get('published_analysis_version')
+            version = objective_row.payload.get("published_analysis_version")
             if version is None:
                 return None
             row = await db.get(
@@ -2741,19 +2718,19 @@ class ObjectiveRepository:
             )
             return (
                 ObjectiveAnalysis(
-                    collection_id=row.payload['collection_id'],
-                    objective_id=row.payload['objective_id'],
-                    analysis_version=row.payload['analysis_version'],
+                    collection_id=row.payload["collection_id"],
+                    objective_id=row.payload["objective_id"],
+                    analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
                         (
                             PreparedDocumentInput(
-                                document_id=item['document_id'],
-                                preparation_fingerprint=item['preparation_fingerprint'],
+                                document_id=item["document_id"],
+                                preparation_fingerprint=item["preparation_fingerprint"],
                             )
                             for item in row.payload.get("document_inputs", ())
                         )
                     ),
-                    pipeline_version=row.payload['pipeline_version'],
+                    pipeline_version=row.payload["pipeline_version"],
                     model_name=row.payload.get("model_name"),
                     prompt_versions=row.payload.get("prompt_versions", {}),
                     stats=ExecutionStats(
@@ -2789,10 +2766,10 @@ class ObjectiveRepository:
                             "prompt_versions", {}
                         ),
                     ),
-                    status=row.payload['status'],
-                    phase=row.payload['phase'],
-                    processed_document_count=row.payload['processed_document_count'],
-                    total_document_count=row.payload['total_document_count'],
+                    status=row.payload["status"],
+                    phase=row.payload["phase"],
+                    processed_document_count=row.payload["processed_document_count"],
+                    total_document_count=row.payload["total_document_count"],
                     current_document_id=row.payload.get("current_document_id"),
                     progress_message=row.payload.get("progress_message"),
                     error_code=row.payload.get("error_code"),
@@ -2800,9 +2777,7 @@ class ObjectiveRepository:
                     created_at=_datetime_or_none(row.payload.get("created_at")),
                     started_at=_datetime_or_none(row.payload.get("started_at")),
                     completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                    diagnostics=tuple(
-                        row.payload.get("diagnostics", ())
-                    ),
+                    diagnostics=tuple(row.payload.get("diagnostics", ())),
                     origin=row.payload.get("origin", "system_generated"),
                     scientific_record_source=row.payload.get(
                         "scientific_record_source",
@@ -2848,8 +2823,12 @@ class ObjectiveRepository:
                     contribution_summary=item.get("contribution_summary"),
                     material_match=tuple(item.get("material_match", ())),
                     changed_variables=tuple(item.get("changed_variables", ())),
-                    measured_property_scope=tuple(item.get("measured_property_scope", ())),
-                    test_environment_scope=tuple(item.get("test_environment_scope", ())),
+                    measured_property_scope=tuple(
+                        item.get("measured_property_scope", ())
+                    ),
+                    test_environment_scope=tuple(
+                        item.get("test_environment_scope", ())
+                    ),
                     exclusion_reason=item.get("exclusion_reason"),
                     warnings=tuple(item.get("warnings", ())),
                     confidence=round(item.get("confidence", 0.0), 4),
@@ -2899,34 +2878,32 @@ class ObjectiveRepository:
             return (
                 tuple(
                     Finding(
-                        collection_id=item['collection_id'],
-                        objective_id=item['objective_id'],
-                        analysis_version=item['analysis_version'],
+                        collection_id=item["collection_id"],
+                        objective_id=item["objective_id"],
+                        analysis_version=item["analysis_version"],
                         finding_id=item["finding_id"],
-                        statement=item['statement'],
+                        statement=item["statement"],
                         factors=tuple(item.get("factors", ())),
-                        outcome=item['outcome'],
-                        direction=item['direction'],
-                        assertion_strength=item['assertion_strength'],
-                        attribution_scope=item['attribution_scope'],
-                        synthesis_status=item['synthesis_status'],
+                        outcome=item["outcome"],
+                        direction=item["direction"],
+                        assertion_strength=item["assertion_strength"],
+                        attribution_scope=item["attribution_scope"],
+                        synthesis_status=item["synthesis_status"],
                         certainty=item["certainty"],
-                        display_rank=item['display_rank'],
+                        display_rank=item["display_rank"],
                         mechanisms=tuple(
                             (
                                 FindingMechanismRelation(
-                                    source_term=item['source_term'],
-                                    relation_type=item['relation_type'],
-                                    target_term=item['target_term'],
-                                    direction=item['direction'],
-                                    assertion_strength=item['assertion_strength'],
+                                    source_term=item["source_term"],
+                                    relation_type=item["relation_type"],
+                                    target_term=item["target_term"],
+                                    direction=item["direction"],
+                                    assertion_strength=item["assertion_strength"],
                                     supporting_evidence_ids=tuple(
                                         item.get("supporting_evidence_ids", ())
                                     ),
                                 )
-                                for item in tuple(
-                                    item.get("mechanisms", ())
-                                )
+                                for item in tuple(item.get("mechanisms", ()))
                             )
                         ),
                         scientific_context=ScientificContext(
@@ -2935,7 +2912,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -2953,7 +2930,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -2971,7 +2948,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -2989,7 +2966,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -3007,8 +2984,8 @@ class ObjectiveRepository:
                         paper_contributions=tuple(
                             (
                                 FindingPaperContribution(
-                                    document_id=item['document_id'],
-                                    analysis_status=item['analysis_status'],
+                                    document_id=item["document_id"],
+                                    analysis_status=item["analysis_status"],
                                     supporting_evidence_ids=tuple(
                                         item.get("supporting_evidence_ids", ())
                                     ),
@@ -3022,9 +2999,7 @@ class ObjectiveRepository:
                                         item.get("condition_boundary_evidence_ids", ())
                                     ),
                                 )
-                                for item in tuple(
-                                    item.get("paper_contributions", ())
-                                )
+                                for item in tuple(item.get("paper_contributions", ()))
                             )
                         ),
                         origin=item.get("origin", "system_generated"),
@@ -3062,34 +3037,32 @@ class ObjectiveRepository:
             for item in (row.payload or {}).get("findings", ()):
                 if item.get("finding_id") == finding_id:
                     return Finding(
-                        collection_id=item['collection_id'],
-                        objective_id=item['objective_id'],
-                        analysis_version=item['analysis_version'],
+                        collection_id=item["collection_id"],
+                        objective_id=item["objective_id"],
+                        analysis_version=item["analysis_version"],
                         finding_id=item["finding_id"],
-                        statement=item['statement'],
+                        statement=item["statement"],
                         factors=tuple(item.get("factors", ())),
-                        outcome=item['outcome'],
-                        direction=item['direction'],
-                        assertion_strength=item['assertion_strength'],
-                        attribution_scope=item['attribution_scope'],
-                        synthesis_status=item['synthesis_status'],
+                        outcome=item["outcome"],
+                        direction=item["direction"],
+                        assertion_strength=item["assertion_strength"],
+                        attribution_scope=item["attribution_scope"],
+                        synthesis_status=item["synthesis_status"],
                         certainty=item["certainty"],
-                        display_rank=item['display_rank'],
+                        display_rank=item["display_rank"],
                         mechanisms=tuple(
                             (
                                 FindingMechanismRelation(
-                                    source_term=item['source_term'],
-                                    relation_type=item['relation_type'],
-                                    target_term=item['target_term'],
-                                    direction=item['direction'],
-                                    assertion_strength=item['assertion_strength'],
+                                    source_term=item["source_term"],
+                                    relation_type=item["relation_type"],
+                                    target_term=item["target_term"],
+                                    direction=item["direction"],
+                                    assertion_strength=item["assertion_strength"],
                                     supporting_evidence_ids=tuple(
                                         item.get("supporting_evidence_ids", ())
                                     ),
                                 )
-                                for item in tuple(
-                                    item.get("mechanisms", ())
-                                )
+                                for item in tuple(item.get("mechanisms", ()))
                             )
                         ),
                         scientific_context=ScientificContext(
@@ -3098,7 +3071,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -3116,7 +3089,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -3134,7 +3107,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -3152,7 +3125,7 @@ class ObjectiveRepository:
                                     ScientificAttribute(
                                         name=attribute["name"],
                                         value=attribute["value"],
-                                        unit=attribute['unit'],
+                                        unit=attribute["unit"],
                                         context_scope=attribute.get(
                                             "context_scope", "unknown"
                                         ),
@@ -3170,8 +3143,8 @@ class ObjectiveRepository:
                         paper_contributions=tuple(
                             (
                                 FindingPaperContribution(
-                                    document_id=item['document_id'],
-                                    analysis_status=item['analysis_status'],
+                                    document_id=item["document_id"],
+                                    analysis_status=item["analysis_status"],
                                     supporting_evidence_ids=tuple(
                                         item.get("supporting_evidence_ids", ())
                                     ),
@@ -3185,9 +3158,7 @@ class ObjectiveRepository:
                                         item.get("condition_boundary_evidence_ids", ())
                                     ),
                                 )
-                                for item in tuple(
-                                    item.get("paper_contributions", ())
-                                )
+                                for item in tuple(item.get("paper_contributions", ()))
                             )
                         ),
                         origin=item.get("origin", "system_generated"),
@@ -3238,7 +3209,11 @@ class ObjectiveRepository:
                 evidence_ids = {
                     evidence_id
                     for contribution in finding.get("paper_contributions", ())
-                    for field_name in ("supporting_evidence_ids", "contradicting_evidence_ids", "context_evidence_ids")
+                    for field_name in (
+                        "supporting_evidence_ids",
+                        "contradicting_evidence_ids",
+                        "context_evidence_ids",
+                    )
                     for evidence_id in contribution.get(field_name, ())
                 }
             records = list(payload.get("evidence_records", ()))
@@ -3265,86 +3240,98 @@ class ObjectiveRepository:
                         target_value=stored_result.get("target_value"),
                         result_kind=stored_result.get("result_kind", "observed"),
                     )
-                    if stored_result is not None else None
+                    if stored_result is not None
+                    else None
                 )
                 comparison = item.get("comparison")
                 context = item.get("scientific_context") or {}
-                evidence.append(ObjectiveEvidence(
-                    collection_id=item.get("collection_id", ""),
-                    objective_id=item.get("objective_id", ""),
-                    analysis_version=item.get("analysis_version", 0),
-                    evidence_id=item.get("evidence_id") or objective_scoped_id(
-                        "oev",
-                        item.get("collection_id", ""),
-                        item.get("objective_id", ""),
-                        item.get("analysis_version", 0),
-                        item.get("document_id", ""),
-                        item.get("source_kind", "text_window"),
-                        item.get("source_ref", ""),
-                        item.get("evidence_role", "irrelevant"),
-                        item.get("semantic_slot") or (result.outcome if result else None),
-                    ),
-                    document_id=item.get("document_id", ""),
-                    source_kind=item.get("source_kind", "text_window"),
-                    source_ref=item.get("source_ref", ""),
-                    source_excerpt=item.get("source_excerpt", ""),
-                    page_numbers=tuple(item.get("page_numbers", ())),
-                    related_source_refs=tuple(item.get("related_source_refs", ())),
-                    evidence_role=item.get("evidence_role", "irrelevant"),
-                    selection_status=item.get("selection_status", "candidate"),
-                    selection_reason=item.get("selection_reason"),
-                    changed_variables=tuple(
-                        ScientificVariable(
-                            name=variable["name"],
-                            baseline_value=variable.get("baseline_value"),
-                            target_value=variable.get("target_value"),
-                            unit=variable.get("unit"),
-                        )
-                        for variable in item.get("changed_variables", ())
-                    ),
-                    comparison=(
-                        ScientificComparison(
-                            baseline_label=comparison["baseline_label"],
-                            target_label=comparison["target_label"],
-                            axis_names=tuple(comparison["axis_names"]),
-                            comparable=comparison["comparable"],
-                            incomparability_reasons=tuple(
-                                comparison.get("incomparability_reasons", ())
-                            ),
-                        )
-                        if comparison is not None else None
-                    ),
-                    reported_result=result,
-                    attribution_scope=item.get("attribution_scope", "not_attributable"),
-                    scientific_context=ScientificContext(**{
-                        group: tuple(
-                            ScientificAttribute(
-                                name=attribute["name"],
-                                value=attribute["value"],
-                                unit=attribute['unit'],
-                                context_scope=attribute.get("context_scope", "unknown"),
-                                applies_to_outcomes=tuple(
-                                    attribute.get("applies_to_outcomes", ())
+                evidence.append(
+                    ObjectiveEvidence(
+                        collection_id=item.get("collection_id", ""),
+                        objective_id=item.get("objective_id", ""),
+                        analysis_version=item.get("analysis_version", 0),
+                        evidence_id=item.get("evidence_id")
+                        or objective_scoped_id(
+                            "oev",
+                            item.get("collection_id", ""),
+                            item.get("objective_id", ""),
+                            item.get("analysis_version", 0),
+                            item.get("document_id", ""),
+                            item.get("source_kind", "text_window"),
+                            item.get("source_ref", ""),
+                            item.get("evidence_role", "irrelevant"),
+                            item.get("semantic_slot")
+                            or (result.outcome if result else None),
+                        ),
+                        document_id=item.get("document_id", ""),
+                        source_kind=item.get("source_kind", "text_window"),
+                        source_ref=item.get("source_ref", ""),
+                        source_excerpt=item.get("source_excerpt", ""),
+                        page_numbers=tuple(item.get("page_numbers", ())),
+                        related_source_refs=tuple(item.get("related_source_refs", ())),
+                        evidence_role=item.get("evidence_role", "irrelevant"),
+                        selection_status=item.get("selection_status", "candidate"),
+                        selection_reason=item.get("selection_reason"),
+                        changed_variables=tuple(
+                            ScientificVariable(
+                                name=variable["name"],
+                                baseline_value=variable.get("baseline_value"),
+                                target_value=variable.get("target_value"),
+                                unit=variable.get("unit"),
+                            )
+                            for variable in item.get("changed_variables", ())
+                        ),
+                        comparison=(
+                            ScientificComparison(
+                                baseline_label=comparison["baseline_label"],
+                                target_label=comparison["target_label"],
+                                axis_names=tuple(comparison["axis_names"]),
+                                comparable=comparison["comparable"],
+                                incomparability_reasons=tuple(
+                                    comparison.get("incomparability_reasons", ())
                                 ),
                             )
-                            for attribute in context.get(group, ())
-                        )
-                        for group in ("material", "sample", "process", "test")
-                    }),
-                    resolution_status=item.get("resolution_status", "unknown"),
-                    failure_reason=item.get("failure_reason"),
-                    confidence=round(item.get("confidence", 0.0), 4),
-                    related_source_refs_explicit="related_source_refs" in item,
-                    origin=item.get("origin", "system_generated"),
-                    source_analysis_version=item.get("source_analysis_version"),
-                    supersedes_evidence_id=item.get("supersedes_evidence_id"),
-                    superseded_by_evidence_id=item.get("superseded_by_evidence_id"),
-                    created_by_user_id=item.get("created_by_user_id"),
-                    created_by_tool_call_id=item.get("created_by_tool_call_id"),
-                    created_at=_datetime_or_none(item.get("created_at")),
-                    authoring_note=item.get("authoring_note"),
-                    warnings=tuple(item.get("warnings", ())),
-                ))
+                            if comparison is not None
+                            else None
+                        ),
+                        reported_result=result,
+                        attribution_scope=item.get(
+                            "attribution_scope", "not_attributable"
+                        ),
+                        scientific_context=ScientificContext(
+                            **{
+                                group: tuple(
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute["unit"],
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in context.get(group, ())
+                                )
+                                for group in ("material", "sample", "process", "test")
+                            }
+                        ),
+                        resolution_status=item.get("resolution_status", "unknown"),
+                        failure_reason=item.get("failure_reason"),
+                        confidence=round(item.get("confidence", 0.0), 4),
+                        related_source_refs_explicit="related_source_refs" in item,
+                        origin=item.get("origin", "system_generated"),
+                        source_analysis_version=item.get("source_analysis_version"),
+                        supersedes_evidence_id=item.get("supersedes_evidence_id"),
+                        superseded_by_evidence_id=item.get("superseded_by_evidence_id"),
+                        created_by_user_id=item.get("created_by_user_id"),
+                        created_by_tool_call_id=item.get("created_by_tool_call_id"),
+                        created_at=_datetime_or_none(item.get("created_at")),
+                        authoring_note=item.get("authoring_note"),
+                        warnings=tuple(item.get("warnings", ())),
+                    )
+                )
             return tuple(evidence), total
 
     @staticmethod
@@ -3792,7 +3779,9 @@ class ObjectiveRepository:
             "figure": artifact.get("figures") or [],
         }.get(evidence.source_kind)
         if source_rows is None:
-            raise ValueError(f"unsupported objective evidence source kind: {evidence.source_kind}")
+            raise ValueError(
+                f"unsupported objective evidence source kind: {evidence.source_kind}"
+            )
         identity_key = {
             "text_window": "block_id",
             "table": "table_id",
@@ -3816,7 +3805,7 @@ def _sorted_finding_records(values: list[dict[str, Any]]) -> list[dict[str, Any]
     )
 
 
-__all__ = ['ObjectiveRepository']
+__all__ = ["ObjectiveRepository"]
 
 
 ObjectiveRepo = ObjectiveRepository()

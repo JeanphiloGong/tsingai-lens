@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
 from typing import Any
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StartResearchProcessToolRequest(BaseModel):
@@ -100,6 +97,7 @@ class StartResearchProcessCapability:
                 await self.document_preparation_service.queue_document_preparation(
                     context.collection_id,
                     document_id,
+                    user_id=context.user_id,
                 )
             )
         runs = tuple(queued_runs)
@@ -124,11 +122,13 @@ class StartResearchProcessCapability:
                 for run in runs
             ),
             warnings=(
-                f"No document scope was supplied; all {len(selected_ids)} paper(s) "
-                "in the collection were queued for preparation.",
-            )
-            if scope_is_collection
-            else (),
+                (
+                    f"No document scope was supplied; all {len(selected_ids)} paper(s) "
+                    "in the collection were queued for preparation.",
+                )
+                if scope_is_collection
+                else ()
+            ),
         )
 
 

@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-
-from infra.persistence.database import AsyncSessionLocal
-
 from domain.core.document_profile import DocumentProfile
+from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
+from sqlalchemy import select
 
 
 class DocumentProfileRepository:

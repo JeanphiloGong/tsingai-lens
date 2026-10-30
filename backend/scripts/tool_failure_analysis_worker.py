@@ -8,20 +8,17 @@ import asyncio
 import sys
 from pathlib import Path
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
 async def run_once() -> str:
-    from main import ApplicationOverrides, build_application_runtime
+    from main import build_application_runtime
 
-    runtime = await build_application_runtime(ApplicationOverrides())
+    runtime = await build_application_runtime()
     try:
         worker = runtime.tool_failure_analysis_worker
-        if worker is None:
-            raise RuntimeError("tool failure analysis worker is not configured")
         job = await worker.run_once()
         return "idle" if job is None else job.status
     finally:
@@ -29,13 +26,11 @@ async def run_once() -> str:
 
 
 async def run_loop(interval_seconds: float) -> None:
-    from main import ApplicationOverrides, build_application_runtime
+    from main import build_application_runtime
 
-    runtime = await build_application_runtime(ApplicationOverrides())
+    runtime = await build_application_runtime()
     try:
         worker = runtime.tool_failure_analysis_worker
-        if worker is None:
-            raise RuntimeError("tool failure analysis worker is not configured")
         while True:
             job = await worker.run_once()
             print("idle" if job is None else job.status, flush=True)
@@ -49,7 +44,9 @@ def main() -> None:
         description="Run failed Chat tool analysis jobs explicitly"
     )
     parser.add_argument("--once", action="store_true", help="process at most one job")
-    parser.add_argument("--interval", type=float, default=2.0, help="loop delay in seconds")
+    parser.add_argument(
+        "--interval", type=float, default=2.0, help="loop delay in seconds"
+    )
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")

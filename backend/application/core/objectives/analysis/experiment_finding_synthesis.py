@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
+    ExperimentalVariant,
     ExperimentComparison,
     ExperimentMeasurementResult,
     ExperimentTestCondition,
-    ExperimentalVariant,
     PaperExperimentRevision,
 )
 from domain.core.research_objective import ResearchObjective
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
-
 
 _ATTRIBUTION_RANK = {
     "isolated_effect": 0,
@@ -55,87 +54,83 @@ class _SelectedStudy:
     has_incomplete_context: bool
 
 
-class ExperimentFindingSynthesisService:
-    """Build conservative Findings without recreating an Evidence fact layer."""
+def synthesize(
+    *,
+    collection_id: str,
+    objective: ResearchObjective,
+    analysis_version: int,
+    revisions: Sequence[PaperExperimentRevision],
+    selections: Sequence[ObjectiveExperimentSelection],
+) -> ExperimentFindingSynthesisResult:
+    if objective.collection_id != collection_id:
+        raise ValueError("experiment synthesis objective belongs to another collection")
+    if analysis_version < 1:
+        raise ValueError("experiment synthesis requires a positive analysis version")
 
-    def synthesize(
-        self,
-        *,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis_version: int,
-        revisions: Sequence[PaperExperimentRevision],
-        selections: Sequence[ObjectiveExperimentSelection],
-    ) -> ExperimentFindingSynthesisResult:
-        if objective.collection_id != collection_id:
-            raise ValueError("experiment synthesis objective belongs to another collection")
-        if analysis_version < 1:
-            raise ValueError("experiment synthesis requires a positive analysis version")
-
-        revision_by_identity = {
-            (item.experiment_id, item.experiment_version): item for item in revisions
-        }
-        studies: list[_SelectedStudy] = []
-        for selection in sorted(selections, key=lambda item: item.selection_id):
-            if (
-                selection.objective_id != objective.objective_id
-                or selection.analysis_version != analysis_version
-            ):
-                raise ValueError("experiment selection does not match synthesis snapshot")
-            revision = revision_by_identity.get(
-                (selection.experiment_id, selection.experiment_version)
+    revision_by_identity = {
+        (item.experiment_id, item.experiment_version): item for item in revisions
+    }
+    studies: list[_SelectedStudy] = []
+    for selection in sorted(selections, key=lambda item: item.selection_id):
+        if (
+            selection.objective_id != objective.objective_id
+            or selection.analysis_version != analysis_version
+        ):
+            raise ValueError("experiment selection does not match synthesis snapshot")
+        revision = revision_by_identity.get(
+            (selection.experiment_id, selection.experiment_version)
+        )
+        if revision is None:
+            raise ValueError(
+                "selection references a missing experiment revision: "
+                f"{selection.experiment_id}/{selection.experiment_version}"
             )
-            if revision is None:
-                raise ValueError(
-                    "selection references a missing experiment revision: "
-                    f"{selection.experiment_id}/{selection.experiment_version}"
-                )
-            if not _matches_any(selection.outcome, objective.outcomes):
-                continue
-            study = _selected_study(selection, revision, objective)
-            if study is not None:
-                studies.append(study)
+        if not _matches_any(selection.outcome, objective.outcomes):
+            continue
+        study = _selected_study(selection, revision, objective)
+        if study is not None:
+            studies.append(study)
 
-        groups: list[ComparisonGroup] = []
-        findings: list[Finding] = []
-        grouped: dict[tuple[str, tuple[str, ...]], list[_SelectedStudy]] = {}
-        for study in studies:
-            key = (
-                _normalize_term(study.selection.outcome),
-                tuple(sorted(_normalize_term(item) for item in study.factors)),
-            )
-            grouped.setdefault(key, []).append(study)
+    groups: list[ComparisonGroup] = []
+    findings: list[Finding] = []
+    grouped: dict[tuple[str, tuple[str, ...]], list[_SelectedStudy]] = {}
+    for study in studies:
+        key = (
+            _normalize_term(study.selection.outcome),
+            tuple(sorted(_normalize_term(item) for item in study.factors)),
+        )
+        grouped.setdefault(key, []).append(study)
 
-        rank = 0
-        for key in sorted(grouped):
-            clusters = _comparability_clusters(grouped[key])
-            context_was_split = len(clusters) > 1
-            for cluster in clusters:
-                group = None
-                if len(cluster) > 1:
-                    group = _build_group(
-                        collection_id=collection_id,
-                        objective=objective,
-                        analysis_version=analysis_version,
-                        studies=cluster,
-                    )
-                    groups.append(group)
-                finding = _build_finding(
+    rank = 0
+    for key in sorted(grouped):
+        clusters = _comparability_clusters(grouped[key])
+        context_was_split = len(clusters) > 1
+        for cluster in clusters:
+            group = None
+            if len(cluster) > 1:
+                group = _build_group(
                     collection_id=collection_id,
                     objective=objective,
                     analysis_version=analysis_version,
                     studies=cluster,
-                    group=group,
-                    context_was_split=context_was_split,
-                    display_rank=rank,
                 )
-                findings.append(finding)
-                rank += 1
+                groups.append(group)
+            finding = _build_finding(
+                collection_id=collection_id,
+                objective=objective,
+                analysis_version=analysis_version,
+                studies=cluster,
+                group=group,
+                context_was_split=context_was_split,
+                display_rank=rank,
+            )
+            findings.append(finding)
+            rank += 1
 
-        return ExperimentFindingSynthesisResult(
-            groups=tuple(groups),
-            findings=tuple(findings),
-        )
+    return ExperimentFindingSynthesisResult(
+        groups=tuple(groups),
+        findings=tuple(findings),
+    )
 
 
 def _selected_study(
@@ -169,7 +164,9 @@ def _selected_study(
         return None
 
     factor_keys = {
-        tuple(sorted(_normalize_term(item.name) for item in comparison.changed_variables))
+        tuple(
+            sorted(_normalize_term(item.name) for item in comparison.changed_variables)
+        )
         for comparison in selected
     }
     if len(factor_keys) != 1:
@@ -276,7 +273,9 @@ def _pair_comparability(
     }:
         return "non_comparable", ("The changed factor sets differ.",)
     if left.units and right.units and left.units != right.units:
-        return "non_comparable", ("Reported units differ and no normalization is recorded.",)
+        return "non_comparable", (
+            "Reported units differ and no normalization is recorded.",
+        )
     if left.test_types and right.test_types and left.test_types != right.test_types:
         return "non_comparable", ("Test or characterization methods differ.",)
     for name in set(left.subject_values) & set(right.subject_values):
@@ -293,7 +292,9 @@ def _pair_comparability(
         reasons.append("Research-object descriptions are only partially aligned.")
     if reasons:
         return "conditional", tuple(reasons)
-    return "comparable", ("Outcome, factors, object, method, unit, and conditions align.",)
+    return "comparable", (
+        "Outcome, factors, object, method, unit, and conditions align.",
+    )
 
 
 def _build_group(
@@ -529,9 +530,13 @@ def _aggregate_attribution(
 
 def _attribution_limitations(scope: str) -> tuple[str, ...]:
     if scope == "joint_effect":
-        return ("Multiple factors changed together; no isolated factor effect is claimed.",)
+        return (
+            "Multiple factors changed together; no isolated factor effect is claimed.",
+        )
     if scope == "association_only":
-        return ("The selected comparisons support association, not isolated causation.",)
+        return (
+            "The selected comparisons support association, not isolated causation.",
+        )
     if scope == "descriptive_only":
         return ("The selected records support description only.",)
     return ()
@@ -544,13 +549,9 @@ def _study_context(
     variants = _comparison_variants(revision, comparisons)
     measurements = _comparison_measurements(revision, comparisons)
     tests = _comparison_tests(revision, measurements)
-    material = _common_attributes(
-        tuple(item.subject_attributes for item in variants)
-    )
+    material = _common_attributes(tuple(item.subject_attributes for item in variants))
     sample = _common_attributes(tuple(item.state for item in variants))
-    process = _common_attributes(
-        tuple(item.matched_conditions for item in comparisons)
-    )
+    process = _common_attributes(tuple(item.matched_conditions for item in comparisons))
     test_attributes: list[tuple[ScientificAttribute, ...]] = []
     for item in tests:
         method = ScientificAttribute(name="test_type", value=item.test_type)
@@ -589,7 +590,9 @@ def _comparison_measurements(
     )
     missing = [key for key in keys if key not in by_key]
     if missing:
-        raise ValueError("comparison references missing measurements: " + ", ".join(missing))
+        raise ValueError(
+            "comparison references missing measurements: " + ", ".join(missing)
+        )
     return tuple(by_key[key] for key in keys)
 
 
@@ -607,7 +610,9 @@ def _comparison_variants(
     )
     missing = [key for key in keys if key not in by_key]
     if missing:
-        raise ValueError("comparison references missing variants: " + ", ".join(missing))
+        raise ValueError(
+            "comparison references missing variants: " + ", ".join(missing)
+        )
     return tuple(by_key[key] for key in keys)
 
 
@@ -741,7 +746,4 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:28]}"
 
 
-__all__ = [
-    "ExperimentFindingSynthesisResult",
-    "ExperimentFindingSynthesisService",
-]
+__all__ = ["ExperimentFindingSynthesisResult", "synthesize"]

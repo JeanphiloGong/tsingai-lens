@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from application.source import collection_service
 from domain.source import SourceReferenceSet
-from repositories.source_artifact_repository import SourceArtifactRepository
+from exceptions import ResourceConflictException
+from repositories.source_artifact_repository import SourceArtifactRepo
 
 
 @dataclass(frozen=True)
@@ -21,40 +23,33 @@ class SourceReferenceWorkflowResult:
         }
 
 
-class SourceReferenceWorkflowService:
-    """Run the independent Source refs expansion workflow."""
+async def build_collection_references(
+    collection_id: str,
+    *,
+    user_id: str,
+) -> SourceReferenceWorkflowResult:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    documents = await SourceArtifactRepo.read_collection_documents(collection_id)
+    if not documents:
+        raise ResourceConflictException(
+            f"source artifacts not ready: {collection_id}",
+            data={"code": "source_artifacts_not_ready", "collection_id": collection_id},
+        )
+    references = await SourceArtifactRepo.read_collection_references(collection_id)
+    return SourceReferenceWorkflowResult(
+        collection_id=collection_id,
+        references=references,
+    )
 
-    def __init__(
-        self,
-        source_artifact_repository: SourceArtifactRepository,
-    ) -> None:
-        self.source_artifact_repository = source_artifact_repository
 
-    async def build_collection_references(
-        self,
-        collection_id: str,
-    ) -> SourceReferenceWorkflowResult:
-        documents = await self.source_artifact_repository.read_collection_documents(
-            collection_id
-        )
-        if not documents:
-            raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        references = await self.source_artifact_repository.read_collection_references(
-            collection_id
-        )
-        return SourceReferenceWorkflowResult(
-            collection_id=collection_id,
-            references=references,
-        )
-
-    async def read_collection_references(
-        self,
-        collection_id: str,
-    ) -> SourceReferenceWorkflowResult:
-        references = await self.source_artifact_repository.read_collection_references(
-            collection_id
-        )
-        return SourceReferenceWorkflowResult(
-            collection_id=collection_id,
-            references=references,
-        )
+async def read_collection_references(
+    collection_id: str,
+    *,
+    user_id: str,
+) -> SourceReferenceWorkflowResult:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    references = await SourceArtifactRepo.read_collection_references(collection_id)
+    return SourceReferenceWorkflowResult(
+        collection_id=collection_id,
+        references=references,
+    )

@@ -1,32 +1,29 @@
 from __future__ import annotations
 
-from domain.chat import ChatMessageRole
-
-from copy import deepcopy
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from application.chat.session_service import ChatSessionService
+from application.chat import session_service as chat_session_service
+from application.feedback import dataset_snapshot_service, feedback_case_service
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.feedback.dataset_snapshot_service import (
     DatasetSelection,
-    DatasetSnapshotService,
     jsonl_bytes_for_rows,
 )
-from application.feedback.feedback_case_service import FeedbackCaseService
 from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
-from application.source.collection_service import CollectionService
+from application.source import collection_service
 from domain.chat import (
     ChatMessage,
+    ChatMessageRole,
     ChatResourceRef,
     ChatSession,
     ChatSourceContext,
@@ -42,6 +39,7 @@ from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.tool_failure import tool_failure_signal_id, tool_result_digest
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
+from infra.persistence.file.object_store import FileObjectStore
 from repositories.analysis_job_repository import (
     TOOL_FAILURE_JOB_TYPE,
     AnalysisJobRepository,
@@ -57,10 +55,10 @@ from repositories.collection_repository import (
 from repositories.dataset_snapshot_repository import (
     DatasetSnapshotRepository,
 )
-from repositories.feedback_dataset_sample_repository import source_digest_for_case
 from repositories.feedback_case_repository import (
     FeedbackCaseRepository,
 )
+from repositories.feedback_dataset_sample_repository import source_digest_for_case
 
 pytestmark = pytest.mark.anyio
 
@@ -101,9 +99,10 @@ async def feedback_chain(postgres_session_factory, tmp_path):
             updated_at=NOW,
         )
     )
-    collection_service = CollectionService(
-        collections, FileCollectionWorkspace(tmp_path)
-    )
+    collection_service.CollectionRepo = collections
+    collection_service.workspace = FileCollectionWorkspace(tmp_path)
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
 
     chat = ChatRepository()
     session = ChatSession.create(
@@ -172,26 +171,23 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     )
 
     jobs = AnalysisJobRepository()
-    chat_service = ChatSessionService(
-        collection_service=collection_service,
-        source_artifact_repository=None,
-        repository=chat,
-        runner=None,
-        analysis_job_repository=jobs,
-    )
+    chat_session_service.collection_service = collection_service
+    chat_session_service.SourceArtifactRepo = None
+    chat_session_service.ChatRepo = chat
+    chat_session_service.runner = None
+    chat_session_service.AnalysisJobRepo = jobs
+    chat_service = chat_session_service
     cases = FeedbackCaseRepository()
-    case_service = FeedbackCaseService(
-        case_repository=cases,
-        chat_repository=chat,
-        collection_service=collection_service,
-    )
+    feedback_case_service.FeedbackCaseRepo = cases
+    feedback_case_service.ChatRepo = chat
+    feedback_case_service.collection_service = collection_service
+    case_service = feedback_case_service
     snapshots = DatasetSnapshotRepository()
-    snapshot_service = DatasetSnapshotService(
-        repository=snapshots,
-        case_repository=cases,
-        chat_repository=chat,
-        collection_service=collection_service,
-    )
+    dataset_snapshot_service.DatasetSnapshotRepo = snapshots
+    dataset_snapshot_service.FeedbackCaseRepo = cases
+    dataset_snapshot_service.ChatRepo = chat
+    dataset_snapshot_service.collection_service = collection_service
+    snapshot_service = dataset_snapshot_service
     return SimpleNamespace(
         auth=auth,
         chat=chat,
@@ -262,7 +258,9 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert result.feedback_id == feedback.feedback_id
     assert result.problem_type == "fact_error"
     assert result.evidence_coverage.coverage_status == "partial"
-    assert {item["document_id"] for item in result.evidence_coverage.requested_scope} == {
+    assert {
+        item["document_id"] for item in result.evidence_coverage.requested_scope
+    } == {
         "doc-a",
         "doc-b",
     }
@@ -360,11 +358,21 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
         ),
         encoding="utf-8",
     )
-    scripts = Path(__file__).resolve().parents[3] / "scripts/evaluation/feedback_dataset"
+    scripts = (
+        Path(__file__).resolve().parents[3] / "scripts/evaluation/feedback_dataset"
+    )
     prepared = tmp_path / "experiment"
     result = subprocess.run(
-        [sys.executable, str(scripts / "prepare.py"), str(source), str(prepared), "--revision", "integration"],
-        capture_output=True, text=True,
+        [
+            sys.executable,
+            str(scripts / "prepare.py"),
+            str(source),
+            str(prepared),
+            "--revision",
+            "integration",
+        ],
+        capture_output=True,
+        text=True,
     )
     assert result.returncode != 0
     assert "export_manifest_schema_invalid" in result.stderr
@@ -390,9 +398,10 @@ async def test_withdrawn_feedback_cancels_pending_job_without_creating_a_case(
         comment="Please include the source condition.",
     )
     assert feedback is not None
-    assert len(
-        await chain.jobs.list_jobs(job_type="feedback_analysis", status="pending")
-    ) == 1
+    assert (
+        len(await chain.jobs.list_jobs(job_type="feedback_analysis", status="pending"))
+        == 1
+    )
 
     withdrawn = await chain.chat_service.set_message_feedback_for_user(
         SESSION_ID,
@@ -434,16 +443,18 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
         tool_calls=(request,),
         created_at="2026-09-24T10:00:03+00:00",
     )
-    call = ChatToolCall.requested(
-        tool_call_id=request.tool_call_id,
-        session_id=SESSION_ID,
-        assistant_message_id=assistant_request.message_id,
-        name=request.name,
-        arguments=request.arguments,
-        risk=ToolRisk.READ,
-        position=request.position,
-    ).start("2026-09-24T10:00:03+00:00").fail(
-        "source_unavailable", "2026-09-24T10:00:04+00:00"
+    call = (
+        ChatToolCall.requested(
+            tool_call_id=request.tool_call_id,
+            session_id=SESSION_ID,
+            assistant_message_id=assistant_request.message_id,
+            name=request.name,
+            arguments=request.arguments,
+            risk=ToolRisk.READ,
+            position=request.position,
+        )
+        .start("2026-09-24T10:00:03+00:00")
+        .fail("source_unavailable", "2026-09-24T10:00:04+00:00")
     )
     failed_result = ChatToolResult(
         tool_call_id=call.tool_call_id,
@@ -488,22 +499,24 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
         tool_results=(failed_result,),
     )
 
-    result_digest = tool_result_digest({
-        "tool_call_id": failed_result.tool_call_id,
-        "status": failed_result.status.value,
-        "data": deepcopy(dict(failed_result.data)),
-        "resource_refs": [
-            {
-                "resource_type": item.resource_type,
-                "resource_id": item.resource_id,
-                "href": item.href,
-            }
-            for item in failed_result.resource_refs
-        ],
-        "warnings": list(failed_result.warnings),
-        "error_code": failed_result.error_code,
-        "error_message": failed_result.error_message,
-    })
+    result_digest = tool_result_digest(
+        {
+            "tool_call_id": failed_result.tool_call_id,
+            "status": failed_result.status.value,
+            "data": deepcopy(dict(failed_result.data)),
+            "resource_refs": [
+                {
+                    "resource_type": item.resource_type,
+                    "resource_id": item.resource_id,
+                    "href": item.href,
+                }
+                for item in failed_result.resource_refs
+            ],
+            "warnings": list(failed_result.warnings),
+            "error_code": failed_result.error_code,
+            "error_message": failed_result.error_message,
+        }
+    )
     enqueue_kwargs = {
         "session_id": SESSION_ID,
         "tool_call_id": call.tool_call_id,
@@ -584,22 +597,33 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     assert await chain.chat.read_messages(SESSION_ID) == trajectory
 
 
-@pytest.mark.parametrize("order", [("correction", "feedback"), ("feedback", "correction")])
+@pytest.mark.parametrize(
+    "order", [("correction", "feedback"), ("feedback", "correction")]
+)
 async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
     feedback_chain, order
 ):
     chain = feedback_chain
     stored_feedback = await chain.chat_service.set_message_feedback_for_user(
-        SESSION_ID, chain.answer.message_id, USER_ID, rating="not_helpful", reason="incorrect",
+        SESSION_ID,
+        chain.answer.message_id,
+        USER_ID,
+        rating="not_helpful",
+        reason="incorrect",
     )
     feedback_job = (await chain.jobs.list_jobs(job_type="feedback_analysis"))[0]
     correction_job = await chain.jobs.enqueue_correction_signal_analysis(
-        session_id=SESSION_ID, anchor_message_id=chain.answer.message_id,
-        trigger_message_id="challenge", trigger_digest="c" * 64,
+        session_id=SESSION_ID,
+        anchor_message_id=chain.answer.message_id,
+        trigger_message_id="challenge",
+        trigger_digest="c" * 64,
         idempotency_key=correction_signal_idempotency_key(
-            session_id=SESSION_ID, anchor_message_id=chain.answer.message_id,
-            trigger_message_id="challenge", trigger_digest="c" * 64,
-        ), now=_current_iso(),
+            session_id=SESSION_ID,
+            anchor_message_id=chain.answer.message_id,
+            trigger_message_id="challenge",
+            trigger_digest="c" * 64,
+        ),
+        now=_current_iso(),
     )
     common = {
         "session_id": SESSION_ID,
@@ -616,26 +640,37 @@ async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
         "created_at": NOW,
     }
     correction = CorrectionSignalAnalysisResult(
-        **common, result_id="correction-result", job_id=correction_job.job_id,
-        signal_id="correction_signal:challenge", signal_type="natural_language_correction",
+        **common,
+        result_id="correction-result",
+        job_id=correction_job.job_id,
+        signal_id="correction_signal:challenge",
+        signal_type="natural_language_correction",
         trigger_message_id="challenge",
     )
     feedback = AnalysisResult(
-        **common, result_id="feedback-result", job_id=feedback_job.job_id,
+        **common,
+        result_id="feedback-result",
+        job_id=feedback_job.job_id,
         feedback_id=stored_feedback.feedback_id,
     )
     snapshots = {
         "correction": {
-            "question": chain.question.content, "answer": chain.answer.content,
+            "question": chain.question.content,
+            "answer": chain.answer.content,
             "corrected_answer": "Paper B was preheated at 200 C.",
             "corrected_message_id": "corrected-answer",
             "pairing_basis": "same_case_review_input",
-            "correction_signal": {"content": "Actually, the caption records preheating."},
-            "inspected_sources": [{"document_title": "Paper B", "quote": "Preheated at 200 C."}],
+            "correction_signal": {
+                "content": "Actually, the caption records preheating."
+            },
+            "inspected_sources": [
+                {"document_title": "Paper B", "quote": "Preheated at 200 C."}
+            ],
             "analysis": {"resolution": "correction_response_available"},
         },
         "feedback": {
-            "question": chain.question.content, "answer": chain.answer.content,
+            "question": chain.question.content,
+            "answer": chain.answer.content,
             "corrected_answer": None,
             "inspected_sources": [],
             "analysis": {"problem_type": "source_missing", "suggested_target": None},
@@ -659,9 +694,14 @@ async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
     assert snapshot["pairing_basis"] == "same_case_review_input"
     # Only the correction source can clear its own pair on a later projection.
     await chain.cases.upsert_case_from_correction_signal(
-        correction, context_snapshot={"question": chain.question.content, "answer": chain.answer.content,
+        correction,
+        context_snapshot={
+            "question": chain.question.content,
+            "answer": chain.answer.content,
             "correction_signal": {"content": "Actually, only summarize B now."},
-            "pairing_assessment": {"task_relation": "different_task"}}, now=_current_iso(),
+            "pairing_assessment": {"task_relation": "different_task"},
+        },
+        now=_current_iso(),
     )
     current = await chain.cases.read_case(cases[0].case_id)
     assert "corrected_answer" not in current.context_snapshot
@@ -693,7 +733,9 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
         related_message_ids=(chain.question.message_id, chain.answer.message_id),
         suggested_evidence=(),
         suggested_target=None,
-        evidence_coverage=EvidenceCoverage(inspected_sources=(excerpt,), coverage_status="partial"),
+        evidence_coverage=EvidenceCoverage(
+            inspected_sources=(excerpt,), coverage_status="partial"
+        ),
         model="test",
         input_digest="a" * 64,
         created_at=NOW,
@@ -712,13 +754,21 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
     frozen_digest = source_digest_for_case(frozen_case)
     excerpt["quote"] = "Changed outside the workbench."
     returned = asdict(frozen_case)
-    returned["context_snapshot"]["inspected_sources"][0]["quote"] = "Changed by a reader."
-    assert frozen_case.context_snapshot["inspected_sources"][0]["quote"] == "Preheated at 200 C."
+    returned["context_snapshot"]["inspected_sources"][0][
+        "quote"
+    ] = "Changed by a reader."
+    assert (
+        frozen_case.context_snapshot["inspected_sources"][0]["quote"]
+        == "Preheated at 200 C."
+    )
     assert source_digest_for_case(frozen_case) == frozen_digest
     reread = await chain.cases.read_case(frozen_case.case_id)
     assert reread.context_snapshot == frozen_case.context_snapshot
     stored_analysis = (await chain.cases.read_analysis_results((result.result_id,)))[0]
-    assert stored_analysis.evidence_coverage.inspected_sources[0]["quote"] == "Preheated at 200 C."
+    assert (
+        stored_analysis.evidence_coverage.inspected_sources[0]["quote"]
+        == "Preheated at 200 C."
+    )
 
     # Simulate the worker retrying after the result transaction committed but
     # before the job status update was observed by the worker.

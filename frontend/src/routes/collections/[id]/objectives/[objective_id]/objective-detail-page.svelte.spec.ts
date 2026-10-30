@@ -46,8 +46,8 @@ vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
 
-function jsonResponse(body: unknown) {
-	return new Response(JSON.stringify(body), {
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
 		status: 200,
 		headers: { 'Content-Type': 'application/json' }
 	});
@@ -135,7 +135,15 @@ function objectiveResponse(overrides: Record<string, unknown> = {}) {
 		active_analysis: analysisState('succeeded'),
 		published_analysis: analysisState('succeeded'),
 		warnings: [],
-		evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+		evidence_review: {
+			total_evidence_count: 0,
+			result_count: 0,
+			comparable_evidence_count: 0,
+			gap_count: 0,
+			omitted_gap_count: 0,
+			status_counts: {},
+			gaps: []
+		},
 		...overrides
 	};
 }
@@ -280,7 +288,8 @@ function installPublishedResponses(
 						collection_id: 'col_123',
 						title: 'Annealing response of LPBF 316L',
 						source_filename: 'annealing-316l.pdf',
-						doc_type: 'experimental', profile_status: 'completed',
+						doc_type: 'experimental',
+						profile_status: 'completed',
 						profile_warnings: [],
 						confidence: 0.95
 					}
@@ -295,7 +304,9 @@ function installPublishedResponses(
 		}
 		if (current.path.endsWith('/objectives/obj_1/experiment-analysis')) {
 			return jsonResponse({
-				collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1,
+				collection_id: 'col_123',
+				objective_id: 'obj_1',
+				analysis_version: 1,
 				selections: [
 					{
 						selection_id: 'selection-1',
@@ -347,6 +358,12 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
 		});
 		goto.mockReset();
+		goto.mockImplementation(async (href: string) => {
+			setPage({
+				params: { id: 'col_123', objective_id: 'obj_1' },
+				url: new URL(href, 'http://localhost')
+			});
+		});
 		fetchMock.mockReset();
 	});
 
@@ -389,14 +406,17 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			const params = new URLSearchParams(current.search);
 			if (current.path.endsWith('/documents'))
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }],
 					count: 1
 				});
 			if (current.path.endsWith('/scope'))
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1', support_is_evidence: false,
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					support_is_evidence: false,
 					recommended_document_ids: ['paper-1'],
 					review_document_ids: [],
 					excluded_document_ids: [],
@@ -405,7 +425,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				});
 			if (current.path.endsWith('/documents/profiles')) {
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: [
 						{
@@ -431,7 +452,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			}
 			if (current.path.endsWith('/objectives/obj_1/experiment-analysis')) {
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1', analysis_version: publishedVersion,
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					analysis_version: publishedVersion,
 					selections: [
 						{
 							selection_id: 'selection-1',
@@ -463,7 +486,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			}
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items:
 						publishedVersion === 2
@@ -475,7 +499,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			if (current.path.endsWith('/objectives/obj_1/evidence')) {
 				const findingId = params.get('finding_id');
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: [{ ...evidence, analysis_version: publishedVersion }],
 					total: 1,
@@ -507,7 +532,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			const current = request(input, init);
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: [{ ...finding, analysis_version: 1 }],
 					total: 1,
@@ -547,14 +573,17 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			requests.push({ path: current.path, method: current.method });
 			if (current.path.endsWith('/documents'))
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }],
 					count: 1
 				});
 			if (current.path.endsWith('/scope'))
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1', support_is_evidence: false,
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					support_is_evidence: false,
 					recommended_document_ids: ['paper-1'],
 					review_document_ids: [],
 					excluded_document_ids: [],
@@ -661,7 +690,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('相关联', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('associated_with')).not.toBeInTheDocument();
 		await browserPage.getByText(/Analysis and experiment versions|分析与实验版本/).click();
-		await expect.element(browserPage.getByText(/Experiment version\s*v1|实验版本\s*v1/)).toHaveTextContent('v1');
+		await expect
+			.element(browserPage.getByText(/Experiment version\s*v1|实验版本\s*v1/))
+			.toHaveTextContent('v1');
 		await openAuditTrail();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Annealing response of LPBF 316L · p.7' }))
@@ -697,10 +728,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			if (current.path.endsWith('/finding-dataset')) {
-				return new Response('{"messages":[]}', {
-					status: 200,
-					headers: { 'Content-Type': 'application/json' }
-				});
+				return jsonResponse({ messages: [] });
 			}
 			return installed(input, init);
 		});
@@ -880,7 +908,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
 				const offset = Number(params.get('offset'));
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: offset === 0 ? [pagedFinding] : [secondFinding],
 					total: 2
@@ -889,7 +918,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			if (current.path.endsWith('/objectives/obj_1/evidence')) {
 				const offset = Number(params.get('offset'));
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					finding_id: params.get('finding_id'),
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: offset === 0 ? [evidence] : [contextEvidence],
 					total: 2
@@ -978,7 +1009,14 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				const findingId = new URLSearchParams(current.search).get('finding_id');
 				if (findingId === 'finding-2') return slowEvidenceResponse.promise;
 				const item = findingId === 'finding-3' ? latestEvidence : evidence;
-				return jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1, items: [item], total: 1 });
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					finding_id: findingId,
+					analysis_version: 1,
+					items: [item],
+					total: 1
+				});
 			}
 			throw new Error(`unexpected request: ${current.method} ${current.path}${current.search}`);
 		});
@@ -998,7 +1036,16 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(latestEvidence.source_excerpt);
 
-		slowEvidenceResponse.resolve(jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1, items: [slowEvidence], total: 1 }));
+		slowEvidenceResponse.resolve(
+			jsonResponse({
+				collection_id: 'col_123',
+				objective_id: 'obj_1',
+				finding_id: 'finding-2',
+				analysis_version: 1,
+				items: [slowEvidence],
+				total: 1
+			})
+		);
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.not.toHaveTextContent(slowEvidence.source_excerpt);
@@ -1047,14 +1094,17 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			const params = new URLSearchParams(current.search);
 			if (current.path.endsWith('/documents'))
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }],
 					count: 1
 				});
 			if (current.path.endsWith('/scope'))
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1', support_is_evidence: false,
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					support_is_evidence: false,
 					recommended_document_ids: ['paper-1'],
 					review_document_ids: [],
 					excluded_document_ids: [],
@@ -1090,7 +1140,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
 				const version = Number(params.get('analysis_version'));
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: version === 2 ? [publishedFinding] : [finding, slowFinding],
 					total: version === 2 ? 1 : 2
@@ -1100,7 +1151,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				const findingId = params.get('finding_id');
 				if (findingId === 'finding-v1-slow') return slowEvidenceResponse.promise;
 				return jsonResponse({
-					collection_id: 'col_123', objective_id: 'obj_1',
+					collection_id: 'col_123',
+					objective_id: 'obj_1',
+					finding_id: findingId,
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
 					items: findingId === 'finding-v2' ? [publishedEvidence] : [evidence],
 					total: 1
@@ -1136,7 +1189,16 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(publishedEvidence.source_excerpt);
 
-		slowEvidenceResponse.resolve(jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1, items: [slowEvidence], total: 1 }));
+		slowEvidenceResponse.resolve(
+			jsonResponse({
+				collection_id: 'col_123',
+				objective_id: 'obj_1',
+				finding_id: 'finding-v1-slow',
+				analysis_version: 1,
+				items: [slowEvidence],
+				total: 1
+			})
+		);
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.not.toHaveTextContent(slowEvidence.source_excerpt);

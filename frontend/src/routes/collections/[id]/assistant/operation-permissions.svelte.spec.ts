@@ -25,7 +25,7 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify(permission), {
+			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
 				status: 200,
 				headers: { 'Content-Type': 'application/json' }
 			});
@@ -90,7 +90,7 @@ it('restores an existing automatic grant duration and can authorize every write 
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify(permission), {
+			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
 				status: 200,
 				headers: { 'Content-Type': 'application/json' }
 			});
@@ -135,7 +135,7 @@ it('renews an expired automatic grant instead of resubmitting its past expiry', 
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify(permission), {
+			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
 				status: 200,
 				headers: { 'Content-Type': 'application/json' }
 			});
@@ -174,7 +174,7 @@ it('uses the collection settings endpoint for defaults and sends the server expa
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify(permission), {
+			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
 				status: 200,
 				headers: { 'Content-Type': 'application/json' }
 			});

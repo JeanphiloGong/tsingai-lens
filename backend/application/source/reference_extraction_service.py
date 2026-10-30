@@ -13,7 +13,6 @@ from domain.source import (
     SourceReferenceSet,
 )
 
-
 _REFERENCE_HEADING_PATTERN = re.compile(
     r"^(references|bibliography|works cited|literature cited)\s*$",
     re.IGNORECASE,
@@ -28,173 +27,172 @@ _CITATION_PATTERN = re.compile(r"\[(?P<body>\d+(?:\s*(?:,\s*|\s*-\s*)\d+)*)\]")
 _SPACE_PATTERN = re.compile(r"\s+")
 
 
-class SourceReferenceExtractionService:
-    """Extract citation metadata from Source structure artifacts."""
+def extract(documents: tuple[SourceDocument, ...]) -> SourceReferenceSet:
+    blocks = tuple(block for document in documents for block in document.blocks)
+    entries = _extract_entries(blocks)
+    mentions = _extract_mentions(blocks, entries)
+    return SourceReferenceSet(
+        entries=tuple(entries),
+        mentions=tuple(mentions),
+        candidates=tuple(_build_candidates(entries, mentions)),
+    )
 
-    def extract(self, documents: tuple[SourceDocument, ...]) -> SourceReferenceSet:
-        blocks = tuple(block for document in documents for block in document.blocks)
-        entries = self._extract_entries(blocks)
-        mentions = self._extract_mentions(blocks, entries)
-        return SourceReferenceSet(
-            entries=tuple(entries),
-            mentions=tuple(mentions),
-            candidates=tuple(self._build_candidates(entries, mentions)),
-        )
 
-    def _extract_entries(
-        self,
-        blocks: Iterable[SourceBlock],
-    ) -> list[SourceReferenceEntry]:
-        entries: list[SourceReferenceEntry] = []
-        blocks_by_document: dict[str, list[SourceBlock]] = defaultdict(list)
-        for block in blocks:
-            blocks_by_document[block.document_id].append(block)
+def _extract_entries(
+    blocks: Iterable[SourceBlock],
+) -> list[SourceReferenceEntry]:
+    entries: list[SourceReferenceEntry] = []
+    blocks_by_document: dict[str, list[SourceBlock]] = defaultdict(list)
+    for block in blocks:
+        blocks_by_document[block.document_id].append(block)
 
-        for document_id, document_blocks in blocks_by_document.items():
-            document_blocks.sort(key=lambda block: block.block_order)
-            in_reference_section = False
-            for block in document_blocks:
-                text = _normalize_text(block.text)
-                if not text:
-                    continue
-                if self._is_reference_heading(block):
-                    in_reference_section = True
-                    continue
-                if in_reference_section and self._is_new_non_reference_heading(block):
-                    break
-                if not in_reference_section:
-                    continue
-                entry = self._entry_from_block(
-                    document_id=document_id,
-                    block=block,
-                    sequence=len(entries) + 1,
-                )
-                if entry is not None:
-                    entries.append(entry)
-        return entries
+    for document_id, document_blocks in blocks_by_document.items():
+        document_blocks.sort(key=lambda block: block.block_order)
+        in_reference_section = False
+        for block in document_blocks:
+            text = _normalize_text(block.text)
+            if not text:
+                continue
+            if _is_reference_heading(block):
+                in_reference_section = True
+                continue
+            if in_reference_section and _is_new_non_reference_heading(block):
+                break
+            if not in_reference_section:
+                continue
+            entry = _entry_from_block(
+                document_id=document_id,
+                block=block,
+                sequence=len(entries) + 1,
+            )
+            if entry is not None:
+                entries.append(entry)
+    return entries
 
-    def _extract_mentions(
-        self,
-        blocks: Iterable[SourceBlock],
-        entries: list[SourceReferenceEntry],
-    ) -> list[SourceReferenceMention]:
-        entry_by_key = {
-            (entry.document_id, entry.reference_index): entry
-            for entry in entries
-            if entry.reference_index
-        }
-        mentions: list[SourceReferenceMention] = []
-        blocks_by_document: dict[str, list[SourceBlock]] = defaultdict(list)
-        for block in blocks:
-            blocks_by_document[block.document_id].append(block)
 
-        for document_id, document_blocks in blocks_by_document.items():
-            in_reference_section = False
-            for block in sorted(document_blocks, key=lambda item: item.block_order):
-                if self._is_reference_heading(block):
-                    in_reference_section = True
-                    continue
-                if in_reference_section and self._is_new_non_reference_heading(block):
-                    in_reference_section = False
-                if in_reference_section:
-                    continue
+def _extract_mentions(
+    blocks: Iterable[SourceBlock],
+    entries: list[SourceReferenceEntry],
+) -> list[SourceReferenceMention]:
+    entry_by_key = {
+        (entry.document_id, entry.reference_index): entry
+        for entry in entries
+        if entry.reference_index
+    }
+    mentions: list[SourceReferenceMention] = []
+    blocks_by_document: dict[str, list[SourceBlock]] = defaultdict(list)
+    for block in blocks:
+        blocks_by_document[block.document_id].append(block)
 
-                for match in _CITATION_PATTERN.finditer(block.text):
-                    for number in _expand_citation_numbers(match.group("body")):
-                        entry = entry_by_key.get((document_id, number))
-                        mentions.append(
-                            SourceReferenceMention(
-                                mention_id=(
-                                    f"mention-{document_id}-"
-                                    f"{block.block_id}-{len(mentions) + 1:04d}"
-                                ),
-                                document_id=document_id,
-                                reference_id=entry.reference_id if entry else None,
-                                citation_marker=f"[{number}]",
-                                context_text=_context_window(block.text, match.start()),
-                                source_block_id=block.block_id,
-                                page=block.page,
-                                confidence=0.9 if entry else 0.6,
-                                metadata={"raw_marker": match.group(0)},
-                            )
+    for document_id, document_blocks in blocks_by_document.items():
+        in_reference_section = False
+        for block in sorted(document_blocks, key=lambda item: item.block_order):
+            if _is_reference_heading(block):
+                in_reference_section = True
+                continue
+            if in_reference_section and _is_new_non_reference_heading(block):
+                in_reference_section = False
+            if in_reference_section:
+                continue
+
+            for match in _CITATION_PATTERN.finditer(block.text):
+                for number in _expand_citation_numbers(match.group("body")):
+                    entry = entry_by_key.get((document_id, number))
+                    mentions.append(
+                        SourceReferenceMention(
+                            mention_id=(
+                                f"mention-{document_id}-"
+                                f"{block.block_id}-{len(mentions) + 1:04d}"
+                            ),
+                            document_id=document_id,
+                            reference_id=entry.reference_id if entry else None,
+                            citation_marker=f"[{number}]",
+                            context_text=_context_window(block.text, match.start()),
+                            source_block_id=block.block_id,
+                            page=block.page,
+                            confidence=0.9 if entry else 0.6,
+                            metadata={"raw_marker": match.group(0)},
                         )
-        return mentions
+                    )
+    return mentions
 
-    def _build_candidates(
-        self,
-        entries: list[SourceReferenceEntry],
-        mentions: list[SourceReferenceMention],
-    ) -> list[SourceReferenceCandidate]:
-        mentions_by_reference: dict[str, list[SourceReferenceMention]] = defaultdict(list)
-        for mention in mentions:
-            if mention.reference_id:
-                mentions_by_reference[mention.reference_id].append(mention)
 
-        candidates: list[SourceReferenceCandidate] = []
-        for entry in entries:
-            reference_mentions = mentions_by_reference.get(entry.reference_id, [])
-            representative = reference_mentions[0] if reference_mentions else None
-            candidates.append(
-                SourceReferenceCandidate(
-                    candidate_id=f"cand-{entry.reference_id}",
-                    reference_id=entry.reference_id,
-                    status="metadata_only",
-                    relevance_score=_candidate_score(entry, reference_mentions),
-                    relevance_reason=_candidate_reason(entry, reference_mentions),
-                    cited_by_document_id=entry.document_id,
-                    mention_count=len(reference_mentions),
-                    representative_context=(
-                        representative.context_text if representative else None
-                    ),
-                    resolved_doi=entry.doi,
-                    resolved_url=f"https://doi.org/{entry.doi}" if entry.doi else None,
-                    metadata={"source": "citation_reference_extraction"},
-                )
-            )
-        candidates.sort(
-            key=lambda candidate: (
-                -candidate.relevance_score,
-                candidate.reference_id,
+def _build_candidates(
+    entries: list[SourceReferenceEntry],
+    mentions: list[SourceReferenceMention],
+) -> list[SourceReferenceCandidate]:
+    mentions_by_reference: dict[str, list[SourceReferenceMention]] = defaultdict(list)
+    for mention in mentions:
+        if mention.reference_id:
+            mentions_by_reference[mention.reference_id].append(mention)
+
+    candidates: list[SourceReferenceCandidate] = []
+    for entry in entries:
+        reference_mentions = mentions_by_reference.get(entry.reference_id, [])
+        representative = reference_mentions[0] if reference_mentions else None
+        candidates.append(
+            SourceReferenceCandidate(
+                candidate_id=f"cand-{entry.reference_id}",
+                reference_id=entry.reference_id,
+                status="metadata_only",
+                relevance_score=_candidate_score(entry, reference_mentions),
+                relevance_reason=_candidate_reason(entry, reference_mentions),
+                cited_by_document_id=entry.document_id,
+                mention_count=len(reference_mentions),
+                representative_context=(
+                    representative.context_text if representative else None
+                ),
+                resolved_doi=entry.doi,
+                resolved_url=f"https://doi.org/{entry.doi}" if entry.doi else None,
+                metadata={"source": "citation_reference_extraction"},
             )
         )
-        return candidates
-
-    def _is_reference_heading(self, block: SourceBlock) -> bool:
-        if str(block.block_type) != "heading":
-            return False
-        return bool(_REFERENCE_HEADING_PATTERN.match(_normalize_text(block.text)))
-
-    def _is_new_non_reference_heading(self, block: SourceBlock) -> bool:
-        return str(block.block_type) == "heading" and not self._is_reference_heading(block)
-
-    def _entry_from_block(
-        self,
-        *,
-        document_id: str,
-        block: SourceBlock,
-        sequence: int,
-    ) -> SourceReferenceEntry | None:
-        text = _normalize_text(block.text)
-        match = _NUMBERED_REFERENCE_PATTERN.match(text)
-        if not match:
-            return None
-        reference_index = match.group("bracket") or match.group("plain")
-        raw_reference = f"[{reference_index}] {match.group('body')}".strip()
-        doi = _extract_doi(raw_reference)
-        return SourceReferenceEntry(
-            reference_id=f"ref-{document_id}-{int(reference_index):04d}",
-            document_id=document_id,
-            raw_reference=raw_reference,
-            reference_index=reference_index,
-            title=_extract_title(match.group("body")),
-            authors_text=_extract_authors(match.group("body")),
-            year=_extract_year(raw_reference),
-            doi=doi,
-            source_block_id=block.block_id,
-            page=block.page,
-            confidence=0.85,
-            metadata={"sequence": sequence},
+    candidates.sort(
+        key=lambda candidate: (
+            -candidate.relevance_score,
+            candidate.reference_id,
         )
+    )
+    return candidates
+
+
+def _is_reference_heading(block: SourceBlock) -> bool:
+    if str(block.block_type) != "heading":
+        return False
+    return bool(_REFERENCE_HEADING_PATTERN.match(_normalize_text(block.text)))
+
+
+def _is_new_non_reference_heading(block: SourceBlock) -> bool:
+    return str(block.block_type) == "heading" and not _is_reference_heading(block)
+
+
+def _entry_from_block(
+    *,
+    document_id: str,
+    block: SourceBlock,
+    sequence: int,
+) -> SourceReferenceEntry | None:
+    text = _normalize_text(block.text)
+    match = _NUMBERED_REFERENCE_PATTERN.match(text)
+    if not match:
+        return None
+    reference_index = match.group("bracket") or match.group("plain")
+    raw_reference = f"[{reference_index}] {match.group('body')}".strip()
+    doi = _extract_doi(raw_reference)
+    return SourceReferenceEntry(
+        reference_id=f"ref-{document_id}-{int(reference_index):04d}",
+        document_id=document_id,
+        raw_reference=raw_reference,
+        reference_index=reference_index,
+        title=_extract_title(match.group("body")),
+        authors_text=_extract_authors(match.group("body")),
+        year=_extract_year(raw_reference),
+        doi=doi,
+        source_block_id=block.block_id,
+        page=block.page,
+        confidence=0.85,
+        metadata={"sequence": sequence},
+    )
 
 
 def _normalize_text(value: str) -> str:

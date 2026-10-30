@@ -7,14 +7,12 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 
+from domain.feedback.dataset import Dataset, DatasetTaskType
+from infra.persistence.database import AsyncSessionLocal
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from infra.persistence.database import AsyncSessionLocal
-
-from domain.feedback.dataset import Dataset, DatasetTaskType
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
 
 
 @dataclass(frozen=True)
@@ -39,7 +37,7 @@ def system_dataset_id(collection_id: str, task_type: str) -> str:
 class FeedbackDatasetRepository:
     backend_name = "postgresql"
 
-    async def create(self, dataset: Dataset) -> Dataset:
+    async def create(self, dataset: Dataset) -> StoredDataset:
         async with AsyncSessionLocal() as db, db.begin():
             now = datetime.now(timezone.utc)
             row = FeedbackDatasetRow(
@@ -55,7 +53,7 @@ class FeedbackDatasetRepository:
             )
             db.add(row)
             await db.flush()
-        return dataset
+        return StoredDataset(dataset=dataset, created_at=now, updated_at=now)
 
     async def read(self, dataset_id: str) -> Dataset | None:
         async with AsyncSessionLocal() as db:
@@ -127,7 +125,11 @@ class FeedbackDatasetRepository:
 
 
 async def ensure_system_datasets(
-    db: AsyncSession, *, collection_id: str, owner_user_id: str, now: datetime,
+    db: AsyncSession,
+    *,
+    collection_id: str,
+    owner_user_id: str,
+    now: datetime,
 ) -> tuple[Dataset, ...]:
     """Use the caller's transaction for collection creation and case writes."""
     records: list[Dataset] = []
@@ -140,23 +142,28 @@ async def ensure_system_datasets(
                 collection_id=collection_id,
                 name=name,
                 task_type=task_type,
-                construction_spec={"mode": "automatic_feedback_workbench", "source": "feedback_case"},
+                construction_spec={
+                    "mode": "automatic_feedback_workbench",
+                    "source": "feedback_case",
+                },
                 spec_version=1,
                 created_by=owner_user_id,
             )
             try:
                 async with db.begin_nested():
-                    db.add(FeedbackDatasetRow(
-                        dataset_id=dataset.dataset_id,
-                        collection_id=dataset.collection_id,
-                        name=dataset.name,
-                        task_type=dataset.task_type,
-                        construction_spec=dataset.construction_spec,
-                        spec_version=dataset.spec_version,
-                        created_by=dataset.created_by,
-                        created_at=now,
-                        updated_at=now,
-                    ))
+                    db.add(
+                        FeedbackDatasetRow(
+                            dataset_id=dataset.dataset_id,
+                            collection_id=dataset.collection_id,
+                            name=dataset.name,
+                            task_type=dataset.task_type,
+                            construction_spec=dataset.construction_spec,
+                            spec_version=dataset.spec_version,
+                            created_by=dataset.created_by,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
                     await db.flush()
             except IntegrityError:
                 row = await db.get(FeedbackDatasetRow, dataset_id)
@@ -164,16 +171,20 @@ async def ensure_system_datasets(
                 records.append(dataset)
                 continue
         if row is None:
-            raise RuntimeError("system feedback dataset creation raced and was not readable")
-        records.append(Dataset(
-            dataset_id=row.dataset_id,
-            collection_id=row.collection_id,
-            name=row.name,
-            task_type=row.task_type,
-            construction_spec=row.construction_spec,
-            spec_version=row.spec_version,
-            created_by=row.created_by,
-        ))
+            raise RuntimeError(
+                "system feedback dataset creation raced and was not readable"
+            )
+        records.append(
+            Dataset(
+                dataset_id=row.dataset_id,
+                collection_id=row.collection_id,
+                name=row.name,
+                task_type=row.task_type,
+                construction_spec=row.construction_spec,
+                spec_version=row.spec_version,
+                created_by=row.created_by,
+            )
+        )
     return tuple(records)
 
 
@@ -190,7 +201,7 @@ def _datetime(value: Any) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-__all__ = ['FeedbackDatasetRepository', 'StoredDataset']
+__all__ = ["FeedbackDatasetRepository", "StoredDataset"]
 
 
 FeedbackDatasetRepo = FeedbackDatasetRepository()

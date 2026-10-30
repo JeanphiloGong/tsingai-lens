@@ -22,8 +22,8 @@ const Page = (await import('./+page.svelte')).default;
 
 afterEach(cleanup);
 
-function jsonResponse(body: unknown) {
-	return new Response(JSON.stringify(body), {
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
 		status: 200,
 		headers: { 'Content-Type': 'application/json' }
 	});
@@ -133,7 +133,7 @@ describe('current collection document workflow', () => {
 	it('shows an Objective load failure without claiming the collection has no objectives', async () => {
 		const normal = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation(async (...args) => {
-			if (String(args[0]).endsWith('/objectives')) return new Response('', { status: 503 });
+			if (String(args[0]).endsWith('/objectives')) return jsonResponse({}, 200205, 'Objectives are unavailable.');
 			return normal(...args);
 		});
 		render(Page);
@@ -147,7 +147,7 @@ describe('current collection document workflow', () => {
 		let failObjectives = false;
 		fetchMock.mockImplementation(async (...args) => {
 			if (String(args[0]).endsWith('/objectives')) {
-				return failObjectives ? new Response('', { status: 503 }) : jsonResponse({
+				return failObjectives ? jsonResponse({}, 200205, 'Objectives are unavailable.') : jsonResponse({
 					collection_id: 'col_123', objectives: [{ objective_id: 'obj_1', question: 'Compare porosity', confirmation_status: 'confirmed' }]
 				});
 			}

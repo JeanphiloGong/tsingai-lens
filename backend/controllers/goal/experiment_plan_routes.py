@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
+from application.goal import experiment_plan_service
 from application.goal.research_plan_contract import ResearchPlanStructure
-from controllers.dependencies.auth import current_user_id
-from domain.goal import ExperimentPlanRecord
+from controllers.dependencies.auth import get_current_user_id
+from fastapi import APIRouter, Depends
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from utils.response import ApiResponse, make_api_response
 
 ExperimentPlanStatus = Literal["draft", "ready_for_review", "archived"]
 ExperimentPlanSourceLinkKind = Literal["document", "evidence"]
@@ -82,94 +82,84 @@ experiment_plan_router = APIRouter(prefix="/collections", tags=["experiment-plan
 
 @experiment_plan_router.post(
     "/{collection_id}/objectives/{objective_id}/experiment-plans",
-    response_model=ExperimentPlanResponse,
+    response_model=ApiResponse[ExperimentPlanResponse],
     summary="Save an Objective-scoped experiment plan draft",
 )
 async def create_experiment_plan(
     collection_id: str,
     objective_id: str,
     payload: ExperimentPlanCreateRequest,
-    request: Request,
-) -> ExperimentPlanResponse:
-    try:
-        await request.app.state.collection_service.get_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-        plan = await request.app.state.experiment_plan_service.create_plan(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            title=payload.title,
-            content=payload.content,
-            structured_plan=(
-                payload.structured_plan.model_dump()
-                if payload.structured_plan is not None
-                else None
-            ),
-            created_by=await current_user_id(request),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _plan_response(plan)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    plan = await experiment_plan_service.create_plan(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        title=payload.title,
+        content=payload.content,
+        structured_plan=(
+            payload.structured_plan.model_dump()
+            if payload.structured_plan is not None
+            else None
+        ),
+        created_by=user_id,
+    )
+    return make_api_response(
+        data=ExperimentPlanResponse.model_validate(plan, from_attributes=True)
+    )
 
 
 @experiment_plan_router.get(
     "/{collection_id}/objectives/{objective_id}/experiment-plans",
-    response_model=ExperimentPlanListResponse,
+    response_model=ApiResponse[ExperimentPlanListResponse],
     summary="List Objective-scoped experiment plan drafts",
 )
 async def list_experiment_plans(
     collection_id: str,
     objective_id: str,
-    request: Request,
-) -> ExperimentPlanListResponse:
-    try:
-        await request.app.state.collection_service.get_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    plans = await request.app.state.experiment_plan_service.list_plans(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    plans = await experiment_plan_service.list_plans(
         collection_id,
         objective_id,
+        user_id=user_id,
     )
-    return ExperimentPlanListResponse(
-        collection_id=collection_id,
-        objective_id=objective_id,
-        items=[_plan_response(plan) for plan in plans],
+    return make_api_response(
+        data=ExperimentPlanListResponse(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            items=[
+                ExperimentPlanResponse.model_validate(plan, from_attributes=True)
+                for plan in plans
+            ],
+        )
     )
 
 
 @experiment_plan_router.get(
     "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
-    response_model=ExperimentPlanResponse,
+    response_model=ApiResponse[ExperimentPlanResponse],
     summary="Read one experiment plan revision",
 )
 async def read_experiment_plan(
     collection_id: str,
     objective_id: str,
     plan_id: str,
-    request: Request,
-) -> ExperimentPlanResponse:
-    try:
-        await request.app.state.collection_service.get_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-        plan = await request.app.state.experiment_plan_service.read_plan(
-            collection_id,
-            objective_id,
-            plan_id,
-        )
-    except ExperimentPlanNotFoundError as exc:
-        raise _not_found(exc) from exc
-    return _plan_response(plan)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    plan = await experiment_plan_service.read_plan(
+        collection_id,
+        objective_id,
+        plan_id,
+        user_id=user_id,
+    )
+    return make_api_response(
+        data=ExperimentPlanResponse.model_validate(plan, from_attributes=True)
+    )
 
 
 @experiment_plan_router.patch(
     "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
-    response_model=ExperimentPlanResponse,
+    response_model=ApiResponse[ExperimentPlanResponse],
     summary="Edit an Objective-scoped experiment plan draft",
 )
 async def update_experiment_plan(
@@ -177,51 +167,22 @@ async def update_experiment_plan(
     objective_id: str,
     plan_id: str,
     payload: ExperimentPlanUpdateRequest,
-    request: Request,
-) -> ExperimentPlanResponse:
-    try:
-        await request.app.state.collection_service.get_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-        current = await request.app.state.experiment_plan_service.read_plan(
-            collection_id,
-            objective_id,
-            plan_id,
-        )
-        plan = await request.app.state.experiment_plan_service.update_plan(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            plan_id=plan_id,
-            title=payload.title if payload.title is not None else current.title,
-            content=payload.content if payload.content is not None else current.content,
-            status=payload.status if payload.status is not None else current.status,
-            structured_plan=(
-                payload.structured_plan.model_dump()
-                if payload.structured_plan is not None
-                else None
-            ),
-            updated_by=await current_user_id(request),
-        )
-    except ExperimentPlanNotFoundError as exc:
-        raise _not_found(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _plan_response(plan)
-
-
-def _plan_response(plan: ExperimentPlanRecord) -> ExperimentPlanResponse:
-    return ExperimentPlanResponse.model_validate(plan, from_attributes=True)
-
-
-def _not_found(exc: ExperimentPlanNotFoundError) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={
-            "code": "experiment_plan_not_found",
-            "message": str(exc),
-            "collection_id": exc.collection_id,
-            "objective_id": exc.objective_id,
-            "plan_id": exc.plan_id,
-        },
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    plan = await experiment_plan_service.update_plan(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        plan_id=plan_id,
+        title=payload.title,
+        content=payload.content,
+        status=payload.status,
+        structured_plan=(
+            payload.structured_plan.model_dump()
+            if payload.structured_plan is not None
+            else None
+        ),
+        updated_by=user_id,
+    )
+    return make_api_response(
+        data=ExperimentPlanResponse.model_validate(plan, from_attributes=True)
     )

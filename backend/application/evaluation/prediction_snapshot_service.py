@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import ModuleType
 from typing import Any, Mapping
 
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
-from application.core.objectives.analysis.experiment_compatibility_projection import (
-    ExperimentCompatibilityProjection,
-)
-
-from application.source.collection_service import CollectionService
 from domain.evaluation import (
     EvaluationPredictionItem,
     EvaluationPredictionSnapshot,
@@ -35,10 +31,10 @@ class EvaluationPredictionSnapshotService:
 
     def __init__(
         self,
-        collection_service: CollectionService,
+        collection_service: ModuleType,
         objective_repository: ObjectiveRepository,
         evaluation_repository: EvaluationRepository,
-        experiment_projection: ExperimentCompatibilityProjection | None = None,
+        experiment_projection: ModuleType | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
@@ -79,9 +75,7 @@ class EvaluationPredictionSnapshotService:
         items: list[EvaluationPredictionItem] = []
         published_analysis_count = 0
         exported_evidence_keys: set[tuple[str, int, str]] = set()
-        for objective in await self.objective_repository.list_objectives(
-            collection_id
-        ):
+        for objective in await self.objective_repository.list_objectives(collection_id):
             analysis_version = objective.published_analysis_version
             if analysis_version is None:
                 continue
@@ -102,15 +96,13 @@ class EvaluationPredictionSnapshotService:
                     evidence_records: list[Any] = []
                     evidence_offset = 0
                     while True:
-                        evidence_page, evidence_total = (
-                            await self._list_evidence(
-                                collection_id,
-                                objective.objective_id,
-                                analysis_version,
-                                finding_id=finding_id,
-                                offset=evidence_offset,
-                                limit=500,
-                            )
+                        evidence_page, evidence_total = await self._list_evidence(
+                            collection_id,
+                            objective.objective_id,
+                            analysis_version,
+                            finding_id=finding_id,
+                            offset=evidence_offset,
+                            limit=500,
                         )
                         if not evidence_page:
                             break
@@ -132,8 +124,7 @@ class EvaluationPredictionSnapshotService:
                         if isinstance(item, Mapping) and item.get("document_id")
                     )
                     item_key = (
-                        f"{objective.objective_id}:v{analysis_version}:"
-                        f"{finding_id}"
+                        f"{objective.objective_id}:v{analysis_version}:" f"{finding_id}"
                     )
                     payload = (
                         dict(finding)
@@ -549,8 +540,12 @@ class EvaluationPredictionSnapshotService:
         offset: int,
         limit: int,
     ) -> tuple[tuple[Any, ...], int]:
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, analysis_version
+        if await should_read_experiment_projection(
+            objective_repository=self.objective_repository,
+            experiment_projection=self.experiment_projection,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
         ):
             return await self.experiment_projection.list_findings(
                 collection_id,
@@ -577,8 +572,12 @@ class EvaluationPredictionSnapshotService:
         offset: int,
         limit: int,
     ) -> tuple[tuple[Any, ...], int]:
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, analysis_version
+        if await should_read_experiment_projection(
+            objective_repository=self.objective_repository,
+            experiment_projection=self.experiment_projection,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
         ):
             return await self.experiment_projection.list_evidence(
                 collection_id,
@@ -597,19 +596,6 @@ class EvaluationPredictionSnapshotService:
             limit=limit,
         )
 
-    async def _should_use_experiment_projection(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> bool:
-        return await should_read_experiment_projection(
-            objective_repository=self.objective_repository,
-            experiment_projection=self.experiment_projection,
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-        )
 
 
 def _field(record: Any, name: str) -> Any:

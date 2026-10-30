@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from application.evaluation.finding_feedback_service import parse_curated_finding
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 
 _ACTIONS = frozenset({"accept", "reject", "correct", "skip"})
 _ISSUES = frozenset(
@@ -39,6 +44,7 @@ class FindingReviewImportService:
         *,
         rows: list[dict[str, Any]],
         reviewer: str,
+        user_id: str,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         reviewer = _human_reviewer(reviewer)
@@ -47,9 +53,14 @@ class FindingReviewImportService:
         for line_number, row in enumerate(rows, start=1):
             try:
                 validated.append(
-                    await self._decision(row, line_number=line_number)
+                    await self._decision(row, line_number=line_number, user_id=user_id)
                 )
-            except ValueError as exc:
+            except (
+                ValueError,
+                RequestInvalidException,
+                ResourceConflictException,
+                ResourceNotFoundException,
+            ) as exc:
                 errors.append({"line": line_number, "message": str(exc)})
         if errors:
             return _summary(
@@ -70,11 +81,13 @@ class FindingReviewImportService:
                 if action == "correct":
                     await self.feedback_service.record_curation(
                         reviewer=reviewer,
+                        user_id=user_id,
                         **payload,
                     )
                 else:
                     await self.feedback_service.record_feedback(
                         reviewer=reviewer,
+                        user_id=user_id,
                         **payload,
                     )
                 written_count += 1
@@ -91,11 +104,13 @@ class FindingReviewImportService:
         *,
         input_path: Path,
         reviewer: str,
+        user_id: str,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         return await self.import_rows(
             rows=read_review_jsonl(input_path),
             reviewer=reviewer,
+            user_id=user_id,
             dry_run=dry_run,
         )
 
@@ -104,9 +119,12 @@ class FindingReviewImportService:
         row: dict[str, Any],
         *,
         line_number: int,
+        user_id: str,
     ) -> dict[str, Any]:
         if "expert_action" in row or "expert_note" in row:
-            raise ValueError("expert_action and expert_note are not review JSONL fields")
+            raise ValueError(
+                "expert_action and expert_note are not review JSONL fields"
+            )
         action = row.get("action")
         if not isinstance(action, str):
             raise ValueError("action must be accept, reject, correct, or skip")
@@ -123,7 +141,7 @@ class FindingReviewImportService:
             note = note.strip() or None
 
         if action == "accept":
-            await self._require_dataset_item(identity)
+            await self._require_dataset_item(identity, user_id=user_id)
             return {
                 "line": line_number,
                 "action": action,
@@ -135,7 +153,7 @@ class FindingReviewImportService:
                 },
             }
         if action == "reject":
-            await self._require_dataset_item(identity)
+            await self._require_dataset_item(identity, user_id=user_id)
             issue_type = row.get("issue_type")
             if not isinstance(issue_type, str):
                 raise ValueError("reject requires a valid issue_type")
@@ -160,6 +178,7 @@ class FindingReviewImportService:
         await self.feedback_service.validate_curation(
             **identity,
             curated_finding=candidate,
+            user_id=user_id,
         )
         curated_status = row.get("curated_status", "limited")
         if not isinstance(curated_status, str):
@@ -181,10 +200,13 @@ class FindingReviewImportService:
     async def _require_dataset_item(
         self,
         identity: dict[str, Any],
+        *,
+        user_id: str,
     ) -> dict[str, Any]:
         dataset = await self.feedback_service.export_dataset(
             collection_id=identity["collection_id"],
             objective_id=identity["objective_id"],
+            user_id=user_id,
         )
         for item in dataset.get("items", []):
             if (

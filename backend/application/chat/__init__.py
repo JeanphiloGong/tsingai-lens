@@ -1,19 +1,23 @@
+from application.chat import session_service as chat_session_service
 from application.chat.agent_runner import (
     AgentCompletionReason,
     AgentRunLimits,
     AgentRunResult,
     AgentRunStatus,
+    ResearchAgentRunner,
     ResearchExecutionPlan,
     ResearchExecutionStatus,
-    ResearchAgentRunner,
 )
-from application.chat.capability_policy import AuthorizationDecision, evaluate_authorization
 from application.chat.capabilities import (
     AgentContext,
     CapabilityExecutionContext,
     CapabilityHandler,
     CapabilityRegistry,
     ToolSpec,
+)
+from application.chat.capability_policy import (
+    AuthorizationDecision,
+    evaluate_authorization,
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.model import (
@@ -23,10 +27,7 @@ from application.chat.model import (
     ModelTurn,
     ModelUsage,
 )
-from application.chat.session_service import (
-    ChatSessionNotFoundError,
-    ChatSessionService,
-)
+from application.chat.session_service import ChatSessionNotFoundError
 
 __all__ = [
     "AgentContext",
@@ -44,7 +45,7 @@ __all__ = [
     "ChatModelContext",
     "ChatModel",
     "ChatSessionNotFoundError",
-    "ChatSessionService",
+    "chat_session_service",
     "ModelResponseError",
     "ModelToolCall",
     "ModelTurn",

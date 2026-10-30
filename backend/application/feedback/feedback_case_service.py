@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
-from application.source.collection_service import CollectionService
+from application.source import collection_service
 from domain.chat import ChatMessageRole
 from domain.feedback import (
     AnalysisResult,
@@ -16,8 +16,13 @@ from domain.feedback import (
     FeedbackCase,
     ReviewDecision,
 )
-from repositories.chat_repository import ChatRepository
-from repositories.feedback_case_repository import FeedbackCaseRepository
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
+from repositories.collection_repository import CollectionRepo
+from repositories.feedback_case_repository import FeedbackCaseWriteConflict
 
 
 @dataclass(frozen=True)
@@ -36,134 +41,146 @@ class FeedbackCaseSummary:
     coverage_status: str = "unknown"
 
 
-class FeedbackCaseService:
-    """Translate stored cases into projections a researcher can understand."""
+from repositories.chat_repository import ChatRepo
+from repositories.feedback_case_repository import FeedbackCaseRepo
 
-    def __init__(
-        self,
-        *,
-        case_repository: FeedbackCaseRepository,
-        chat_repository: ChatRepository,
-        collection_service: CollectionService,
-    ) -> None:
-        self.case_repository = case_repository
-        self.chat_repository = chat_repository
-        self.collection_service = collection_service
 
-    async def list_for_user(
-        self,
-        *,
-        user_id: str,
-        collection_id: str | None = None,
-        status: str | None = None,
-        problem_type: str | None = None,
-        needs_human_review: bool | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> tuple[FeedbackCaseSummary, ...]:
-        if limit < 1 or limit > 200 or offset < 0:
-            raise ValueError("invalid pagination")
-        collection_ids = await self._authorized_collection_ids(user_id, collection_id)
-        rows: list[FeedbackCaseSummary] = []
-        cases = await self.case_repository.list_cases(
-            collection_ids=collection_ids,
-            status=status,
-            problem_type=problem_type,
-            limit=None,
-            offset=0,
+async def list_for_user(
+    *,
+    user_id: str,
+    collection_id: str | None = None,
+    status: str | None = None,
+    problem_type: str | None = None,
+    needs_human_review: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[FeedbackCaseSummary, ...]:
+    if limit < 1 or limit > 200 or offset < 0:
+        raise RequestInvalidException(
+            "Invalid pagination.", data={"code": "feedback_case_filter_invalid"}
         )
-        for case in cases:
-            summary = await self._summarize(
-                case,
-                user_id=user_id,
-                needs_human_review=needs_human_review,
-            )
-            if summary is not None:
-                rows.append(summary)
-        rows.sort(key=lambda item: (item.created_at, item.case_id))
-        return tuple(rows[offset : offset + limit])
-
-    async def read_for_user(self, case_id: str, user_id: str) -> dict[str, Any]:
-        case = await self.case_repository.read_case(case_id)
-        if case is None:
-            raise FileNotFoundError(f"feedback case not found: {case_id}")
-        await self.collection_service.get_collection_for_user(case.collection_id, user_id)
-        session = await self.chat_repository.read_session(case.session_id)
-        if (
-            session is None
-            or session.user_id != user_id
-            or session.collection_id != case.collection_id
-        ):
-            raise FileNotFoundError(f"feedback case not found: {case_id}")
-        messages = await self.chat_repository.read_messages(case.session_id)
-        if any(message.session_id != case.session_id for message in messages):
-            raise FileNotFoundError(f"feedback case not found: {case_id}")
-        results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        signal_results = await self.case_repository.read_correction_signal_analysis_results(case.signal_analysis_result_ids)
-        tool_failure_results = await self.case_repository.read_tool_failure_analysis_results(case.tool_failure_analysis_result_ids)
-        feedback_items: list[Any] = []
-        for signal_id in case.source_signal_ids:
-            item = await self.chat_repository.read_feedback_by_id(signal_id)
-            if (
-                item is not None
-                and item.session_id == case.session_id
-                and item.user_id == user_id
-            ):
-                feedback_items.append(item)
-        feedback = tuple(feedback_items)
-        correction_items = _correction_signal_records(
-            signal_results,
-            messages=messages,
-            session_id=case.session_id,
-        )
-        annotation = await self.case_repository.read_annotation(case.case_id)
-        decisions = await self.case_repository.read_review_decisions(case.case_id)
-        return _detail(
+    collection_ids = await _authorized_collection_ids(user_id, collection_id)
+    rows: list[FeedbackCaseSummary] = []
+    cases = await FeedbackCaseRepo.list_cases(
+        collection_ids=collection_ids,
+        status=status,
+        problem_type=problem_type,
+        limit=None,
+        offset=0,
+    )
+    for case in cases:
+        summary = await _summarize(
             case,
-            messages,
-            results,
-            feedback,
-            annotation,
-            decisions,
-            signal_results=signal_results,
-            correction_items=correction_items,
-            tool_failure_results=tool_failure_results,
+            user_id=user_id,
+            needs_human_review=needs_human_review,
         )
+        if summary is not None:
+            rows.append(summary)
+    rows.sort(key=lambda item: (item.created_at, item.case_id))
+    return tuple(rows[offset : offset + limit])
 
-    async def save_annotation_for_user(
-        self,
-        *,
-        case_id: str,
-        user_id: str,
-        expected_digest: str | None,
-        problem_type: str,
-        severity: str,
-        target: str | None,
-        support_source_refs: tuple[str, ...],
-        dataset_uses: tuple[str, ...],
-        reason: str,
-        now: str | None = None,
-    ) -> FeedbackAnnotation:
-        """Persist a human judgment after re-reading the case's evidence boundary."""
-        case, results = await self._authorized_case(case_id, user_id)
-        # A rejected or insufficient review is a request for better material,
-        # not a terminal deletion.  A new annotation version may reopen those
-        # cases, while accepted/withdrawn cases remain immutable until an
-        # explicit future workflow defines how to revoke them.
-        if case.status not in {
-            "needs_annotation",
-            "ready_for_review",
-            "rejected",
-            "insufficient",
-        }:
-            raise ValueError("feedback_case_not_annotatable")
-        allowed_source_refs = _case_source_refs(case, results)
-        requested_refs = support_source_refs
-        if any(ref not in allowed_source_refs for ref in requested_refs):
-            raise ValueError("annotation_source_not_in_case")
-        current = await self.case_repository.read_annotation(case.case_id)
-        timestamp = now or datetime.now(timezone.utc).isoformat()
-        version = current.version + 1 if current is not None else 1
+
+async def read_for_user(case_id: str, user_id: str) -> dict[str, Any]:
+    case = await FeedbackCaseRepo.read_case(case_id)
+    if case is None:
+        raise ResourceNotFoundException(
+            "Feedback case not found.",
+            data={"code": "feedback_case_not_found", "case_id": case_id},
+        )
+    await collection_service.get_collection_for_user(case.collection_id, user_id)
+    session = await ChatRepo.read_session(case.session_id)
+    if (
+        session is None
+        or session.user_id != user_id
+        or session.collection_id != case.collection_id
+    ):
+        raise ResourceNotFoundException(
+            "Feedback case not found.",
+            data={"code": "feedback_case_not_found", "case_id": case_id},
+        )
+    messages = await ChatRepo.read_messages(case.session_id)
+    if any(message.session_id != case.session_id for message in messages):
+        raise ResourceNotFoundException(
+            "Feedback case not found.",
+            data={"code": "feedback_case_not_found", "case_id": case_id},
+        )
+    results = await FeedbackCaseRepo.read_analysis_results(case.analysis_result_ids)
+    signal_results = await FeedbackCaseRepo.read_correction_signal_analysis_results(
+        case.signal_analysis_result_ids
+    )
+    tool_failure_results = await FeedbackCaseRepo.read_tool_failure_analysis_results(
+        case.tool_failure_analysis_result_ids
+    )
+    feedback_items: list[Any] = []
+    for signal_id in case.source_signal_ids:
+        item = await ChatRepo.read_feedback_by_id(signal_id)
+        if (
+            item is not None
+            and item.session_id == case.session_id
+            and item.user_id == user_id
+        ):
+            feedback_items.append(item)
+    feedback = tuple(feedback_items)
+    correction_items = _correction_signal_records(
+        signal_results,
+        messages=messages,
+        session_id=case.session_id,
+    )
+    annotation = await FeedbackCaseRepo.read_annotation(case.case_id)
+    decisions = await FeedbackCaseRepo.read_review_decisions(case.case_id)
+    return _detail(
+        case,
+        messages,
+        results,
+        feedback,
+        annotation,
+        decisions,
+        signal_results=signal_results,
+        correction_items=correction_items,
+        tool_failure_results=tool_failure_results,
+    )
+
+
+async def save_annotation_for_user(
+    *,
+    case_id: str,
+    user_id: str,
+    expected_digest: str | None,
+    problem_type: str,
+    severity: str,
+    target: str | None,
+    support_source_refs: tuple[str, ...],
+    dataset_uses: tuple[str, ...],
+    reason: str,
+    now: str | None = None,
+) -> FeedbackAnnotation:
+    """Persist a human judgment after re-reading the case's evidence boundary."""
+    case, results = await _authorized_case(case_id, user_id)
+    # A rejected or insufficient review is a request for better material,
+    # not a terminal deletion.  A new annotation version may reopen those
+    # cases, while accepted/withdrawn cases remain immutable until an
+    # explicit future workflow defines how to revoke them.
+    if case.status not in {
+        "needs_annotation",
+        "ready_for_review",
+        "rejected",
+        "insufficient",
+    }:
+        raise ResourceConflictException(
+            "This case cannot be annotated in its current state.",
+            data={"code": "feedback_case_not_annotatable"},
+        )
+    allowed_source_refs = _case_source_refs(case, results)
+    requested_refs = support_source_refs
+    if any(ref not in allowed_source_refs for ref in requested_refs):
+        raise RequestInvalidException(
+            "An annotation source does not belong to this case.",
+            data={"code": "annotation_source_not_in_case"},
+        )
+    current = await FeedbackCaseRepo.read_annotation(case.case_id)
+    timestamp = now or datetime.now(timezone.utc).isoformat()
+    version = current.version + 1 if current is not None else 1
+    try:
         annotation = FeedbackAnnotation.build(
             annotation_id=f"annotation_{uuid4().hex[:32]}",
             case_id=case.case_id,
@@ -177,48 +194,77 @@ class FeedbackCaseService:
             created_by=user_id,
             created_at=timestamp,
         )
-        return await self.case_repository.save_annotation(annotation, expected_digest=expected_digest, now=timestamp)
+    except ValueError as exc:
+        raise RequestInvalidException(
+            str(exc), data={"code": "feedback_annotation_invalid"}
+        ) from exc
+    try:
+        return await FeedbackCaseRepo.save_annotation(
+            annotation, expected_digest=expected_digest, now=timestamp
+        )
+    except FeedbackCaseWriteConflict as exc:
+        raise ResourceConflictException(
+            str(exc), data={"code": exc.reason, "case_id": case_id}
+        ) from exc
 
-    async def _authorized_case(
-        self, case_id: str, user_id: str
-    ) -> tuple[FeedbackCase, tuple[AnalysisResult, ...]]:
-        case = await self.case_repository.read_case(case_id)
-        if case is None:
-            raise FileNotFoundError(f"feedback case not found: {case_id}")
-        await self.collection_service.get_collection_for_user(case.collection_id, user_id)
-        session = await self.chat_repository.read_session(case.session_id)
-        if (
-            session is None
-            or session.user_id != user_id
-            or session.collection_id != case.collection_id
-        ):
-            raise FileNotFoundError(f"feedback case not found: {case_id}")
-        results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        signal_results = await self.case_repository.read_correction_signal_analysis_results(case.signal_analysis_result_ids)
-        tool_failure_results = await self.case_repository.read_tool_failure_analysis_results(case.tool_failure_analysis_result_ids)
-        return case, (*results, *signal_results, *tool_failure_results)
 
-    async def submit_review_for_user(
-        self,
-        *,
-        case_id: str,
-        user_id: str,
-        expected_annotation_digest: str,
-        decision: str,
-        reason: str | None,
-        idempotency_key: str | None = None,
-        now: str | None = None,
-    ) -> ReviewDecision:
-        case, _ = await self._authorized_case(case_id, user_id)
-        annotation = await self.case_repository.read_annotation(case.case_id)
-        if annotation is None:
-            raise ValueError("feedback_case_annotation_required")
-        if annotation.annotation_digest != expected_annotation_digest:
-            raise ValueError("feedback_case_stale")
-        if decision == "accept":
-            await self._validate_review_acceptance(case, annotation)
-        previous = await self.case_repository.read_review_decisions(case.case_id)
-        timestamp = now or datetime.now(timezone.utc).isoformat()
+async def _authorized_case(
+    case_id: str, user_id: str
+) -> tuple[FeedbackCase, tuple[AnalysisResult, ...]]:
+    case = await FeedbackCaseRepo.read_case(case_id)
+    if case is None:
+        raise ResourceNotFoundException(
+            "Feedback case not found.",
+            data={"code": "feedback_case_not_found", "case_id": case_id},
+        )
+    await collection_service.get_collection_for_user(case.collection_id, user_id)
+    session = await ChatRepo.read_session(case.session_id)
+    if (
+        session is None
+        or session.user_id != user_id
+        or session.collection_id != case.collection_id
+    ):
+        raise ResourceNotFoundException(
+            "Feedback case not found.",
+            data={"code": "feedback_case_not_found", "case_id": case_id},
+        )
+    results = await FeedbackCaseRepo.read_analysis_results(case.analysis_result_ids)
+    signal_results = await FeedbackCaseRepo.read_correction_signal_analysis_results(
+        case.signal_analysis_result_ids
+    )
+    tool_failure_results = await FeedbackCaseRepo.read_tool_failure_analysis_results(
+        case.tool_failure_analysis_result_ids
+    )
+    return case, (*results, *signal_results, *tool_failure_results)
+
+
+async def submit_review_for_user(
+    *,
+    case_id: str,
+    user_id: str,
+    expected_annotation_digest: str,
+    decision: str,
+    reason: str | None,
+    idempotency_key: str | None = None,
+    now: str | None = None,
+) -> ReviewDecision:
+    case, _ = await _authorized_case(case_id, user_id)
+    annotation = await FeedbackCaseRepo.read_annotation(case.case_id)
+    if annotation is None:
+        raise RequestInvalidException(
+            "Annotate this case before reviewing it.",
+            data={"code": "feedback_case_annotation_required"},
+        )
+    if annotation.annotation_digest != expected_annotation_digest:
+        raise ResourceConflictException(
+            "The case changed. Reload before reviewing it.",
+            data={"code": "feedback_case_stale"},
+        )
+    if decision == "accept":
+        await _validate_review_acceptance(case, annotation)
+    previous = await FeedbackCaseRepo.read_review_decisions(case.case_id)
+    timestamp = now or datetime.now(timezone.utc).isoformat()
+    try:
         review = ReviewDecision(
             decision_id=_review_decision_id(
                 case_id=case.case_id,
@@ -233,102 +279,140 @@ class FeedbackCaseService:
             seq=len(previous) + 1,
             created_at=timestamp,
         )
-        return await self.case_repository.append_review_decision(
+    except ValueError as exc:
+        raise RequestInvalidException(
+            str(exc), data={"code": "feedback_review_invalid"}
+        ) from exc
+    try:
+        return await FeedbackCaseRepo.append_review_decision(
             review,
             expected_annotation_digest=expected_annotation_digest,
             now=timestamp,
         )
+    except FeedbackCaseWriteConflict as exc:
+        raise ResourceConflictException(
+            str(exc), data={"code": exc.reason, "case_id": case_id}
+        ) from exc
 
-    async def _validate_review_acceptance(
-        self, case: FeedbackCase, annotation: FeedbackAnnotation
-    ) -> None:
-        """Reject an approval that cannot produce any declared dataset row.
 
-        Snapshot creation repeats these checks against the frozen read set. The
-        review boundary also performs them so an ``accept`` record cannot claim
-        that an unusable SFT or preference sample was admitted.
-        """
-        uses = set(annotation.dataset_uses)
-        if not uses:
-            raise ValueError("review_dataset_use_missing")
-        if "preference" not in uses:
-            return
-        messages = await self.chat_repository.read_messages(case.session_id)
-        answer = next(
-            (message for message in messages if message.message_id == case.anchor_message_id),
-            None,
+async def _validate_review_acceptance(
+    case: FeedbackCase, annotation: FeedbackAnnotation
+) -> None:
+    """Reject an approval that cannot produce any declared dataset row.
+
+    Snapshot creation repeats these checks against the frozen read set. The
+    review boundary also performs them so an ``accept`` record cannot claim
+    that an unusable SFT or preference sample was admitted.
+    """
+    uses = set(annotation.dataset_uses)
+    if not uses:
+        raise RequestInvalidException(
+            "Select a dataset use before accepting this case.",
+            data={"code": "review_dataset_use_missing"},
         )
-        if answer is None or answer.role is not ChatMessageRole.ASSISTANT:
-            raise ValueError("review_anchor_answer_missing")
-        if annotation.target.strip() == answer.content.strip():
-            raise ValueError("review_preference_pair_missing")
-
-    async def list_reviews_for_user(
-        self, *, case_id: str, user_id: str
-    ) -> tuple[ReviewDecision, ...]:
-        case, _ = await self._authorized_case(case_id, user_id)
-        return await self.case_repository.read_review_decisions(case.case_id)
-
-    async def _authorized_collection_ids(
-        self, user_id: str, collection_id: str | None
-    ) -> tuple[str, ...]:
-        if collection_id is not None:
-            await self.collection_service.get_collection_for_user(collection_id, user_id)
-            return (collection_id,)
-        collections = await self.collection_service.list_collections(user_id)
-        return tuple(item.collection_id for item in collections)
-
-    async def _summarize(
-        self,
-        case: FeedbackCase,
-        *,
-        user_id: str,
-        needs_human_review: bool | None,
-    ) -> FeedbackCaseSummary | None:
-        session = await self.chat_repository.read_session(case.session_id)
-        if (
-            session is None
-            or session.user_id != user_id
-            or session.collection_id != case.collection_id
-        ):
-            return None
-        messages = await self.chat_repository.read_messages(case.session_id)
-        if any(message.session_id != case.session_id for message in messages):
-            return None
-        results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        signal_results = await self.case_repository.read_correction_signal_analysis_results(case.signal_analysis_result_ids)
-        tool_failure_results = await self.case_repository.read_tool_failure_analysis_results(case.tool_failure_analysis_result_ids)
-        result = _latest_result((*results, *signal_results, *tool_failure_results))
-        needs_review = case.status in {
-            "detected",
-            "collecting_context",
-            "needs_annotation",
-            "insufficient",
-            "ready_for_review",
-        }
-        if needs_human_review is not None and needs_review != needs_human_review:
-            return None
-        answer = next(
-            (message for message in messages if message.message_id == case.anchor_message_id),
-            None,
+    if "preference" not in uses:
+        return
+    messages = await ChatRepo.read_messages(case.session_id)
+    answer = next(
+        (
+            message
+            for message in messages
+            if message.message_id == case.anchor_message_id
+        ),
+        None,
+    )
+    if answer is None or answer.role is not ChatMessageRole.ASSISTANT:
+        raise RequestInvalidException(
+            "The answer being reviewed is no longer available.",
+            data={"code": "review_anchor_answer_missing"},
         )
-        question = _previous_user_question(messages, answer)
-        coverage = result.evidence_coverage if result else None
-        document_titles = _document_titles(asdict(coverage) if coverage else {})
-        return FeedbackCaseSummary(
-            case_id=case.case_id,
-            collection_id=case.collection_id,
-            status=case.status,
-            anchor_message_id=case.anchor_message_id,
-            problem_type=result.problem_type if result else None,
-            confidence=result.confidence if result else None,
-            needs_human_review=needs_review,
-            created_at=case.created_at,
-            question_preview=_preview(question),
-            answer_preview=_preview(answer.content if answer is not None else str(case.context_snapshot.get("answer") or "")),
-            document_titles=document_titles,
-            coverage_status=coverage.coverage_status if coverage else "unknown",
+    if annotation.target.strip() == answer.content.strip():
+        raise RequestInvalidException(
+            "A preference sample requires two different answers.",
+            data={"code": "review_preference_pair_missing"},
         )
+
+
+async def list_reviews_for_user(
+    *, case_id: str, user_id: str
+) -> tuple[ReviewDecision, ...]:
+    case, _ = await _authorized_case(case_id, user_id)
+    return await FeedbackCaseRepo.read_review_decisions(case.case_id)
+
+
+async def _authorized_collection_ids(
+    user_id: str, collection_id: str | None
+) -> tuple[str, ...]:
+    if collection_id is not None:
+        await collection_service.get_collection_for_user(collection_id, user_id)
+        return (collection_id,)
+    collections = await CollectionRepo.list_collections(user_id)
+    return tuple(item.collection_id for item in collections)
+
+
+async def _summarize(
+    case: FeedbackCase,
+    *,
+    user_id: str,
+    needs_human_review: bool | None,
+) -> FeedbackCaseSummary | None:
+    session = await ChatRepo.read_session(case.session_id)
+    if (
+        session is None
+        or session.user_id != user_id
+        or session.collection_id != case.collection_id
+    ):
+        return None
+    messages = await ChatRepo.read_messages(case.session_id)
+    if any(message.session_id != case.session_id for message in messages):
+        return None
+    results = await FeedbackCaseRepo.read_analysis_results(case.analysis_result_ids)
+    signal_results = await FeedbackCaseRepo.read_correction_signal_analysis_results(
+        case.signal_analysis_result_ids
+    )
+    tool_failure_results = await FeedbackCaseRepo.read_tool_failure_analysis_results(
+        case.tool_failure_analysis_result_ids
+    )
+    result = _latest_result((*results, *signal_results, *tool_failure_results))
+    needs_review = case.status in {
+        "detected",
+        "collecting_context",
+        "needs_annotation",
+        "insufficient",
+        "ready_for_review",
+    }
+    if needs_human_review is not None and needs_review != needs_human_review:
+        return None
+    answer = next(
+        (
+            message
+            for message in messages
+            if message.message_id == case.anchor_message_id
+        ),
+        None,
+    )
+    question = _previous_user_question(messages, answer)
+    coverage = result.evidence_coverage if result else None
+    document_titles = _document_titles(asdict(coverage) if coverage else {})
+    return FeedbackCaseSummary(
+        case_id=case.case_id,
+        collection_id=case.collection_id,
+        status=case.status,
+        anchor_message_id=case.anchor_message_id,
+        problem_type=result.problem_type if result else None,
+        confidence=result.confidence if result else None,
+        needs_human_review=needs_review,
+        created_at=case.created_at,
+        question_preview=_preview(question),
+        answer_preview=_preview(
+            answer.content
+            if answer is not None
+            else str(case.context_snapshot.get("answer") or "")
+        ),
+        document_titles=document_titles,
+        coverage_status=coverage.coverage_status if coverage else "unknown",
+    )
+
 
 def _detail(
     case: FeedbackCase,
@@ -344,7 +428,11 @@ def _detail(
 ) -> dict[str, Any]:
     latest = _latest_result((*results, *signal_results, *tool_failure_results))
     answer = next(
-        (message for message in messages if message.message_id == case.anchor_message_id),
+        (
+            message
+            for message in messages
+            if message.message_id == case.anchor_message_id
+        ),
         None,
     )
     question = ""
@@ -352,7 +440,8 @@ def _detail(
         prior_users = [
             message.content
             for message in messages
-            if message.role is ChatMessageRole.USER and message.created_at <= answer.created_at
+            if message.role is ChatMessageRole.USER
+            and message.created_at <= answer.created_at
         ]
         question = prior_users[-1] if prior_users else ""
     coverage = asdict(latest.evidence_coverage) if latest else {}
@@ -473,7 +562,9 @@ def _detail(
 
 
 def _latest_result(results: tuple[Any, ...]) -> Any | None:
-    return max(results, key=lambda item: (item.created_at, item.result_id), default=None)
+    return max(
+        results, key=lambda item: (item.created_at, item.result_id), default=None
+    )
 
 
 def _correction_signal_records(
@@ -518,7 +609,7 @@ def _case_source_refs(
                     if value:
                         refs.add(str(value))
         refs.update(str(value) for value in result.suggested_evidence if value)
-    for item in (case.context_snapshot.get("source_refs") or ()):
+    for item in case.context_snapshot.get("source_refs") or ():
         if isinstance(item, dict):
             value = item.get("source_ref") or item.get("source_id")
         else:
@@ -542,7 +633,10 @@ def _review_decision_id(
         return f"review_{uuid4().hex[:32]}"
     key = idempotency_key.strip()
     if not key:
-        raise ValueError("idempotency_key_invalid")
+        raise RequestInvalidException(
+            "Idempotency key must not be empty.",
+            data={"code": "idempotency_key_invalid"},
+        )
     digest = sha256(f"{user_id}\0{case_id}\0{key}".encode("utf-8")).hexdigest()
     return f"review_{digest[:48]}"
 
@@ -553,7 +647,8 @@ def _previous_user_question(messages: tuple[Any, ...], answer: Any | None) -> st
     prior = [
         message.content
         for message in messages
-        if message.role is ChatMessageRole.USER and message.created_at <= answer.created_at
+        if message.role is ChatMessageRole.USER
+        and message.created_at <= answer.created_at
     ]
     return prior[-1] if prior else ""
 
@@ -565,7 +660,12 @@ def _preview(value: str, limit: int = 180) -> str:
 
 def _document_titles(coverage: dict[str, Any]) -> tuple[str, ...]:
     titles: list[str] = []
-    for field in ("requested_scope", "inspected_sources", "omitted_candidates", "claim_support"):
+    for field in (
+        "requested_scope",
+        "inspected_sources",
+        "omitted_candidates",
+        "claim_support",
+    ):
         for item in coverage.get(field) or ():
             if not isinstance(item, dict):
                 continue
@@ -587,4 +687,11 @@ def _readable_scope(scope: Any) -> list[dict[str, Any]]:
     return readable
 
 
-__all__ = ["FeedbackCaseService", "FeedbackCaseSummary"]
+__all__ = [
+    "FeedbackCaseSummary",
+    "list_for_user",
+    "read_for_user",
+    "save_annotation_for_user",
+    "submit_review_for_user",
+    "list_reviews_for_user",
+]

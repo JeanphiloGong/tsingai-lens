@@ -8,120 +8,116 @@ from typing import Any
 from uuid import uuid4
 
 from application.auth.passwords import hash_password, verify_password
+from exceptions import ProjectException, RequestInvalidException
 from repositories.auth_repository import (
-    AuthRepository,
+    AuthRepo,
     AuthSessionRecord,
     AuthUserRecord,
 )
 
 SESSION_COOKIE_NAME = "lens_session"
-DEFAULT_SESSION_TTL_HOURS = 24
+SESSION_TTL = timedelta(hours=24)
 
 
-class AuthError(RuntimeError):
-    """Base class for authentication failures."""
+class AuthError(ProjectException):
+    """An explicit authentication rejection."""
 
 
 class InvalidCredentialsError(AuthError):
-    """Raised when login credentials do not match a user."""
+    def __init__(self, message: str = "Invalid email or password.") -> None:
+        super().__init__(
+            code=200301, message=message, data={"code": "invalid_credentials"}
+        )
 
 
 class SessionNotFoundError(AuthError):
-    """Raised when a browser session is missing or no longer valid."""
-
-
-class AuthSessionService:
-    """Owns private-beta password auth and server-side sessions."""
-
-    def __init__(
-        self,
-        repository: AuthRepository,
-        *,
-        session_ttl_hours: int = DEFAULT_SESSION_TTL_HOURS,
-    ) -> None:
-        self.repository = repository
-        self.session_ttl = timedelta(hours=session_ttl_hours)
-
-    async def ensure_bootstrap_user(self) -> dict[str, Any] | None:
-        email = _clean_text(os.getenv("BOOTSTRAP_ADMIN_EMAIL"))
-        password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD")
-        if not email or not password:
-            return None
-        user = await self.repository.read_user_by_email(email)
-        if user:
-            return _public_user(user)
-        return await self.create_user(
-            email=email,
-            password=password,
-            display_name=os.getenv("BOOTSTRAP_ADMIN_NAME") or "Admin",
+    def __init__(self, message: str = "Authentication is required.") -> None:
+        super().__init__(
+            code=200301, message=message, data={"code": "authentication_required"}
         )
 
-    async def create_user(
-        self,
-        *,
-        email: str,
-        password: str,
-        display_name: str | None = None,
-    ) -> dict[str, Any]:
-        normalized_email = _required_text(email, "email").lower()
-        if not password:
-            raise ValueError("password is required")
-        now = _now_iso()
-        user = AuthUserRecord(
-            user_id=f"user_{uuid4().hex[:12]}",
-            email=normalized_email,
-            display_name=_clean_text(display_name),
-            password_hash=hash_password(password),
-            created_at=now,
-        )
-        await self.repository.add_user(user)
+
+async def ensure_bootstrap_user() -> dict[str, Any] | None:
+    email = _clean_text(os.getenv("BOOTSTRAP_ADMIN_EMAIL"))
+    password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD")
+    if not email or not password:
+        return None
+    user = await AuthRepo.read_user_by_email(email)
+    if user:
         return _public_user(user)
+    return await create_user(
+        email=email,
+        password=password,
+        display_name=os.getenv("BOOTSTRAP_ADMIN_NAME") or "Admin",
+    )
 
-    async def login(self, *, email: str, password: str) -> dict[str, Any]:
-        user = await self.repository.read_user_by_email(
-            _required_text(email, "email")
-        )
-        if not user or not verify_password(password, user.password_hash):
-            raise InvalidCredentialsError("invalid email or password")
-        now = datetime.now(timezone.utc)
-        bearer_token = secrets.token_urlsafe(32)
-        session = AuthSessionRecord(
-            session_id=f"session_{uuid4().hex}",
-            user_id=user.user_id,
-            created_at=now.isoformat(),
-            expires_at=(now + self.session_ttl).isoformat(),
-        )
-        await self.repository.add_session(session, token_hash=_session_token_hash(bearer_token))
-        return {
-            "session_id": bearer_token,
-            "expires_at": session.expires_at,
-            "user": _public_user(user),
-        }
 
-    async def logout(self, session_id: str | None) -> None:
-        if not session_id:
-            return
-        await self.repository.revoke_session_by_token_hash(
-            _session_token_hash(session_id),
-            _now_iso(),
-        )
+async def create_user(
+    *,
+    email: str,
+    password: str,
+    display_name: str | None = None,
+) -> dict[str, Any]:
+    normalized_email = _required_text(email, "email").lower()
+    if not password:
+        raise ValueError("password is required")
+    now = _now_iso()
+    user = AuthUserRecord(
+        user_id=f"user_{uuid4().hex[:12]}",
+        email=normalized_email,
+        display_name=_clean_text(display_name),
+        password_hash=hash_password(password),
+        created_at=now,
+    )
+    await AuthRepo.add_user(user)
+    return _public_user(user)
 
-    async def resolve_session(
-        self, session_id: str | None
-    ) -> dict[str, Any]:
-        if not session_id:
-            raise SessionNotFoundError("authentication required")
-        session = await self.repository.read_session_by_token_hash(
-            _session_token_hash(session_id)
-        )
-        if not session or session.revoked_at:
-            raise SessionNotFoundError("authentication required")
-        if _parse_iso(session.expires_at) <= datetime.now(timezone.utc):
-            raise SessionNotFoundError("authentication required")
-        user = await self.repository.read_user(session.user_id)
-        if not user:
-            raise SessionNotFoundError("authentication required")
-        return _public_user(user)
+
+async def login(*, email: str, password: str) -> dict[str, Any]:
+    try:
+        login_email = _required_text(email, "email")
+    except ValueError as exc:
+        raise RequestInvalidException(str(exc)) from exc
+    user = await AuthRepo.read_user_by_email(login_email)
+    if not user or not verify_password(password, user.password_hash):
+        raise InvalidCredentialsError("invalid email or password")
+    now = datetime.now(timezone.utc)
+    bearer_token = secrets.token_urlsafe(32)
+    session = AuthSessionRecord(
+        session_id=f"session_{uuid4().hex}",
+        user_id=user.user_id,
+        created_at=now.isoformat(),
+        expires_at=(now + SESSION_TTL).isoformat(),
+    )
+    await AuthRepo.add_session(session, token_hash=_session_token_hash(bearer_token))
+    return {
+        "session_id": bearer_token,
+        "expires_at": session.expires_at,
+        "user": _public_user(user),
+    }
+
+
+async def logout(session_id: str | None) -> None:
+    if not session_id:
+        return
+    await AuthRepo.revoke_session_by_token_hash(
+        _session_token_hash(session_id),
+        _now_iso(),
+    )
+
+
+async def resolve_session(session_id: str | None) -> dict[str, Any]:
+    if not session_id:
+        raise SessionNotFoundError("authentication required")
+    session = await AuthRepo.read_session_by_token_hash(_session_token_hash(session_id))
+    if not session or session.revoked_at:
+        raise SessionNotFoundError("authentication required")
+    if _parse_iso(session.expires_at) <= datetime.now(timezone.utc):
+        raise SessionNotFoundError("authentication required")
+    user = await AuthRepo.read_user(session.user_id)
+    if not user:
+        raise SessionNotFoundError("authentication required")
+    return _public_user(user)
 
 
 def _public_user(user: AuthUserRecord) -> dict[str, Any]:
@@ -163,7 +159,6 @@ def _clean_text(value: str | None) -> str | None:
 
 __all__ = [
     "AuthError",
-    "AuthSessionService",
     "InvalidCredentialsError",
     "SESSION_COOKIE_NAME",
     "SessionNotFoundError",

@@ -1,27 +1,22 @@
 from __future__ import annotations
 
-from infra.persistence import database
-
-
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
-
-from application.core.objectives.analysis.experiment_analysis_writer import (
-    ExperimentAnalysisWriter,
-)
+from application.core.objectives.analysis import experiment_analysis_writer
 from domain.core.paper_experiment import (
-    SourceReference,
     ExperimentalVariant,
-    ExperimentTestCondition,
-    ExperimentMeasurementResult,
     ExperimentComparison,
-    ReportedInterpretation,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
     PaperExperimentRevision,
+    ReportedInterpretation,
+    SourceReference,
 )
 from domain.source import Collection, Document
+from infra.persistence import database
 from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
     CollectionRepository,
@@ -91,13 +86,14 @@ async def paper_experiment_repository(postgres_session_factory):
 
 
 async def test_source_only_batch_rolls_back_every_revision_on_write_failure(
-    paper_experiment_repository, postgres_session_factory, monkeypatch,
+    paper_experiment_repository,
+    postgres_session_factory,
+    monkeypatch,
 ):
     repository = paper_experiment_repository
-    writer = ExperimentAnalysisWriter(
-        paper_experiment_repository=repository,
-        experiment_analysis_repository=object(),
-    )
+    experiment_analysis_writer.PaperExperimentRepo = repository
+    experiment_analysis_writer.ExperimentAnalysisRepo = object()
+    writer = experiment_analysis_writer
     output = _physical_split_experiment("paper-experiment-doc", distinct_boundary=True)
     add_revision = repository.add_revision
     calls = 0
@@ -113,36 +109,45 @@ async def test_source_only_batch_rolls_back_every_revision_on_write_failure(
     with pytest.raises(RuntimeError, match="second revision failed"):
         async with postgres_session_factory() as db, db.begin():
             await writer.write_paper_experiment_revisions(
-                experiment_outputs=(output,), db=db,
+                experiment_outputs=(output,),
+                db=db,
             )
     assert calls == 2
     async with database.AsyncSessionLocal() as db, db.begin():
-        assert await repository.list_latest_for_document(db, 'paper-experiment-doc') == ()
+        assert (
+            await repository.list_latest_for_document(db, "paper-experiment-doc") == ()
+        )
 
 
 async def test_source_only_concurrent_saves_without_objective_are_idempotent(
-    paper_experiment_repository, postgres_session_factory,
+    paper_experiment_repository,
+    postgres_session_factory,
 ):
     repository = paper_experiment_repository
-    writer = ExperimentAnalysisWriter(
-        paper_experiment_repository=repository,
-        experiment_analysis_repository=object(),
-    )
+    experiment_analysis_writer.PaperExperimentRepo = repository
+    experiment_analysis_writer.ExperimentAnalysisRepo = object()
+    writer = experiment_analysis_writer
     output = _physical_split_experiment("paper-experiment-doc", distinct_boundary=True)
 
     async def save():
         async with postgres_session_factory() as db, db.begin():
             return await writer.write_paper_experiment_revisions(
-                experiment_outputs=(output,), db=db,
+                experiment_outputs=(output,),
+                db=db,
                 created_by="experiment-owner",
             )
 
     first, second = await asyncio.gather(save(), save())
     assert len(first.revisions) == len(second.revisions) == 2
-    assert {item.revision_id for item in first.revisions} == {item.revision_id for item in second.revisions}
+    assert {item.revision_id for item in first.revisions} == {
+        item.revision_id for item in second.revisions
+    }
     assert first.selections == first.findings == ()
     async with database.AsyncSessionLocal() as db, db.begin():
-        assert len(await repository.list_latest_for_document(db, 'paper-experiment-doc')) == 2
+        assert (
+            len(await repository.list_latest_for_document(db, "paper-experiment-doc"))
+            == 2
+        )
 
 
 def _revision(version: int = 1) -> PaperExperimentRevision:
@@ -249,7 +254,9 @@ async def test_repository_round_trips_complete_revision(
     expected = _revision()
 
     async with database.AsyncSessionLocal() as db, db.begin():
-        stored = await paper_experiment_repository.add_revision(db, expected, created_by='test-agent', created_at=NOW)
+        stored = await paper_experiment_repository.add_revision(
+            db, expected, created_by="test-agent", created_at=NOW
+        )
 
     assert stored.revision_id > 0
     assert stored.revision == expected
@@ -269,11 +276,13 @@ async def test_repository_round_trips_complete_revision(
     assert len(stored_test.binding_source_refs) == 1
     async with database.AsyncSessionLocal() as db, db.begin():
         assert (
-            await paper_experiment_repository.read_revision(db, 'experiment-1', 1)
+            await paper_experiment_repository.read_revision(db, "experiment-1", 1)
         ) == stored
     async with database.AsyncSessionLocal() as db, db.begin():
         assert (
-            await paper_experiment_repository.read_revision_by_id(db, stored.revision_id)
+            await paper_experiment_repository.read_revision_by_id(
+                db, stored.revision_id
+            )
         ) == stored
 
 
@@ -281,18 +290,22 @@ async def test_new_version_does_not_replace_old_revision(
     paper_experiment_repository,
 ) -> None:
     async with database.AsyncSessionLocal() as db, db.begin():
-        first = await paper_experiment_repository.add_revision(db, _revision(), created_at=NOW)
+        first = await paper_experiment_repository.add_revision(
+            db, _revision(), created_at=NOW
+        )
     async with database.AsyncSessionLocal() as db, db.begin():
-        second = await paper_experiment_repository.add_revision(db, _revision(2), created_at=NOW.replace(minute=1))
+        second = await paper_experiment_repository.add_revision(
+            db, _revision(2), created_at=NOW.replace(minute=1)
+        )
 
     assert second.revision_id != first.revision_id
     async with database.AsyncSessionLocal() as db, db.begin():
         assert (
-            await paper_experiment_repository.read_revision(db, 'experiment-1', 1)
+            await paper_experiment_repository.read_revision(db, "experiment-1", 1)
         ).revision == first.revision
     async with database.AsyncSessionLocal() as db, db.begin():
         assert (
-            await paper_experiment_repository.read_latest_revision(db, 'experiment-1')
+            await paper_experiment_repository.read_latest_revision(db, "experiment-1")
         ).revision == second.revision
 
 
@@ -302,13 +315,19 @@ async def test_latest_revision_allocation_serializes_shared_write_transactions(
 ) -> None:
     """The first revision must not race when two writers see an empty head."""
 
-
     async with database.AsyncSessionLocal() as first_db, first_db.begin():
-        assert await paper_experiment_repository.read_latest_revision(first_db, 'experiment-concurrent') is None
+        assert (
+            await paper_experiment_repository.read_latest_revision(
+                first_db, "experiment-concurrent"
+            )
+            is None
+        )
 
         async def read_second_head():
             async with database.AsyncSessionLocal() as db, db.begin():
-                return await paper_experiment_repository.read_latest_revision(db, 'experiment-concurrent')
+                return await paper_experiment_repository.read_latest_revision(
+                    db, "experiment-concurrent"
+                )
 
         task = asyncio.create_task(read_second_head())
         await asyncio.sleep(0.05)
@@ -323,13 +342,16 @@ async def test_document_identity_resolution_lock_is_shared_and_transaction_scope
 ) -> None:
     """Rereads of one paper cannot resolve identities concurrently."""
 
-
     async with database.AsyncSessionLocal() as first_db, first_db.begin():
-        await paper_experiment_repository.lock_document(first_db, 'paper-experiment-doc')
+        await paper_experiment_repository.lock_document(
+            first_db, "paper-experiment-doc"
+        )
 
         async def acquire_second_lock():
             async with database.AsyncSessionLocal() as db, db.begin():
-                await paper_experiment_repository.lock_document(db, 'paper-experiment-doc')
+                await paper_experiment_repository.lock_document(
+                    db, "paper-experiment-doc"
+                )
                 return True
 
         task = asyncio.create_task(acquire_second_lock())
@@ -343,14 +365,23 @@ async def test_same_version_is_idempotent_but_conflicting_version_is_rejected(
     paper_experiment_repository,
 ) -> None:
     async with database.AsyncSessionLocal() as db, db.begin():
-        first = await paper_experiment_repository.add_revision(db, _revision(), created_at=NOW)
+        first = await paper_experiment_repository.add_revision(
+            db, _revision(), created_at=NOW
+        )
     async with database.AsyncSessionLocal() as db, db.begin():
-        assert await paper_experiment_repository.add_revision(db, _revision(), created_at=NOW) == first
+        assert (
+            await paper_experiment_repository.add_revision(
+                db, _revision(), created_at=NOW
+            )
+            == first
+        )
 
     conflicting = replace(_revision(), label="Changed after publication")
     with pytest.raises(PaperExperimentRevisionConflictError):
         async with database.AsyncSessionLocal() as db, db.begin():
-            await paper_experiment_repository.add_revision(db, conflicting, created_at=NOW)
+            await paper_experiment_repository.add_revision(
+                db, conflicting, created_at=NOW
+            )
 
 
 async def test_invalid_domain_revision_does_not_create_experiment_head(
@@ -371,5 +402,5 @@ async def test_invalid_domain_revision_does_not_create_experiment_head(
 
     async with database.AsyncSessionLocal() as db, db.begin():
         assert (
-            await paper_experiment_repository.read_revision(db, 'experiment-1', 1)
+            await paper_experiment_repository.read_revision(db, "experiment-1", 1)
         ) is None

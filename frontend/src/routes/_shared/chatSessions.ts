@@ -397,10 +397,12 @@ export async function setChatMessageFeedback(
 	input: ChatFeedbackInput,
 	signal?: AbortSignal
 ) {
-	return (await requestJson(
+	const data = await requestJson(
 		`${chatSessionPath(sessionId)}/messages/${encodeURIComponent(messageId)}/feedback`,
 		{ signal, method: 'PUT', body: JSON.stringify(input) }
-	)) as ChatMessageFeedback | null;
+	);
+	if (Object.keys(data as object).length === 0) return null;
+	return data as ChatMessageFeedback;
 }
 
 export async function streamChatMessage(
@@ -467,7 +469,9 @@ async function readChatEvents(
 	},
 	signal?: AbortSignal
 ) {
-	if (!response.ok) await throwApiError(response);
+	if (!response.ok || !response.headers.get('Content-Type')?.includes('text/event-stream')) {
+		await throwApiError(response);
+	}
 	if (!response.body) throw new Error('The research response stream is unavailable.');
 
 	const reader = response.body.getReader();

@@ -3,9 +3,16 @@ from __future__ import annotations
 import json
 from typing import Mapping
 
-
 from application.evaluation.finding_feedback_service import parse_curated_finding
+from controllers.core import finding_review_routes
 from controllers.core.finding_review_routes import finding_review_router as router
+from controllers.dependencies.auth import get_current_user_id
+from controllers.exception_router import (
+    general_exception_handler,
+    http_exception_handler,
+    project_exception_handler,
+    request_validation_handler,
+)
 from domain.core import Finding, ObjectiveEvidence
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
@@ -16,8 +23,6 @@ from domain.core.finding import (
     Finding,
     FindingMechanismRelation,
     FindingPaperContribution,
-)
-from domain.core.finding import (
     datetime,
 )
 from domain.core.research_objective import (
@@ -33,20 +38,24 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-
-
-
-
 from domain.evaluation import (
     FindingCuration,
     FindingFeedback,
 )
+from domain.evaluation.records import FindingFeedbackDecisionError
+from exceptions import (
+    ProjectException,
+    RequestInvalidException,
+    ResourceConflictException,
+)
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 from repositories.objective_repository import (
     ExecutionStats,
     ObjectiveAnalysis,
 )
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class _Service:
@@ -59,6 +68,9 @@ class _Service:
         )
 
         self.authoring_kwargs = kwargs
+        if not kwargs["selection_ids"] and kwargs["abstention_reason"] is None:
+            from exceptions import RequestInvalidException
+            raise RequestInvalidException("Finding requires an experiment selection")
         analysis = ObjectiveAnalysis(
             collection_id=kwargs["collection_id"] or "",
             objective_id=kwargs["objective_id"] or "",
@@ -81,35 +93,37 @@ class _Service:
             source_analysis_version=1,
             created_by_user_id=kwargs["created_by_user_id"],
             abstention_reason=kwargs.get("abstention_reason"),
-            abstention_note="\n".join(kwargs.get("limitations", ()))
+            abstention_note=(
+                "\n".join(kwargs.get("limitations", ()))
                 if kwargs.get("abstention_reason")
-                else None,
+                else None
+            ),
         )
         finding = Finding(
-            collection_id=_finding_record().get('collection_id', None)
-            or "",
-            objective_id=_finding_record().get('objective_id', None)
-            or "",
+            collection_id=_finding_record().get("collection_id", None) or "",
+            objective_id=_finding_record().get("objective_id", None) or "",
             analysis_version=2,
             finding_id="finding-manual-1",
-            statement=_finding_record().get('statement', None) or "",
-            factors=tuple(_finding_record().get('factors', None) or ()),
-            outcome=_finding_record().get('outcome', None) or "",
-            direction=_finding_record().get('direction', None),
-            assertion_strength=_finding_record().get('assertion_strength', None),
-            attribution_scope=_finding_record().get('attribution_scope', None),
-            synthesis_status=_finding_record().get('synthesis_status', None),
-            certainty=_finding_record().get('certainty', None),
-            display_rank=_finding_record().get('display_rank', None),
+            statement=_finding_record().get("statement", None) or "",
+            factors=tuple(_finding_record().get("factors", None) or ()),
+            outcome=_finding_record().get("outcome", None) or "",
+            direction=_finding_record().get("direction", None),
+            assertion_strength=_finding_record().get("assertion_strength", None),
+            attribution_scope=_finding_record().get("attribution_scope", None),
+            synthesis_status=_finding_record().get("synthesis_status", None),
+            certainty=_finding_record().get("certainty", None),
+            display_rank=_finding_record().get("display_rank", None),
             mechanisms=tuple(
                 (
                     FindingMechanismRelation(
-                        source_term=item.get('source_term') or "",
-                        relation_type=item.get('relation_type') or "",
-                        target_term=item.get('target_term') or "",
-                        direction=item.get('direction'),
-                        assertion_strength=item.get('assertion_strength'),
-                        supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
+                        source_term=item.get("source_term") or "",
+                        relation_type=item.get("relation_type") or "",
+                        target_term=item.get("target_term") or "",
+                        direction=item.get("direction"),
+                        assertion_strength=item.get("assertion_strength"),
+                        supporting_evidence_ids=tuple(
+                            item.get("supporting_evidence_ids") or ()
+                        ),
                     )
                     for item in tuple(
                         (
@@ -139,7 +153,9 @@ class _Service:
                             ),
                             unit=attribute.get("unit"),
                             context_scope=attribute.get("context_scope"),
-                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
+                            applies_to_outcomes=tuple(
+                                attribute.get("applies_to_outcomes") or ()
+                            ),
                         )
                         for attribute in (
                             (
@@ -183,7 +199,9 @@ class _Service:
                             ),
                             unit=attribute.get("unit"),
                             context_scope=attribute.get("context_scope"),
-                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
+                            applies_to_outcomes=tuple(
+                                attribute.get("applies_to_outcomes") or ()
+                            ),
                         )
                         for attribute in (
                             (
@@ -227,7 +245,9 @@ class _Service:
                             ),
                             unit=attribute.get("unit"),
                             context_scope=attribute.get("context_scope"),
-                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
+                            applies_to_outcomes=tuple(
+                                attribute.get("applies_to_outcomes") or ()
+                            ),
                         )
                         for attribute in (
                             (
@@ -271,7 +291,9 @@ class _Service:
                             ),
                             unit=attribute.get("unit"),
                             context_scope=attribute.get("context_scope"),
-                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
+                            applies_to_outcomes=tuple(
+                                attribute.get("applies_to_outcomes") or ()
+                            ),
                         )
                         for attribute in (
                             (
@@ -305,16 +327,27 @@ class _Service:
                     )
                 ),
             ),
-            limitations=tuple((list(kwargs.get('limitations', ())) or ['Supported by one paper.']) or ()),
+            limitations=tuple(
+                (list(kwargs.get("limitations", ())) or ["Supported by one paper."])
+                or ()
+            ),
             paper_contributions=tuple(
                 (
                     FindingPaperContribution(
-                        document_id=item.get('document_id') or "",
-                        analysis_status=item.get('analysis_status'),
-                        supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
-                        contradicting_evidence_ids=tuple(item.get('contradicting_evidence_ids') or ()),
-                        context_evidence_ids=tuple(item.get('context_evidence_ids') or ()),
-                        condition_boundary_evidence_ids=tuple(item.get('condition_boundary_evidence_ids') or ()),
+                        document_id=item.get("document_id") or "",
+                        analysis_status=item.get("analysis_status"),
+                        supporting_evidence_ids=tuple(
+                            item.get("supporting_evidence_ids") or ()
+                        ),
+                        contradicting_evidence_ids=tuple(
+                            item.get("contradicting_evidence_ids") or ()
+                        ),
+                        context_evidence_ids=tuple(
+                            item.get("context_evidence_ids") or ()
+                        ),
+                        condition_boundary_evidence_ids=tuple(
+                            item.get("condition_boundary_evidence_ids") or ()
+                        ),
                     )
                     for item in tuple(
                         (
@@ -332,33 +365,48 @@ class _Service:
                     )
                 )
             ),
-            origin='hybrid' if kwargs.get('parent_finding_id') else 'human_authored',
+            origin="hybrid" if kwargs.get("parent_finding_id") else "human_authored",
             source_analysis_version=1,
-            parent_finding_id=kwargs.get('parent_finding_id'),
-            created_by_user_id=kwargs['created_by_user_id'],
-            created_by_tool_call_id=_finding_record().get('created_by_tool_call_id', None),
+            parent_finding_id=kwargs.get("parent_finding_id"),
+            created_by_user_id=kwargs["created_by_user_id"],
+            created_by_tool_call_id=_finding_record().get(
+                "created_by_tool_call_id", None
+            ),
             created_at=datetime.fromisoformat("2026-09-01T00:00:00+00:00"),
-            warnings=tuple(_finding_record().get('warnings', None) or ()),
-            selection_ids=tuple(_finding_record().get('selection_ids', None) or ()),
-            comparison_group_ids=tuple(_finding_record().get('comparison_group_ids', None) or ()),
+            warnings=tuple(_finding_record().get("warnings", None) or ()),
+            selection_ids=tuple(_finding_record().get("selection_ids", None) or ()),
+            comparison_group_ids=tuple(
+                _finding_record().get("comparison_group_ids", None) or ()
+            ),
         )
         return FindingAuthoringResult(
             analysis=analysis,
             finding=None if kwargs.get("abstention_reason") else finding,
         )
 
-    async def record_feedback(self, **kwargs):
-        return FindingFeedback(**{
-            "note": None,
-            "reviewer": None,
-            "feedback_id": "feedback-1",
-            **kwargs,
-            "created_at": "2026-07-22T00:00:00+00:00",
-        })
+    async def record_feedback(self, *, user_id: str, **kwargs):
+        assert user_id == "user-researcher"
+        try:
+            return FindingFeedback(
+                **{
+                    "note": None,
+                    "reviewer": None,
+                    "feedback_id": "feedback-1",
+                    **kwargs,
+                    "created_at": "2026-07-22T00:00:00+00:00",
+                }
+            )
+        except FindingFeedbackDecisionError as exc:
+            raise RequestInvalidException(
+                str(exc), data={"code": "finding_feedback_invalid"}
+            ) from exc
 
     async def list_feedback(self, **kwargs):
         if kwargs["analysis_version"] != 1:
-            raise ValueError("review must reference the published analysis version")
+            raise ResourceConflictException(
+                "review must reference the published analysis version",
+                data={"code": "analysis_version_not_published"},
+            )
         return (
             await self.record_feedback(
                 **kwargs,
@@ -367,7 +415,7 @@ class _Service:
             ),
         )
 
-    async def record_curation(self, **kwargs):
+    async def record_curation(self, *, user_id: str, **kwargs):
         return FindingCuration(
             curation_id="curation-1",
             **kwargs,
@@ -376,7 +424,10 @@ class _Service:
 
     async def list_curations(self, **kwargs):
         if kwargs["analysis_version"] != 1:
-            raise ValueError("review must reference the published analysis version")
+            raise ResourceConflictException(
+                "review must reference the published analysis version",
+                data={"code": "analysis_version_not_published"},
+            )
         return (
             await self.record_curation(
                 **kwargs,
@@ -454,7 +505,7 @@ def _finding_record(statement: str = "Temperature affects strength.") -> dict:
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope='isolated_effect',
+        attribution_scope="isolated_effect",
         synthesis_status="insufficient_confirmation",
         certainty=0.5,
         display_rank=0,
@@ -813,18 +864,14 @@ def _evidence_record() -> dict:
 
 def _client(service: _Service | None = None) -> TestClient:
     app = FastAPI()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     resolved = service or _Service()
-    app.state.finding_feedback_service = resolved
-    app.state.finding_authoring_service = resolved
-
-    @app.middleware("http")
-    async def authenticated(request, call_next):
-        request.state.current_user = {
-            "user_id": "user-researcher",
-            "email": "researcher@example.com",
-        }
-        return await call_next(request)
-
+    finding_review_routes.finding_feedback_service = resolved
+    finding_review_routes.finding_authoring_service = resolved
+    app.dependency_overrides[get_current_user_id] = lambda: "user-researcher"
     app.include_router(router)
     return TestClient(app)
 
@@ -840,7 +887,8 @@ def test_author_finding_api_rejects_legacy_evidence_bindings() -> None:
             "condition_boundary_evidence_ids": [],
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["code"] == 200100
 
 
 def test_author_finding_api_requires_experiment_selection() -> None:
@@ -852,7 +900,8 @@ def test_author_finding_api_requires_experiment_selection() -> None:
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["code"] == 200100
 
 
 def test_author_finding_api_preserves_parent_and_limitations() -> None:
@@ -866,9 +915,9 @@ def test_author_finding_api_preserves_parent_and_limitations() -> None:
             "limitations": ["Only the tested material is supported."],
         },
     )
-    assert response.status_code == 201
-    assert response.json()["finding"]["parent_finding_id"] == "finding-1"
-    assert response.json()["finding"]["limitations"] == [
+    assert response.status_code == 200
+    assert response.json()["data"]["finding"]["parent_finding_id"] == "finding-1"
+    assert response.json()["data"]["finding"]["limitations"] == [
         "Only the tested material is supported."
     ]
 
@@ -882,10 +931,10 @@ def test_author_finding_api_records_abstention_without_placeholder() -> None:
             "limitations": ["The second paper has no comparable measurement."],
         },
     )
-    assert response.status_code == 201
-    assert response.json()["finding"] is None
+    assert response.status_code == 200
+    assert response.json()["data"]["finding"] is None
     assert (
-        response.json()["analysis"]["abstention_note"]
+        response.json()["data"]["analysis"]["abstention_note"]
         == "The second paper has no comparable measurement."
     )
 
@@ -895,7 +944,8 @@ def test_author_evidence_api_is_removed() -> None:
         "/collections/col-1/objectives/obj-1/evidence",
         json={"source_analysis_version": 1},
     )
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
 def test_feedback_api_requires_explicit_analysis_version() -> None:
@@ -909,8 +959,8 @@ def test_feedback_api_requires_explicit_analysis_version() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["analysis_version"] == 1
-    assert "claim_id" not in response.json()
+    assert response.json()["data"]["analysis_version"] == 1
+    assert "claim_id" not in response.json()["data"]
 
 
 def test_feedback_api_rejects_inconsistent_status_and_issue() -> None:
@@ -933,8 +983,10 @@ def test_feedback_api_rejects_inconsistent_status_and_issue() -> None:
         },
     )
 
-    assert correct_with_issue.status_code == 422
-    assert partial_without_issue.status_code == 422
+    assert correct_with_issue.status_code == 200
+    assert correct_with_issue.json()["code"] == 200100
+    assert partial_without_issue.status_code == 200
+    assert partial_without_issue.json()["code"] == 200100
 
 
 def test_curation_api_uses_finding_evidence_ids() -> None:
@@ -948,7 +1000,7 @@ def test_curation_api_uses_finding_evidence_ids() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["curated_finding"]["paper_contributions"][0][
+    assert response.json()["data"]["curated_finding"]["paper_contributions"][0][
         "supporting_evidence_ids"
     ] == ["evidence-1"]
 
@@ -966,7 +1018,8 @@ def test_curation_api_rejects_retired_finding_fields() -> None:
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["code"] == 200100
 
 
 def test_curation_api_rejects_missing_canonical_finding_fields() -> None:
@@ -983,7 +1036,8 @@ def test_curation_api_rejects_missing_canonical_finding_fields() -> None:
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json()["code"] == 200100
 
 
 def test_review_gets_reject_stale_analysis_version() -> None:
@@ -998,8 +1052,10 @@ def test_review_gets_reject_stale_analysis_version() -> None:
         params={"analysis_version": 2},
     )
 
-    assert feedback.status_code == 409
-    assert curations.status_code == 409
+    assert feedback.status_code == 200
+    assert feedback.json()["code"] == 200204
+    assert curations.status_code == 200
+    assert curations.json()["code"] == 200204
 
 
 def test_training_jsonl_contains_messages_and_versioned_metadata() -> None:

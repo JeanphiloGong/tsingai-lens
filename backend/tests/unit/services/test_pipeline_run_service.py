@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import pytest
-
-from application.pipeline import PipelineRunService
+from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
 from repositories.pipeline_run_repository import PipelineRunRepository
+from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio
 
@@ -14,8 +14,18 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_pipeline_run_service_lists_scope_status_and_progress(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository())
+@pytest.fixture(autouse=True)
+async def owned_collection(postgres_session_factory, anyio_backend):
+    await seed_collection(
+        postgres_session_factory, "col_a", document_ids=("doc_a", "doc_b")
+    )
+
+
+async def test_pipeline_run_service_lists_scope_status_and_progress(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     run_a = await service.create_run(
         "col_a",
         "document_preparation",
@@ -39,20 +49,23 @@ async def test_pipeline_run_service_lists_scope_status_and_progress(*, postgres_
         errors=["invalid PDF"],
     )
 
-    runs = await service.list_runs(collection_id="col_a")
+    runs = await service.list_runs(collection_id="col_a", user_id="user-1")
     assert [item["run_id"] for item in runs] == [
         run_b["run_id"],
         run_a["run_id"],
     ]
     assert [item["scope_id"] for item in runs] == ["doc_b", "doc_a"]
     completed = await service.list_runs(
-        collection_id="col_a", status="completed"
+        collection_id="col_a", status="completed", user_id="user-1"
     )
     assert [item["run_id"] for item in completed] == [run_a["run_id"]]
 
 
-async def test_pipeline_run_service_persists_node_and_terminal_failure(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository())
+async def test_pipeline_run_service_persists_node_and_terminal_failure(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     run, _created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -82,8 +95,11 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure(*, postgr
     assert failed["updated_at"] == failed["finished_at"]
 
 
-async def test_document_run_reuses_active_and_matching_completed_work(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository())
+async def test_document_run_reuses_active_and_matching_completed_work(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     first, created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -119,8 +135,11 @@ async def test_document_run_reuses_active_and_matching_completed_work(*, postgre
     assert changed["run_id"] != first["run_id"]
 
 
-async def test_collection_run_reuses_only_active_work_and_preserves_context(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository())
+async def test_collection_run_reuses_only_active_work_and_preserves_context(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     first, created = await service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -149,9 +168,12 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context(*, p
     assert retry["run_id"] != first["run_id"]
 
 
-async def test_historical_preparation_errors_are_safe_without_rewriting_storage(*, postgres_session_factory):
+async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
+    *, postgres_session_factory
+):
     repository = PipelineRunRepository()
-    service = PipelineRunService(repository)
+    pipeline_run_service.PipelineRunRepo = repository
+    service = pipeline_run_service
     run = await service.create_run(
         "col_a",
         "document_preparation",
@@ -165,8 +187,8 @@ async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
         current_node="document_profile",
         errors=[raw_error],
     )
-    detail = await service.get_run(run["run_id"])
-    listing = await service.list_runs(collection_id="col_a")
+    detail = await service.get_run(run["run_id"], user_id="user-1")
+    listing = await service.list_runs(collection_id="col_a", user_id="user-1")
     assert raw_error not in str(detail)
     assert raw_error not in str(listing)
     assert "classification" in detail["errors"][0].lower()
@@ -179,4 +201,6 @@ async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
 async def research_records(postgres_session_factory, anyio_backend):
     from tests.support.postgres import seed_collection
 
-    await seed_collection(postgres_session_factory, "col_a", document_ids=("doc_a", "doc_b"))
+    await seed_collection(
+        postgres_session_factory, "col_a", document_ids=("doc_a", "doc_b")
+    )

@@ -7,9 +7,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from application.core.objectives.llm.structured_response import StructuredResponseClient
+from exceptions import ServiceUnavailableException
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 PROMPT_VERSION = "finding-evidence-summary.v1"
@@ -17,8 +17,14 @@ MAX_SUMMARY_EVIDENCE = 200
 MAX_PROMPT_TOKENS = 24000
 
 
-class FindingSummaryUnavailable(Exception):
+class FindingSummaryUnavailable(ServiceUnavailableException):
     """Safe reason code for an optional summary that could not be produced."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            "The evidence summary is unavailable. Original evidence remains accessible.",
+            data={"code": reason},
+        )
 
 
 class FindingSummaryModelOutput(BaseModel):

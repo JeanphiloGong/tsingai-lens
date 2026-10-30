@@ -39,8 +39,8 @@ const Page = (await import('./+page.svelte')).default;
 
 afterEach(cleanup);
 
-function jsonResponse(body: unknown) {
-	return new Response(JSON.stringify(body), {
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
 		status: 200,
 		headers: { 'Content-Type': 'application/json' }
 	});

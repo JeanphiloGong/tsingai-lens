@@ -22,13 +22,13 @@ Use the following entry points when modifying the Core workflow:
 
 | Task | Entry point | Result |
 |---|---|---|
-| Resolve selected ready papers | `ObjectiveInputService.resolve_prepared_document_inputs()` | frozen input set; no parsing |
-| Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
-| Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
-| Create/confirm a candidate | `ObjectiveAuthoringService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
-| Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
-| Reconstruct experiments | `ObjectiveExperimentAnalysisService.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
-| Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
+| Resolve selected ready papers | `objective_input_service.resolve_prepared_document_inputs()` | frozen input set; no parsing |
+| Discover candidates | `objective_discovery_service.start_objective_discovery()` | queued discovery run |
+| Form candidates | `objective_candidate_service.discover_candidate_facts()` | candidate Objectives |
+| Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
+| Queue analysis | `analysis_service.start_analysis()` | queued versioned analysis |
+| Reconstruct experiments | `objective_analysis_service.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
+| Publish/read analysis | `analysis_service.execute_queued_analysis()` / read methods | immutable published snapshot |
 
 Paper Map construction is intentionally split by responsibility:
 
@@ -43,17 +43,18 @@ The coordinator must remain the only place that orders these steps. Moving a
 helper does not authorize changing Source order, recovery budgets, or map
 status semantics.
 
-`ObjectiveInputService.load_or_build_paper_maps()` may call the model and store
+`objective_input_service.load_or_build_paper_maps()` may call the model and store
 a refreshed map. Its other input reads do not create Objectives or experiments.
 Discovery stores candidate Objectives; authoring stores only the explicitly
 requested creation or confirmation. Scientific analysis returns experiment
-records; `ExperimentAnalysisWriter` stores revisions, selections, optional
-groups, and Findings. `ObjectiveAnalysisService` controls the complete
+records; `experiment_analysis_writer` stores revisions, selections, optional
+groups, and Findings. `analysis_service` controls the complete
 version's publication. Both HTTP and Agent callers use these owners.
 
-The analysis runtime receives `ObjectiveInputService` and
-`DocumentProfileService` directly at construction. It does not reach through
-the scientific engine to discover those dependencies.
+The analysis module imports `objective_input_service` and
+`document_profiles.service` directly. It does not reach through the scientific
+engine to discover those dependencies. Public reads and commands accept the
+actor's user ID and authorize the Collection before accessing scientific data.
 
 ## Changing This Package
 
@@ -90,7 +91,7 @@ Finding.
 
 ## Document-Level Paper Map
 
-`PaperResearchMapService.build_document_paper_map()` receives one prepared
+`paper_research_map_service.build_document_paper_map()` receives one prepared
 `SourceDocument`, its `DocumentProfile`, and its document tree. It:
 
 1. selects bounded overview, abstract, conclusion, table, and figure Sources;
@@ -132,7 +133,7 @@ POST objective-discovery {document_ids}
 `preparation_fingerprint`. Empty, duplicate, unknown, non-ready, or stale inputs
 are rejected. Discovery never falls back to all Collection papers.
 
-`ObjectiveInputService` owns this input boundary for both Discovery and
+`objective_input_service` owns this input boundary for both Discovery and
 Analysis. It also loads the matching Source documents, Profiles, document trees,
 and reusable Paper Maps; it does not form scientific claims or persist
 Objectives/Evidence.

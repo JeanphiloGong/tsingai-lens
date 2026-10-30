@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -17,20 +17,16 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
-async def _build_runtime():
-    from main import ApplicationOverrides, build_application_runtime
-
-    return await build_application_runtime(ApplicationOverrides())
-
-
 async def run_once() -> str:
-    runtime = await _build_runtime()
+    from main import build_application_runtime
+    from repositories.feedback_dataset_sample_repository import (
+        FeedbackDatasetSampleRepo,
+    )
+
+    runtime = await build_application_runtime()
     try:
-        if runtime.feedback_dataset_sample_repository is not None:
-            await runtime.feedback_dataset_sample_repository.backfill_existing_cases()
+        await FeedbackDatasetSampleRepo.backfill_existing_cases()
         worker = runtime.dataset_sample_build_worker
-        if worker is None:
-            raise RuntimeError("dataset sample build worker is not configured")
         result = await worker.run_once()
         return "idle" if result is None else str(result.status)
     finally:
@@ -38,18 +34,20 @@ async def run_once() -> str:
 
 
 async def run_loop(interval_seconds: float) -> None:
+    from main import build_application_runtime
+    from repositories.feedback_dataset_sample_repository import (
+        FeedbackDatasetSampleRepo,
+    )
+
     runtime = None
     initialized = False
     try:
         while True:
             try:
                 if runtime is None:
-                    runtime = await _build_runtime()
+                    runtime = await build_application_runtime()
                 if not initialized:
-                    if runtime.dataset_sample_build_worker is None:
-                        raise RuntimeError("dataset sample build worker is not configured")
-                    if runtime.feedback_dataset_sample_repository is not None:
-                        await runtime.feedback_dataset_sample_repository.backfill_existing_cases()
+                    await FeedbackDatasetSampleRepo.backfill_existing_cases()
                     initialized = True
                 result = await runtime.dataset_sample_build_worker.run_once()
                 print("idle" if result is None else str(result.status), flush=True)
@@ -62,9 +60,13 @@ async def run_loop(interval_seconds: float) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run dataset sample build jobs explicitly")
+    parser = argparse.ArgumentParser(
+        description="Run dataset sample build jobs explicitly"
+    )
     parser.add_argument("--once", action="store_true", help="process at most one job")
-    parser.add_argument("--interval", type=float, default=2.0, help="loop delay in seconds")
+    parser.add_argument(
+        "--interval", type=float, default=2.0, help="loop delay in seconds"
+    )
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")

@@ -12,6 +12,13 @@
 - API 文档地址：`/api/docs`
 - 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求，并用
   same-origin cookie 传递登录会话
+- JSON 成功和失败均使用 HTTP 200，响应为 `{code,message,data,meta}`；
+  `requestJson` 返回 `data`，非 200 业务码抛出 `ApiError`。无结果时 `data` 为 `{}`。
+- 使用 `isApiErrorCode` 判断六位业务码，使用 `getApiErrorReason` 读取 `data.code`；
+  只有 `200301 + authentication_required` 清空登录状态和用户聊天缓存并跳转登录，不能按 HTTP 状态或错误文案猜测。
+- 文件成功保留原始字节，下载前先识别 JSON 业务失败；普通 JSON 导出只保存 `data`。
+  SSE 开始前先识别 JSON 拒绝，开始后继续处理既有 `error` 事件和取消／恢复。
+- 完整业务码与响应定义以 [`backend/docs/specs/api.md`](../../backend/docs/specs/api.md) 为准。
 
 ## 产品主流程
 

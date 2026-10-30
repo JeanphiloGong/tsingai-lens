@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
-import asyncio
-
 import pytest
-
-from application.feedback.feedback_case_service import FeedbackCaseService
+from application.feedback import feedback_case_service
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
-from domain.feedback import AnalysisResult, EvidenceCoverage, FeedbackAnnotation, FeedbackCase
-
+from domain.feedback import (
+    AnalysisResult,
+    EvidenceCoverage,
+    FeedbackAnnotation,
+    FeedbackCase,
+)
+from exceptions import RequestInvalidException, ResourceConflictException
+from repositories.feedback_case_repository import FeedbackCaseWriteConflict
 
 pytestmark = pytest.mark.anyio
 
@@ -65,14 +69,24 @@ class _Cases:
 
     async def save_annotation(self, annotation, *, expected_digest, now):
         if expected_digest != self.case.annotation_digest:
-            raise ValueError("feedback_case_stale")
-        if self.annotation is not None and self.annotation.annotation_digest == annotation.annotation_digest:
+            raise FeedbackCaseWriteConflict("feedback_case_stale")
+        if (
+            self.annotation is not None
+            and self.annotation.annotation_digest == annotation.annotation_digest
+        ):
             return self.annotation
-        if self.case.status not in {"needs_annotation", "ready_for_review", "rejected", "insufficient"}:
-            raise ValueError("feedback_case_not_annotatable")
-        expected_version = self.annotation.version + 1 if self.annotation is not None else 1
+        if self.case.status not in {
+            "needs_annotation",
+            "ready_for_review",
+            "rejected",
+            "insufficient",
+        }:
+            raise FeedbackCaseWriteConflict("feedback_case_not_annotatable")
+        expected_version = (
+            self.annotation.version + 1 if self.annotation is not None else 1
+        )
         if annotation.version != expected_version:
-            raise ValueError("annotation_version_conflict")
+            raise FeedbackCaseWriteConflict("annotation_version_conflict")
         self.annotation = annotation
         self.case = replace(
             self.case,
@@ -85,75 +99,182 @@ class _Cases:
 
 def _fixture():
     session = ChatSession.create(
-        session_id="session-1", user_id="user-1", collection_id="collection-1", created_at="2026-09-24T00:00:00+00:00"
+        session_id="session-1",
+        user_id="user-1",
+        collection_id="collection-1",
+        created_at="2026-09-24T00:00:00+00:00",
     )
-    question = ChatMessage.user(message_id="question-1", session_id=session.session_id, content="Compare A and B", created_at="2026-09-24T00:00:01+00:00")
-    answer = ChatMessage.assistant(message_id="answer-1", session_id=session.session_id, content="B has no preheating", created_at="2026-09-24T00:00:02+00:00")
-    feedback = ChatMessageFeedback.for_answer(message=answer, feedback_id="feedback-1", user_id="user-1", rating="not_helpful", reason="incorrect", comment=None, now="2026-09-24T00:00:03+00:00")
+    question = ChatMessage.user(
+        message_id="question-1",
+        session_id=session.session_id,
+        content="Compare A and B",
+        created_at="2026-09-24T00:00:01+00:00",
+    )
+    answer = ChatMessage.assistant(
+        message_id="answer-1",
+        session_id=session.session_id,
+        content="B has no preheating",
+        created_at="2026-09-24T00:00:02+00:00",
+    )
+    feedback = ChatMessageFeedback.for_answer(
+        message=answer,
+        feedback_id="feedback-1",
+        user_id="user-1",
+        rating="not_helpful",
+        reason="incorrect",
+        comment=None,
+        now="2026-09-24T00:00:03+00:00",
+    )
     result = AnalysisResult(
-        result_id="result-1", job_id="job-1", feedback_id=feedback.feedback_id, session_id=session.session_id,
-        collection_id=session.collection_id, anchor_message_id=answer.message_id, problem_type="source_missing", confidence=.8,
-        related_message_ids=(question.message_id, answer.message_id), suggested_evidence=("source-b",), suggested_target=None,
-        evidence_coverage=EvidenceCoverage(inspected_sources=({"source_ref": "source-a", "document_title": "A"},), gaps=("B omitted",), coverage_status="partial"),
-        model="test", input_digest="a" * 64, created_at="2026-09-24T00:00:04+00:00",
+        result_id="result-1",
+        job_id="job-1",
+        feedback_id=feedback.feedback_id,
+        session_id=session.session_id,
+        collection_id=session.collection_id,
+        anchor_message_id=answer.message_id,
+        problem_type="source_missing",
+        confidence=0.8,
+        related_message_ids=(question.message_id, answer.message_id),
+        suggested_evidence=("source-b",),
+        suggested_target=None,
+        evidence_coverage=EvidenceCoverage(
+            inspected_sources=({"source_ref": "source-a", "document_title": "A"},),
+            gaps=("B omitted",),
+            coverage_status="partial",
+        ),
+        model="test",
+        input_digest="a" * 64,
+        created_at="2026-09-24T00:00:04+00:00",
     )
-    case = FeedbackCase(case_id="case-1", collection_id=session.collection_id, session_id=session.session_id, anchor_message_id=answer.message_id, source_signal_ids=(feedback.feedback_id,), analysis_result_ids=(result.result_id,), context_snapshot={}, status="needs_annotation", created_at="2026-09-24T00:00:04+00:00", updated_at="2026-09-24T00:00:04+00:00")
+    case = FeedbackCase(
+        case_id="case-1",
+        collection_id=session.collection_id,
+        session_id=session.session_id,
+        anchor_message_id=answer.message_id,
+        source_signal_ids=(feedback.feedback_id,),
+        analysis_result_ids=(result.result_id,),
+        context_snapshot={},
+        status="needs_annotation",
+        created_at="2026-09-24T00:00:04+00:00",
+        updated_at="2026-09-24T00:00:04+00:00",
+    )
     repo = _Cases(case, result)
-    service = FeedbackCaseService(case_repository=repo, chat_repository=_Chat(session, (question, answer)), collection_service=_Collections())
+    feedback_case_service.FeedbackCaseRepo = repo
+    feedback_case_service.ChatRepo = _Chat(session, (question, answer))
+    feedback_case_service.collection_service = _Collections()
+    service = feedback_case_service
     return service, repo
 
 
 async def test_annotation_is_versioned_and_source_scoped() -> None:
     service, repo = _fixture()
     annotation = await service.save_annotation_for_user(
-        case_id="case-1", user_id="user-1", expected_digest=None, problem_type="source_missing", severity="high",
-        target=None, support_source_refs=("source-a",), dataset_uses=("evaluation",), reason="B was not inspected.", now="2026-09-24T00:01:00+00:00"
+        case_id="case-1",
+        user_id="user-1",
+        expected_digest=None,
+        problem_type="source_missing",
+        severity="high",
+        target=None,
+        support_source_refs=("source-a",),
+        dataset_uses=("evaluation",),
+        reason="B was not inspected.",
+        now="2026-09-24T00:01:00+00:00",
     )
     assert annotation.version == 1
     assert len(annotation.annotation_digest) == 64
     assert repo.case.status == "ready_for_review"
 
-    with pytest.raises(ValueError, match="annotation_source_not_in_case"):
+    with pytest.raises(
+        RequestInvalidException,
+        match="An annotation source does not belong to this case.",
+    ):
         await service.save_annotation_for_user(
-            case_id="case-1", user_id="user-1", expected_digest=annotation.annotation_digest, problem_type="source_missing", severity="high",
-            target=None, support_source_refs=("foreign-source",), dataset_uses=("evaluation",), reason="wrong source", now="2026-09-24T00:02:00+00:00"
+            case_id="case-1",
+            user_id="user-1",
+            expected_digest=annotation.annotation_digest,
+            problem_type="source_missing",
+            severity="high",
+            target=None,
+            support_source_refs=("foreign-source",),
+            dataset_uses=("evaluation",),
+            reason="wrong source",
+            now="2026-09-24T00:02:00+00:00",
         )
 
 
 async def test_annotation_rejects_stale_digest_and_missing_sft_target() -> None:
     service, _ = _fixture()
-    with pytest.raises(ValueError, match="feedback_case_stale"):
+    with pytest.raises(
+        ResourceConflictException, match="feedback_case_stale|The case changed"
+    ):
         await service.save_annotation_for_user(
-            case_id="case-1", user_id="user-1", expected_digest="b" * 64, problem_type="source_missing", severity="medium",
-            target=None, support_source_refs=(), dataset_uses=("evaluation",), reason="stale", now="2026-09-24T00:01:00+00:00"
+            case_id="case-1",
+            user_id="user-1",
+            expected_digest="b" * 64,
+            problem_type="source_missing",
+            severity="medium",
+            target=None,
+            support_source_refs=(),
+            dataset_uses=("evaluation",),
+            reason="stale",
+            now="2026-09-24T00:01:00+00:00",
         )
-    with pytest.raises(ValueError, match="sft annotation requires a target"):
+    with pytest.raises(
+        RequestInvalidException, match="sft annotation requires a target"
+    ):
         await service.save_annotation_for_user(
-            case_id="case-1", user_id="user-1", expected_digest=None, problem_type="source_missing", severity="medium",
-            target=None, support_source_refs=(), dataset_uses=("sft",), reason="needs target", now="2026-09-24T00:01:00+00:00"
+            case_id="case-1",
+            user_id="user-1",
+            expected_digest=None,
+            problem_type="source_missing",
+            severity="medium",
+            target=None,
+            support_source_refs=(),
+            dataset_uses=("sft",),
+            reason="needs target",
+            now="2026-09-24T00:01:00+00:00",
         )
-    with pytest.raises(ValueError, match="sft annotation requires support sources"):
+    with pytest.raises(
+        RequestInvalidException, match="sft annotation requires support sources"
+    ):
         await service.save_annotation_for_user(
-            case_id="case-1", user_id="user-1", expected_digest=None,
-            problem_type="source_missing", severity="medium", target="Corrected answer",
-            support_source_refs=(), dataset_uses=("sft",), reason="needs source", now="2026-09-24T00:01:00+00:00"
+            case_id="case-1",
+            user_id="user-1",
+            expected_digest=None,
+            problem_type="source_missing",
+            severity="medium",
+            target="Corrected answer",
+            support_source_refs=(),
+            dataset_uses=("sft",),
+            reason="needs source",
+            now="2026-09-24T00:01:00+00:00",
         )
 
 
 async def test_rejected_case_can_be_revised_without_erasing_review_history() -> None:
     service, repo = _fixture()
     first = await service.save_annotation_for_user(
-        case_id="case-1", user_id="user-1", expected_digest=None,
-        problem_type="source_missing", severity="high", target=None,
-        support_source_refs=("source-a",), dataset_uses=("evaluation",),
+        case_id="case-1",
+        user_id="user-1",
+        expected_digest=None,
+        problem_type="source_missing",
+        severity="high",
+        target=None,
+        support_source_refs=("source-a",),
+        dataset_uses=("evaluation",),
         reason="Initial review needs a better explanation.",
         now="2026-09-24T00:01:00+00:00",
     )
     repo.case = replace(repo.case, status="rejected")
     second = await service.save_annotation_for_user(
-        case_id="case-1", user_id="user-1", expected_digest=first.annotation_digest,
-        problem_type="source_missing", severity="critical", target=None,
-        support_source_refs=("source-a",), dataset_uses=("evaluation",),
+        case_id="case-1",
+        user_id="user-1",
+        expected_digest=first.annotation_digest,
+        problem_type="source_missing",
+        severity="critical",
+        target=None,
+        support_source_refs=("source-a",),
+        dataset_uses=("evaluation",),
         reason="The source omission is now documented precisely.",
         now="2026-09-24T00:02:00+00:00",
     )
@@ -165,17 +286,30 @@ async def test_rejected_case_can_be_revised_without_erasing_review_history() -> 
 async def test_annotation_revision_rejects_terminal_accepted_case() -> None:
     service, repo = _fixture()
     first = await service.save_annotation_for_user(
-        case_id="case-1", user_id="user-1", expected_digest=None,
-        problem_type="source_missing", severity="high", target=None,
-        support_source_refs=("source-a",), dataset_uses=("evaluation",),
-        reason="Accepted baseline.", now="2026-09-24T00:01:00+00:00",
+        case_id="case-1",
+        user_id="user-1",
+        expected_digest=None,
+        problem_type="source_missing",
+        severity="high",
+        target=None,
+        support_source_refs=("source-a",),
+        dataset_uses=("evaluation",),
+        reason="Accepted baseline.",
+        now="2026-09-24T00:01:00+00:00",
     )
     repo.case = replace(repo.case, status="accepted")
-    with pytest.raises(ValueError, match="feedback_case_not_annotatable"):
+    with pytest.raises(
+        ResourceConflictException, match="This case cannot be annotated"
+    ):
         await service.save_annotation_for_user(
-            case_id="case-1", user_id="user-1", expected_digest=first.annotation_digest,
-            problem_type="source_missing", severity="critical", target=None,
-            support_source_refs=("source-a",), dataset_uses=("evaluation",),
+            case_id="case-1",
+            user_id="user-1",
+            expected_digest=first.annotation_digest,
+            problem_type="source_missing",
+            severity="critical",
+            target=None,
+            support_source_refs=("source-a",),
+            dataset_uses=("evaluation",),
             reason="Must not silently replace accepted material.",
             now="2026-09-24T00:02:00+00:00",
         )
@@ -200,29 +334,45 @@ async def test_concurrent_first_annotations_allow_one_digest_winner() -> None:
     async def write(reason: str):
         try:
             return await service.save_annotation_for_user(
-                case_id="case-1", user_id="user-1", expected_digest=None,
-                problem_type="source_missing", severity="high", target=None,
-                support_source_refs=("source-a",), dataset_uses=("evaluation",),
-                reason=reason, now="2026-09-24T00:01:00+00:00",
+                case_id="case-1",
+                user_id="user-1",
+                expected_digest=None,
+                problem_type="source_missing",
+                severity="high",
+                target=None,
+                support_source_refs=("source-a",),
+                dataset_uses=("evaluation",),
+                reason=reason,
+                now="2026-09-24T00:01:00+00:00",
             )
-        except ValueError as exc:
+        except ResourceConflictException as exc:
             return exc
 
     first, second = await asyncio.gather(write("first"), write("second"))
     winners = [item for item in (first, second) if isinstance(item, FeedbackAnnotation)]
-    failures = [item for item in (first, second) if isinstance(item, ValueError)]
+    failures = [
+        item for item in (first, second) if isinstance(item, ResourceConflictException)
+    ]
     assert len(winners) == 1
     assert len(failures) == 1
-    assert str(failures[0]) == "feedback_case_stale"
+    assert failures[0].data["code"] == "feedback_case_stale"
     assert repo.annotation is winners[0]
 
 
 def test_annotation_digest_must_be_hex_sha256() -> None:
     with pytest.raises(ValueError, match="annotation digest does not match content"):
         FeedbackAnnotation(
-            annotation_id="annotation-1", case_id="case-1", version=1,
-            problem_type="source_missing", severity="high", target=None,
-            support_source_refs=(), dataset_uses=("evaluation",), reason="checked",
-            annotation_digest="z" * 64, created_by="user-1",
-            created_at="2026-09-24T00:00:00+00:00", updated_at="2026-09-24T00:00:00+00:00",
+            annotation_id="annotation-1",
+            case_id="case-1",
+            version=1,
+            problem_type="source_missing",
+            severity="high",
+            target=None,
+            support_source_refs=(),
+            dataset_uses=("evaluation",),
+            reason="checked",
+            annotation_digest="z" * 64,
+            created_by="user-1",
+            created_at="2026-09-24T00:00:00+00:00",
+            updated_at="2026-09-24T00:00:00+00:00",
         )

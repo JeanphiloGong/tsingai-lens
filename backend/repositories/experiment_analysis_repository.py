@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
@@ -19,6 +16,8 @@ from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
     _add_revision,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @dataclass(frozen=True)
@@ -36,7 +35,9 @@ class ExperimentAnalysisWrite:
 
     def __post_init__(self) -> None:
         if not self.collection_id.strip() or not self.objective_id.strip():
-            raise ValueError("experiment analysis write requires collection and objective")
+            raise ValueError(
+                "experiment analysis write requires collection and objective"
+            )
         if self.analysis_version < 1:
             raise ValueError("experiment analysis write requires a positive version")
 
@@ -144,7 +145,9 @@ class ExperimentAnalysisRepository:
         )
         groups = tuple(
             [
-                await ComparisonGroupRepository().add_group(db, graph.collection_id, group)
+                await ComparisonGroupRepository().add_group(
+                    db, graph.collection_id, group
+                )
                 for group in graph.groups
             ]
         )
@@ -159,7 +162,11 @@ class ExperimentAnalysisRepository:
         )
 
 
-__all__ = ['ExperimentAnalysisRepository', 'ExperimentAnalysisWrite', 'StoredExperimentAnalysis']
+__all__ = [
+    "ExperimentAnalysisRepository",
+    "ExperimentAnalysisWrite",
+    "StoredExperimentAnalysis",
+]
 
 
 ExperimentAnalysisRepo = ExperimentAnalysisRepository()

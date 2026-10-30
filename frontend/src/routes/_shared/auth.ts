@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import { isHttpStatusError, requestJson } from './api';
+import { isApiErrorCode, requestJson } from './api';
 
 export type AuthUser = {
 	user_id: string;
@@ -41,7 +41,13 @@ export function startAuthSynchronization() {
 function setAuthenticated(payload: unknown) {
 	const record = payload as AuthSessionPayload;
 	const user = record?.user;
-	if (!user || typeof user.user_id !== 'string' || !user.user_id || typeof user.email !== 'string' || !user.email) {
+	if (
+		!user ||
+		typeof user.user_id !== 'string' ||
+		!user.user_id ||
+		typeof user.email !== 'string' ||
+		!user.email
+	) {
 		throw new Error('Auth response is missing user.');
 	}
 	clearOtherUsersChatStorage(user.user_id);
@@ -58,7 +64,7 @@ export async function fetchCurrentSession() {
 		return setAuthenticated(data);
 	} catch (error) {
 		if (generation !== authGeneration) return null;
-		if (isHttpStatusError(error, 401)) {
+		if (isApiErrorCode(error, 200301)) {
 			clearAuthState();
 			return null;
 		}

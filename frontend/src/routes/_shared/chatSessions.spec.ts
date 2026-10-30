@@ -14,7 +14,7 @@ describe('chat session deletion', () => {
 	it('uses the same-origin DELETE endpoint with encoded session identity', async () => {
 		const fetch = vi
 			.spyOn(globalThis, 'fetch')
-			.mockResolvedValue(new Response(null, { status: 204 }));
+			.mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: {}, meta: null })));
 		try {
 			await deleteChatSession('session/one');
 			expect(fetch).toHaveBeenCalledWith(
@@ -32,7 +32,7 @@ describe('chat history pinning', () => {
 		'saves an explicit pin state %s with an encoded session identity',
 		async (isPinned) => {
 			const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-				new Response(JSON.stringify({ session_id: 'session/one', is_pinned: isPinned }), {
+				new Response(JSON.stringify({ code: 200, message: 'success', data: { session_id: 'session/one', is_pinned: isPinned }, meta: null }), {
 					headers: { 'Content-Type': 'application/json' }
 				})
 			);
@@ -60,7 +60,7 @@ describe('chat history pinning', () => {
 describe('answer feedback requests', () => {
 	it('uses the same-origin API with encoded identities and explicit withdrawal', async () => {
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response('null', {
+			new Response(JSON.stringify({ code: 200, message: 'success', data: {}, meta: null }), {
 				headers: { 'Content-Type': 'application/json' }
 			})
 		);
@@ -85,12 +85,23 @@ describe('answer feedback requests', () => {
 });
 
 describe('chat stream lifecycle', () => {
+	it('rejects a JSON business error before the SSE stream starts', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			JSON.stringify({ code: 200204, message: 'Resolve the pending action.', data: { code: 'chat_tool_approval_pending' }, meta: null }),
+			{ headers: { 'Content-Type': 'application/json' } }
+		));
+		try {
+			await expect(streamChatMessage('chat_1', 'Compare the papers', () => {}))
+				.rejects.toMatchObject({ code: 200204, data: { code: 'chat_tool_approval_pending' } });
+		} finally { fetch.mockRestore(); }
+	});
 	it('leaves a silent stream for recovery but keeps a heartbeating long turn connected', async () => {
 		vi.useFakeTimers();
 		const cancel = vi.fn();
 		let stream!: ReadableStreamDefaultController<Uint8Array>;
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-			new ReadableStream({ start(controller) { stream = controller; }, cancel })
+			new ReadableStream({ start(controller) { stream = controller; }, cancel }),
+			{ headers: { 'Content-Type': 'text/event-stream' } }
 		));
 		try {
 			const response = streamChatMessage('chat_1', 'Compare the papers', () => {});
@@ -125,7 +136,8 @@ describe('chat stream lifecycle', () => {
 						);
 					},
 					cancel
-				})
+				}),
+				{ headers: { 'Content-Type': 'text/event-stream' } }
 			)
 		);
 		try {
@@ -159,7 +171,8 @@ describe('chat stream lifecycle', () => {
 						stream.enqueue(new TextEncoder().encode('event: progress\ndata: invalid\n\n'));
 					},
 					cancel
-				})
+				}),
+				{ headers: { 'Content-Type': 'text/event-stream' } }
 			)
 		);
 		try {

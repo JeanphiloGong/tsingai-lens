@@ -4,9 +4,7 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 
 import pytest
-
 from application.auth import (
-    AuthSessionService,
     InvalidCredentialsError,
     SessionNotFoundError,
 )
@@ -21,10 +19,7 @@ def anyio_backend() -> str:
 
 
 async def test_auth_session_service_logs_in_and_resolves_user(auth_session_service):
-    service = AuthSessionService(
-        auth_session_service.repository,
-        session_ttl_hours=1,
-    )
+    service = auth_session_service
     user = await service.create_user(
         email="reader@example.com",
         password="correct horse",
@@ -39,7 +34,7 @@ async def test_auth_session_service_logs_in_and_resolves_user(auth_session_servi
     assert resolved["email"] == "reader@example.com"
     assert "password_hash" not in resolved
 
-    stored_user = await service.repository.read_user(user["user_id"])
+    stored_user = await service.AuthRepo.read_user(user["user_id"])
     assert stored_user.user_id == user["user_id"]
     assert stored_user.password_hash not in repr(stored_user)
 
@@ -79,11 +74,11 @@ async def test_auth_session_service_persists_only_the_bearer_token_hash(
     bearer_token = login["session_id"]
 
     token_hash = sha256(bearer_token.encode("utf-8")).hexdigest()
-    stored = await service.repository.read_session_by_token_hash(token_hash)
+    stored = await service.AuthRepo.read_session_by_token_hash(token_hash)
 
     assert stored is not None
     assert stored.session_id != bearer_token
-    assert await service.repository.read_session_by_token_hash(bearer_token) is None
+    assert await service.AuthRepo.read_session_by_token_hash(bearer_token) is None
 
 
 async def test_auth_session_service_rejects_expired_session(auth_session_service):
@@ -94,7 +89,7 @@ async def test_auth_session_service_rejects_expired_session(auth_session_service
     )
     bearer_token = "expired-browser-token"
     now = datetime.now(timezone.utc)
-    await service.repository.add_session(
+    await service.AuthRepo.add_session(
         AuthSessionRecord(
             session_id="session_expired",
             user_id=user["user_id"],

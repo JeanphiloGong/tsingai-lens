@@ -4,20 +4,20 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
+from application.core.document_profiles import service as document_profile_service
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
     DocumentProfileModelOutput,
 )
-from application.core.document_profiles.service import DocumentProfileService
-from application.pipeline import PipelineRunService
-from application.source.document_preparation_service import DocumentPreparationService
+from application.pipeline import pipeline_run_service
+from application.source import document_preparation_service
 from domain.source import Document, SourceDocument
+from exceptions import ServiceUnavailableException
 from repositories.collection_repository import StoredDocument
-from tests.support.collection_service import build_test_collection_service
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.pipeline_run_repository import PipelineRunRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
 
@@ -29,7 +29,7 @@ def anyio_backend():
 
 @pytest.fixture
 async def preparation(tmp_path, *, postgres_session_factory):
-    collections = build_test_collection_service(tmp_path / 'collections')
+    collections = build_test_collection_service(tmp_path / "collections")
     collection = await collections.create_collection("LPBF porosity research")
     collection_id = collection["collection_id"]
     document = StoredDocument(
@@ -45,23 +45,25 @@ async def preparation(tmp_path, *, postgres_session_factory):
         storage_key=f"{collection_id}/input/paper.pdf",
         created_at=collection["created_at"],
     )
-    await collections.repository.add_documents(
+    await collections.CollectionRepo.add_documents(
         collection_id,
         (document,),
         updated_at=document.created_at,
     )
     sources = SourceArtifactRepository()
-    profiles = DocumentProfileService(
-        collections, sources, DocumentProfileRepository()
-    )
-    runs = PipelineRunService(PipelineRunRepository())
-    service = DocumentPreparationService(
-        collection_service=collections,
-        pipeline_run_service=runs,
-        source_artifact_repository=sources,
-        document_profile_service=profiles,
-        max_concurrency=1,
-    )
+    document_profile_service.collection_service = collections
+    document_profile_service.SourceArtifactRepo = sources
+    document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
+    profiles = document_profile_service
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    runs = pipeline_run_service
+    document_preparation_service.collection_service = collections
+    document_preparation_service.pipeline_run_service = runs
+    document_preparation_service.SourceArtifactRepo = sources
+    document_preparation_service.DocumentProfileRepo = profiles.DocumentProfileRepo
+    document_preparation_service.document_profile_service = profiles
+    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_service
     return SimpleNamespace(
         service=service,
         collections=collections,
@@ -111,7 +113,7 @@ async def test_worker_failure_is_terminal_and_retryable(
             )
         assert raised.value is failure
 
-    failed = await ctx.runs.get_run(run["run_id"])
+    failed = await ctx.runs.get_run(run["run_id"], user_id="local-user")
     assert failed["status"] == "failed"
     assert failed["finished_at"] is not None
     assert "/private/provider" not in str(failed)
@@ -134,9 +136,13 @@ async def test_dispatch_failure_does_not_leave_queued_work(preparation, monkeypa
     monkeypatch.setattr(
         "application.source.document_preparation_service.create_task", fail_dispatch
     )
-    with pytest.raises(RuntimeError, match="could not be scheduled"):
-        await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
-    runs = await ctx.runs.list_runs(collection_id=ctx.collection_id)
+    with pytest.raises(ServiceUnavailableException, match="could not be scheduled"):
+        await ctx.service.queue_document_preparation(
+            ctx.collection_id, "doc_a", user_id="local-user"
+        )
+    runs = await ctx.runs.list_runs(
+        collection_id=ctx.collection_id, user_id="local-user"
+    )
     assert len(runs) == 1
     assert runs[0]["status"] == "failed"
     assert runs[0]["current_node"] == "dispatch_failed"
@@ -177,9 +183,11 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     extractor = Extractor()
     ctx.profiles._document_profile_extractor = extractor
     monkeypatch.setattr(ctx.service, "_parse_document", parse_document)
-    first = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
+    first = await ctx.service.queue_document_preparation(
+        ctx.collection_id, "doc_a", user_id="local-user"
+    )
     await asyncio.gather(*tuple(ctx.service._active_workers))
-    partial = await ctx.runs.get_run(first["run_id"])
+    partial = await ctx.runs.get_run(first["run_id"], user_id="local-user")
     assert partial["status"] == "partial_success"
     assert partial["warnings"]
     assert partial["nodes"]["document_profile"]["status"] == "failed"
@@ -200,10 +208,12 @@ async def test_classification_retry_reuses_source_not_failed_profile(
             preparation_fingerprint=profile_id,
         )
 
-    retry = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
+    retry = await ctx.service.queue_document_preparation(
+        ctx.collection_id, "doc_a", user_id="local-user"
+    )
     assert retry["run_id"] != first["run_id"]
     await asyncio.gather(*tuple(ctx.service._active_workers))
-    completed = await ctx.runs.get_run(retry["run_id"])
+    completed = await ctx.runs.get_run(retry["run_id"], user_id="local-user")
     assert completed["status"] == "completed"
     assert completed["warnings"] == []
     assert completed["nodes"]["document_profile"]["status"] == "succeeded"
@@ -213,7 +223,9 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     assert await ctx.sources.read_document(ctx.collection_id, "doc_a") == source
     assert parse_calls == 1
     assert extractor.calls == 2
-    reused = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
+    reused = await ctx.service.queue_document_preparation(
+        ctx.collection_id, "doc_a", user_id="local-user"
+    )
     assert reused["run_id"] == retry["run_id"]
     assert not ctx.service._active_workers
 
@@ -227,12 +239,16 @@ async def test_completed_uncertain_classification_is_reusable(preparation, monke
         )
 
     monkeypatch.setattr(ctx.service, "_parse_document", parse_document)
-    first = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
+    first = await ctx.service.queue_document_preparation(
+        ctx.collection_id, "doc_a", user_id="local-user"
+    )
     await asyncio.gather(*tuple(ctx.service._active_workers))
-    profile = await ctx.profiles.read_document_profile(ctx.collection_id, "doc_a")
+    profile = await ctx.profiles.DocumentProfileRepo.read(ctx.collection_id, "doc_a")
     assert profile.profile_status == "completed"
     assert profile.doc_type == "uncertain"
-    assert (await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a"))[
-        "run_id"
-    ] == first["run_id"]
+    assert (
+        await ctx.service.queue_document_preparation(
+            ctx.collection_id, "doc_a", user_id="local-user"
+        )
+    )["run_id"] == first["run_id"]
     assert not ctx.service._active_workers

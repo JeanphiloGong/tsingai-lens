@@ -3,30 +3,34 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 from uuid import uuid4
 
-from application.source.collection_service import CollectionService
+from application.source import collection_service
 from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
 from domain.feedback.dataset_sample import DatasetSample, SampleAction
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.sample_revision import (
-    SampleRevision,
+    PreferenceRevisionContent,
     RevisionContent,
+    SampleRevision,
+    SftRevisionContent,
     content_digest_for,
+    strip_internal_references,
+)
+from exceptions import (
+    ProjectException,
+    RequestInvalidException,
+    ResourceNotFoundException,
 )
 from repositories.analysis_job_repository import (
     DATASET_SAMPLE_BUILD_JOB_TYPE,
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
     AnalysisJob,
 )
-from repositories.feedback_case_repository import FeedbackCaseRepository
-from repositories.feedback_dataset_repository import (
-    FeedbackDatasetRepository,
-    StoredDataset,
-)
+from repositories.feedback_dataset_repository import StoredDataset
 from repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
     DatasetSampleActionConflict,
@@ -38,12 +42,23 @@ from repositories.feedback_dataset_sample_repository import (
 )
 
 
-class FeedbackDatasetError(ValueError):
+class FeedbackDatasetError(RequestInvalidException):
     """A user-correctable dataset request."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(message=reason, data={"code": reason})
 
 
 class FeedbackDatasetConflict(FeedbackDatasetError):
-    """A mutable sample changed after the caller read it."""
+    """Dataset state changed after the caller read it."""
+
+    def __init__(self, reason: str) -> None:
+        ProjectException.__init__(
+            self,
+            code=self.build_code(2, 4),
+            message=reason,
+            data={"code": reason},
+        )
 
 
 @dataclass(frozen=True)
@@ -66,7 +81,9 @@ class DatasetSampleDetail:
 class DatasetCollectionResult:
     """The durable result of explicitly collecting source cases."""
 
-    def __init__(self, *, operation_id: str, items: tuple[CollectedDatasetSample, ...]) -> None:
+    def __init__(
+        self, *, operation_id: str, items: tuple[CollectedDatasetSample, ...]
+    ) -> None:
         self.operation_id = operation_id
         self.items = items
 
@@ -79,482 +96,593 @@ class DatasetCollectionResult:
         return len(self.items) - self.created_count
 
 
-_FORBIDDEN_SPEC_KEYS = frozenset({"api_key", "token", "password", "secret", "credential"})
+_FORBIDDEN_SPEC_KEYS = frozenset(
+    {"api_key", "token", "password", "secret", "credential"}
+)
 
 
-class FeedbackDatasetService:
-    def __init__(
-        self,
-        *,
-        repository: FeedbackDatasetRepository,
-        collection_service: CollectionService,
-        sample_repository: FeedbackDatasetSampleRepository | None = None,
-        case_repository: FeedbackCaseRepository | None = None,
-    ) -> None:
-        self.repository = repository
-        self.collection_service = collection_service
-        self.sample_repository = sample_repository
-        self.case_repository = case_repository
+from repositories.feedback_case_repository import FeedbackCaseRepo
+from repositories.feedback_dataset_repository import FeedbackDatasetRepo
+from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
 
-    async def create_for_user(
-        self,
-        *,
-        user_id: str,
-        collection_id: str,
-        name: str,
-        task_type: str,
-        construction_spec: dict[str, Any],
-    ) -> Dataset:
-        await self.collection_service.get_collection_for_user(collection_id, user_id)
-        if task_type not in DATASET_TASK_TYPES:
-            raise FeedbackDatasetError("dataset_task_type_not_available")
-        cleaned_name = name.strip()
-        if not cleaned_name:
-            raise FeedbackDatasetError("dataset_name_required")
-        if len(cleaned_name) > 120:
-            raise FeedbackDatasetError("dataset_name_too_long")
-        _validate_public_spec(construction_spec)
-        dataset = Dataset(
-            dataset_id=f"fdset_{uuid4().hex[:32]}",
-            collection_id=collection_id,
-            name=cleaned_name,
-            task_type=cast(DatasetTaskType, task_type),
-            construction_spec=deepcopy(construction_spec),
-            spec_version=1,
-            created_by=user_id,
+
+async def create_for_user(
+    *,
+    user_id: str,
+    collection_id: str,
+    name: str,
+    task_type: str,
+    construction_spec: dict[str, Any],
+) -> StoredDataset:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    if task_type not in DATASET_TASK_TYPES:
+        raise FeedbackDatasetError("dataset_task_type_not_available")
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise FeedbackDatasetError("dataset_name_required")
+    if len(cleaned_name) > 120:
+        raise FeedbackDatasetError("dataset_name_too_long")
+    _validate_public_spec(construction_spec)
+    dataset = Dataset(
+        dataset_id=f"fdset_{uuid4().hex[:32]}",
+        collection_id=collection_id,
+        name=cleaned_name,
+        task_type=cast(DatasetTaskType, task_type),
+        construction_spec=deepcopy(construction_spec),
+        spec_version=1,
+        created_by=user_id,
+    )
+    return await FeedbackDatasetRepo.create(dataset)
+
+
+async def read_for_user(*, user_id: str, dataset_id: str) -> Dataset:
+    dataset = await FeedbackDatasetRepo.read(dataset_id)
+    if dataset is None:
+        raise ResourceNotFoundException(
+            "Dataset not found.",
+            data={"code": "dataset_not_found", "dataset_id": dataset_id},
         )
-        return await self.repository.create(dataset)
+    await collection_service.get_collection_for_user(
+        dataset.collection_id,
+        user_id,
+    )
+    return dataset
 
-    async def read_for_user(self, *, user_id: str, dataset_id: str) -> Dataset:
-        dataset = await self.repository.read(dataset_id)
-        if dataset is None:
-            raise FileNotFoundError(f"dataset not found: {dataset_id}")
-        await self.collection_service.get_collection_for_user(
-            dataset.collection_id,
-            user_id,
+
+async def read_record_for_user(*, user_id: str, dataset_id: str) -> StoredDataset:
+    record = await FeedbackDatasetRepo.read_record(dataset_id)
+    if record is None:
+        raise ResourceNotFoundException(
+            "Dataset not found.",
+            data={"code": "dataset_not_found", "dataset_id": dataset_id},
         )
-        return dataset
+    await collection_service.get_collection_for_user(
+        record.dataset.collection_id, user_id
+    )
+    return record
 
-    async def read_record_for_user(
-        self, *, user_id: str, dataset_id: str
-    ) -> StoredDataset:
-        record = await self.repository.read_record(dataset_id)
-        if record is None:
-            raise FileNotFoundError(f"dataset not found: {dataset_id}")
-        await self.collection_service.get_collection_for_user(
-            record.dataset.collection_id, user_id
+
+async def list_records_for_user(
+    *,
+    user_id: str,
+    collection_id: str,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[StoredDataset, ...]:
+    if limit < 1 or limit > 200 or offset < 0:
+        raise FeedbackDatasetError("pagination_invalid")
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    return await FeedbackDatasetRepo.list_records_for_collection(
+        collection_id=collection_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+async def collect_cases_for_user(
+    *,
+    user_id: str,
+    dataset_id: str,
+    source_case_ids: tuple[str, ...],
+) -> DatasetCollectionResult:
+    """Freeze selected cases and enqueue one build job per new sample."""
+
+    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    case_ids = tuple(
+        dict.fromkeys(
+            str(item).strip() for item in source_case_ids if str(item).strip()
         )
-        return record
+    )
+    if not case_ids:
+        raise FeedbackDatasetError("source_case_ids_required")
+    if len(case_ids) > 1000:
+        raise FeedbackDatasetError("source_case_selection_too_large")
 
-    async def list_records_for_user(
-        self,
-        *,
-        user_id: str,
-        collection_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> tuple[StoredDataset, ...]:
-        if limit < 1 or limit > 200 or offset < 0:
-            raise FeedbackDatasetError("pagination_invalid")
-        await self.collection_service.get_collection_for_user(collection_id, user_id)
-        return await self.repository.list_records_for_collection(
-            collection_id=collection_id,
-            limit=limit,
-            offset=offset,
-        )
-
-    async def collect_cases_for_user(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        source_case_ids: tuple[str, ...],
-    ) -> DatasetCollectionResult:
-        """Freeze selected cases and enqueue one build job per new sample."""
-
-        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        if self.sample_repository is None or self.case_repository is None:
-            raise FeedbackDatasetError("dataset_samples_unavailable")
-        case_ids = tuple(dict.fromkeys(str(item).strip() for item in source_case_ids if str(item).strip()))
-        if not case_ids:
-            raise FeedbackDatasetError("source_case_ids_required")
-        if len(case_ids) > 1000:
-            raise FeedbackDatasetError("source_case_selection_too_large")
-
-        now = datetime.now(timezone.utc).isoformat()
-        samples: list[DatasetSample] = []
-        jobs: list[AnalysisJob] = []
-        for case_id in case_ids:
-            case = await self.case_repository.read_case(case_id)
-            if case is None or case.collection_id != dataset.collection_id:
-                raise FileNotFoundError(f"feedback case not found: {case_id}")
-            if case.status == "withdrawn":
-                raise FeedbackDatasetError("source_case_withdrawn")
-            source_digest = source_digest_for_case(case)
-            sample_id = f"sample_{uuid4().hex[:32]}"
-            generation = 1
-            job_id = f"job_{uuid4().hex[:32]}"
-            idempotency_key = sample_build_idempotency_key(
-                sample_id=sample_id,
-                generation=generation,
-                spec_version=dataset.spec_version,
-                source_digest=source_digest,
-            )
-            samples.append(
-                DatasetSample.pending(
-                    sample_id=sample_id,
-                    dataset_id=dataset.dataset_id,
-                    source_case_id=case_id,
-                    source_digest=source_digest,
-                    active_job_id=job_id,
-                    now=now,
-                )
-            )
-            jobs.append(
-                AnalysisJob(
-                    job_id=job_id,
-                    job_type=DATASET_SAMPLE_BUILD_JOB_TYPE,
-                    payload_version=DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
-                    payload={
-                        "dataset_id": dataset.dataset_id,
-                        "sample_id": sample_id,
-                        "generation": generation,
-                        "spec_version": dataset.spec_version,
-                        "source_digest": source_digest,
-                    },
-                    status="pending",
-                    idempotency_key=idempotency_key,
-                    available_at=now,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-        try:
-            collected = await self.sample_repository.collect(samples=tuple(samples), jobs=tuple(jobs))
-        except DatasetSampleRevisionConflict as exc:
-            raise FeedbackDatasetConflict(str(exc)) from exc
-        return DatasetCollectionResult(
-            operation_id=f"collect_{uuid4().hex[:24]}",
-            items=collected,
-        )
-
-    async def list_samples_for_user(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        status: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> DatasetSampleListResult:
-        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_supported(dataset)
-        repository = self._sample_repository()
-        if limit < 1 or limit > 200 or offset < 0:
-            raise FeedbackDatasetError("pagination_invalid")
-        allowed_statuses = {
-            "pending",
-            "building",
-            "needs_confirmation",
-            "needs_input",
-            "confirmed",
-            "discarded",
-            "build_failed",
-        }
-        if status is not None and status not in allowed_statuses:
-            raise FeedbackDatasetError("sample_status_invalid")
-        items = await repository.list_samples(
-            dataset_id=dataset_id,
-            status=status,
-            limit=limit,
-            offset=offset,
-        )
-        total = await repository.count_samples(dataset_id=dataset_id, status=status)
-        return DatasetSampleListResult(items=items, total=total, limit=limit, offset=offset)
-
-    async def read_sample_for_user(
-        self, *, user_id: str, dataset_id: str, sample_id: str
-    ) -> DatasetSampleDetail:
-        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_supported(dataset)
-        repository = self._sample_repository()
-        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
-        if sample is None:
-            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
-        current_revision = await self._read_related_revision(
-            repository, sample.current_revision_id, sample_id, "sample_current_revision_missing"
-        )
-        confirmed_revision = await self._read_related_revision(
-            repository,
-            sample.confirmed_revision_id,
-            sample_id,
-            "sample_confirmed_revision_missing",
-        )
-        case_repository = self._case_repository()
-        source_case = await case_repository.read_case(sample.source_case_id)
-        if source_case is None or source_case.collection_id != dataset.collection_id:
-            raise FeedbackDatasetError("sample_source_case_missing")
-        return DatasetSampleDetail(
-            dataset=dataset,
-            sample=sample,
-            current_revision=current_revision,
-            confirmed_revision=confirmed_revision,
-            source_case=source_case,
-        )
-
-    async def update_sample(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        sample_id: str,
-        expected_revision_id: str | None,
-        content: RevisionContent,
-        expected_generation: int | None = None,
-    ) -> DatasetSample:
-        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_supported(dataset)
-        repository = self._sample_repository()
-        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
-        if sample is None:
-            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
-        if sample.current_revision_id != expected_revision_id:
-            raise FeedbackDatasetConflict("sample_revision_stale")
-        if expected_generation is not None and sample.generation != expected_generation:
-            raise FeedbackDatasetConflict("sample_revision_stale")
-        if sample.status not in {"needs_input", "needs_confirmation", "confirmed"}:
-            raise FeedbackDatasetError("sample_not_editable")
-        if expected_revision_id is None and expected_generation is None:
-            raise FeedbackDatasetError("sample_generation_required")
-        current = await repository.read_revision(expected_revision_id) if expected_revision_id else None
-        if expected_revision_id and (current is None or current.sample_id != sample_id):
-            raise FeedbackDatasetError("sample_current_revision_missing")
-        parsed = content
-        if parsed.schema_version != _schema_for_task(dataset.task_type):
-            raise FeedbackDatasetError("sample_content_task_type_mismatch")
-        case = await self._case_repository().read_case(sample.source_case_id)
+    now = datetime.now(timezone.utc).isoformat()
+    samples: list[DatasetSample] = []
+    jobs: list[AnalysisJob] = []
+    for case_id in case_ids:
+        case = await FeedbackCaseRepo.read_case(case_id)
         if case is None or case.collection_id != dataset.collection_id:
-            raise FeedbackDatasetError("sample_source_case_missing")
+            raise ResourceNotFoundException(
+                "Feedback case not found.",
+                data={"code": "feedback_case_not_found", "case_id": case_id},
+            )
         if case.status == "withdrawn":
-            raise FeedbackDatasetError("sample_source_case_withdrawn")
-        if source_digest_for_case(case) != sample.source_digest:
-            raise FeedbackDatasetConflict("sample_source_stale")
-        snapshot = case.context_snapshot
-        prior_provenance = current.provenance if current else {}
-        source_records = [
-            *prior_provenance.get("evidence_records", []),
-            *snapshot.get("inspected_sources", []),
-            *snapshot.get("requested_scope", []),
-        ]
-        # Bind edited excerpts to exact known text, never retain an old source
-        # identity for replacement text supplied by the annotator.
-        evidence_records = []
-        for item in parsed.evidence:
-            original = next((record for record in source_records if isinstance(record, Mapping)
-                and str(record.get("document_title") or record.get("title") or "").strip() == item["document_title"]
-                and str(record.get("quote") or record.get("text") or record.get("content") or "").strip() == item["text"]), None)
-            evidence_records.append({
-                **(dict(original) if original else {}),
-                "document_title": item["document_title"], "quote": item["text"],
-                "audit_basis": "human_selected_case_evidence" if original else "human_supplied_excerpt",
-                "annotated_by": user_id,
-            })
-        provenance = {
-            **prior_provenance,
-            "collection_id": dataset.collection_id, "source_case_id": case.case_id,
-            "session_id": case.session_id, "anchor_message_id": case.anchor_message_id,
-            "corrected_message_id": snapshot.get("corrected_message_id"),
-            "evidence_records": evidence_records,
-            "source_refs": list(dict.fromkeys(str(item.get("source_ref") or item.get("table_ref"))
-                for item in evidence_records if item.get("source_ref") or item.get("table_ref"))),
-            "edited_from_revision_id": current.revision_id if current else None,
-            "edited_by": user_id,
-        }
-        now = datetime.now(timezone.utc).isoformat()
-        revision = SampleRevision(
-            revision_id=f"revision_{uuid4().hex[:32]}",
+            raise FeedbackDatasetError("source_case_withdrawn")
+        source_digest = source_digest_for_case(case)
+        sample_id = f"sample_{uuid4().hex[:32]}"
+        generation = 1
+        job_id = f"job_{uuid4().hex[:32]}"
+        idempotency_key = sample_build_idempotency_key(
             sample_id=sample_id,
-            revision_no=current.revision_no + 1 if current else 1,
-            author_kind="human",
-            content=parsed,
-            content_digest=content_digest_for(parsed),
-            input_digest=sample.source_digest,
-            construction_spec_version=dataset.spec_version,
-            provenance=provenance,
-            created_at=now,
-            created_by=user_id,
-            job_id=None,
+            generation=generation,
+            spec_version=dataset.spec_version,
+            source_digest=source_digest,
         )
-        try:
-            return await repository.append_human_revision(
+        samples.append(
+            DatasetSample.pending(
                 sample_id=sample_id,
-                expected_revision_id=expected_revision_id,
-                expected_generation=sample.generation,
-                expected_source_digest=sample.source_digest,
-                revision=revision,
-                updated_at=now,
+                dataset_id=dataset.dataset_id,
+                source_case_id=case_id,
+                source_digest=source_digest,
+                active_job_id=job_id,
+                now=now,
             )
-        except DatasetSampleRevisionConflict as exc:
-            raise FeedbackDatasetConflict(str(exc)) from exc
-
-    async def confirm_sample(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        sample_id: str,
-        expected_revision_id: str,
-    ) -> DatasetSample:
-        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_supported(dataset)
-        repository = self._sample_repository()
-        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
-        if sample is None:
-            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
-        if sample.current_revision_id != expected_revision_id:
-            raise FeedbackDatasetConflict("sample_revision_stale")
-        revision = await repository.read_revision(expected_revision_id)
-        if revision is None or revision.sample_id != sample_id:
-            raise FeedbackDatasetError("sample_current_revision_missing")
-        if revision.content.schema_version != _schema_for_task(dataset.task_type):
-            raise FeedbackDatasetError("sample_content_invalid")
-        case = await self._case_repository().read_case(sample.source_case_id)
-        if case is None or case.collection_id != dataset.collection_id:
-            raise FeedbackDatasetError("sample_source_case_missing")
-        if case.status == "withdrawn":
-            raise FeedbackDatasetError("sample_source_case_withdrawn")
-        if source_digest_for_case(case) != sample.source_digest:
-            raise FeedbackDatasetConflict("sample_source_stale")
-        now = datetime.now(timezone.utc).isoformat()
-        try:
-            return await repository.confirm_revision(
-                sample_id=sample_id,
-                expected_revision_id=expected_revision_id,
-                expected_source_digest=sample.source_digest,
-                confirmed_by=user_id,
-                confirmed_at=now,
-            )
-        except DatasetSampleRevisionConflict as exc:
-            raise FeedbackDatasetConflict(str(exc)) from exc
-
-    async def apply_sample_action_for_user(
-        self,
-        *,
-        user_id: str,
-        dataset_id: str,
-        sample_id: str,
-        action: SampleAction,
-        expected_revision_id: str | None,
-        reason: str | None,
-        idempotency_key: str,
-    ) -> DatasetSample:
-        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_supported(dataset)
-        repository = self._sample_repository()
-        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
-        if sample is None:
-            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
-        if action not in {"rebuild", "retry", "discard", "restore"}:
-            raise FeedbackDatasetError("sample_action_invalid")
-        cleaned_reason = (reason or "").strip() or None
-        if action == "rebuild" and not cleaned_reason:
-            raise FeedbackDatasetError("sample_rebuild_reason_required")
-        if cleaned_reason and len(cleaned_reason) > 2000:
-            raise FeedbackDatasetError("sample_action_reason_too_long")
-        if not idempotency_key.strip() or len(idempotency_key) > 128:
-            raise FeedbackDatasetError("sample_action_key_invalid")
-
-        now = datetime.now(timezone.utc).isoformat()
-        source_digest: str | None = None
-        if action in {"rebuild", "retry", "restore"}:
-            case = await self._case_repository().read_case(sample.source_case_id)
-            if case is None or case.collection_id != dataset.collection_id:
-                raise FeedbackDatasetError("sample_source_case_missing")
-            if case.status == "withdrawn":
-                raise FeedbackDatasetError("sample_source_case_withdrawn")
-            source_digest = source_digest_for_case(case)
-
-        job: AnalysisJob | None = None
-        if action in {"rebuild", "retry"}:
-            assert source_digest is not None
-            generation = sample.generation + 1
-            payload = {
-                "dataset_id": dataset_id,
-                "sample_id": sample_id,
-                "generation": generation,
-                "spec_version": dataset.spec_version,
-                "source_digest": source_digest,
-            }
-            if cleaned_reason:
-                payload["review_note"] = cleaned_reason
-            job = AnalysisJob(
-                job_id=f"job_{uuid4().hex[:32]}",
+        )
+        jobs.append(
+            AnalysisJob(
+                job_id=job_id,
                 job_type=DATASET_SAMPLE_BUILD_JOB_TYPE,
                 payload_version=DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
-                payload=payload,
+                payload={
+                    "dataset_id": dataset.dataset_id,
+                    "sample_id": sample_id,
+                    "generation": generation,
+                    "spec_version": dataset.spec_version,
+                    "source_digest": source_digest,
+                },
                 status="pending",
-                idempotency_key=sample_build_idempotency_key(
-                    sample_id=sample_id,
-                    generation=generation,
-                    spec_version=dataset.spec_version,
-                    source_digest=source_digest,
-                ),
+                idempotency_key=idempotency_key,
                 available_at=now,
                 created_at=now,
                 updated_at=now,
             )
-        try:
-            return await repository.apply_action(
-                dataset_id=dataset_id,
-                sample_id=sample_id,
-                expected_revision_id=expected_revision_id,
-                expected_generation=sample.generation,
-                action=action,
-                reason=cleaned_reason,
-                actor_id=user_id,
-                idempotency_key=idempotency_key,
-                request_digest=sample_action_digest(
-                    action=action,
-                    expected_revision_id=expected_revision_id,
-                    reason=cleaned_reason,
-                ),
-                source_digest=source_digest,
-                job=job,
-                now=now,
+        )
+    try:
+        collected = await FeedbackDatasetSampleRepo.collect(
+            samples=tuple(samples), jobs=tuple(jobs)
+        )
+    except DatasetSampleRevisionConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
+    return DatasetCollectionResult(
+        operation_id=f"collect_{uuid4().hex[:24]}",
+        items=collected,
+    )
+
+
+async def list_samples_for_user(
+    *,
+    user_id: str,
+    dataset_id: str,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> DatasetSampleListResult:
+    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    _require_supported(dataset)
+    repository = FeedbackDatasetSampleRepo
+    if limit < 1 or limit > 200 or offset < 0:
+        raise FeedbackDatasetError("pagination_invalid")
+    allowed_statuses = {
+        "pending",
+        "building",
+        "needs_confirmation",
+        "needs_input",
+        "confirmed",
+        "discarded",
+        "build_failed",
+    }
+    if status is not None and status not in allowed_statuses:
+        raise FeedbackDatasetError("sample_status_invalid")
+    items = await repository.list_samples(
+        dataset_id=dataset_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    total = await repository.count_samples(dataset_id=dataset_id, status=status)
+    return DatasetSampleListResult(items=items, total=total, limit=limit, offset=offset)
+
+
+async def read_sample_for_user(
+    *, user_id: str, dataset_id: str, sample_id: str
+) -> DatasetSampleDetail:
+    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    _require_supported(dataset)
+    repository = FeedbackDatasetSampleRepo
+    sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+    if sample is None:
+        raise ResourceNotFoundException(
+            "Dataset sample not found.",
+            data={
+                "code": "dataset_sample_not_found",
+                "dataset_id": dataset_id,
+                "sample_id": sample_id,
+            },
+        )
+    current_revision = await _read_related_revision(
+        repository,
+        sample.current_revision_id,
+        sample_id,
+        "sample_current_revision_missing",
+    )
+    confirmed_revision = await _read_related_revision(
+        repository,
+        sample.confirmed_revision_id,
+        sample_id,
+        "sample_confirmed_revision_missing",
+    )
+    case_repository = FeedbackCaseRepo
+    source_case = await case_repository.read_case(sample.source_case_id)
+    if source_case is None or source_case.collection_id != dataset.collection_id:
+        raise FeedbackDatasetError("sample_source_case_missing")
+    return DatasetSampleDetail(
+        dataset=dataset,
+        sample=sample,
+        current_revision=current_revision,
+        confirmed_revision=confirmed_revision,
+        source_case=source_case,
+    )
+
+
+async def update_sample(
+    *,
+    user_id: str,
+    dataset_id: str,
+    sample_id: str,
+    expected_revision_id: str | None,
+    content: RevisionContent,
+    expected_generation: int | None = None,
+) -> DatasetSample:
+    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    _require_supported(dataset)
+    repository = FeedbackDatasetSampleRepo
+    sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+    if sample is None:
+        raise ResourceNotFoundException(
+            "Dataset sample not found.",
+            data={
+                "code": "dataset_sample_not_found",
+                "dataset_id": dataset_id,
+                "sample_id": sample_id,
+            },
+        )
+    if sample.current_revision_id != expected_revision_id:
+        raise FeedbackDatasetConflict("sample_revision_stale")
+    if expected_generation is not None and sample.generation != expected_generation:
+        raise FeedbackDatasetConflict("sample_revision_stale")
+    if sample.status not in {"needs_input", "needs_confirmation", "confirmed"}:
+        raise FeedbackDatasetError("sample_not_editable")
+    if expected_revision_id is None and expected_generation is None:
+        raise FeedbackDatasetError("sample_generation_required")
+    current = (
+        await repository.read_revision(expected_revision_id)
+        if expected_revision_id
+        else None
+    )
+    if expected_revision_id and (current is None or current.sample_id != sample_id):
+        raise FeedbackDatasetError("sample_current_revision_missing")
+    # Human edits and non-HTTP callers obey the same model-facing text boundary.
+    messages = tuple(
+        {"role": item["role"], "content": strip_internal_references(item["content"])}
+        for item in content.messages
+    )
+    context = tuple(
+        {
+            "document_title": strip_internal_references(item["document_title"]),
+            "text": strip_internal_references(item["text"]),
+        }
+        for item in content.context
+    )
+    evidence = tuple(
+        {
+            "document_title": strip_internal_references(item["document_title"]),
+            "text": strip_internal_references(item["text"]),
+        }
+        for item in content.evidence
+    )
+    try:
+        if isinstance(content, SftRevisionContent):
+            parsed = replace(
+                content,
+                messages=messages,
+                context=context,
+                evidence=evidence,
+                target=strip_internal_references(content.target),
             )
-        except DatasetSampleActionConflict as exc:
-            raise FeedbackDatasetConflict(str(exc)) from exc
-        except ValueError as exc:
-            raise FeedbackDatasetError(str(exc)) from exc
+        elif isinstance(content, PreferenceRevisionContent):
+            parsed = replace(
+                content,
+                messages=messages,
+                context=context,
+                evidence=evidence,
+                response_a=strip_internal_references(content.response_a),
+                response_b=strip_internal_references(content.response_b),
+                rationale=strip_internal_references(content.rationale),
+            )
+        else:
+            parsed = replace(
+                content,
+                messages=messages,
+                context=context,
+                evidence=evidence,
+                reference=strip_internal_references(content.reference),
+                criteria=tuple(
+                    strip_internal_references(item) for item in content.criteria
+                ),
+            )
+    except ValueError as exc:
+        raise RequestInvalidException(
+            str(exc), data={"code": "sample_content_invalid"}
+        ) from exc
+    if parsed.schema_version != _schema_for_task(dataset.task_type):
+        raise FeedbackDatasetError("sample_content_task_type_mismatch")
+    case = await FeedbackCaseRepo.read_case(sample.source_case_id)
+    if case is None or case.collection_id != dataset.collection_id:
+        raise FeedbackDatasetError("sample_source_case_missing")
+    if case.status == "withdrawn":
+        raise FeedbackDatasetError("sample_source_case_withdrawn")
+    if source_digest_for_case(case) != sample.source_digest:
+        raise FeedbackDatasetConflict("sample_source_stale")
+    snapshot = case.context_snapshot
+    prior_provenance = current.provenance if current else {}
+    source_records = [
+        *prior_provenance.get("evidence_records", []),
+        *snapshot.get("inspected_sources", []),
+        *snapshot.get("requested_scope", []),
+    ]
+    # Bind edited excerpts to exact known text, never retain an old source
+    # identity for replacement text supplied by the annotator.
+    evidence_records = []
+    for item in parsed.evidence:
+        original = next(
+            (
+                record
+                for record in source_records
+                if isinstance(record, Mapping)
+                and str(
+                    record.get("document_title") or record.get("title") or ""
+                ).strip()
+                == item["document_title"]
+                and str(
+                    record.get("quote")
+                    or record.get("text")
+                    or record.get("content")
+                    or ""
+                ).strip()
+                == item["text"]
+            ),
+            None,
+        )
+        evidence_records.append(
+            {
+                **(dict(original) if original else {}),
+                "document_title": item["document_title"],
+                "quote": item["text"],
+                "audit_basis": (
+                    "human_selected_case_evidence"
+                    if original
+                    else "human_supplied_excerpt"
+                ),
+                "annotated_by": user_id,
+            }
+        )
+    provenance = {
+        **prior_provenance,
+        "collection_id": dataset.collection_id,
+        "source_case_id": case.case_id,
+        "session_id": case.session_id,
+        "anchor_message_id": case.anchor_message_id,
+        "corrected_message_id": snapshot.get("corrected_message_id"),
+        "evidence_records": evidence_records,
+        "source_refs": list(
+            dict.fromkeys(
+                str(item.get("source_ref") or item.get("table_ref"))
+                for item in evidence_records
+                if item.get("source_ref") or item.get("table_ref")
+            )
+        ),
+        "edited_from_revision_id": current.revision_id if current else None,
+        "edited_by": user_id,
+    }
+    now = datetime.now(timezone.utc).isoformat()
+    revision = SampleRevision(
+        revision_id=f"revision_{uuid4().hex[:32]}",
+        sample_id=sample_id,
+        revision_no=current.revision_no + 1 if current else 1,
+        author_kind="human",
+        content=parsed,
+        content_digest=content_digest_for(parsed),
+        input_digest=sample.source_digest,
+        construction_spec_version=dataset.spec_version,
+        provenance=provenance,
+        created_at=now,
+        created_by=user_id,
+        job_id=None,
+    )
+    try:
+        return await repository.append_human_revision(
+            sample_id=sample_id,
+            expected_revision_id=expected_revision_id,
+            expected_generation=sample.generation,
+            expected_source_digest=sample.source_digest,
+            revision=revision,
+            updated_at=now,
+        )
+    except DatasetSampleRevisionConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
 
-    async def _read_related_revision(
-        self,
-        repository: FeedbackDatasetSampleRepository,
-        revision_id: str | None,
-        sample_id: str,
-        missing_code: str,
-    ) -> SampleRevision | None:
-        if not revision_id:
-            return None
-        revision = await repository.read_revision(revision_id)
-        if revision is None or revision.sample_id != sample_id:
-            raise FeedbackDatasetError(missing_code)
-        return revision
 
-    def _sample_repository(self) -> FeedbackDatasetSampleRepository:
-        if self.sample_repository is None:
-            raise FeedbackDatasetError("dataset_samples_unavailable")
-        return self.sample_repository
+async def confirm_sample(
+    *,
+    user_id: str,
+    dataset_id: str,
+    sample_id: str,
+    expected_revision_id: str,
+) -> DatasetSample:
+    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    _require_supported(dataset)
+    repository = FeedbackDatasetSampleRepo
+    sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+    if sample is None:
+        raise ResourceNotFoundException(
+            "Dataset sample not found.",
+            data={
+                "code": "dataset_sample_not_found",
+                "dataset_id": dataset_id,
+                "sample_id": sample_id,
+            },
+        )
+    if sample.current_revision_id != expected_revision_id:
+        raise FeedbackDatasetConflict("sample_revision_stale")
+    revision = await repository.read_revision(expected_revision_id)
+    if revision is None or revision.sample_id != sample_id:
+        raise FeedbackDatasetError("sample_current_revision_missing")
+    if revision.content.schema_version != _schema_for_task(dataset.task_type):
+        raise FeedbackDatasetError("sample_content_invalid")
+    case = await FeedbackCaseRepo.read_case(sample.source_case_id)
+    if case is None or case.collection_id != dataset.collection_id:
+        raise FeedbackDatasetError("sample_source_case_missing")
+    if case.status == "withdrawn":
+        raise FeedbackDatasetError("sample_source_case_withdrawn")
+    if source_digest_for_case(case) != sample.source_digest:
+        raise FeedbackDatasetConflict("sample_source_stale")
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        return await repository.confirm_revision(
+            sample_id=sample_id,
+            expected_revision_id=expected_revision_id,
+            expected_source_digest=sample.source_digest,
+            confirmed_by=user_id,
+            confirmed_at=now,
+        )
+    except DatasetSampleRevisionConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
 
-    def _case_repository(self) -> FeedbackCaseRepository:
-        if self.case_repository is None:
-            raise FeedbackDatasetError("dataset_samples_unavailable")
-        return self.case_repository
 
-    @staticmethod
-    def _require_supported(dataset: Dataset) -> None:
-        if dataset.task_type not in DATASET_TASK_TYPES:
-            raise FeedbackDatasetError("dataset_task_type_not_available")
+async def apply_sample_action_for_user(
+    *,
+    user_id: str,
+    dataset_id: str,
+    sample_id: str,
+    action: SampleAction,
+    expected_revision_id: str | None,
+    reason: str | None,
+    idempotency_key: str,
+) -> DatasetSample:
+    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    _require_supported(dataset)
+    repository = FeedbackDatasetSampleRepo
+    sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+    if sample is None:
+        raise ResourceNotFoundException(
+            "Dataset sample not found.",
+            data={
+                "code": "dataset_sample_not_found",
+                "dataset_id": dataset_id,
+                "sample_id": sample_id,
+            },
+        )
+    if action not in {"rebuild", "retry", "discard", "restore"}:
+        raise FeedbackDatasetError("sample_action_invalid")
+    cleaned_reason = (reason or "").strip() or None
+    if action == "rebuild" and not cleaned_reason:
+        raise FeedbackDatasetError("sample_rebuild_reason_required")
+    if cleaned_reason and len(cleaned_reason) > 2000:
+        raise FeedbackDatasetError("sample_action_reason_too_long")
+    if not idempotency_key.strip() or len(idempotency_key) > 128:
+        raise FeedbackDatasetError("sample_action_key_invalid")
+
+    now = datetime.now(timezone.utc).isoformat()
+    source_digest: str | None = None
+    if action in {"rebuild", "retry", "restore"}:
+        case = await FeedbackCaseRepo.read_case(sample.source_case_id)
+        if case is None or case.collection_id != dataset.collection_id:
+            raise FeedbackDatasetError("sample_source_case_missing")
+        if case.status == "withdrawn":
+            raise FeedbackDatasetError("sample_source_case_withdrawn")
+        source_digest = source_digest_for_case(case)
+
+    job: AnalysisJob | None = None
+    if action in {"rebuild", "retry"}:
+        assert source_digest is not None
+        generation = sample.generation + 1
+        payload = {
+            "dataset_id": dataset_id,
+            "sample_id": sample_id,
+            "generation": generation,
+            "spec_version": dataset.spec_version,
+            "source_digest": source_digest,
+        }
+        if cleaned_reason:
+            payload["review_note"] = cleaned_reason
+        job = AnalysisJob(
+            job_id=f"job_{uuid4().hex[:32]}",
+            job_type=DATASET_SAMPLE_BUILD_JOB_TYPE,
+            payload_version=DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
+            payload=payload,
+            status="pending",
+            idempotency_key=sample_build_idempotency_key(
+                sample_id=sample_id,
+                generation=generation,
+                spec_version=dataset.spec_version,
+                source_digest=source_digest,
+            ),
+            available_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+    try:
+        return await repository.apply_action(
+            dataset_id=dataset_id,
+            sample_id=sample_id,
+            expected_revision_id=expected_revision_id,
+            expected_generation=sample.generation,
+            action=action,
+            reason=cleaned_reason,
+            actor_id=user_id,
+            idempotency_key=idempotency_key,
+            request_digest=sample_action_digest(
+                action=action,
+                expected_revision_id=expected_revision_id,
+                reason=cleaned_reason,
+            ),
+            source_digest=source_digest,
+            job=job,
+            now=now,
+        )
+    except DatasetSampleActionConflict as exc:
+        raise FeedbackDatasetConflict(str(exc)) from exc
+
+
+async def _read_related_revision(
+    repository: FeedbackDatasetSampleRepository,
+    revision_id: str | None,
+    sample_id: str,
+    missing_code: str,
+) -> SampleRevision | None:
+    if not revision_id:
+        return None
+    revision = await repository.read_revision(revision_id)
+    if revision is None or revision.sample_id != sample_id:
+        raise FeedbackDatasetError(missing_code)
+    return revision
+
+
+def _require_supported(dataset: Dataset) -> None:
+    if dataset.task_type not in DATASET_TASK_TYPES:
+        raise FeedbackDatasetError("dataset_task_type_not_available")
 
 
 def _schema_for_task(task_type: DatasetTaskType) -> str:
@@ -588,5 +716,14 @@ __all__ = [
     "DatasetSampleListResult",
     "FeedbackDatasetConflict",
     "FeedbackDatasetError",
-    "FeedbackDatasetService",
+    "create_for_user",
+    "read_for_user",
+    "read_record_for_user",
+    "list_records_for_user",
+    "collect_cases_for_user",
+    "list_samples_for_user",
+    "read_sample_for_user",
+    "update_sample",
+    "confirm_sample",
+    "apply_sample_action_for_user",
 ]

@@ -3,26 +3,24 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
-from domain.core.scientific_fact import (
-    ScientificAttribute,
-    ScientificVariable,
-)
-
-from application.core.objectives.analysis.experiment_finding_synthesis import (
-    ExperimentFindingSynthesisService,
+from application.core.objectives.analysis import (
+    experiment_finding_synthesis as experiment_finding_synthesis_service,
 )
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
-    SourceReference,
     ExperimentalVariant,
-    ExperimentTestCondition,
-    ExperimentMeasurementResult,
     ExperimentComparison,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
     PaperExperimentRevision,
+    SourceReference,
 )
 from domain.core.research_objective import (
     ResearchObjective,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificVariable,
 )
 
 
@@ -173,19 +171,19 @@ def _revision(
 
 def _selection(experiment_id: str, suffix: str) -> ObjectiveExperimentSelection:
     return ObjectiveExperimentSelection(
-        selection_id=f'selection-{suffix}',
-        objective_id='objective-1',
+        selection_id=f"selection-{suffix}",
+        objective_id="objective-1",
         analysis_version=1,
         experiment_id=experiment_id,
         experiment_version=1,
-        outcome='elongation',
-        measurement_keys=('m-np', 'm-p150'),
-        comparison_keys=('c-preheat',),
+        outcome="elongation",
+        measurement_keys=("m-np", "m-p150"),
+        comparison_keys=("c-preheat",),
     )
 
 
 def _synthesize(revisions, selections):
-    return ExperimentFindingSynthesisService().synthesize(
+    return experiment_finding_synthesis_service.synthesize(
         collection_id="collection-1",
         objective=_objective(),
         analysis_version=1,
@@ -255,7 +253,9 @@ def test_groups_aligned_cross_paper_comparisons_and_reports_agreement() -> None:
     assert result.findings[0].comparison_group_ids == (result.groups[0].group_id,)
 
 
-@pytest.mark.parametrize("direction", ["increase", "decrease", "no_change", "mixed", "unknown"])
+@pytest.mark.parametrize(
+    "direction", ["increase", "decrease", "no_change", "mixed", "unknown"]
+)
 def test_synthesis_preserves_known_directions_and_skips_unknown(direction):
     result = _synthesize(
         (_revision("experiment-a", "paper-a", direction=direction),),
@@ -277,21 +277,42 @@ def test_synthesis_keeps_case_distinct_fixed_keys_when_intersecting_conditions()
     revision = replace(
         revision,
         variants=(
-            replace(first, variant_key="V", state=(ScientificAttribute("orientation", "horizontal"),)),
-            replace(second, variant_key="v", state=(ScientificAttribute("orientation", "vertical"),)),
+            replace(
+                first,
+                variant_key="V",
+                state=(ScientificAttribute("orientation", "horizontal"),),
+            ),
+            replace(
+                second,
+                variant_key="v",
+                state=(ScientificAttribute("orientation", "vertical"),),
+            ),
         ),
         measurements=(
-            replace(measurements[0], measurement_key="M", variant_key="V", test_key="T"),
-            replace(measurements[1], measurement_key="m", variant_key="v", test_key="t"),
+            replace(
+                measurements[0], measurement_key="M", variant_key="V", test_key="T"
+            ),
+            replace(
+                measurements[1], measurement_key="m", variant_key="v", test_key="t"
+            ),
         ),
         test_conditions=(
             replace(test, test_key="T"),
-            replace(test, test_key="t", parameters=(ScientificAttribute("temperature", 80, "C"),)),
+            replace(
+                test,
+                test_key="t",
+                parameters=(ScientificAttribute("temperature", 80, "C"),),
+            ),
         ),
-        comparisons=(replace(
-            comparison, baseline_variant_key="V", target_variant_key="v",
-            baseline_measurement_keys=("M",), target_measurement_keys=("m",),
-        ),),
+        comparisons=(
+            replace(
+                comparison,
+                baseline_variant_key="V",
+                target_variant_key="v",
+                baseline_measurement_keys=("M",),
+                target_measurement_keys=("m",),
+            ),
+        ),
     )
     selection = replace(_selection("experiment-a", "a"), measurement_keys=("M", "m"))
 
@@ -301,7 +322,10 @@ def test_synthesis_keeps_case_distinct_fixed_keys_when_intersecting_conditions()
     context = result.findings[0].scientific_context
     assert context.sample == ()
     assert all(attribute.name != "temperature" for attribute in context.test)
-    assert any(attribute.name == "test_type" and attribute.value == "tensile" for attribute in context.test)
+    assert any(
+        attribute.name == "test_type" and attribute.value == "tensile"
+        for attribute in context.test
+    )
 
 
 def test_preserves_condition_dependent_directions_without_claiming_conflict() -> None:
@@ -344,18 +368,22 @@ def test_keeps_joint_changes_out_of_single_factor_causation() -> None:
     assert finding.factors == ("preheat", "scan speed")
     assert finding.attribution_scope == "joint_effect"
     assert finding.assertion_strength == "associative"
-    assert any("Multiple factors changed together" in item for item in finding.limitations)
+    assert any(
+        "Multiple factors changed together" in item for item in finding.limitations
+    )
 
 
-def test_does_not_merge_incompatible_methods_or_invent_measurement_only_finding() -> None:
+def test_does_not_merge_incompatible_methods_or_invent_measurement_only_finding() -> (
+    None
+):
     measurement_only = ObjectiveExperimentSelection(
-        selection_id='selection-measurement',
-        objective_id='objective-1',
+        selection_id="selection-measurement",
+        objective_id="objective-1",
         analysis_version=1,
-        experiment_id='experiment-c',
+        experiment_id="experiment-c",
         experiment_version=1,
-        outcome='elongation',
-        measurement_keys=('m-np', 'm-p150'),
+        outcome="elongation",
+        measurement_keys=("m-np", "m-p150"),
     )
     result = _synthesize(
         (
@@ -373,7 +401,9 @@ def test_does_not_merge_incompatible_methods_or_invent_measurement_only_finding(
     assert result.groups == ()
     assert len(result.findings) == 2
     assert all(item.synthesis_status == "single_study" for item in result.findings)
-    assert all("selection-measurement" not in item.selection_ids for item in result.findings)
+    assert all(
+        "selection-measurement" not in item.selection_ids for item in result.findings
+    )
 
 
 def test_matches_non_ascii_objective_terms_without_dropping_them() -> None:
@@ -399,7 +429,7 @@ def test_matches_non_ascii_objective_terms_without_dropping_them() -> None:
         factors=("预热",),
     )
 
-    result = ExperimentFindingSynthesisService().synthesize(
+    result = experiment_finding_synthesis_service.synthesize(
         collection_id="collection-1",
         objective=objective,
         analysis_version=1,

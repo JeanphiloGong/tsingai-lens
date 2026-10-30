@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from application.source.reference_extraction_service import (
-    SourceReferenceExtractionService,
+from application.source import (
+    reference_extraction_service as source_reference_extraction_service,
 )
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 
@@ -71,10 +71,10 @@ def test_source_reference_extraction_builds_entries_mentions_and_candidates():
                 block_order=5,
                 page=12,
             ),
-        )
+        ),
     )
 
-    references = SourceReferenceExtractionService().extract(artifacts)
+    references = source_reference_extraction_service.extract(artifacts)
 
     assert [entry.reference_id for entry in references.entries] == [
         "ref-doc-1-0001",
@@ -148,10 +148,10 @@ def test_source_reference_extraction_ignores_reference_section_citation_markers(
                 text="[3] Third Author. Third Paper. Journal. 2023.",
                 block_order=5,
             ),
-        )
+        ),
     )
 
-    references = SourceReferenceExtractionService().extract(artifacts)
+    references = source_reference_extraction_service.extract(artifacts)
 
     assert len(references.entries) == 3
     assert [

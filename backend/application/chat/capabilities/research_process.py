@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
-
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
-
-from pydantic import BaseModel, ConfigDict
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict
 
 _VISIBLE_WARNING_LIMIT = 8
 _VISIBLE_FAILURE_LIMIT = 8
@@ -52,6 +48,7 @@ class InspectResearchProcessCapability:
             context.user_id,
         )
         runs = await self.pipeline_run_service.list_runs(
+            user_id=context.user_id,
             collection_id=context.collection_id,
             limit=200,
             offset=0,
@@ -146,9 +143,7 @@ class InspectResearchProcessCapability:
             "run_id": str(run.get("run_id") or "") or None if run else None,
             "stage": str(run.get("current_node") or "") or None if run else None,
             "progress_percent": (
-                max(0, min(100, int(run.get("progress_percent") or 0)))
-                if run
-                else 0
+                max(0, min(100, int(run.get("progress_percent") or 0))) if run else 0
             ),
         }
 
@@ -168,11 +163,9 @@ class InspectResearchProcessCapability:
 
     @staticmethod
     def _bounded_texts(values: Any, *, limit: int) -> tuple[str, ...]:
-        return tuple(
-            text[:500]
-            for value in values
-            if (text := str(value).strip())
-        )[:limit]
+        return tuple(text[:500] for value in values if (text := str(value).strip()))[
+            :limit
+        ]
 
 
 __all__ = [

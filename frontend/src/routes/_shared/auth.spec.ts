@@ -1,39 +1,37 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { ApiError } from './api';
 
-const { requestJson } = vi.hoisted(() => ({
-	requestJson: vi.fn()
-}));
 
-vi.mock('./api', async () => {
-	const actual = await vi.importActual<typeof import('./api')>('./api');
-	return {
-		...actual,
-		requestJson
-	};
-});
+import { authState, clearAuthState, fetchCurrentSession, login } from './auth';
 
-const { authState, clearAuthState, fetchCurrentSession, login } = await import('./auth');
+const fetch = vi.fn();
+function apiResponse(code: number, data: unknown) {
+    return new Response(JSON.stringify({ code, message: 'response', data, meta: null }), {
+        headers: { 'Content-Type': 'application/json' }
+    });
+}
 
 describe('auth shared helper', () => {
 	beforeEach(() => {
-		requestJson.mockReset();
+		fetch.mockReset();
+		vi.stubGlobal('fetch', fetch);
 		clearAuthState();
 	});
 
+	afterEach(() => vi.unstubAllGlobals());
+
 	it('loads the current authenticated user', async () => {
-		requestJson.mockResolvedValue({
+		fetch.mockResolvedValue(apiResponse(200, {
 			user: {
 				user_id: 'user_1',
 				email: 'admin@example.com',
 				display_name: 'Admin'
 			}
-		});
+		}));
 
 		const user = await fetchCurrentSession();
 
-		expect(requestJson).toHaveBeenCalledWith('/auth/me', { method: 'GET' });
+		expect(fetch).toHaveBeenCalledWith('/api/v1/auth/me', expect.objectContaining({ method: 'GET', credentials: 'same-origin' }));
 		expect(user).toEqual({
 			user_id: 'user_1',
 			email: 'admin@example.com',
@@ -49,7 +47,7 @@ describe('auth shared helper', () => {
 	});
 
 	it('sets anonymous state on a missing session', async () => {
-		requestJson.mockRejectedValue(new ApiError(401, 'Unauthorized', null));
+		fetch.mockResolvedValue(apiResponse(200301, { code: 'authentication_required' }));
 
 		const user = await fetchCurrentSession();
 
@@ -61,22 +59,23 @@ describe('auth shared helper', () => {
 	});
 
 	it('submits login credentials through the same auth endpoint', async () => {
-		requestJson.mockResolvedValue({
+		fetch.mockResolvedValue(apiResponse(200, {
 			user: {
 				user_id: 'user_2',
 				email: 'researcher@example.com'
 			}
-		});
+		}));
 
 		const user = await login('researcher@example.com', 'secret');
 
-		expect(requestJson).toHaveBeenCalledWith('/auth/login', {
+		expect(fetch).toHaveBeenCalledWith('/api/v1/auth/login', expect.objectContaining({
 			method: 'POST',
 			body: JSON.stringify({
 				email: 'researcher@example.com',
 				password: 'secret'
-			})
-		});
+			}),
+			credentials: 'same-origin'
+		}));
 		expect(user).toMatchObject({
 			user_id: 'user_2',
 			email: 'researcher@example.com'

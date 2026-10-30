@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from infra.persistence import database
-
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -10,8 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from application.core.objectives import finding_authoring_service
+from application.core.objectives.analysis import experiment_analysis_writer
 from application.core.objectives.analysis.experiment_analysis_writer import (
-    ExperimentAnalysisWriter,
     stable_draft_experiment_id,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
@@ -19,9 +18,6 @@ from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     reconcile_model_output,
-)
-from application.core.objectives.finding_authoring_service import (
-    FindingAuthoringService,
 )
 from domain.core.finding import (
     PAPER_CONTRIBUTION_STATUSES,
@@ -33,6 +29,7 @@ from domain.core.research_objective import (
     ResearchObjective,
     normalize_objective_terms,
 )
+from infra.persistence import database
 from repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,
     StoredExperimentAnalysis,
@@ -40,11 +37,11 @@ from repositories.experiment_analysis_repository import (
 from repositories.objective_repository import (
     ExecutionStats,
     ObjectiveAnalysis,
+    ObjectiveRepository,
 )
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
-from repositories.objective_repository import ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -54,9 +51,7 @@ def anyio_backend():
     return "asyncio"
 
 
-def _objective(
-    *, variables: tuple[str, ...] = ("preheat",)
-) -> ResearchObjective:
+def _objective(*, variables: tuple[str, ...] = ("preheat",)) -> ResearchObjective:
     return ResearchObjective(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -124,7 +119,7 @@ def _draft_output(
             "variant_label": "P150",
             "identity_specificity": "exact",
             "subject_attributes": [{"name": "material", "value": "316L"}],
-            "intervention_attributes":[{"name": "preheat", "value": 150, "unit": "C"}],
+            "intervention_attributes": [{"name": "preheat", "value": 150, "unit": "C"}],
             "source_labels": ["methods"],
             "binding_source_labels": ["methods"],
         },
@@ -162,7 +157,12 @@ def _draft_output(
             "baseline_measurement_keys": ["np-elongation"],
             "target_measurement_keys": ["p150-elongation"],
             "changed_variables": [
-                {"name": "preheat", "baseline_value": 0, "target_value": 150, "unit": "C"}
+                {
+                    "name": "preheat",
+                    "baseline_value": 0,
+                    "target_value": 150,
+                    "unit": "C",
+                }
             ],
             "source_labels": ["table"],
             "binding_source_labels": ["table"],
@@ -176,7 +176,9 @@ def _draft_output(
                     "variant_label": "S800",
                     "identity_specificity": "exact",
                     "subject_attributes": [{"name": "material", "value": "316L"}],
-                    "intervention_attributes": [{"name": "scan speed", "value": 800, "unit": "mm/s"}],
+                    "intervention_attributes": [
+                        {"name": "scan speed", "value": 800, "unit": "mm/s"}
+                    ],
                     "source_labels": ["methods"],
                     "binding_source_labels": ["methods"],
                 },
@@ -185,7 +187,9 @@ def _draft_output(
                     "variant_label": "S1000",
                     "identity_specificity": "exact",
                     "subject_attributes": [{"name": "material", "value": "316L"}],
-                    "intervention_attributes": [{"name": "scan speed", "value": 1000, "unit": "mm/s"}],
+                    "intervention_attributes": [
+                        {"name": "scan speed", "value": 1000, "unit": "mm/s"}
+                    ],
                     "source_labels": ["methods"],
                     "binding_source_labels": ["methods"],
                 },
@@ -226,7 +230,12 @@ def _draft_output(
                 "baseline_measurement_keys": ["s800-elongation"],
                 "target_measurement_keys": ["s1000-elongation"],
                 "changed_variables": [
-                    {"name": "scan speed", "baseline_value": 800, "target_value": 1000, "unit": "mm/s"}
+                    {
+                        "name": "scan speed",
+                        "baseline_value": 800,
+                        "target_value": 1000,
+                        "unit": "mm/s",
+                    }
                 ],
                 "source_labels": ["table"],
                 "binding_source_labels": ["table"],
@@ -377,9 +386,7 @@ def _partial_archive_without_variants(
 
 
 def test_formal_identity_remains_strict_without_physical_variants():
-    with pytest.raises(
-        ValueError, match="without physical variants"
-    ):
+    with pytest.raises(ValueError, match="without physical variants"):
         stable_draft_experiment_id(
             document_id="paper-a",
             payload={"scope_kind": "parent", "experimental_variants": []},
@@ -507,7 +514,11 @@ class _RevisionRepository:
             for (identity, _), record in self.records.items()
             if identity == experiment_id
         ]
-        return max(values, key=lambda item: item.revision.experiment_version) if values else None
+        return (
+            max(values, key=lambda item: item.revision.experiment_version)
+            if values
+            else None
+        )
 
     async def list_latest_for_document(self, db, document_id):
         self.transaction_handles.append(db)
@@ -554,7 +565,9 @@ class _AnalysisRepository:
         self.transaction_handles.append(db)
         stored_revisions = tuple(
             [
-                await self.revisions.add_revision(db, revision, created_by=graph.created_by)
+                await self.revisions.add_revision(
+                    db, revision, created_by=graph.created_by
+                )
                 for revision in graph.revisions
             ]
         )
@@ -569,10 +582,9 @@ class _AnalysisRepository:
 def _writer():
     revisions = _RevisionRepository()
     analyses = _AnalysisRepository(revisions)
-    writer = ExperimentAnalysisWriter(
-        paper_experiment_repository=revisions,
-        experiment_analysis_repository=analyses,
-    )
+    experiment_analysis_writer.PaperExperimentRepo = revisions
+    experiment_analysis_writer.ExperimentAnalysisRepo = analyses
+    writer = experiment_analysis_writer
     return writer, revisions, analyses
 
 
@@ -630,7 +642,8 @@ async def test_source_only_batch_validates_all_experiments_before_writing():
     output = _physical_split_experiment("paper-a", distinct_boundary=False)
     with pytest.raises(ValueError, match="identity collision"):
         await writer.write_paper_experiment_revisions(
-            experiment_outputs=(output,), db=object(),
+            experiment_outputs=(output,),
+            db=object(),
         )
     assert revisions.records == {}
     assert graphs.graphs == []
@@ -691,7 +704,9 @@ async def test_abstention_revision_writes_no_placeholder_finding():
     assert len(analyses.graphs) == 1
 
 
-async def test_researcher_revises_limits_then_abstains_without_changing_source(monkeypatch, collection_service, *, postgres_session_factory):
+async def test_researcher_revises_limits_then_abstains_without_changing_source(
+    monkeypatch, collection_service, *, postgres_session_factory
+):
     from tests.support.postgres import seed_collection, seed_user
 
     await seed_user(postgres_session_factory, "researcher-1")
@@ -700,7 +715,9 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(m
         owner_user_id="researcher-1",
     )
     collection_id = collection["collection_id"]
-    await seed_collection(postgres_session_factory, collection_id, document_ids=("paper-a", "paper-b"))
+    await seed_collection(
+        postgres_session_factory, collection_id, document_ids=("paper-a", "paper-b")
+    )
     objective = replace(_objective(), collection_id=collection_id)
     repository = ObjectiveRepository()
     await repository.replace(
@@ -730,7 +747,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(m
             objective_id=objective.objective_id or "",
             analysis_version=1,
             document_id=paper or "",
-            analysis_status='analyzed' if paper == 'paper-a' else 'excluded',
+            analysis_status="analyzed" if paper == "paper-a" else "excluded",
             relevance="uncertain",
             paper_role="uncertain",
             contribution_summary=None,
@@ -747,15 +764,24 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(m
         for paper in ("paper-a", "paper-b")
     )
     async with database.AsyncSessionLocal() as db, db.begin():
-        await repository.publish_experiment_analysis(db, collection_id, objective.objective_id, 1, contributions=coverage)
+        await repository.publish_experiment_analysis(
+            db, collection_id, objective.objective_id, 1, contributions=coverage
+        )
     query = SimpleNamespace(read_analysis_bundle=AsyncMock(return_value=source))
 
     @asynccontextmanager
     async def db():
         yield None
 
-    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", database.AsyncSessionLocal)
-    service = FindingAuthoringService(collection_service=collection_service, objective_repository=repository, experiment_query_service=query, experiment_analysis_writer=writer)
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
+        database.AsyncSessionLocal,
+    )
+    finding_authoring_service.collection_service = collection_service
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = query
+    finding_authoring_service.experiment_analysis_writer = writer
+    service = finding_authoring_service
     revised = await service.create_selection_version(
         collection_id=collection_id,
         objective_id=objective.objective_id,
@@ -1032,13 +1058,11 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
     )
 
     versions = sorted(
-        revision.revision.experiment_version
-        for revision in revisions.records.values()
+        revision.revision.experiment_version for revision in revisions.records.values()
     )
     assert versions == [1, 2]
     assert sorted(
-        revision.revision.source_fingerprint
-        for revision in revisions.records.values()
+        revision.revision.source_fingerprint for revision in revisions.records.values()
     ) == ["prepared-v1", "prepared-v2"]
 
 
@@ -1079,7 +1103,9 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiment_outputs=(_draft_output("paper-a", source_fingerprint="prepared-v1"),),
+        experiment_outputs=(
+            _draft_output("paper-a", source_fingerprint="prepared-v1"),
+        ),
         db=object(),
     )
 
@@ -1123,7 +1149,9 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
     assert len(stored) == 2
     assert len({item.revision.experiment_id for item in stored}) == 1
     assert sorted(item.revision.experiment_version for item in stored) == [1, 2]
-    assert result.revisions[0].revision.experiment_id == stored[0].revision.experiment_id
+    assert (
+        result.revisions[0].revision.experiment_id == stored[0].revision.experiment_id
+    )
 
 
 async def test_parent_identity_is_reused_for_objective_variant_subset():
@@ -1145,9 +1173,7 @@ async def test_parent_identity_is_reused_for_objective_variant_subset():
         if item["variant_key"] == "p150"
     ]
     subset_payload["measurements"] = [
-        item
-        for item in subset_payload["measurements"]
-        if item["variant_key"] == "p150"
+        item for item in subset_payload["measurements"] if item["variant_key"] == "p150"
     ]
     subset_payload["comparisons"] = []
     subset = reconcile_model_output(
@@ -1211,7 +1237,9 @@ async def test_physical_split_identity_uses_source_backed_boundary_discriminator
 
     assert len(result.revisions) == 2
     assert len({item.revision.experiment_id for item in result.revisions}) == 2
-    assert sorted(item.revision.experiment_version for item in revisions.records.values()) == [1, 1]
+    assert sorted(
+        item.revision.experiment_version for item in revisions.records.values()
+    ) == [1, 1]
 
 
 def test_physical_split_identity_ignores_response_local_source_labels():
@@ -1219,9 +1247,9 @@ def test_physical_split_identity_ignores_response_local_source_labels():
     second = deepcopy(first)
     second["split_evidence"] = [{"source_label": "S999"}]
 
-    assert stable_draft_experiment_id(document_id="paper-a", payload=first) == stable_draft_experiment_id(
-        document_id="paper-a", payload=second
-    )
+    assert stable_draft_experiment_id(
+        document_id="paper-a", payload=first
+    ) == stable_draft_experiment_id(document_id="paper-a", payload=second)
 
 
 async def test_identical_physical_split_identity_requires_manual_reconciliation():

@@ -71,7 +71,7 @@ For model/result responsibilities, see
 
 ## Candidate Question Evaluation
 
-`ObjectiveCandidateService.propose_candidate_questions()` is an explicitly
+`objective_candidate_service.propose_candidate_questions()` is an explicitly
 invoked, nonpersistent evaluation path. Default discovery still calls
 `discover_candidate_facts()` and its existing axis-equivalence grouping.
 Neither the HTTP workflow nor Agent tools call the evaluation method.

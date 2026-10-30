@@ -1,18 +1,21 @@
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import controllers.source.collection_routes as routes
 import pytest
-from fastapi import HTTPException
-
-from controllers.source.collection_routes import CollectionAgentPermissionRequest, get_collection_agent_permission, set_collection_agent_permission
+from controllers.source.collection_routes import (
+    CollectionAgentPermissionRequest,
+    get_collection_agent_permission,
+    set_collection_agent_permission,
+)
+from exceptions import ResourceNotFoundException
 
 
 def _request(service, user_id: str = "owner") -> SimpleNamespace:
-    return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(collection_service=service)),
-        state=SimpleNamespace(current_user={"user_id": user_id}),
-    )
+    routes.collection_service = service
+    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
 
 class _Service:
@@ -27,13 +30,15 @@ class _Service:
     async def get_agent_default_permission_for_user(self, collection_id, user_id):
         assert collection_id == "col-1"
         if user_id != "owner":
-            raise FileNotFoundError("collection not found")
+            raise ResourceNotFoundException("collection not found")
         return self.saved
 
-    async def set_agent_default_permission_for_user(self, collection_id, user_id, **changes):
+    async def set_agent_default_permission_for_user(
+        self, collection_id, user_id, **changes
+    ):
         assert collection_id == "col-1"
         if user_id != "owner":
-            raise FileNotFoundError("collection not found")
+            raise ResourceNotFoundException("collection not found")
         assert changes["all_actions"] is True
         self.saved = {
             "mode": "auto",
@@ -47,29 +52,40 @@ class _Service:
 def test_collection_permission_endpoint_reads_and_expands_all_actions() -> None:
     service = _Service()
     request = _request(service)
-    read = asyncio.run(get_collection_agent_permission("col-1", request))
+    read = asyncio.run(
+        get_collection_agent_permission(
+            collection_id="col-1", user_id=request.state.current_user["user_id"]
+        )
+    )
     updated = asyncio.run(
         set_collection_agent_permission(
-            "col-1",
-            CollectionAgentPermissionRequest(
+            collection_id="col-1",
+            payload=CollectionAgentPermissionRequest(
                 mode="auto",
                 all_actions=True,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
+                expires_at=(
+                    datetime.now(timezone.utc) + timedelta(hours=2)
+                ).isoformat(),
                 expected_revision=0,
             ),
-            request,
+            user_id=request.state.current_user["user_id"],
         )
     )
 
+    read = routes.CollectionAgentPermissionResponse.model_validate(json.loads(read.body)["data"])
+    updated = routes.CollectionAgentPermissionResponse.model_validate(json.loads(updated.body)["data"])
     assert read.revision == 0
     assert updated.mode == "auto"
     assert updated.revision == 1
 
 
 def test_collection_permission_endpoint_hides_other_owner() -> None:
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(ResourceNotFoundException) as error:
         asyncio.run(
-            get_collection_agent_permission("col-1", _request(_Service(), "other"))
+            get_collection_agent_permission(
+                collection_id="col-1",
+                user_id=_request(_Service(), "other").state.current_user["user_id"],
+            )
         )
 
-    assert error.value.status_code == 404
+    assert error.value.code == 200201

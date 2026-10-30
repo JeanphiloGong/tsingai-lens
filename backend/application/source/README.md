@@ -5,11 +5,11 @@ one-Document preparation orchestration.
 
 ## Start Here
 
-- HTTP upload: `controllers/source/collections.py:upload_collection_document`
-- Import implementation: `SourceImportService.add_document()`
-- Queue preparation: `DocumentPreparationService.queue_document_preparation()`
-- Execute preparation: `DocumentPreparationService.run_document_preparation()`
-- Read prepared Source: `ArtifactInputService`
+- HTTP upload: `controllers/source/collection_routes.py:upload_collection_document`
+- Import implementation: `source_import_service.add_document()`
+- Queue preparation: `document_preparation_service.queue_document_preparation()`
+- Execute preparation: `document_preparation_service.run_document_preparation()`
+- Read prepared Source: `artifact_input_service` module functions
 
 The preparation input is one stored Document. The output is the current
 `SourceDocument`, its `DocumentProfile`, and a `ready` Document status. PDF
@@ -45,7 +45,7 @@ selected ready Documents
   -> build or reuse a lightweight PaperMap for Objective discovery
 ```
 
-`DocumentPreparationService` owns the upload-time sequence through Source and
+`document_preparation_service` owns the upload-time sequence through Source and
 DocumentProfile. It prepares different Documents concurrently while allowing at
 most one active preparation run for the same Document. Failure updates only
 that Document and run; input loading preserves skipped-file failures in the
@@ -83,11 +83,11 @@ Scientific Objective analysis lives in [`../core/objectives/README.md`](../core/
 
 ## Changing This Module
 
-For upload behavior, start with `SourceImportService`.
-For reproduction downloads, start with `SourceArchiveService`. For readiness,
-retry, or stage reuse, start with `DocumentPreparationService`; its fingerprints
+For upload behavior, start with `source_import_service`.
+For reproduction downloads, start with `source_archive_service`. For readiness,
+retry, or stage reuse, start with `document_preparation_service`; its fingerprints
 decide which existing artifacts can be reused. Do not put these responsibilities
-back into `CollectionService` or reproduce them in an Agent capability.
+back into `collection_service` or reproduce them in an Agent capability.
 
 The HTTP handler checks the authenticated user's Collection ownership. A
 background preparation task inherits the existing request trace context, even

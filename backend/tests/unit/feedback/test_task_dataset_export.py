@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from types import ModuleType
 
 import pytest
-from scripts.evaluation.feedback_dataset.prepare import load_prepared, prepare_export
-
-from application.feedback.dataset_export_service import (
-    DatasetExportError,
-    FeedbackDatasetExportService,
-)
+from application.feedback import dataset_export_service
+from application.feedback.dataset_export_service import DatasetExportError
+from application.feedback.dataset_service import FeedbackDatasetConflict
 from domain.feedback import Dataset, DatasetExport, DatasetSample, SampleRevision
 from domain.feedback.sample_revision import (
     EvaluationRevisionContent,
@@ -26,6 +24,8 @@ from repositories.feedback_dataset_export_repository import (
 from repositories.feedback_dataset_sample_repository import (
     ConfirmedDatasetMember,
 )
+
+from scripts.evaluation.feedback_dataset.prepare import load_prepared, prepare_export
 
 pytestmark = pytest.mark.anyio
 
@@ -141,7 +141,11 @@ class _Samples:
 
     async def read_confirmed_members(self, *, dataset_id: str, sample_ids=None):
         assert dataset_id == "fdset_export_test"
-        return tuple(member for member in self.members if sample_ids is None or member.sample.sample_id in sample_ids)
+        return tuple(
+            member
+            for member in self.members
+            if sample_ids is None or member.sample.sample_id in sample_ids
+        )
 
 
 async def test_selected_export_never_reads_unselected_stale_members() -> None:
@@ -151,17 +155,28 @@ async def test_selected_export_never_reads_unselected_stale_members() -> None:
                 from repositories.feedback_dataset_sample_repository import (
                     DatasetSampleRevisionConflict,
                 )
-                raise DatasetSampleRevisionConflict("sample_source_stale")
-            return await super().read_confirmed_members(dataset_id=dataset_id, sample_ids=sample_ids)
 
-    service = FeedbackDatasetExportService(
-        dataset_service=_DatasetService(), sample_repository=SamplesWithStaleUnselectedMember(_member(1), _member(2)),
-        repository=_Exports(),
+                raise DatasetSampleRevisionConflict("sample_source_stale")
+            return await super().read_confirmed_members(
+                dataset_id=dataset_id, sample_ids=sample_ids
+            )
+
+    dataset_export_service.dataset_service = _DatasetService()
+    dataset_export_service.FeedbackDatasetSampleRepo = SamplesWithStaleUnselectedMember(
+        _member(1), _member(2)
     )
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test", sample_ids=["sample-1"])
+    dataset_export_service.FeedbackDatasetExportRepo = _Exports()
+    service = dataset_export_service
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test", sample_ids=["sample-1"]
+    )
     export = await service.publish_for_user(
-        user_id="user-1", dataset_id="fdset_export_test", preview_id=preview.preview_id,
-        preview_digest=preview.preview_digest, allow_partial=False, idempotency_key="selected-healthy",
+        user_id="user-1",
+        dataset_id="fdset_export_test",
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="selected-healthy",
     )
     assert len(export.rows) == 1
 
@@ -181,7 +196,9 @@ class _Exports:
         return self.previews.get(preview_id)
 
     async def list_exports(self, *, dataset_id: str, limit: int = 50, offset: int = 0):
-        values = [item for item in self.exports.values() if item.dataset_id == dataset_id]
+        values = [
+            item for item in self.exports.values() if item.dataset_id == dataset_id
+        ]
         return tuple(
             DatasetExportSummary(
                 export_id=item.export_id,
@@ -206,7 +223,9 @@ class _Exports:
                 existing.preview_id != draft.preview_id
                 or existing.content_digest != draft.content_digest
             ):
-                raise DatasetExportIdempotencyConflict("export_idempotency_identity_conflict")
+                raise DatasetExportIdempotencyConflict(
+                    "export_idempotency_identity_conflict"
+                )
             return existing
         preview = self.previews[draft.preview_id]
         if preview.preview_digest != draft.preview_digest:
@@ -249,12 +268,11 @@ class _Exports:
 
 def _service(
     samples: _Samples, exports: _Exports, dataset: Dataset | None = None
-) -> FeedbackDatasetExportService:
-    return FeedbackDatasetExportService(
-        dataset_service=_DatasetService(dataset),
-        sample_repository=samples,
-        repository=exports,
-    )
+) -> ModuleType:
+    dataset_export_service.dataset_service = _DatasetService(dataset)
+    dataset_export_service.FeedbackDatasetSampleRepo = samples
+    dataset_export_service.FeedbackDatasetExportRepo = exports
+    return dataset_export_service
 
 
 async def test_selected_export_ignores_unselected_changes_but_rejects_selected_changes():
@@ -266,21 +284,29 @@ async def test_selected_export_ignores_unselected_changes_but_rejects_selected_c
     assert [item.sample_id for item in preview.members] == ["sample-1"]
     samples.members = [samples.members[0]]
     export = await service.publish_for_user(
-        user_id="user-1", dataset_id="fdset_export_test",
-        preview_id=preview.preview_id, preview_digest=preview.preview_digest,
-        allow_partial=False, idempotency_key="selected-export",
+        user_id="user-1",
+        dataset_id="fdset_export_test",
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="selected-export",
     )
     assert export.row_count == 1
     samples.members = []
-    with pytest.raises(DatasetExportError, match="export_preview_stale"):
+    with pytest.raises(FeedbackDatasetConflict, match="export_preview_stale"):
         await service.publish_for_user(
-            user_id="user-1", dataset_id="fdset_export_test",
-            preview_id=preview.preview_id, preview_digest=preview.preview_digest,
-            allow_partial=False, idempotency_key="changed-export",
+            user_id="user-1",
+            dataset_id="fdset_export_test",
+            preview_id=preview.preview_id,
+            preview_digest=preview.preview_digest,
+            allow_partial=False,
+            idempotency_key="changed-export",
         )
 
 
-@pytest.mark.parametrize("selection", [[], ["sample-1", "sample-1"], ["foreign-sample"]])
+@pytest.mark.parametrize(
+    "selection", [[], ["sample-1", "sample-1"], ["foreign-sample"]]
+)
 async def test_export_rejects_invalid_selection(selection):
     with pytest.raises(DatasetExportError, match="export_sample_selection_invalid"):
         await _service(_Samples(_member()), _Exports()).preview_for_user(
@@ -288,7 +314,9 @@ async def test_export_rejects_invalid_selection(selection):
         )
 
 
-def _content_member(content, *, sample_id: str, dataset_id: str = "fdset_export_test") -> ConfirmedDatasetMember:
+def _content_member(
+    content, *, sample_id: str, dataset_id: str = "fdset_export_test"
+) -> ConfirmedDatasetMember:
     sample = DatasetSample(
         sample_id=sample_id,
         dataset_id=dataset_id,
@@ -329,12 +357,16 @@ def _content_member(content, *, sample_id: str, dataset_id: str = "fdset_export_
 
 
 @pytest.mark.anyio
-async def test_preview_reports_invalid_provenance_and_partial_publish_excludes_it() -> None:
+async def test_preview_reports_invalid_provenance_and_partial_publish_excludes_it() -> (
+    None
+):
     samples = _Samples(_member(1), _member(2, complete=False))
     exports = _Exports()
     service = _service(samples, exports)
 
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
 
     assert preview.requested_count == 2
     assert preview.exportable_count == 1
@@ -382,9 +414,11 @@ async def test_publish_rejects_empty_export_and_stale_preview() -> None:
     samples = _Samples(_member(1))
     exports = _Exports()
     service = _service(samples, exports)
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
     samples.members[0] = _member(2)
-    with pytest.raises(DatasetExportError, match="export_preview_stale"):
+    with pytest.raises(FeedbackDatasetConflict, match="export_preview_stale"):
         await service.publish_for_user(
             user_id="user-1",
             dataset_id="fdset_export_test",
@@ -400,7 +434,9 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
     samples = _Samples(_member(1))
     exports = _Exports()
     service = _service(samples, exports)
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
 
     first = await service.publish_for_user(
         user_id="user-1",
@@ -425,14 +461,29 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
     assert set(model_row) == {"messages"}
     assert first.schema_version == "literature-sft.v2"
     assert first.manifest["data_format"] == "messages-sft"
-    assert model_row["messages"][0]["content"] == "文献：文献 1\n原文：图注记录了 200 C 的预热条件。\n\n问题：比较文献 1 的预热条件。"
-    assert model_row["messages"][-1] == {"role": "assistant", "content": _content().target}
+    assert (
+        model_row["messages"][0]["content"]
+        == "文献：文献 1\n原文：图注记录了 200 C 的预热条件。\n\n问题：比较文献 1 的预热条件。"
+    )
+    assert model_row["messages"][-1] == {
+        "role": "assistant",
+        "content": _content().target,
+    }
     assert first.provenance[0]["evidence"] == list(_content().evidence)
     serialized = json.dumps(model_row, ensure_ascii=False)
-    for internal_id in ("sample-1", "case-1", "revision-1", "session-1", "source-ref-1"):
+    for internal_id in (
+        "sample-1",
+        "case-1",
+        "revision-1",
+        "session-1",
+        "source-ref-1",
+    ):
         assert internal_id not in serialized
     assert first.provenance[0]["sample_id"] == "sample-1"
-    assert first.provenance[0]["evidence_records"][0]["heading_path"] == "Results > Figure 3"
+    assert (
+        first.provenance[0]["evidence_records"][0]["heading_path"]
+        == "Results > Figure 3"
+    )
 
 
 @pytest.mark.anyio
@@ -445,31 +496,67 @@ async def test_export_without_excerpts_preserves_input_and_identity(task_type) -
     )
     common = dict(messages=messages, context=(), evidence=())
     if task_type == "sft":
-        content = SftRevisionContent(schema_version="literature-sft.v1", target="Vary power at fixed speed.", **common)
+        content = SftRevisionContent(
+            schema_version="literature-sft.v1",
+            target="Vary power at fixed speed.",
+            **common,
+        )
     elif task_type == "preference":
-        content = PreferenceRevisionContent(schema_version="literature-preference.v1",
-            response_a="Vary power at fixed speed.", response_b="Vary both power and speed.",
-            suggested_preference=None, human_preference="a", rationale="Preserves the decision.", **common)
+        content = PreferenceRevisionContent(
+            schema_version="literature-preference.v1",
+            response_a="Vary power at fixed speed.",
+            response_b="Vary both power and speed.",
+            suggested_preference=None,
+            human_preference="a",
+            rationale="Preserves the decision.",
+            **common,
+        )
     else:
-        content = EvaluationRevisionContent(schema_version="literature-evaluation.v1",
-            reference="Vary power at fixed speed.", criteria=("Keep scan speed fixed.",), evaluation_mode="reference", **common)
+        content = EvaluationRevisionContent(
+            schema_version="literature-evaluation.v1",
+            reference="Vary power at fixed speed.",
+            criteria=("Keep scan speed fixed.",),
+            evaluation_mode="reference",
+            **common,
+        )
     member = _content_member(content, sample_id="conversation-1")
-    member = replace(member, revision=replace(member.revision, provenance={
-        "session_id": "session-1", "anchor_message_id": "answer-1", "evidence_records": [],
-    }))
-    service = _service(_Samples(member), _Exports(), replace(_dataset(), task_type=task_type))
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    member = replace(
+        member,
+        revision=replace(
+            member.revision,
+            provenance={
+                "session_id": "session-1",
+                "anchor_message_id": "answer-1",
+                "evidence_records": [],
+            },
+        ),
+    )
+    service = _service(
+        _Samples(member), _Exports(), replace(_dataset(), task_type=task_type)
+    )
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
     assert preview.issues == ()
-    exported = await service.publish_for_user(user_id="user-1", dataset_id="fdset_export_test",
-        preview_id=preview.preview_id, preview_digest=preview.preview_digest,
-        allow_partial=False, idempotency_key="conversation")
+    exported = await service.publish_for_user(
+        user_id="user-1",
+        dataset_id="fdset_export_test",
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="conversation",
+    )
     row = exported.rows[0]
     actual = row["prompt"] if task_type == "preference" else row["messages"]
-    assert actual == list(messages) + ([{"role": "assistant", "content": content.target}] if task_type == "sft" else [])
+    assert actual == list(messages) + (
+        [{"role": "assistant", "content": content.target}] if task_type == "sft" else []
+    )
     assert exported.provenance[0]["session_id"] == "session-1"
 
 
-async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected() -> None:
+async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected() -> (
+    None
+):
     content = PreferenceRevisionContent(
         schema_version="literature-preference.v1",
         messages=({"role": "user", "content": "比较 A、B。"},),
@@ -484,13 +571,17 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
     samples = _Samples(_content_member(content, sample_id="preference-1"))
     exports = _Exports()
     service = _service(samples, exports, dataset)
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
     assert preview.exportable_count == 0
     assert any(issue.code == "preference_not_pairwise" for issue in preview.issues)
 
     content_with_label = replace(content, human_preference="b")
     samples.members = [_content_member(content_with_label, sample_id="preference-1")]
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
     assert preview.issues == ()
     exported = await service.publish_for_user(
         user_id="user-1",
@@ -504,7 +595,9 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
     assert set(exported.rows[0]) == {"prompt", "chosen", "rejected"}
     assert exported.rows[0]["chosen"] == [{"role": "assistant", "content": "回答 B"}]
     assert exported.rows[0]["rejected"] == [{"role": "assistant", "content": "回答 A"}]
-    assert exported.rows[0]["prompt"] == [{"role": "user", "content": "文献：文献\n原文：原文\n\n问题：比较 A、B。"}]
+    assert exported.rows[0]["prompt"] == [
+        {"role": "user", "content": "文献：文献\n原文：原文\n\n问题：比较 A、B。"}
+    ]
     assert "suggested_preference" not in exported.rows[0]
 
 
@@ -521,9 +614,13 @@ async def test_evaluation_export_keeps_reference_and_criteria_outside_input() ->
     )
     dataset = replace(_dataset(), task_type="evaluation")
     service = _service(
-        _Samples(_content_member(content, sample_id="evaluation-1")), _Exports(), dataset
+        _Samples(_content_member(content, sample_id="evaluation-1")),
+        _Exports(),
+        dataset,
     )
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
     assert preview.issues == ()
     exported = await service.publish_for_user(
         user_id="user-1",
@@ -534,21 +631,35 @@ async def test_evaluation_export_keeps_reference_and_criteria_outside_input() ->
         idempotency_key="evaluation-1",
     )
     assert exported.schema_version == "literature-evaluation.v2"
-    assert set(exported.rows[0]) == {"messages", "reference", "criteria", "evaluation_mode"}
-    assert exported.rows[0]["messages"] == [{"role": "user", "content": "文献：文献\n原文：原文\n\n问题：比较 A、B。"}]
+    assert set(exported.rows[0]) == {
+        "messages",
+        "reference",
+        "criteria",
+        "evaluation_mode",
+    }
+    assert exported.rows[0]["messages"] == [
+        {"role": "user", "content": "文献：文献\n原文：原文\n\n问题：比较 A、B。"}
+    ]
     assert exported.rows[0]["reference"] == "B 有预热。"
     assert exported.rows[0]["criteria"] == ["指出 B 的预热条件", "引用图注"]
 
 
 @pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
-async def test_published_files_load_offline_without_review_data_in_input(tmp_path, task_type) -> None:
+async def test_published_files_load_offline_without_review_data_in_input(
+    tmp_path, task_type
+) -> None:
     question = "固定构建方向时，每个扫描策略条件做了几次拉伸测试？"
     excerpt = "Three tests were conducted for each condition."
     common = {
         "schema_version": f"literature-{task_type}.v1",
-        "messages": [{"role": "system", "content": "依据原文回答。"}, {"role": "user", "content": question}],
+        "messages": [
+            {"role": "system", "content": "依据原文回答。"},
+            {"role": "user", "content": question},
+        ],
         "context": [{"document_title": "P006.pdf", "text": excerpt}] * 2,
-        "evidence": [{"document_title": "P006.pdf", "text": "Review-only evidence marker"}],
+        "evidence": [
+            {"document_title": "P006.pdf", "text": "Review-only evidence marker"}
+        ],
     }
     if task_type == "sft":
         content = SftRevisionContent(**common, target="每个条件三次拉伸测试。")
@@ -568,20 +679,39 @@ async def test_published_files_load_offline_without_review_data_in_input(tmp_pat
             criteria=("明确三次测试。",),
             evaluation_mode="reference",
         )
-    service = _service(_Samples(_content_member(content, sample_id="p006")), _Exports(), replace(_dataset(), task_type=task_type))
-    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
-    export = await service.publish_for_user(user_id="user-1", dataset_id="fdset_export_test",
-        preview_id=preview.preview_id, preview_digest=preview.preview_digest, allow_partial=False,
-        idempotency_key=f"p006-{task_type}")
+    service = _service(
+        _Samples(_content_member(content, sample_id="p006")),
+        _Exports(),
+        replace(_dataset(), task_type=task_type),
+    )
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test"
+    )
+    export = await service.publish_for_user(
+        user_id="user-1",
+        dataset_id="fdset_export_test",
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key=f"p006-{task_type}",
+    )
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     for format in ("jsonl", "provenance", "manifest", "json"):
-        _, data, _, filename = await service.download_for_user(user_id="user-1", dataset_id="fdset_export_test",
-            export_id=export.export_id, format=format)
+        _, data, _, filename = await service.download_for_user(
+            user_id="user-1",
+            dataset_id="fdset_export_test",
+            export_id=export.export_id,
+            format=format,
+        )
         (bundle / filename).write_bytes(data)
     row = json.loads((bundle / "data.jsonl").read_text())
     assert json.loads((bundle / "data.json").read_text()) == [row]
-    inputs = row["prompt"] if task_type == "preference" else row["messages"][:-1] if task_type == "sft" else row["messages"]
+    inputs = (
+        row["prompt"]
+        if task_type == "preference"
+        else row["messages"][:-1] if task_type == "sft" else row["messages"]
+    )
     assert inputs[0] == common["messages"][0]
     assert inputs[-1]["content"].count(excerpt) == 1
     assert inputs[-1]["content"].endswith(question)
@@ -597,12 +727,22 @@ async def test_published_files_load_offline_without_review_data_in_input(tmp_pat
 
 
 def test_frozen_content_and_preview_fingerprints_keep_their_stored_contract():
-    from pathlib import Path
     import json
-    from domain.feedback.dataset_export import ExportIssue, ExportMember, ExportPreview, member_digest
+    from pathlib import Path
+
+    from domain.feedback.dataset_export import (
+        ExportIssue,
+        ExportMember,
+        ExportPreview,
+        member_digest,
+    )
     from domain.feedback.sample_revision import content_digest_for
 
-    fixtures = json.loads((Path(__file__).parents[2] / "fixtures" / "sample_revision_fingerprints.json").read_text())
+    fixtures = json.loads(
+        (
+            Path(__file__).parents[2] / "fixtures" / "sample_revision_fingerprints.json"
+        ).read_text()
+    )
     for fixture in fixtures:
         value = fixture["content"]
         if value["schema_version"] == "literature-sft.v1":
@@ -613,14 +753,33 @@ def test_frozen_content_and_preview_fingerprints_keep_their_stored_contract():
             content = EvaluationRevisionContent(**value)
         assert content_digest_for(content) == fixture["content_digest"]
         member = ExportMember(
-            sample_id="sample-fixed", source_case_id="case-fixed", revision_id="revision-fixed", revision_no=2,
-            content=content, content_digest=fixture["content_digest"], input_digest="a" * 64,
-            provenance={"paper_order": ["b", "a"], "scope": {"collection": "collection-fixed"}},
+            sample_id="sample-fixed",
+            source_case_id="case-fixed",
+            revision_id="revision-fixed",
+            revision_no=2,
+            content=content,
+            content_digest=fixture["content_digest"],
+            input_digest="a" * 64,
+            provenance={
+                "paper_order": ["b", "a"],
+                "scope": {"collection": "collection-fixed"},
+            },
         )
         preview = ExportPreview.build(
-            preview_id="preview-fixed", dataset_id="dataset-fixed", members=(member,),
-            issues=(ExportIssue(sample_id="sample-other", revision_id=None, code="not_confirmed", message="尚未确认", question="控制条件是否一致？"),),
-            created_at="2026-10-27T00:00:00Z", expires_at="2026-10-28T00:00:00Z",
+            preview_id="preview-fixed",
+            dataset_id="dataset-fixed",
+            members=(member,),
+            issues=(
+                ExportIssue(
+                    sample_id="sample-other",
+                    revision_id=None,
+                    code="not_confirmed",
+                    message="尚未确认",
+                    question="控制条件是否一致？",
+                ),
+            ),
+            created_at="2026-10-27T00:00:00Z",
+            expires_at="2026-10-28T00:00:00Z",
         )
         assert preview.preview_digest == fixture["preview_digest"]
         assert member_digest((member,)) == fixture["member_digest"]

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from types import ModuleType
 
-from .experiment_compatibility_projection import ExperimentCompatibilityProjection
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 
 def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
@@ -20,7 +20,7 @@ def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
 async def should_read_experiment_projection(
     *,
     objective_repository: ObjectiveRepository,
-    experiment_projection: ExperimentCompatibilityProjection | None,
+    experiment_projection: ModuleType | None,
     collection_id: str,
     objective_id: str,
     analysis_version: int,

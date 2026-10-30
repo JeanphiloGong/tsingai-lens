@@ -14,11 +14,15 @@ This node owns browser-side helpers shared across frontend routes.
 ## Important Files
 
 - `api.ts`
-  Base request helpers, shared HTTP error behavior, and same-origin blob
-  downloads used by source archives and Finding dataset exports. HTTP status
-  and detail come only from `ApiError`; ordinary network errors are not parsed
-  as HTTP responses. `buildApiUrl` owns URL construction for requests, streams,
-  and downloads.
+  Base request helpers and same-origin downloads. JSON uses HTTP 200 with
+  `{code,message,data,meta}`; `requestJson` unwraps `data`, and business failures
+  raise `ApiError(code, message, data)`. `isApiErrorCode` compares numeric business
+  codes and `getApiErrorReason` reads stable `data.code` strings. Authentication
+  expiry clears local auth and chat storage before redirecting, only for
+  `200301` plus `authentication_required`. Network
+  errors remain ordinary errors. `requestBlob` rejects JSON failures before
+  saving, unwraps ordinary JSON exports, and preserves file bytes identified
+  by Content-Disposition. `buildApiUrl` owns URLs for requests and streams.
 - `collections.ts`, `collectionDocuments.ts`, `pipelineRuns.ts`
   Collection upload, current Document, independent preparation, and Pipeline
   Run progress contracts. Collection history uses compact run summaries; one
@@ -45,7 +49,9 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, streamed text
   deltas, capability results, exact write decisions, and the bounded pending
-  Source handoff between a document reader and its Collection Agent.
+  Source handoff between a document reader and its Collection Agent. JSON
+  rejection before stream start is handled before parsing SSE; after start,
+  `error` events and cancellation retain the existing recovery flow.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans
   may retain source provenance returned by the API.

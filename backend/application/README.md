@@ -52,3 +52,22 @@ Inside it, business responsibilities are now grouped as:
 - raw HTTP parsing or response serialization
 - low-level persistence implementations
 - engine-specific runtime logic living directly in controllers
+
+
+## Calling Application Operations
+
+HTTP controllers import the owning module functions. Those functions use the
+concrete repository singletons defined in `repositories/*_repository.py`.
+They own resource authorization and orchestrate reads, domain decisions, and
+writes; callers pass the actor's user ID explicitly. Background recovery has
+separate process-owned operations for interrupted work. There is no service
+container, `app.state` service registration, injection-only service class, or
+forwarding compatibility interface. Stateful workers and the Agent runner keep
+their actual execution state and lifecycle.
+
+External formats are parsed at their input boundary. An expected missing
+resource, invalid decision, stale version, or write conflict is reported by its
+owning operation with an explicit application exception. Repositories report
+storage facts and concrete write conflicts; they do not create HTTP responses or
+classify provider failures. Controllers construct response models and use
+`make_api_response`; the shared exception handlers produce safe JSON failures.

@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from domain.chat import ChatMessageRole, ToolResultStatus
-
-import json
-
-from domain.chat import ChatToolRequest
-
 import asyncio
+import json
 from dataclasses import asdict, replace
 from hashlib import sha256
 from types import SimpleNamespace
@@ -18,31 +13,42 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import inspect
-
-from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
+from application.auth import session_service as auth_session_service
+from application.auth.session_service import SESSION_COOKIE_NAME
 from application.chat import (
     CapabilityRegistry,
     ModelToolCall,
     ModelTurn,
     ResearchAgentRunner,
 )
-from application.chat.session_service import ChatSessionService
-from application.source.collection_service import CollectionService
+from application.chat import session_service as chat_session_service
+from application.source import collection_service
 from controllers.chat.chat_session_routes import chat_session_router as router
+from controllers.exception_router import (
+    general_exception_handler,
+    http_exception_handler,
+    project_exception_handler,
+    request_validation_handler,
+)
 from domain.chat import (
     ChatMessage,
+    ChatMessageRole,
     ChatResourceRef,
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ChatToolRequest,
     ChatToolResult,
+    ToolResultStatus,
     ToolRisk,
 )
 from domain.source import Collection, Document, SourceBlock, SourceDocument
+from exceptions import ProjectException
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from httpx import ASGITransport, AsyncClient
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
+from infra.persistence.file.object_store import FileObjectStore
 from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
@@ -50,6 +56,8 @@ from repositories.collection_repository import (
     StoredCollection,
     StoredDocument,
 )
+from sqlalchemy import inspect
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from tests.unit.application.test_chat_session_service import _WriteCapability
 from tests.unit.application.test_research_agent_runner import _Model
 
@@ -57,7 +65,9 @@ pytestmark = pytest.mark.anyio
 NOW = "2026-09-09T00:00:00+00:00"
 QUOTE = "The LPBF Ti-6Al-4V specimens were tensile tested at 293 K."
 QUESTION = "Which test conditions should I verify before comparing the reported tensile strengths?"
-REVISION = "Please identify the test temperature before I compare the tensile strengths."
+REVISION = (
+    "Please identify the test temperature before I compare the tensile strengths."
+)
 ANSWER = "The Source reports 293 K. Match temperature and specimen condition before comparing strength."
 BASE = "/api/v1/chat-sessions"
 
@@ -65,22 +75,45 @@ BASE = "/api/v1/chat-sessions"
 class _Sources:
     def __init__(self):
         self.document = SourceDocument(
-            document_id="paper", document_order=0, title="LPBF tensile test conditions", text=QUOTE,
-            blocks=(SourceBlock(block_id="methods", document_id="paper", block_type="paragraph",
-                                text=QUOTE, block_order=0, page=3, heading_path="Methods"),),
+            document_id="paper",
+            document_order=0,
+            title="LPBF tensile test conditions",
+            text=QUOTE,
+            blocks=(
+                SourceBlock(
+                    block_id="methods",
+                    document_id="paper",
+                    block_type="paragraph",
+                    text=QUOTE,
+                    block_order=0,
+                    page=3,
+                    heading_path="Methods",
+                ),
+            ),
         )
 
     async def read_document(self, collection_id, document_id):
-        return self.document if (collection_id, document_id) == ("collection", "paper") else None
+        return (
+            self.document
+            if (collection_id, document_id) == ("collection", "paper")
+            else None
+        )
 
 
 @pytest.fixture
 async def branch_app(postgres_session_factory, tmp_path):
-    auth = AuthSessionService(AuthRepository())
+    auth_session_service.AuthRepo = AuthRepository()
+    auth = auth_session_service
     users, cookies = [], []
     for email in ("branch-owner@example.test", "branch-other@example.test"):
-        users.append(await auth.create_user(email=email, password="synthetic-test-password"))
-        cookies.append((await auth.login(email=email, password="synthetic-test-password"))["session_id"])
+        users.append(
+            await auth.create_user(email=email, password="synthetic-test-password")
+        )
+        cookies.append(
+            (await auth.login(email=email, password="synthetic-test-password"))[
+                "session_id"
+            ]
+        )
     collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
@@ -115,19 +148,46 @@ async def branch_app(postgres_session_factory, tmp_path):
         updated_at=NOW,
     )
     repository = ChatRepository()
-    chat = ChatSession.create(session_id="original", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
+    chat = ChatSession.create(
+        session_id="original",
+        user_id=users[0]["user_id"],
+        collection_id="collection",
+        created_at=NOW,
+    )
     await repository.add_session(chat)
     call = ChatToolCall.requested(
-        tool_call_id="historical-write", session_id=chat.session_id, assistant_message_id="request",
-        name="create_objective_candidate", arguments={"question": "Compare matched LPBF tensile conditions"}, risk=ToolRisk.WRITE,
+        tool_call_id="historical-write",
+        session_id=chat.session_id,
+        assistant_message_id="request",
+        name="create_objective_candidate",
+        arguments={"question": "Compare matched LPBF tensile conditions"},
+        risk=ToolRisk.WRITE,
     ).require_approval()
-    call = call.approve(user_id=chat.user_id, arguments_digest=call.arguments_digest, decided_at=NOW).start(NOW).succeed(NOW)
-    result = ChatToolResult(tool_call_id=call.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"objective_id": "existing-objective"})
+    call = (
+        call.approve(
+            user_id=chat.user_id, arguments_digest=call.arguments_digest, decided_at=NOW
+        )
+        .start(NOW)
+        .succeed(NOW)
+    )
+    result = ChatToolResult(
+        tool_call_id=call.tool_call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        data={"objective_id": "existing-objective"},
+    )
     source = ChatSourceContext(
-        resource_ref=ChatResourceRef(resource_type="source", resource_id="paper:methods"),
-        collection_id="collection", document_id="paper", document_title="LPBF tensile test conditions",
-        source_kind="text_window", source_ref="methods", page=3, quote=QUOTE,
-        heading_path="Methods", source_digest=sha256(QUOTE.encode()).hexdigest(),
+        resource_ref=ChatResourceRef(
+            resource_type="source", resource_id="paper:methods"
+        ),
+        collection_id="collection",
+        document_id="paper",
+        document_title="LPBF tensile test conditions",
+        source_kind="text_window",
+        source_ref="methods",
+        page=3,
+        quote=QUOTE,
+        heading_path="Methods",
+        source_digest=sha256(QUOTE.encode()).hexdigest(),
     )
     messages = (
         ChatMessage.user(
@@ -200,73 +260,121 @@ async def branch_app(postgres_session_factory, tmp_path):
             created_at=NOW,
         ),
     )
-    await repository.save_trajectory(chat_session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
+    await repository.save_trajectory(
+        chat_session=chat, messages=messages, tool_calls=(call,), tool_results=(result,)
+    )
     model = _Model(*(ModelTurn(content=ANSWER) for _ in range(8)))
     write = _WriteCapability()
     sources = _Sources()
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,)))
-    service = ChatSessionService(
-        collection_service=CollectionService(collections, FileCollectionWorkspace(tmp_path)),
-        source_artifact_repository=sources, repository=repository, runner=runner,
-    )
+    chat_session_service.collection_service = collection_service
+    chat_session_service.SourceArtifactRepo = sources
+    chat_session_service.ChatRepo = repository
+    chat_session_service.runner = runner
+    collection_service.CollectionRepo = collections
+    collection_service.workspace = FileCollectionWorkspace(tmp_path)
+    collection_service.root_dir = collection_service.workspace.root_dir
+    collection_service.object_store = FileObjectStore(collection_service.root_dir)
+    service = chat_session_service
     app = FastAPI()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     app.include_router(router, prefix="/api/v1")
-    app.state.auth_session_service = auth
-    app.state.chat_session_service = service
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", cookies={SESSION_COOKIE_NAME: cookies[0]}) as client:
-        yield SimpleNamespace(client=client, service=service, repository=repository, cookies=cookies,
-                              owner=chat.user_id, model=model, sources=sources, write=write,
-                              factory=postgres_session_factory)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        cookies={SESSION_COOKIE_NAME: cookies[0]},
+    ) as client:
+        yield SimpleNamespace(
+            client=client,
+            service=service,
+            repository=repository,
+            cookies=cookies,
+            owner=chat.user_id,
+            model=model,
+            sources=sources,
+            write=write,
+            factory=postgres_session_factory,
+        )
 
 
-async def _branch(app, session_id="original", message_id="question", message=REVISION, request_id=None):
-    response = await app.client.post(f"{BASE}/{session_id}/branches", json={
-        "message_id": message_id, "request_id": request_id or str(uuid4()), "message": message,
-    })
-    assert response.status_code == 201, response.text
-    return response.json()
+async def _branch(
+    app, session_id="original", message_id="question", message=REVISION, request_id=None
+):
+    response = await app.client.post(
+        f"{BASE}/{session_id}/branches",
+        json={
+            "message_id": message_id,
+            "request_id": request_id or str(uuid4()),
+            "message": message,
+        },
+    )
+    assert response.status_code == 200
+    return response.json()["data"]
 
 
 async def _send(app, branch, *, streaming=False):
-    response = await app.client.post(f"{BASE}/{branch['session_id']}/messages", json={
-        "message": branch["fork_content"], "branch_revision": True,
-    }, headers={"Accept": "text/event-stream"} if streaming else {})
+    response = await app.client.post(
+        f"{BASE}/{branch['session_id']}/messages",
+        json={
+            "message": branch["fork_content"],
+            "branch_revision": True,
+        },
+        headers={"Accept": "text/event-stream"} if streaming else {},
+    )
     assert response.status_code == 200, response.text
     return response
 
 
 async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(branch_app):
     app = branch_app
-    newer = await app.service.create_session(collection_id="collection", user_id=app.owner)
+    newer = await app.service.create_session(
+        collection_id="collection", user_id=app.owner
+    )
     original = await app.repository.read_session("original")
     messages = await app.repository.read_messages("original")
-    assert (await app.client.get(f"{BASE}/original")).json()["is_pinned"] is False
+    assert (await app.client.get(f"{BASE}/original")).json()["data"][
+        "is_pinned"
+    ] is False
 
     for _ in range(2):
-        response = await app.client.put(f"{BASE}/original/pin", json={"is_pinned": True})
+        response = await app.client.put(
+            f"{BASE}/original/pin", json={"is_pinned": True}
+        )
         assert response.status_code == 200, response.text
-        assert response.json()["is_pinned"] is True
-        assert response.json()["updated_at"] == original.updated_at
+        assert response.json()["data"]["is_pinned"] is True
+        assert response.json()["data"]["updated_at"] == original.updated_at
 
     # A model checkpoint that started before pinning must not undo the preference.
     await app.repository.save_trajectory(
-        chat_session=original, messages=messages, tool_calls=(), tool_results=(),
+        chat_session=original,
+        messages=messages,
+        tool_calls=(),
+        tool_results=(),
     )
     reloaded = ChatRepository()
     assert (await reloaded.read_session("original")).is_pinned is True
     assert await reloaded.read_messages("original") == messages
-    first = await app.client.get(BASE, params={"collection_id": "collection", "limit": 1})
-    second = await app.client.get(BASE, params={"collection_id": "collection", "limit": 1, "offset": 1})
-    assert first.json()["items"][0]["session_id"] == "original"
-    assert first.json()["items"][0]["is_pinned"] is True
-    assert second.json()["items"][0]["session_id"] == newer.session_id
+    first = await app.client.get(
+        BASE, params={"collection_id": "collection", "limit": 1}
+    )
+    second = await app.client.get(
+        BASE, params={"collection_id": "collection", "limit": 1, "offset": 1}
+    )
+    assert first.json()["data"]["items"][0]["session_id"] == "original"
+    assert first.json()["data"]["items"][0]["is_pinned"] is True
+    assert second.json()["data"]["items"][0]["session_id"] == newer.session_id
     branch = await _branch(app)
     assert branch["is_pinned"] is False
 
     response = await app.client.put(f"{BASE}/original/pin", json={"is_pinned": False})
     assert response.status_code == 200, response.text
-    assert response.json()["updated_at"] == original.updated_at
-    items = (await app.client.get(BASE, params={"collection_id": "collection"})).json()["items"]
+    assert response.json()["data"]["updated_at"] == original.updated_at
+    items = (await app.client.get(BASE, params={"collection_id": "collection"})).json()[
+        "data"
+    ]["items"]
     assert items[-1]["session_id"] == "original"
     assert items[-1]["is_pinned"] is False
 
@@ -275,17 +383,22 @@ async def test_pin_is_owner_only_and_requires_an_explicit_boolean(branch_app):
     app = branch_app
     for payload in ({}, {"is_pinned": "false"}, {"is_pinned": None}):
         response = await app.client.put(f"{BASE}/original/pin", json=payload)
-        assert response.status_code == 422, response.text
+        assert response.status_code == 200
+        assert response.json()["code"] == 200100
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
     for session_id in ("original", "missing"):
-        response = await app.client.put(f"{BASE}/{session_id}/pin", json={"is_pinned": True})
-        assert response.status_code == 404, response.text
-        assert response.json()["detail"]["code"] == "chat_session_not_found"
+        response = await app.client.put(
+            f"{BASE}/{session_id}/pin", json={"is_pinned": True}
+        )
+        assert response.status_code == 200
+        assert response.json()["code"] == 200201
+        assert response.json()["data"]["code"] == "chat_session_not_found"
     assert (await app.repository.read_session("original")).is_pinned is False
 
 
 async def test_pin_migration_upgrades_existing_sessions_without_changing_messages(
-    branch_app, postgres_sync_engine,
+    branch_app,
+    postgres_sync_engine,
 ):
     app = branch_app
     before = await app.repository.read_messages("original")
@@ -293,7 +406,10 @@ async def test_pin_migration_upgrades_existing_sessions_without_changing_message
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
         command.downgrade(config, "20261008_0086")
-        assert "is_pinned" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
+        assert "is_pinned" not in {
+            column["name"]
+            for column in inspect(connection).get_columns("chat_sessions")
+        }
         command.upgrade(config, "head")
     assert (await app.repository.read_session("original")).is_pinned is False
     assert await app.repository.read_messages("original") == before
@@ -306,19 +422,38 @@ async def test_edit_preserves_sources_history_and_completed_writes(branch_app):
     branch_id = branch["session_id"]
     copied = await app.repository.read_messages(branch_id)
     assert len(copied) == 4
-    assert [item.content for item in copied if item.role.value != "tool"] == [item.content for item in original[:4] if item.role.value != "tool"]
-    assert not ({item.message_id for item in copied} & {item.message_id for item in original})
+    assert [item.content for item in copied if item.role.value != "tool"] == [
+        item.content for item in original[:4] if item.role.value != "tool"
+    ]
+    assert not (
+        {item.message_id for item in copied} & {item.message_id for item in original}
+    )
     copied_call = copied[1].tool_calls[0]
     assert copied_call.tool_call_id != "historical-write"
     assert copied[2].tool_result.tool_call_id == copied_call.tool_call_id
     assert copied[2].tool_result.data["objective_id"] == "existing-objective"
-    assert await app.repository.claim_approved_tool_call(session_id=branch_id, tool_call_id=copied_call.tool_call_id, user_id=app.owner, started_at=NOW) is None
-    draft = (await app.client.get(f"{BASE}/{branch_id}/messages")).json()["branch_draft"]
-    assert draft["content"] == REVISION and draft["source_contexts"][0]["quote"] == QUOTE
+    assert (
+        await app.repository.claim_approved_tool_call(
+            session_id=branch_id,
+            tool_call_id=copied_call.tool_call_id,
+            user_id=app.owner,
+            started_at=NOW,
+        )
+        is None
+    )
+    draft = (await app.client.get(f"{BASE}/{branch_id}/messages")).json()["data"][
+        "branch_draft"
+    ]
+    assert (
+        draft["content"] == REVISION and draft["source_contexts"][0]["quote"] == QUOTE
+    )
     await _send(app, branch, streaming=True)
-    saved = (await app.client.get(f"{BASE}/{branch_id}/messages")).json()
+    saved = (await app.client.get(f"{BASE}/{branch_id}/messages")).json()["data"]
     assert saved["items"][4]["content"] == REVISION
-    assert saved["items"][4]["source_contexts"][0]["source_digest"] == sha256(QUOTE.encode()).hexdigest()
+    assert (
+        saved["items"][4]["source_contexts"][0]["source_digest"]
+        == sha256(QUOTE.encode()).hexdigest()
+    )
     assert saved["branch_draft"] is None and saved["running"] is False
     assert saved["branches"][0]["session_ids"] == ["original", branch_id]
     assert saved["branches"][0]["active_session_id"] == branch_id
@@ -326,63 +461,112 @@ async def test_edit_preserves_sources_history_and_completed_writes(branch_app):
     assert await app.repository.read_messages("original") == original
 
 
-async def test_tree_checkpoint_continuation_preserves_answer_and_excludes_later_turns(branch_app):
+async def test_tree_checkpoint_continuation_preserves_answer_and_excludes_later_turns(
+    branch_app,
+):
     app = branch_app
     question = "Compare only specimens with the same heat treatment."
-    payload = {"message_id": "question", "request_id": str(uuid4()),
-               "message": question, "mode": "continue"}
-    before = (await app.client.get(f"{BASE}/original/tree")).json()
+    payload = {
+        "message_id": "question",
+        "request_id": str(uuid4()),
+        "message": question,
+        "mode": "continue",
+    }
+    before = (await app.client.get(f"{BASE}/original/tree")).json()["data"]
     assert before["active_path"] == ["create", "question", "later"]
-    assert [node["parent_message_id"] for node in before["nodes"]] == [None, "create", "question"]
+    assert [node["parent_message_id"] for node in before["nodes"]] == [
+        None,
+        "create",
+        "question",
+    ]
     response = await app.client.post(f"{BASE}/original/branches", json=payload)
-    assert response.status_code == 201, response.text
-    branch = response.json()
+    assert response.status_code == 200
+    branch = response.json()["data"]
     assert branch["fork_position"] == 6 and branch["fork_message_id"] == "answer"
-    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).json() == branch
+    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).json()[
+        "data"
+    ] == branch
     copied = await app.repository.read_messages(branch["session_id"])
     assert len(copied) == 6 and copied[-1].content == ANSWER
     assert copied[4].source_contexts[0].quote == QUOTE
-    assert not any(item.content == "What about specimen orientation?" for item in copied)
-    draft = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()["branch_draft"]
+    assert not any(
+        item.content == "What about specimen orientation?" for item in copied
+    )
+    draft = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()[
+        "data"
+    ]["branch_draft"]
     assert draft["role"] == "user" and draft["source_contexts"] == []
     await _send(app, branch)
     saved = await app.repository.read_messages(branch["session_id"])
-    tree = (await app.client.get(f"{BASE}/{branch['session_id']}/tree")).json()
+    tree = (await app.client.get(f"{BASE}/{branch['session_id']}/tree")).json()["data"]
     assert len(tree["nodes"]) == 4
     assert tree["active_path"] == ["create", "question", saved[6].message_id]
-    node = next(node for node in tree["nodes"] if node["message"]["content"] == question)
+    node = next(
+        node for node in tree["nodes"] if node["message"]["content"] == question
+    )
     assert node["parent_message_id"] == "question"
-    nested = await _branch(app, branch["session_id"], saved[6].message_id, "Compare cooling rates instead.")
+    nested = await _branch(
+        app, branch["session_id"], saved[6].message_id, "Compare cooling rates instead."
+    )
     assert nested["parent_session_id"] == branch["session_id"]
     await _send(app, nested)
     original = await app.repository.read_messages("original")
     assert len(original) == 8 and original[-1].message_id == "later-answer"
-    final_tree = (await app.client.get(f"{BASE}/original/tree")).json()
+    final_tree = (await app.client.get(f"{BASE}/original/tree")).json()["data"]
     assert len(final_tree["nodes"]) == 5
-    assert sum(node["parent_message_id"] == "question" for node in final_tree["nodes"]) == 3
+    assert (
+        sum(node["parent_message_id"] == "question" for node in final_tree["nodes"])
+        == 3
+    )
 
 
-async def test_tree_and_checkpoint_enforce_ownership_busy_and_completed_boundaries(branch_app):
+async def test_tree_and_checkpoint_enforce_ownership_busy_and_completed_boundaries(
+    branch_app,
+):
     app = branch_app
-    payload = {"message_id": "question", "request_id": str(uuid4()),
-               "message": "Compare matched specimens.", "mode": "continue"}
+    payload = {
+        "message_id": "question",
+        "request_id": str(uuid4()),
+        "message": "Compare matched specimens.",
+        "mode": "continue",
+    }
     async with app.repository.session_execution("original"):
-        tree = (await app.client.get(f"{BASE}/original/tree")).json()
+        tree = (await app.client.get(f"{BASE}/original/tree")).json()["data"]
         assert tree["nodes"][-1]["status"] == "running"
         assert not any(node["can_branch"] for node in tree["nodes"])
-        assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 409
-    assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message": None})).status_code == 422
-    original = await app.repository.read_messages("original")
-    unanswered = ChatMessage.user(message_id="unanswered", session_id="original",
-                                  content="What about cooling rate?", created_at=NOW)
-    await app.repository.save_trajectory(
-        chat_session=await app.repository.read_session("original"), messages=(*original, unanswered),
-        tool_calls=(), tool_results=(),
+        rejection = await app.client.post(f"{BASE}/original/branches", json=payload)
+        assert rejection.status_code == 200
+        assert rejection.json()["code"] == 200204
+    rejection = await app.client.post(
+        f"{BASE}/original/branches", json={**payload, "message": None}
     )
-    assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message_id": "unanswered"})).status_code == 422
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200100
+    original = await app.repository.read_messages("original")
+    unanswered = ChatMessage.user(
+        message_id="unanswered",
+        session_id="original",
+        content="What about cooling rate?",
+        created_at=NOW,
+    )
+    await app.repository.save_trajectory(
+        chat_session=await app.repository.read_session("original"),
+        messages=(*original, unanswered),
+        tool_calls=(),
+        tool_results=(),
+    )
+    rejection = await app.client.post(
+        f"{BASE}/original/branches", json={**payload, "message_id": "unanswered"}
+    )
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200100
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
-    assert (await app.client.get(f"{BASE}/original/tree")).status_code == 404
-    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 404
+    rejection = await app.client.get(f"{BASE}/original/tree")
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
+    rejection = await app.client.post(f"{BASE}/original/branches", json=payload)
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
 
 
 async def test_revision_retries_are_idempotent_and_do_not_repeat_generation(branch_app):
@@ -392,13 +576,29 @@ async def test_revision_retries_are_idempotent_and_do_not_repeat_generation(bran
     assert await _branch(app, request_id=request_id) == branch
     await _send(app, branch)
     count = len(app.model.contexts)
-    assert await _branch(app, request_id=request_id) == (await app.client.get(f"{BASE}/{branch['session_id']}")).json()
+    assert (
+        await _branch(app, request_id=request_id)
+        == (await app.client.get(f"{BASE}/{branch['session_id']}")).json()["data"]
+    )
     for headers in ({}, {"Accept": "text/event-stream"}):
-        repeated = await app.client.post(f"{BASE}/{branch['session_id']}/messages", json={"message": REVISION, "branch_revision": True}, headers=headers)
-        assert repeated.status_code == 409
+        repeated = await app.client.post(
+            f"{BASE}/{branch['session_id']}/messages",
+            json={"message": REVISION, "branch_revision": True},
+            headers=headers,
+        )
+        assert repeated.status_code == 200
+        assert repeated.json()["code"] == 200204
     assert len(app.model.contexts) == count
-    reused = await app.client.post(f"{BASE}/original/branches", json={"message_id": "question", "request_id": request_id, "message": "Different question"})
-    assert reused.status_code == 422
+    reused = await app.client.post(
+        f"{BASE}/original/branches",
+        json={
+            "message_id": "question",
+            "request_id": request_id,
+            "message": "Different question",
+        },
+    )
+    assert reused.status_code == 200
+    assert reused.json()["code"] == 200204
 
 
 async def test_alternatives_and_nested_edits_keep_separate_version_groups(branch_app):
@@ -411,12 +611,18 @@ async def test_alternatives_and_nested_edits_keep_separate_version_groups(branch
     assert second["fork_message_id"] == "question"
     await _send(app, second)
     earlier = (await app.repository.read_messages(second["session_id"]))[0]
-    third = await _branch(app, second["session_id"], earlier.message_id, "Explain the collection scope.")
+    third = await _branch(
+        app, second["session_id"], earlier.message_id, "Explain the collection scope."
+    )
     assert third["parent_session_id"] == "original" and third["fork_position"] == 0
     await _send(app, third)
-    original = (await app.client.get(f"{BASE}/original/messages")).json()
+    original = (await app.client.get(f"{BASE}/original/messages")).json()["data"]
     assert original["branches"][0]["session_ids"] == ["original", third["session_id"]]
-    assert original["branches"][1]["session_ids"] == ["original", first["session_id"], second["session_id"]]
+    assert original["branches"][1]["session_ids"] == [
+        "original",
+        first["session_id"],
+        second["session_id"],
+    ]
 
 
 async def test_deleting_ancestor_does_not_break_saved_branch_sources(branch_app):
@@ -425,88 +631,188 @@ async def test_deleting_ancestor_does_not_break_saved_branch_sources(branch_app)
     deletion = await app.client.delete(f"{BASE}/original")
     trajectory = await app.client.get(f"{BASE}/{branch['session_id']}/messages")
     assert trajectory.status_code == 200, trajectory.text
-    assert trajectory.json()["branch_draft"]["source_contexts"][0]["quote"] == QUOTE
-    assert deletion.status_code == 409
-    assert deletion.json()["detail"]["code"] == "chat_session_has_branches"
+    assert (
+        trajectory.json()["data"]["branch_draft"]["source_contexts"][0]["quote"]
+        == QUOTE
+    )
+    assert deletion.status_code == 200
+    assert deletion.json()["code"] == 200204
+    assert deletion.json()["data"]["code"] == "chat_session_has_branches"
     await _send(app, branch)
-    followup = await app.client.post(f"{BASE}/{branch['session_id']}/messages", json={
-        "message": "Which specimen orientation was used?",
-    })
+    followup = await app.client.post(
+        f"{BASE}/{branch['session_id']}/messages",
+        json={
+            "message": "Which specimen orientation was used?",
+        },
+    )
     assert followup.status_code == 200
     question = (await app.repository.read_messages(branch["session_id"]))[-2]
-    nested = await _branch(app, branch["session_id"], question.message_id, "Verify build orientation before comparing strengths.")
+    nested = await _branch(
+        app,
+        branch["session_id"],
+        question.message_id,
+        "Verify build orientation before comparing strengths.",
+    )
     assert nested["parent_session_id"] == branch["session_id"]
-    assert (await app.client.delete(f"{BASE}/{branch['session_id']}")).status_code == 409
+    rejection = await app.client.delete(f"{BASE}/{branch['session_id']}")
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200204
     await _send(app, nested)
-    assert (await app.client.get(f"{BASE}/{nested['session_id']}/tree")).status_code == 200
-    assert (await app.client.delete(f"{BASE}/{nested['session_id']}")).status_code == 204
-    assert (await app.client.get(f"{BASE}/{branch['session_id']}/tree")).status_code == 200
-    assert (await app.client.delete(f"{BASE}/{branch['session_id']}")).status_code == 204
+    assert (
+        await app.client.get(f"{BASE}/{nested['session_id']}/tree")
+    ).status_code == 200
+    assert (
+        await app.client.delete(f"{BASE}/{nested['session_id']}")
+    ).status_code == 200
+    assert (
+        await app.client.get(f"{BASE}/{branch['session_id']}/tree")
+    ).status_code == 200
+    assert (
+        await app.client.delete(f"{BASE}/{branch['session_id']}")
+    ).status_code == 200
     assert (await app.client.get(f"{BASE}/original/messages")).status_code == 200
-    assert (await app.client.delete(f"{BASE}/original")).status_code == 204
+    assert (await app.client.delete(f"{BASE}/original")).status_code == 200
 
 
 async def test_deletion_checks_ownership_execution_and_repeated_requests(branch_app):
     app = branch_app
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
-    assert (await app.client.delete(f"{BASE}/original")).status_code == 404
+    rejection = await app.client.delete(f"{BASE}/original")
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[0])
     async with app.repository.session_execution("original"):
-        assert (await app.client.delete(f"{BASE}/original")).status_code == 409
+        rejection = await app.client.delete(f"{BASE}/original")
+        assert rejection.status_code == 200
+        assert rejection.json()["code"] == 200204
     assert (await app.client.get(f"{BASE}/original/messages")).status_code == 200
-    assert (await app.client.delete(f"{BASE}/original")).status_code == 204
-    assert (await app.client.delete(f"{BASE}/original")).status_code == 404
-    assert (await app.client.get(BASE, params={"collection_id": "collection"})).json()["items"] == []
+    assert (await app.client.delete(f"{BASE}/original")).status_code == 200
+    rejection = await app.client.delete(f"{BASE}/original")
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
+    assert (await app.client.get(BASE, params={"collection_id": "collection"})).json()[
+        "data"
+    ]["items"] == []
 
 
 async def test_branch_authorization_busy_worker_and_message_boundaries(branch_app):
     app = branch_app
     payload = {"message_id": "question", "request_id": str(uuid4())}
     app.client.cookies.clear()
-    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 401
+    rejection = await app.client.post(f"{BASE}/original/branches", json=payload)
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200301
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
-    assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 404
+    rejection = await app.client.post(f"{BASE}/original/branches", json=payload)
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200201
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[0])
     for message_id in ("missing", "answer", "result"):
-        assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message_id": message_id})).status_code == 404
-    for change in ({"message": " "}, {"message": "bad\x00question"}, {"message": "x" * 12001}, {"request_id": "invalid"}, {"user_id": "other"}):
-        assert (await app.client.post(f"{BASE}/original/branches", json={**payload, **change})).status_code == 422
+        rejection = await app.client.post(
+            f"{BASE}/original/branches", json={**payload, "message_id": message_id}
+        )
+        assert rejection.status_code == 200
+        assert rejection.json()["code"] == 200201
+    for change in (
+        {"message": " "},
+        {"message": "bad\x00question"},
+        {"message": "x" * 12001},
+        {"request_id": "invalid"},
+        {"user_id": "other"},
+    ):
+        rejection = await app.client.post(
+            f"{BASE}/original/branches", json={**payload, **change}
+        )
+        assert rejection.status_code == 200
+        assert rejection.json()["code"] == 200100
     other_worker = ChatRepository()
     async with other_worker.session_execution("original"):
-        assert (await app.client.get(f"{BASE}/original/messages")).json()["running"] is True
-        assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 409
-        assert (await app.client.post(f"{BASE}/original/messages", json={"message": QUESTION})).status_code == 409
-    assert (await app.client.get(f"{BASE}/original/messages")).json()["running"] is False
+        assert (await app.client.get(f"{BASE}/original/messages")).json()["data"][
+            "running"
+        ] is True
+        rejection = await app.client.post(f"{BASE}/original/branches", json=payload)
+        assert rejection.status_code == 200
+        assert rejection.json()["code"] == 200204
+        rejection = await app.client.post(
+            f"{BASE}/original/messages", json={"message": QUESTION}
+        )
+        assert rejection.status_code == 200
+        assert rejection.json()["code"] == 200204
+    assert (await app.client.get(f"{BASE}/original/messages")).json()["data"][
+        "running"
+    ] is False
 
 
 async def test_regenerated_write_requires_a_fresh_exact_approval(branch_app):
     app = branch_app
-    app.service.runner.model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=app.write.spec.name, arguments={"question": "Compare matched LPBF tensile conditions"}),)), ModelTurn(content="The new objective candidate was saved."))
+    app.service.runner.model = _Model(
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name=app.write.spec.name,
+                    arguments={"question": "Compare matched LPBF tensile conditions"},
+                ),
+            )
+        ),
+        ModelTurn(content="The new objective candidate was saved."),
+    )
     branch = await _branch(app, message_id="create", message=None)
-    turn = (await _send(app, branch)).json()
+    turn = (await _send(app, branch)).json()["data"]
     assert turn["status"] == "approval_required" and app.write.executed == []
     call = turn["pending_approval"]
-    assert call["tool_call_id"] != "historical-write" and call["decision_user_id"] is None
+    assert (
+        call["tool_call_id"] != "historical-write" and call["decision_user_id"] is None
+    )
     question_id = turn["messages"][0]["message_id"]
-    blocked = await app.client.post(f"{BASE}/{branch['session_id']}/branches", json={"message_id": question_id, "request_id": str(uuid4())})
-    assert blocked.status_code == 409
-    decision_url = f"{BASE}/{branch['session_id']}/tool-calls/{call['tool_call_id']}/decision"
-    approved = await app.client.post(decision_url, json={"decision": "approved", "arguments_digest": call["arguments_digest"]})
+    blocked = await app.client.post(
+        f"{BASE}/{branch['session_id']}/branches",
+        json={"message_id": question_id, "request_id": str(uuid4())},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["code"] == 200204
+    decision_url = (
+        f"{BASE}/{branch['session_id']}/tool-calls/{call['tool_call_id']}/decision"
+    )
+    approved = await app.client.post(
+        decision_url,
+        json={"decision": "approved", "arguments_digest": call["arguments_digest"]},
+    )
     assert approved.status_code == 200, approved.text
     assert len(app.write.executed) == 1
 
 
-async def test_source_changes_block_revision_without_silently_dropping_context(branch_app):
+async def test_source_changes_block_revision_without_silently_dropping_context(
+    branch_app,
+):
     app = branch_app
     branch = await _branch(app)
-    app.sources.document = replace(app.sources.document, blocks=(replace(app.sources.document.blocks[0], text="The reported temperature was corrected to 573 K."),))
-    blocked = await app.client.post(f"{BASE}/{branch['session_id']}/messages", json={"message": REVISION, "branch_revision": True})
-    assert blocked.status_code == 422
+    app.sources.document = replace(
+        app.sources.document,
+        blocks=(
+            replace(
+                app.sources.document.blocks[0],
+                text="The reported temperature was corrected to 573 K.",
+            ),
+        ),
+    )
+    blocked = await app.client.post(
+        f"{BASE}/{branch['session_id']}/messages",
+        json={"message": REVISION, "branch_revision": True},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["code"] == 200100
     assert len(await app.repository.read_messages(branch["session_id"])) == 4
-    assert (await app.client.post(f"{BASE}/original/branches", json={"message_id": "question", "request_id": str(uuid4())})).status_code == 422
+    rejection = await app.client.post(
+        f"{BASE}/original/branches",
+        json={"message_id": "question", "request_id": str(uuid4())},
+    )
+    assert rejection.status_code == 200
+    assert rejection.json()["code"] == 200100
 
 
-async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(branch_app):
+async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
+    branch_app,
+):
     app = branch_app
     entered, release = asyncio.Event(), asyncio.Event()
 
@@ -519,21 +825,36 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
     app.service.runner.model = PausedModel(ModelTurn(content=ANSWER))
     branch = await _branch(app)
     events = await app.service.send_message_stream(
-        branch["session_id"], app.owner, message=REVISION, branch_revision=True,
+        branch["session_id"],
+        app.owner,
+        message=REVISION,
+        branch_revision=True,
     )
     try:
         assert (await anext(events))["type"] == "trajectory"
         await asyncio.wait_for(entered.wait(), timeout=3)
         await events.aclose()
-        saved = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()
+        saved = (
+            await app.client.get(f"{BASE}/{branch['session_id']}/messages")
+        ).json()["data"]
         assert saved["running"] is True
-        question = next(message for message in reversed(saved["items"]) if message["role"] == "user")
-        blocked = await app.client.post(f"{BASE}/{branch['session_id']}/branches", json={"message_id": question["message_id"], "request_id": str(uuid4())})
-        assert blocked.status_code == 409
+        question = next(
+            message for message in reversed(saved["items"]) if message["role"] == "user"
+        )
+        blocked = await app.client.post(
+            f"{BASE}/{branch['session_id']}/branches",
+            json={"message_id": question["message_id"], "request_id": str(uuid4())},
+        )
+        assert blocked.status_code == 200
+        assert blocked.json()["code"] == 200204
     finally:
         release.set()
-        await asyncio.wait_for(asyncio.gather(*app.service._active_stream_tasks), timeout=5)
-    saved = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()
+        await asyncio.wait_for(
+            asyncio.gather(*app.service._active_stream_tasks), timeout=5
+        )
+    saved = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()[
+        "data"
+    ]
     assert saved["running"] is False and saved["items"][-1]["content"] == ANSWER
 
 
@@ -541,26 +862,35 @@ async def test_failed_model_answer_can_be_regenerated_with_the_same_source(branc
     app = branch_app
     app.service.runner.model = _Model(RuntimeError("synthetic provider failure"))
     first = await _branch(app)
-    failed = (await _send(app, first)).json()
+    failed = (await _send(app, first)).json()["data"]
     assert failed["status"] == "failed"
-    question = next(message for message in failed["messages"] if message["role"] == "user")
+    question = next(
+        message for message in failed["messages"] if message["role"] == "user"
+    )
     app.service.runner.model = _Model(ModelTurn(content=ANSWER))
     second = await _branch(app, first["session_id"], question["message_id"], None)
-    completed = (await _send(app, second)).json()
+    completed = (await _send(app, second)).json()["data"]
     assert completed["status"] == "completed"
     assert completed["messages"][0]["source_contexts"] == question["source_contexts"]
 
 
-async def test_branch_migration_round_trip_preserves_original_sessions(branch_app, postgres_sync_engine):
+async def test_branch_migration_round_trip_preserves_original_sessions(
+    branch_app, postgres_sync_engine
+):
     app = branch_app
     await _branch(app)
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
         # Exercise this migration without crossing the irreversible 0075 step.
-        migration = ScriptDirectory.from_config(config).get_revision("20260909_0057").module
+        migration = (
+            ScriptDirectory.from_config(config).get_revision("20260909_0057").module
+        )
         with Operations.context(MigrationContext.configure(connection)):
             migration.downgrade()
-            assert "fork_position" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
+            assert "fork_position" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("chat_sessions")
+            }
             migration.upgrade()
     assert (await app.repository.read_messages("original"))[4].content == QUESTION

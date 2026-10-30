@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import os
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from application.auth import session_service
+from application.auth.session_service import SESSION_COOKIE_NAME
+from config import COOKIE_SECURE
+from controllers.dependencies.auth import get_current_user_id
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
-
-from application.auth.session_service import (
-    SESSION_COOKIE_NAME,
-    InvalidCredentialsError,
-)
-from controllers.dependencies.auth import require_current_user
+from utils.response import ApiResponse, make_api_response
 
 
 class AuthLoginRequest(BaseModel):
@@ -44,52 +44,44 @@ class AuthLogoutResponse(BaseModel):
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@auth_router.post("/login", response_model=AuthSessionResponse, summary="Log in")
+@auth_router.post(
+    "/login", response_model=ApiResponse[AuthSessionResponse], summary="Log in"
+)
 async def login(
     payload: AuthLoginRequest,
-    request: Request,
-    response: Response,
-) -> AuthSessionResponse:
-    try:
-        session = await request.app.state.auth_session_service.login(
-            email=payload.email,
-            password=payload.password,
-        )
-    except InvalidCredentialsError as exc:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "invalid_credentials",
-                "message": "Invalid email or password.",
-            },
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+) -> Response:
+    session = await session_service.login(
+        email=payload.email,
+        password=payload.password,
+    )
 
+    response = make_api_response(data=AuthSessionResponse(user=session["user"]))
     response.set_cookie(
         SESSION_COOKIE_NAME,
         session["session_id"],
         httponly=True,
-        secure=_cookie_secure(),
+        secure=COOKIE_SECURE,
         samesite="lax",
         path="/",
     )
-    return AuthSessionResponse(user=session["user"])
+    return response
 
 
-@auth_router.post("/logout", response_model=AuthLogoutResponse, summary="Log out")
-async def logout(request: Request, response: Response) -> AuthLogoutResponse:
-    await request.app.state.auth_session_service.logout(
-        request.cookies.get(SESSION_COOKIE_NAME)
-    )
+@auth_router.post(
+    "/logout", response_model=ApiResponse[AuthLogoutResponse], summary="Log out"
+)
+async def logout(request: Request) -> Response:
+    await session_service.logout(request.cookies.get(SESSION_COOKIE_NAME))
+    response = make_api_response(data=AuthLogoutResponse(ok=True))
     response.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="lax")
-    return AuthLogoutResponse(ok=True)
+    return response
 
 
-@auth_router.get("/me", response_model=AuthSessionResponse, summary="Read current user")
-async def me(request: Request) -> AuthSessionResponse:
-    return AuthSessionResponse(user=await require_current_user(request))
-
-
-def _cookie_secure() -> bool:
-    return os.getenv("COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes"}
+@auth_router.get(
+    "/me", response_model=ApiResponse[AuthSessionResponse], summary="Read current user"
+)
+async def me(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    return make_api_response(data=AuthSessionResponse(user=request.state.current_user))

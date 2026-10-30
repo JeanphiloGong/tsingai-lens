@@ -7,23 +7,22 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Mapping
 
+from application.core.objectives.analysis import experiment_analysis_writer
 from application.core.objectives.analysis.experiment_analysis_writer import (
-    ExperimentAnalysisWriter,
     ExperimentAnalysisWriteResult,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
-    parse_paper_experiment_response,
     PaperExperimentDraftValidationError,
     ReconciledPaperExperimentOutput,
+    parse_paper_experiment_response,
     prepare_model_output,
 )
 from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
-from application.source.collection_service import CollectionService
+from application.source import collection_service
 from infra.persistence.database import AsyncSessionLocal
 from infra.source.artifact_bundle import source_table_payload
-from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 @dataclass(frozen=True)
@@ -60,7 +59,9 @@ def _canonical_digest(value: Mapping[str, Any]) -> str:
     return sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _source_digest_map(payloads: tuple[Mapping[str, Any], ...]) -> dict[tuple[str, str], str]:
+def _source_digest_map(
+    payloads: tuple[Mapping[str, Any], ...]
+) -> dict[tuple[str, str], str]:
     return {
         (str(source["source_kind"]), str(source["source_ref"])): sha256(
             str(source["_canonical_content"]).encode("utf-8")
@@ -118,137 +119,121 @@ def _source_payloads(document: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(payloads)
 
 
-class PaperExperimentAuthoringService:
-    """Validate paper facts and save the reviewed revisions independently."""
+from repositories.source_artifact_repository import SourceArtifactRepo
 
-    def __init__(
-        self,
-        *,
-        collection_service: CollectionService,
-        source_artifact_repository: SourceArtifactRepository,
-        experiment_analysis_writer: ExperimentAnalysisWriter,
 
-    ) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
-        self.experiment_analysis_writer = experiment_analysis_writer
-
-    async def prepare(
-        self,
-        *,
-        collection_id: str,
-        user_id: str,
-        document_id: str,
-        raw_draft: Mapping[str, Any],
-    ) -> PreparedPaperExperimentDraft:
-        await self.collection_service.get_collection_for_user(collection_id, user_id)
-        document = await self.source_artifact_repository.read_document(
-            collection_id, document_id
+async def prepare(
+    *,
+    collection_id: str,
+    user_id: str,
+    document_id: str,
+    raw_draft: Mapping[str, Any],
+) -> PreparedPaperExperimentDraft:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    document = await SourceArtifactRepo.read_document(collection_id, document_id)
+    if document is None:
+        raise FileNotFoundError(
+            f"prepared Source document not found: {collection_id}/{document_id}"
         )
-        if document is None:
-            raise FileNotFoundError(
-                f"prepared Source document not found: {collection_id}/{document_id}"
-            )
-        document_record = await self.collection_service.get_document(
-            collection_id, document_id
-        )
-        source_fingerprint = str(
-            document_record.document.preparation_fingerprint
-            or document_record.document.source_fingerprint
-            or document.metadata.get("source_fingerprint")
-            or ""
-        ).strip()
-        if not source_fingerprint:
-            raise ValueError("prepared Source document has no fingerprint")
-        source_payloads = _source_payloads(document)
-        bundle = build_source_bundle(
+    document_record = await collection_service.get_document(collection_id, document_id)
+    source_fingerprint = str(
+        document_record.document.preparation_fingerprint
+        or document_record.document.source_fingerprint
+        or document.metadata.get("source_fingerprint")
+        or ""
+    ).strip()
+    if not source_fingerprint:
+        raise ValueError("prepared Source document has no fingerprint")
+    source_payloads = _source_payloads(document)
+    bundle = build_source_bundle(
+        document_id=document_id,
+        source_fingerprint=source_fingerprint,
+        source_payloads=source_payloads,
+    )
+    try:
+        output = parse_paper_experiment_response(
+            raw_draft,
             document_id=document_id,
             source_fingerprint=source_fingerprint,
-            source_payloads=source_payloads,
+            source_labels=bundle.source_catalog,
         )
-        try:
-            output = parse_paper_experiment_response(
-                raw_draft,
-                document_id=document_id,
-                source_fingerprint=source_fingerprint,
-                source_labels=bundle.source_catalog,
-            )
-            reconciled = prepare_model_output(output)
-        except PaperExperimentDraftValidationError:
-            raise
-        except ValueError as exc:
-            detail = " ".join(str(exc).split())
-            path = detail.split(" ", 1)[0] if detail.startswith("experiments[") else None
-            raise PaperExperimentDraftValidationError(
-                detail or "PaperExperiment draft failed deterministic validation.",
-                validation_path=path,
-            ) from exc
-        if not reconciled.output.experiments:
-            raise PaperExperimentDraftEmptyError(
-                "Agent draft contains no source-supported experiment"
-            )
-        digest = _canonical_digest(
-            {
-                "collection_id": collection_id,
-                "document_id": document_id,
-                "source_fingerprint": source_fingerprint,
-                "source_catalog": bundle.source_catalog,
-                "draft": raw_draft,
-            }
+        reconciled = prepare_model_output(output)
+    except PaperExperimentDraftValidationError:
+        raise
+    except ValueError as exc:
+        detail = " ".join(str(exc).split())
+        path = detail.split(" ", 1)[0] if detail.startswith("experiments[") else None
+        raise PaperExperimentDraftValidationError(
+            detail or "PaperExperiment draft failed deterministic validation.",
+            validation_path=path,
+        ) from exc
+    if not reconciled.output.experiments:
+        raise PaperExperimentDraftEmptyError(
+            "Agent draft contains no source-supported experiment"
         )
-        return PreparedPaperExperimentDraft(
-            collection_id=collection_id,
-            output=reconciled,
-            source_fingerprint=source_fingerprint,
-            draft_digest=digest,
-            source_digests=_source_digest_map(source_payloads),
-        )
+    digest = _canonical_digest(
+        {
+            "collection_id": collection_id,
+            "document_id": document_id,
+            "source_fingerprint": source_fingerprint,
+            "source_catalog": bundle.source_catalog,
+            "draft": raw_draft,
+        }
+    )
+    return PreparedPaperExperimentDraft(
+        collection_id=collection_id,
+        output=reconciled,
+        source_fingerprint=source_fingerprint,
+        draft_digest=digest,
+        source_digests=_source_digest_map(source_payloads),
+    )
 
-    async def write(
-        self,
-        *,
-        prepared: PreparedPaperExperimentDraft,
-        collection_id: str,
-        created_by: str,
-    ) -> ExperimentAnalysisWriteResult:
-        if prepared.collection_id != collection_id:
-            raise ValueError("prepared paper experiment belongs to another collection")
-        await self.collection_service.get_collection_for_user(collection_id, created_by)
-        document_record = await self.collection_service.get_document(
-            collection_id, prepared.output.output.document_id
+
+async def write(
+    *,
+    prepared: PreparedPaperExperimentDraft,
+    collection_id: str,
+    created_by: str,
+) -> ExperimentAnalysisWriteResult:
+    if prepared.collection_id != collection_id:
+        raise ValueError("prepared paper experiment belongs to another collection")
+    await collection_service.get_collection_for_user(collection_id, created_by)
+    document_record = await collection_service.get_document(
+        collection_id, prepared.output.output.document_id
+    )
+    document = await SourceArtifactRepo.read_document(
+        collection_id, prepared.output.output.document_id
+    )
+    if document is None:
+        raise FileNotFoundError("prepared Source document is no longer available")
+    current_fingerprint = str(
+        document_record.document.preparation_fingerprint
+        or document_record.document.source_fingerprint
+        or document.metadata.get("source_fingerprint")
+        or ""
+    ).strip()
+    if current_fingerprint != prepared.source_fingerprint:
+        raise PaperExperimentSourceChangedError(
+            "prepared paper experiment source fingerprint changed; review it again"
         )
-        document = await self.source_artifact_repository.read_document(
-            collection_id, prepared.output.output.document_id
+    current_digests = _source_digest_map(_source_payloads(document))
+    if current_digests != dict(prepared.source_digests):
+        raise PaperExperimentSourceChangedError(
+            "prepared paper experiment Source content changed; review it again"
         )
-        if document is None:
-            raise FileNotFoundError("prepared Source document is no longer available")
-        current_fingerprint = str(
-            document_record.document.preparation_fingerprint
-            or document_record.document.source_fingerprint
-            or document.metadata.get("source_fingerprint")
-            or ""
-        ).strip()
-        if current_fingerprint != prepared.source_fingerprint:
-            raise PaperExperimentSourceChangedError(
-                "prepared paper experiment source fingerprint changed; review it again"
-            )
-        current_digests = _source_digest_map(_source_payloads(document))
-        if current_digests != dict(prepared.source_digests):
-            raise PaperExperimentSourceChangedError(
-                "prepared paper experiment Source content changed; review it again"
-            )
-        async with AsyncSessionLocal() as db, db.begin():
-            return await self.experiment_analysis_writer.write_paper_experiment_revisions(
-                experiment_outputs=(prepared.output,),
-                created_by=created_by,
-                db=db,
-            )
+    async with AsyncSessionLocal() as db, db.begin():
+        return await experiment_analysis_writer.write_paper_experiment_revisions(
+            experiment_outputs=(prepared.output,),
+            created_by=created_by,
+            db=db,
+        )
 
 
 __all__ = [
     "PaperExperimentAuthoringError",
     "PaperExperimentDraftEmptyError",
     "PaperExperimentSourceChangedError",
-    "PaperExperimentAuthoringService",
     "PreparedPaperExperimentDraft",
+    "prepare",
+    "write",
 ]

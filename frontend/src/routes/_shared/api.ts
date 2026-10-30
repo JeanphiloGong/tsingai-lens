@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { API_PREFIX } from './base';
+import { clearAuthState } from './auth';
 import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {
@@ -8,83 +9,54 @@ const ERROR_CODE_TRANSLATIONS = {
 	graph_not_ready: 'error.graphNotReady',
 	community_not_found: 'error.communityNotFound',
 	chat_session_busy: 'error.chatSessionBusy',
-	chat_session_has_branches: 'error.chatSessionHasBranches'
+	chat_session_has_branches: 'error.chatSessionHasBranches',
+	upload_too_large: 'error.uploadTooLarge'
 } as const;
 
+type ApiResponse = {
+	code: number;
+	message: string;
+	data: unknown;
+	meta: Record<string, unknown> | null;
+};
+
 export class ApiError extends Error {
-	status: number;
-	statusText: string;
-	detail: unknown;
-
-	constructor(status: number, statusText: string, detail: unknown) {
-		const detailText = stringifyDetail(detail);
-		super(`${status} ${statusText}${detailText ? ` - ${detailText}` : ''}`);
+	constructor(
+		public code: number,
+		message: string,
+		public data: unknown
+	) {
+		super(message);
 		this.name = 'ApiError';
-		this.status = status;
-		this.statusText = statusText;
-		this.detail = detail;
 	}
-}
-
-function stringifyDetail(detail: unknown) {
-	if (typeof detail === 'string') return detail;
-	if (detail === null || detail === undefined) return '';
-	return JSON.stringify(detail);
-}
-
-function normalizeDetail(detail: unknown) {
-	return detail && typeof detail === 'object' && 'detail' in detail ? detail.detail : detail;
-}
-
-function readDetailCode(detail: unknown) {
-	return detail && typeof detail === 'object' && 'code' in detail && typeof detail.code === 'string'
-		? detail.code
-		: null;
 }
 
 export function errorMessage(error: unknown) {
-	if (error instanceof ApiError && error.status === 413) {
-		const detail = getApiErrorDetail(error);
-		if (typeof detail === 'string' && detail.includes('uploaded file exceeds')) {
-			return translateKey(get(language), 'error.uploadTooLarge');
-		}
+	const reason = getApiErrorReason(error);
+	if (reason) {
+		const key = ERROR_CODE_TRANSLATIONS[reason as keyof typeof ERROR_CODE_TRANSLATIONS];
+		if (key) return translateKey(get(language), key);
 	}
-	const detailCode = getApiErrorCode(error);
-	if (detailCode) {
-		const key = ERROR_CODE_TRANSLATIONS[detailCode as keyof typeof ERROR_CODE_TRANSLATIONS];
-		if (key) {
-			return translateKey(get(language), key);
-		}
+	if (isApiErrorCode(error, 200000)) {
+		return translateKey(get(language), 'error.requestFailed');
 	}
-	if (error instanceof ApiError) {
-		if (error.status >= 500) {
-			return translateKey(get(language), 'error.requestFailed');
-		}
-		const detail = getApiErrorDetail(error);
-		if (typeof detail === 'string' && detail.trim()) return detail;
-		if (detail && typeof detail === 'object' && 'message' in detail) {
-			const message = (detail as { message?: unknown }).message;
-			if (typeof message === 'string' && message.trim()) return message;
-		}
-	}
-
 	const message = error instanceof Error ? error.message : 'error.unexpected';
-	if (message.startsWith('error.')) {
-		return translateKey(get(language), message);
-	}
-	return message;
+	return message.startsWith('error.') ? translateKey(get(language), message) : message;
 }
 
-export function isHttpStatusError(error: unknown, status: number) {
-	return error instanceof ApiError && error.status === status;
+export function isApiErrorCode(error: unknown, code: number) {
+	return error instanceof ApiError && error.code === code;
 }
 
-export function getApiErrorDetail(error: unknown) {
-	return error instanceof ApiError ? normalizeDetail(error.detail) : null;
+export function getApiErrorData(error: unknown) {
+	return error instanceof ApiError ? error.data : null;
 }
 
-export function getApiErrorCode(error: unknown) {
-	return readDetailCode(getApiErrorDetail(error));
+export function getApiErrorReason(error: unknown) {
+	const data = getApiErrorData(error);
+	return data && typeof data === 'object' && 'code' in data && typeof data.code === 'string'
+		? data.code
+		: null;
 }
 
 export function formatResult(data: unknown) {
@@ -92,86 +64,84 @@ export function formatResult(data: unknown) {
 	return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 }
 
-function parseMaybeJson(value: string) {
-	try {
-		return JSON.parse(value);
-	} catch {
-		return value;
-	}
-}
-
 export function buildApiUrl(path: string) {
 	const normalized = path.startsWith('/') ? path : `/${path}`;
-	if (normalized.startsWith('/api/')) {
-		return normalized;
-	}
-	return `${API_PREFIX}${normalized}`;
+	return normalized.startsWith('/api/') ? normalized : `${API_PREFIX}${normalized}`;
 }
 
-function buildApiError(response: Response, detail: unknown) {
-	const error = new ApiError(response.status, response.statusText, normalizeDetail(detail));
-	if (
-		error.status === 401 &&
-		getApiErrorCode(error) === 'authentication_required' &&
-		typeof window !== 'undefined' &&
-		window.location.pathname !== '/login'
-	) {
-		window.location.replace('/login');
+function buildApiError(payload: ApiResponse) {
+	const error = new ApiError(payload.code, payload.message, payload.data);
+	if (error.code === 200301 && getApiErrorReason(error) === 'authentication_required') {
+		clearAuthState();
+		if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+			window.location.replace('/login');
+		}
 	}
 	return error;
 }
 
-async function readResponseData(response: Response) {
-	const text = await response.text();
-	return text ? parseMaybeJson(text) : null;
+async function readApiResponse(response: Response): Promise<ApiResponse> {
+	if (!response.ok) throw new Error('error.requestFailed');
+	const payload: unknown = await response.json();
+	if (
+		!payload ||
+		typeof payload !== 'object' ||
+		!('code' in payload) ||
+		typeof payload.code !== 'number' ||
+		!('message' in payload) ||
+		typeof payload.message !== 'string' ||
+		!('data' in payload) ||
+		!('meta' in payload)
+	)
+		throw new Error('error.requestFailed');
+	return payload as ApiResponse;
+}
+
+async function readApiData(response: Response) {
+	const payload = await readApiResponse(response);
+	if (payload.code !== 200) throw buildApiError(payload);
+	return payload.data;
 }
 
 export async function throwApiError(response: Response): Promise<never> {
-	const detail = await readResponseData(response);
-	throw buildApiError(response, detail);
+	const payload = await readApiResponse(response);
+	if (payload.code === 200) throw new Error('error.requestFailed');
+	throw buildApiError(payload);
 }
 
 export async function requestJson(path: string, init: RequestInit = {}) {
-	const url = buildApiUrl(path);
 	const headers = new Headers(init.headers ?? {});
 	if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');
 	}
-
-	const response = await fetch(url, { ...init, credentials: 'same-origin', headers });
-	const data = await readResponseData(response);
-
-	if (!response.ok) {
-		throw buildApiError(response, data);
-	}
-
-	return data;
+	const response = await fetch(buildApiUrl(path), { ...init, credentials: 'same-origin', headers });
+	return readApiData(response);
 }
 
 export async function requestText(path: string, init: RequestInit = {}) {
-	const url = buildApiUrl(path);
-	const response = await fetch(url, { ...init, credentials: 'same-origin' });
-	const text = await response.text();
-
-	if (!response.ok) {
-		throw buildApiError(response, text ? parseMaybeJson(text) : null);
+	const response = await fetch(buildApiUrl(path), { ...init, credentials: 'same-origin' });
+	if (!response.ok) throw new Error('error.requestFailed');
+	if (response.headers.get('Content-Type')?.includes('application/json')) {
+		const data = await readApiData(response);
+		return typeof data === 'string' ? data : JSON.stringify(data);
 	}
-
-	return text;
+	return response.text();
 }
 
 export async function requestBlob(path: string, init: RequestInit = {}) {
-	const url = buildApiUrl(path);
 	const headers = new Headers(init.headers ?? {});
 	if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');
 	}
-	const response = await fetch(url, { ...init, credentials: 'same-origin', headers });
-
-	if (!response.ok) {
-		await throwApiError(response);
+	const response = await fetch(buildApiUrl(path), { ...init, credentials: 'same-origin', headers });
+	if (!response.ok) throw new Error('error.requestFailed');
+	if (
+		response.headers.get('Content-Type')?.includes('application/json') &&
+		!response.headers.has('Content-Disposition')
+	) {
+		const data = await readApiData(response);
+		return new Blob([JSON.stringify(data)], { type: 'application/json' });
 	}
-
 	return response.blob();
 }
 

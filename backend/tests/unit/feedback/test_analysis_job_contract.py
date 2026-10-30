@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import ModuleType
 
 import pytest
-
-from application.chat.session_service import ChatSessionService
+from application.chat import session_service as chat_session_service
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
 from repositories.analysis_job_repository import AnalysisJob
@@ -102,14 +102,14 @@ class _Jobs:
         return 1
 
 
-def _service(chat: _Chat, jobs: _Jobs) -> ChatSessionService:
-    return ChatSessionService(
-        collection_service=_Collections(),
-        source_artifact_repository=object(),
-        repository=chat,
-        runner=None,
-        analysis_job_repository=jobs,
-    )
+def _service(chat: _Chat, jobs: _Jobs) -> ModuleType:
+    chat_session_service.collection_service = _Collections()
+    chat_session_service.CollectionRepo = _Collections()
+    chat_session_service.SourceArtifactRepo = object()
+    chat_session_service.ChatRepo = chat
+    chat_session_service.runner = None
+    chat_session_service.AnalysisJobRepo = jobs
+    return chat_session_service
 
 
 async def test_feedback_version_is_the_idempotent_analysis_job_identity() -> None:

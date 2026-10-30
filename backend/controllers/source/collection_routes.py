@@ -4,17 +4,23 @@ import logging
 from collections.abc import Iterator
 from dataclasses import asdict
 from tempfile import SpooledTemporaryFile
-from typing import BinaryIO, Literal
+from typing import Annotated, BinaryIO, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from starlette.background import BackgroundTask
-
-from application.source.source_archive_service import CollectionSourceArchiveError
-from controllers.dependencies.auth import current_user_id
+from application.source import (
+    collection_service,
+    source_archive_service,
+    source_import_service,
+)
+from controllers.dependencies.auth import get_current_user_id
 from domain.chat.permissions import AUTO_ACTIONS
+from exceptions import RequestInvalidException
+from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from repositories.collection_repository import CollectionRepo
+from starlette.background import BackgroundTask
+from utils.response import ApiResponse, make_api_response
 
 
 class CollectionCreateRequest(BaseModel):
@@ -170,7 +176,7 @@ logger = logging.getLogger(__name__)
 _MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 
 
-class UploadTooLargeError(ValueError):
+class UploadTooLargeError(RequestInvalidException):
     """Raised when an upload exceeds the ingestion resource limit."""
 
 
@@ -186,182 +192,151 @@ async def _read_upload_content(file: UploadFile) -> bytes:
         while chunk := await file.read(64 * 1024):
             total += len(chunk)
             if total > _MAX_UPLOAD_BYTES:
-                raise UploadTooLargeError("uploaded file exceeds the 256 MiB limit")
+                raise UploadTooLargeError(
+                    "uploaded file exceeds the 256 MiB limit",
+                    data={"code": "upload_too_large"},
+                )
             buffered.write(chunk)
         buffered.seek(0)
         return buffered.read()
 
 
-def _source_archive_error_detail(
-    exc: CollectionSourceArchiveError,
-) -> dict[str, str]:
-    detail = {
-        "code": exc.code,
-        "message": exc.message,
-        "collection_id": exc.collection_id,
-    }
-    if exc.document_id is not None:
-        detail["document_id"] = exc.document_id
-    return detail
-
-
-@collection_router.post("", response_model=CollectionResponse, summary="create the paper collection")
+@collection_router.post(
+    "",
+    response_model=ApiResponse[CollectionResponse],
+    summary="create the paper collection",
+)
 async def create_collection(
     payload: CollectionCreateRequest,
-    request: Request,
-) -> CollectionResponse:
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
     # create collection of paper
-    record = await request.app.state.collection_service.create_collection(
+    record = await collection_service.create_collection(
         name=payload.name,
         description=payload.description,
-        owner_user_id=await current_user_id(request),
+        owner_user_id=user_id,
     )
-    return CollectionResponse(**record)
+    return make_api_response(data=CollectionResponse(**record))
 
 
-@collection_router.get("", response_model=CollectionListResponse, summary="List paper collections")
-async def list_collections(request: Request) -> CollectionListResponse:
+@collection_router.get(
+    "",
+    response_model=ApiResponse[CollectionListResponse],
+    summary="List paper collections",
+)
+async def list_collections(
+    user_id: Annotated[str, Depends(get_current_user_id)]
+) -> Response:
     items = [
         CollectionSummaryResponse(
             **asdict(record),
             paper_count=len(record.documents),
         )
-        for record in await request.app.state.collection_service.list_collections(
-            await current_user_id(request)
-        )
+        for record in await CollectionRepo.list_collections(user_id)
     ]
-    return CollectionListResponse(items=items)
+    return make_api_response(data=CollectionListResponse(items=items))
 
 
-@collection_router.get("/{collection_id}", response_model=CollectionResponse, summary="Get collection details")
-async def get_collection(collection_id: str, request: Request) -> CollectionResponse:
-    try:
-        record = await request.app.state.collection_service.get_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return CollectionResponse(**record)
+@collection_router.get(
+    "/{collection_id}",
+    response_model=ApiResponse[CollectionResponse],
+    summary="Get collection details",
+)
+async def get_collection(
+    collection_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
+) -> Response:
+    record = await collection_service.get_collection_for_user(
+        collection_id,
+        user_id,
+    )
+    return make_api_response(data=CollectionResponse(**record))
 
 
 @collection_router.get(
     "/{collection_id}/agent-permissions",
-    response_model=CollectionAgentPermissionResponse,
+    response_model=ApiResponse[CollectionAgentPermissionResponse],
     summary="Read the default Research Agent permission for a collection",
 )
 async def get_collection_agent_permission(
-    collection_id: str, request: Request
-) -> CollectionAgentPermissionResponse:
-    try:
-        permission = await request.app.state.collection_service.get_agent_default_permission_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return CollectionAgentPermissionResponse(**permission)
+    collection_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
+) -> Response:
+    permission = await collection_service.get_agent_default_permission_for_user(
+        collection_id,
+        user_id,
+    )
+    return make_api_response(data=CollectionAgentPermissionResponse(**permission))
 
 
 @collection_router.put(
     "/{collection_id}/agent-permissions",
-    response_model=CollectionAgentPermissionResponse,
+    response_model=ApiResponse[CollectionAgentPermissionResponse],
     summary="Set the default Research Agent permission for a collection",
 )
 async def set_collection_agent_permission(
     collection_id: str,
     payload: CollectionAgentPermissionRequest,
-    request: Request,
-) -> CollectionAgentPermissionResponse:
-    try:
-        permission = await request.app.state.collection_service.set_agent_default_permission_for_user(
-            collection_id,
-            await current_user_id(request),
-            **payload.model_dump(),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
-    return CollectionAgentPermissionResponse(**permission)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    permission = await collection_service.set_agent_default_permission_for_user(
+        collection_id,
+        user_id,
+        **payload.model_dump(),
+    )
+    return make_api_response(data=CollectionAgentPermissionResponse(**permission))
 
 
 @collection_router.delete(
     "/{collection_id}",
-    response_model=CollectionDeleteResponse,
+    response_model=ApiResponse[CollectionDeleteResponse],
     summary="Delete a paper collection",
 )
-async def delete_collection(collection_id: str, request: Request) -> CollectionDeleteResponse:
-    try:
-        result = await request.app.state.collection_service.delete_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return CollectionDeleteResponse(**result)
+async def delete_collection(
+    collection_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
+) -> Response:
+    result = await collection_service.delete_collection_for_user(
+        collection_id,
+        user_id,
+    )
+    return make_api_response(data=CollectionDeleteResponse(**result))
 
 
 @collection_router.post(
     "/{collection_id}/documents",
-    response_model=CollectionDocumentResponse,
+    response_model=ApiResponse[CollectionDocumentResponse],
     summary="Upload a paper to a collection",
 )
 async def upload_collection_document(
     collection_id: str,
-    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     file: UploadFile = File(...),
     reuse_existing: bool = False,
-) -> CollectionDocumentResponse:
-    collection_service = request.app.state.collection_service
-    try:
-        await collection_service.get_collection_for_user(
-            collection_id, await current_user_id(request)
-        )
-        content = await _read_upload_content(file)
-        record = await request.app.state.source_import_service.add_document(
-            collection_id=collection_id,
-            filename=file.filename or "upload.bin",
-            content=content,
-            media_type=file.content_type,
-            reuse_existing=reuse_existing,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except UploadTooLargeError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("File upload failed")
-        raise HTTPException(status_code=500, detail="File upload failed.") from exc
-    return CollectionDocumentResponse(**record)
+) -> Response:
+    content = await _read_upload_content(file)
+    record = await source_import_service.add_document(
+        collection_id=collection_id,
+        filename=file.filename or "upload.bin",
+        content=content,
+        media_type=file.content_type,
+        reuse_existing=reuse_existing,
+        user_id=user_id,
+    )
+    return make_api_response(data=CollectionDocumentResponse(**record))
 
 
 @collection_router.get(
     "/{collection_id}/documents",
-    response_model=CollectionDocumentListResponse,
+    response_model=ApiResponse[CollectionDocumentListResponse],
     summary="List collection documents",
 )
 async def list_collection_documents(
     collection_id: str,
-    request: Request,
-) -> CollectionDocumentListResponse:
-    collection_service = request.app.state.collection_service
-    try:
-        await collection_service.get_collection_for_user(
-            collection_id, await current_user_id(request)
-        )
-        collection = await collection_service.get_collection(collection_id)
-        items = [
-            CollectionDocumentResponse(**record)
-            for record in collection["documents"]
-        ]
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return CollectionDocumentListResponse(items=items)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    collection = await collection_service.get_collection_for_user(
+        collection_id, user_id
+    )
+    items = [CollectionDocumentResponse(**record) for record in collection["documents"]]
+    return make_api_response(data=CollectionDocumentListResponse(items=items))
 
 
 @collection_router.post(
@@ -371,30 +346,11 @@ async def list_collection_documents(
 async def create_collection_source_archive(
     collection_id: str,
     payload: CollectionSourceArchiveRequest,
-    request: Request,
-) -> StreamingResponse:
-    collection_service = request.app.state.collection_service
-    source_archive_service = request.app.state.source_archive_service
-    try:
-        await collection_service.get_collection_for_user(
-            collection_id,
-            await current_user_id(request),
-        )
-        result = await source_archive_service.build_source_archive(
-            collection_id,
-            payload.document_ids,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except CollectionSourceArchiveError as exc:
-        status_code = {
-            "collection_source_document_not_found": 404,
-            "collection_source_archive_too_large": 413,
-        }.get(exc.code, 409)
-        raise HTTPException(
-            status_code=status_code,
-            detail=_source_archive_error_detail(exc),
-        ) from exc
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    result = await source_archive_service.build_source_archive(
+        collection_id, payload.document_ids, user_id=user_id
+    )
 
     archive_file = result["file"]
     filename = str(result["filename"])

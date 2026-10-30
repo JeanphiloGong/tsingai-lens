@@ -63,9 +63,9 @@ const session = {
 	updated_at: createdAt
 };
 
-function jsonResponse(body: unknown, status = 200) {
-	return new Response(JSON.stringify(body), {
-		status,
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
+		status: 200,
 		headers: { 'Content-Type': 'application/json' }
 	});
 }
@@ -208,7 +208,7 @@ function installApi({
 			);
 		}
 		if (path === '/api/v1/chat-sessions' && method === 'POST') {
-			return Promise.resolve(jsonResponse(session, 201));
+			return Promise.resolve(jsonResponse(session, 200, 'Request failed.'));
 		}
 		if (path === `/api/v1/chat-sessions/${session.session_id}` && method === 'GET') {
 			return Promise.resolve(jsonResponse(session));
@@ -229,7 +229,7 @@ function installApi({
 			const file = init?.body instanceof FormData ? init.body.get('file') : null;
 			return uploadDocument && file instanceof File
 				? Promise.resolve(uploadDocument(file))
-				: Promise.resolve(jsonResponse({ detail: 'Unexpected document upload' }, 500));
+				: Promise.resolve(jsonResponse({}, 200000, 'Unexpected document upload'));
 		}
 		const preparationMatch = path.match(
 			/^\/api\/v1\/collections\/col_123\/documents\/([^/]+)\/preparation$/
@@ -237,9 +237,9 @@ function installApi({
 		if (preparationMatch && method === 'POST') {
 			return prepareDocument
 				? Promise.resolve(prepareDocument(decodeURIComponent(preparationMatch[1])))
-				: Promise.resolve(jsonResponse({ detail: 'Unexpected document preparation' }, 500));
+				: Promise.resolve(jsonResponse({}, 200000, 'Unexpected document preparation'));
 		}
-		return Promise.resolve(jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500));
+		return Promise.resolve(jsonResponse({}, 200000, `Unexpected ${method} ${path}`));
 	});
 }
 
@@ -527,7 +527,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
-					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
+					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 200, 'Request failed.');
 				}
 				const id = path.split('/')[4];
 				if (!path.endsWith('/messages')) return jsonResponse({ ...session, session_id: id });
@@ -676,7 +676,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
-					return jsonResponse(newSession, 201);
+					return jsonResponse(newSession, 200, 'Request failed.');
 				}
 				if (path === `/api/v1/chat-sessions/${oldSession.session_id}` && method === 'GET') {
 					return jsonResponse({
@@ -696,7 +696,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 						running: false
 					});
 				}
-				return jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500);
+				return jsonResponse({}, 200000, `Unexpected ${method} ${path}`);
 			});
 
 			await renderReady();
@@ -737,7 +737,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			const method = requestMethod(input, init);
 			if(path.endsWith('/chat_1/title')) {
 				expect(method).toBe('PUT');
-				if(fail) return Promise.resolve(jsonResponse({detail:'Save unavailable'},500));
+				if(fail) return Promise.resolve(jsonResponse({}, 200000, 'Save unavailable'));
 				saved.title = JSON.parse(String(init?.body)).title;
 				return Promise.resolve(jsonResponse(saved));
 			}
@@ -841,7 +841,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				offsets.push(offset);
 				if (offset === 10 && failNextPage) {
 					failNextPage = false;
-					return Promise.resolve(jsonResponse({ detail: 'History temporarily unavailable' }, 503));
+					return Promise.resolve(jsonResponse({}, 200205, 'History temporarily unavailable'));
 				}
 				return Promise.resolve(jsonResponse({ items: items.slice(offset, offset + limit), limit, offset }));
 			}
@@ -856,7 +856,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await vi.waitFor(() => expect(rowCount()).toBe(10));
 		container.scrollTop = container.scrollHeight;
 		container.dispatchEvent(new Event('scroll'));
-		await expect.element(browserPage.getByText('The request could not be completed. Please try again.', { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByText('History temporarily unavailable', { exact: true })).toBeVisible();
 		expect(rowCount()).toBe(10);
 		await browserPage.getByRole('button', { name: 'Load more conversations', exact: true }).click();
 		await vi.waitFor(() => expect(rowCount()).toBe(20));
@@ -874,7 +874,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
 			requestPath(input).endsWith('/pin')
-				? Promise.resolve(jsonResponse({ detail: 'Pin could not be saved' }, 500))
+				? Promise.resolve(jsonResponse({}, 200000, 'Pin could not be saved'))
 				: original(input, init));
 		await renderReady();
 		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
@@ -903,7 +903,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
 				if (failRefresh) {
 					failRefresh = false;
-					return Promise.resolve(jsonResponse({}, 503));
+					return Promise.resolve(jsonResponse({}, 200205, 'Request failed.'));
 				}
 				const offset = Number(new URL(String(input), 'http://localhost').searchParams.get('offset') ?? 0);
 				const ordered = old.is_pinned ? [old, session, ...others] : [session, ...others, old];
@@ -981,7 +981,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			render(Conversation, { embedded });
 			await vi.waitFor(() => expect(finishCreation).toBeTypeOf('function'));
 			expect(historyRequested).toBe(true);
-			finishCreation!(jsonResponse(session, 201));
+			finishCreation!(jsonResponse(session, 200, 'Request failed.'));
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!))
 				.toEqual([expect.objectContaining({ session_id: session.session_id })]);
@@ -1083,7 +1083,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
-				return Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, 503));
+				return Promise.resolve(jsonResponse({}, 200205, 'Temporarily unavailable'));
 			}
 			return original(input, init);
 		});
@@ -1102,7 +1102,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			if (requestMethod(input, init) === 'DELETE') {
 				return Promise.resolve(
-					jsonResponse({ detail: { code: 'chat_session_has_branches' } }, 409)
+					jsonResponse({ code: 'chat_session_has_branches' }, 200204, 'Request failed.')
 				);
 			}
 			return original(input, init);
@@ -1360,7 +1360,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		async (available) => {
 			const file = new File(['%PDF-1.7'], 'LPBF-study.pdf', { type: 'application/pdf' });
 			let stored = false;
-			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 202));
+			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 200, 'Request failed.'));
 			installApi({
 				uploadDocument: () => {
 					if (!stored) {
@@ -1369,7 +1369,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					}
 					return available
 						? jsonResponse(uploadedDocument(file, 'doc_saved'))
-						: jsonResponse({ detail: 'Upload recovery unavailable' }, 503);
+						: jsonResponse({}, 200205, 'Upload recovery unavailable');
 				},
 				prepareDocument: preparation
 			});
@@ -1441,7 +1441,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					requestBody(input, init)?.collection_id === 'col_456'
 				)
 					return Promise.resolve(
-						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 201)
+						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 200, 'Request failed.')
 					);
 				if (path.endsWith('/messages') && requestMethod(input, init) === 'POST')
 					return Promise.resolve(
@@ -1594,7 +1594,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				});
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(signal?.aborted).toBe(true);
-			finish(jsonResponse({ detail: 'Previous feedback failed' }, 503));
+			finish(jsonResponse({}, 200205, 'Previous feedback failed'));
 			await new Promise(requestAnimationFrame);
 			await expect
 				.element(browserPage.getByText('Could not save feedback. Please try again.'))
@@ -1630,7 +1630,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				if (requestPath(input) === '/api/v1/chat-sessions/chat_1' && unavailable)
 					return failure === 'offline'
 						? Promise.reject(new TypeError('Failed to fetch'))
-						: Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, failure));
+						: Promise.resolve(jsonResponse({}, ({ 403: 200203, 503: 200205 } as const)[failure], 'Temporarily unavailable'));
 				return original(input, init);
 			});
 			render(Page);
@@ -1665,7 +1665,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
 			requestPath(input).endsWith('/missing')
-				? Promise.resolve(jsonResponse({ detail: 'Not found' }, 404))
+				? Promise.resolve(jsonResponse({}, 200201, 'Not found'))
 				: original(input, init)
 		);
 		await renderReady();
@@ -1699,7 +1699,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				);
 			if (path === '/api/v1/chat-sessions')
 				return Promise.resolve(
-					jsonResponse({ ...session, user_id: 'researcher_2', session_id: 'chat_2' }, 201)
+					jsonResponse({ ...session, user_id: 'researcher_2', session_id: 'chat_2' }, 200, 'Request failed.')
 				);
 			return original(input, init);
 		});
@@ -1851,7 +1851,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				stage === 'creation'
 					? jsonResponse(session)
 					: stage === 'failure'
-						? jsonResponse({ detail: 'Old collection unavailable' }, 503)
+						? jsonResponse({}, 200205, 'Old collection unavailable')
 						: jsonResponse({
 								feedback: [],
 								items: [message('old', 'assistant', 'Old collection answer')],
@@ -1937,7 +1937,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => pending,
-			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 200, 'Request failed.')
 		});
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
@@ -1962,7 +1962,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			url: new URL('http://localhost/collections/col_456/assistant')
 		});
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-		finish(jsonResponse(uploadedDocument(file), 201));
+		finish(jsonResponse(uploadedDocument(file), 200, 'Request failed.'));
 		await vi.waitFor(() =>
 			expect(
 				fetchMock.mock.calls.some(([input]) =>
@@ -1986,7 +1986,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => pending,
-			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 200, 'Request failed.')
 		});
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
@@ -2002,7 +2002,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.click();
 		await logout();
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
-		finish(jsonResponse(uploadedDocument(file), 201));
+		finish(jsonResponse(uploadedDocument(file), 200, 'Request failed.'));
 		await new Promise(requestAnimationFrame);
 		await new Promise(requestAnimationFrame);
 		expect(
@@ -2013,8 +2013,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
 		installApi({
-			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 201),
-			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 202)
+			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 200, 'Request failed.'),
+			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
 		});
 		await renderReady();
 
@@ -2062,7 +2062,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => uploadPending,
-			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 202)
+			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
 		});
 		await renderReady();
 
@@ -2074,13 +2074,13 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeDisabled();
 		await expect.element(browserPage.getByRole('button', { name: 'Add papers' })).toBeDisabled();
 
-		finishUpload?.(jsonResponse(uploadedDocument(file), 201));
+		finishUpload?.(jsonResponse(uploadedDocument(file), 200, 'Request failed.'));
 		await expect.element(browserPage.getByText('Preparation queued')).toBeInTheDocument();
 	});
 
 	it('reports an upload failure beside the paper without hiding the retry path', async () => {
 		installApi({
-			uploadDocument: () => jsonResponse({ detail: 'PDF exceeds the upload limit' }, 413)
+			uploadDocument: () => jsonResponse({}, 200100, 'PDF exceeds the upload limit')
 		});
 		await renderReady();
 
@@ -2098,7 +2098,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('marks a paper already in the collection without presenting it as a retryable failure', async () => {
 		installApi({
 			uploadDocument: () =>
-				jsonResponse({ detail: 'document content already exists in collection' }, 400)
+				jsonResponse({ code: 'document_content_already_exists' }, 200204, 'Document content already exists in this collection.')
 		});
 		await renderReady();
 
@@ -2123,13 +2123,13 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			uploadDocument: (file) => {
 				uploadCalls += 1;
-				return jsonResponse(uploadedDocument(file), 201);
+				return jsonResponse(uploadedDocument(file), 200, 'Request failed.');
 			},
 			prepareDocument: (documentId) => {
 				preparationCalls += 1;
 				return preparationCalls === 1
-					? jsonResponse({ detail: 'Preparation worker unavailable' }, 503)
-					: jsonResponse(queuedPreparation(documentId), 202);
+					? jsonResponse({}, 200205, 'Preparation worker unavailable')
+					: jsonResponse(queuedPreparation(documentId), 200, 'Request failed.');
 			}
 		});
 		await renderReady();

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from infra.persistence.postgres.models.objective_experiment_selection import (
@@ -18,6 +14,9 @@ from infra.persistence.postgres.models.paper_experiment import (
     ExperimentMeasurementResultRow,
     PaperExperimentRow,
 )
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ObjectiveExperimentSelectionRepository:
@@ -30,7 +29,6 @@ class ObjectiveExperimentSelectionRepository:
         selection: ObjectiveExperimentSelection,
         *,
         revision_id: int,
-
     ) -> ObjectiveExperimentSelection:
         return await _add_selection(
             db,
@@ -72,9 +70,7 @@ class ObjectiveExperimentSelectionRepository:
                 .order_by(ObjectiveExperimentSelectionRow.selection_id)
             )
         )
-        return tuple(
-            [await load_experiment_selection(db, row) for row in rows]
-        )
+        return tuple([await load_experiment_selection(db, row) for row in rows])
 
 
 async def _add_selection(
@@ -212,15 +208,20 @@ async def load_experiment_selection(
         )
     )
     return ObjectiveExperimentSelection(
-        selection_id=row.selection_id, objective_id=row.objective_id,
-        analysis_version=row.analysis_version, experiment_id=row.experiment_id,
-        experiment_version=row.experiment_version, outcome=row.outcome,
-        measurement_keys=measurement_keys, comparison_keys=comparison_keys,
-        missing_context=tuple(row.missing_context_json), reasons=tuple(row.reasons_json),
+        selection_id=row.selection_id,
+        objective_id=row.objective_id,
+        analysis_version=row.analysis_version,
+        experiment_id=row.experiment_id,
+        experiment_version=row.experiment_version,
+        outcome=row.outcome,
+        measurement_keys=measurement_keys,
+        comparison_keys=comparison_keys,
+        missing_context=tuple(row.missing_context_json),
+        reasons=tuple(row.reasons_json),
     )
 
 
-__all__ = ['ObjectiveExperimentSelectionRepository']
+__all__ = ["ObjectiveExperimentSelectionRepository"]
 
 
 ObjectiveExperimentSelectionRepo = ObjectiveExperimentSelectionRepository()

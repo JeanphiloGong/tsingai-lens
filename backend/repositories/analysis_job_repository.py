@@ -10,13 +10,11 @@ from hashlib import sha256
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy import and_, or_, select
-from sqlalchemy.exc import IntegrityError
-
 from infra.persistence.database import AsyncSessionLocal
-
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
+from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 
 DATASET_SAMPLE_BUILD_JOB_TYPE = "dataset_sample_build"
 DATASET_SAMPLE_BUILD_PAYLOAD_VERSION = 1
@@ -65,7 +63,13 @@ def tool_failure_idempotency_key(
 ) -> str:
     """Return a bounded key for one immutable tool failure observation."""
 
-    values = (session_id, tool_call_id, assistant_message_id, result_message_id, result_digest)
+    values = (
+        session_id,
+        tool_call_id,
+        assistant_message_id,
+        result_message_id,
+        result_digest,
+    )
     if any(not value for value in values):
         raise ValueError("tool failure identity is incomplete")
     return "tool-failure:" + sha256("\x1f".join(values).encode("utf-8")).hexdigest()

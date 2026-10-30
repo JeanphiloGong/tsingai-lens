@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { Sparkles, RotateCcw } from '@lucide/svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
-	import { getApiErrorCode } from '../../../_shared/api';
+	import { getApiErrorReason } from '../../../_shared/api';
 	import { language, t } from '../../../_shared/i18n';
 	import {
 		generateFindingSummary,
@@ -65,7 +65,7 @@
 			summary = result;
 		} catch (error) {
 			if (request === sequence && requestKey === key) {
-				const code = getApiErrorCode(error);
+				const code = getApiErrorReason(error);
 				errorCode =
 					code &&
 					[

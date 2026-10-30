@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from application.goal import brief_service
+from controllers.dependencies.auth import get_current_user_id
+from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
-
-from controllers.dependencies.auth import current_user_id
+from utils.response import ApiResponse, make_api_response
 
 GoalIntent = Literal["explore", "compare", "design_experiment"]
 CoverageLevel = Literal["direct", "indirect", "sparse", "absent"]
@@ -122,23 +124,20 @@ goal_router = APIRouter(prefix="/goals", tags=["goals"])
 
 @goal_router.post(
     "/intake",
-    response_model=GoalIntakeResponse,
+    response_model=ApiResponse[GoalIntakeResponse],
     summary="Create a Goal Brief / Intake entry",
 )
 async def intake_goal(
     payload: GoalIntakeRequest,
-    request: Request,
-) -> GoalIntakeResponse:
-    try:
-        response = await request.app.state.goal_service.intake_goal(
-            material_system=payload.material_system,
-            target_property=payload.target_property,
-            intent=payload.intent,
-            constraints=payload.constraints,
-            context=payload.context,
-            max_seed_documents=payload.max_seed_documents,
-            owner_user_id=await current_user_id(request),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return GoalIntakeResponse(**response)
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    response = await brief_service.intake_goal(
+        material_system=payload.material_system,
+        target_property=payload.target_property,
+        intent=payload.intent,
+        constraints=payload.constraints,
+        context=payload.context,
+        max_seed_documents=payload.max_seed_documents,
+        owner_user_id=user_id,
+    )
+    return make_api_response(data=GoalIntakeResponse(**response))

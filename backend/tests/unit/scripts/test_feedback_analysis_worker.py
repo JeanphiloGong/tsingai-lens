@@ -14,7 +14,9 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_requeue_failed_job_uses_repository_and_closes_runtime(monkeypatch) -> None:
+async def test_requeue_failed_job_uses_repository_and_closes_runtime(
+    monkeypatch,
+) -> None:
     calls: list[tuple[str, str]] = []
 
     class Repository:
@@ -33,8 +35,12 @@ async def test_requeue_failed_job_uses_repository_and_closes_runtime(monkeypatch
 
     runtime = Runtime()
     monkeypatch.setattr(
+        "repositories.analysis_job_repository.AnalysisJobRepo",
+        runtime.analysis_job_repository,
+    )
+    monkeypatch.setattr(
         "main.build_application_runtime",
-        lambda _overrides: _runtime(runtime),
+        lambda: _runtime(runtime),
     )
 
     assert await worker_script.requeue_failed_job("job-123") == "pending"
@@ -61,18 +67,27 @@ def test_cli_rejects_worker_and_requeue_actions_together(monkeypatch) -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("module_name,worker_name", [
-    ("feedback_analysis_worker", "feedback_analysis_worker"),
-    ("correction_signal_analysis_worker", "correction_signal_analysis_worker"),
-    ("tool_failure_analysis_worker", "tool_failure_analysis_worker"),
-])
+@pytest.mark.parametrize(
+    "module_name,worker_name",
+    [
+        ("feedback_analysis_worker", "feedback_analysis_worker"),
+        ("correction_signal_analysis_worker", "correction_signal_analysis_worker"),
+        ("tool_failure_analysis_worker", "tool_failure_analysis_worker"),
+    ],
+)
 @pytest.mark.parametrize("termination", [KeyboardInterrupt, RuntimeError])
-async def test_loop_reuses_one_runtime_and_closes_on_exit(monkeypatch, module_name, worker_name, termination):
+async def test_loop_reuses_one_runtime_and_closes_on_exit(
+    monkeypatch, module_name, worker_name, termination
+):
     import importlib
     from unittest.mock import AsyncMock
 
     module = importlib.import_module(f"scripts.{module_name}")
-    worker = SimpleNamespace(run_once=AsyncMock(side_effect=[None, SimpleNamespace(status="succeeded"), None, termination()]))
+    worker = SimpleNamespace(
+        run_once=AsyncMock(
+            side_effect=[None, SimpleNamespace(status="succeeded"), None, termination()]
+        )
+    )
     runtime = SimpleNamespace(**{worker_name: worker}, close=AsyncMock())
     build = AsyncMock(return_value=runtime)
     monkeypatch.setattr("main.build_application_runtime", build)

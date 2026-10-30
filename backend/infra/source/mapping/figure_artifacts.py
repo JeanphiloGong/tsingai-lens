@@ -14,10 +14,9 @@ from domain.source import (
     build_figure_caption_blocks,
     build_heading_blocks,
     find_nearest_caption_block,
-    normalize_optional_text,
     resolve_heading_path_for_page,
-    safe_int,
 )
+from infra.source.mapping.values import normalize_optional_text, safe_int
 from infra.source.artifact_bundle import source_figure_payload
 from infra.source.contracts.artifact_schemas import FIGURES_FINAL_COLUMNS
 from infra.source.hashing import gen_sha512_hash

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-import math
 import re
 from typing import Any, Iterable, Literal, Mapping
 
@@ -407,13 +406,12 @@ def find_nearest_caption_block(
     caption_blocks: Iterable[SourceBlock | SourceLayoutBlock],
     used_block_ids: set[str],
 ) -> SourceBlock | SourceLayoutBlock | None:
-    normalized_page = safe_int(page)
     candidates = [
         block
         for block in caption_blocks
         if block.block_id
         and block.block_id not in used_block_ids
-        and (normalized_page is None or block.page == normalized_page)
+        and (page is None or block.page == page)
     ]
     if not candidates:
         return None
@@ -430,13 +428,12 @@ def resolve_heading_path_for_page(
     blocks = list(heading_blocks)
     if not blocks:
         return None
-    normalized_page = safe_int(page)
     eligible = [
         item
         for item in blocks
         if item.heading_path
         and (
-            normalized_page is None or item.page is None or item.page <= normalized_page
+            page is None or item.page is None or item.page <= page
         )
     ]
     if not eligible:
@@ -470,7 +467,7 @@ def build_source_table_rows_from_cells(
             )
             if not row_text:
                 continue
-            page = first_non_null([cell.page for cell in ordered_cells])
+            page = next((cell.page for cell in ordered_cells if cell.page is not None), None)
             rows.append(
                 SourceTableRow(
                     row_id=f"row_{document_id}_{table_id}_{row_index}",
@@ -576,40 +573,6 @@ def update_heading_stack(stack: list[str], heading: str, level: int) -> list[str
     if effective_level > len(stack) + 1:
         effective_level = len(stack) + 1
     return [*stack[: effective_level - 1], normalized_heading]
-
-
-def normalize_optional_text(value: Any) -> str | None:
-    if _is_missing_value(value):
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def safe_int(value: Any) -> int | None:
-    if _is_missing_value(value):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def first_non_null(values: Iterable[Any]) -> Any:
-    for value in values:
-        if value is None:
-            continue
-        if _is_missing_value(value):
-            continue
-        return value
-    return None
-
-
-def _is_missing_value(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, float) and math.isnan(value):
-        return True
-    return False
 
 
 def _build_caption_blocks(
@@ -1011,12 +974,9 @@ __all__ = [
     "build_table_caption_blocks",
     "extract_unit_hint",
     "find_nearest_caption_block",
-    "first_non_null",
     "make_table_id",
-    "normalize_optional_text",
     "render_markdown_table",
     "render_plain_table_text",
     "resolve_heading_path_for_page",
-    "safe_int",
     "update_heading_stack",
 ]

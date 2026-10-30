@@ -194,7 +194,6 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.core.objectives.objective_discovery_service as _test_objective_discovery_service
     import application.core.objectives.objective_input_service as _test_objective_input_service
     import application.core.objectives.paper_experiment_authoring_service as _test_paper_experiment_authoring_service
-    import application.core.objectives.paper_research_map_service as _test_paper_research_map_service
     import application.evaluation.finding_feedback_service as _test_finding_feedback_service
     import application.feedback.dataset_export_service as _test_dataset_export_service
     import application.feedback.dataset_service as _test_dataset_service
@@ -245,7 +244,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "DocumentProfileRepo",
                 "SourceArtifactRepo",
-                "_document_profile_extractor",
                 "collection_service",
             ],
         ),
@@ -303,8 +301,6 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "ObjectiveRepo",
                 "PaperExperimentRepo",
                 "PaperMapRepo",
-                "_objective_source_screener",
-                "_paper_experiment_extractor",
                 "collection_service",
                 "objective_input_service",
             ],
@@ -323,8 +319,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "collection_service",
                 "ObjectiveRepo",
-                "_axis_equivalence_classifier",
-                "_response_client",
                 "_worker_factory",
                 "_workers",
                 "objective_candidate_service",
@@ -337,7 +331,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "PaperMapRepo",
                 "SourceArtifactRepo",
-                "_response_client",
                 "collection_service",
                 "document_profile_service",
                 "paper_research_map_service",
@@ -346,10 +339,6 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_paper_experiment_authoring_service,
             ["SourceArtifactRepo", "collection_service", "experiment_analysis_writer"],
-        ),
-        (
-            _test_paper_research_map_service,
-            ["_paper_map_aggregator", "_paper_map_extraction", "_paper_map_sources"],
         ),
         (
             _test_finding_feedback_service,

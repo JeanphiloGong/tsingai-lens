@@ -299,7 +299,9 @@ async def test_document_profile_service_short_circuits_insufficient_content(
     document_profile_service.collection_service = collection_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
-    document_profile_service._document_profile_extractor = ExplodingExtractor()
+    document_profile_service.build_default_document_profile_extractor = (
+        lambda: ExplodingExtractor()
+    )
     profile_service = document_profile_service
     collection = await collection_service.create_collection("Sparse Profiles")
     collection_id = collection["collection_id"]
@@ -372,7 +374,9 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     document_profile_service.collection_service = collection_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
-    document_profile_service._document_profile_extractor = OneFailedProfileExtractor()
+    document_profile_service.build_default_document_profile_extractor = (
+        lambda: OneFailedProfileExtractor()
+    )
     profile_service = document_profile_service
     collection = await collection_service.create_collection("Partial Profiles")
     collection_id = collection["collection_id"]

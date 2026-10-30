@@ -102,9 +102,6 @@ class DocumentNotFoundError(ResourceNotFoundException):
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 
-_document_profile_extractor = None
-
-
 async def list_document_profiles(
     collection_id: str,
     offset: int = 0,
@@ -305,13 +302,6 @@ async def build_document_profile(
     return profile
 
 
-def _get_document_profile_extractor() -> DocumentProfileExtractor:
-    global _document_profile_extractor
-    if _document_profile_extractor is None:
-        _document_profile_extractor = build_default_document_profile_extractor()
-    return _document_profile_extractor
-
-
 def _document_text(document: SourceDocument) -> str:
     return (document.text or "").strip() or "\n\n".join(
         unit.text.strip()
@@ -348,7 +338,7 @@ def _profile_document(
             profile_status=PROFILE_STATUS_COMPLETED,
         )
 
-    extractor = _get_document_profile_extractor()
+    extractor = build_default_document_profile_extractor()
     try:
         extracted = extractor.extract_document_profile(profile_payload)
     except DocumentProfileExtractionError:

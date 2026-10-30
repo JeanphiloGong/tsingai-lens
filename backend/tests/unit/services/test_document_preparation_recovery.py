@@ -181,7 +181,7 @@ async def test_classification_retry_reuses_source_not_failed_profile(
             return None
 
     extractor = Extractor()
-    ctx.profiles._document_profile_extractor = extractor
+    ctx.profiles.build_default_document_profile_extractor = lambda: extractor
     monkeypatch.setattr(ctx.service, "_parse_document", parse_document)
     first = await ctx.service.queue_document_preparation(
         ctx.collection_id, "doc_a", user_id="local-user"

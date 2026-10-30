@@ -93,8 +93,6 @@ def build_research_objective_service(
     **kwargs,
 ) -> ModuleType:
     objective_judgments = kwargs.pop("response_client", None)
-    if objective_judgments is not None:
-        kwargs.setdefault("objective_source_screener", objective_judgments)
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
         source_repository = (
@@ -134,17 +132,13 @@ def build_research_objective_service(
     objective_input_service.paper_research_map_service = kwargs.pop(
         "paper_map_service", paper_research_map_service
     )
-    objective_input_service._response_client = objective_judgments
+    objective_input_service.build_default_structured_response_client = (
+        lambda: objective_judgments
+    )
     experiment_analysis_service.collection_service = collection_service
     experiment_analysis_service.PaperMapRepo = paper_map_repository
     experiment_analysis_service.ObjectiveRepo = objective_repository
     experiment_analysis_service.objective_input_service = objective_input_service
-    experiment_analysis_service._objective_source_screener = kwargs.pop(
-        "objective_source_screener", None
-    )
-    experiment_analysis_service._paper_experiment_extractor = kwargs.pop(
-        "paper_experiment_extractor", None
-    )
     if kwargs:
         raise TypeError(f"Unexpected test service options: {', '.join(kwargs)}")
     return experiment_analysis_service

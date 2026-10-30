@@ -25,9 +25,6 @@ from application.core.objectives import (
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
-from application.core.objectives.llm.structured_response import (
-    StructuredResponseClient,
-)
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
 )
@@ -43,8 +40,6 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 from repositories.objective_repository import ObjectiveRepo
 
-_response_client = None
-_axis_equivalence_classifier = None
 _worker_factory = create_task
 _workers: set[Any] = set()
 
@@ -211,7 +206,6 @@ async def discover_and_replace_objective_candidates(
 ) -> ObjectiveFactSet:
     """Build maps for the selected papers, form candidates, and persist them."""
 
-    global _axis_equivalence_classifier
     document_inputs = await objective_input_service.resolve_prepared_document_inputs(
         collection_id,
         document_ids,
@@ -226,16 +220,15 @@ async def discover_and_replace_objective_candidates(
         source_inputs=source_inputs,
         progress_callback=progress_callback,
     )
-    if _axis_equivalence_classifier is None:
-        _axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
-            _get_response_client()
-        )
+    axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
+        objective_input_service.get_response_client()
+    )
     candidate_facts = await to_thread(
         objective_candidate_service.discover_candidate_facts,
         collection_id,
         paper_maps=paper_maps,
         document_inputs=document_inputs,
-        axis_equivalence_classifier=_axis_equivalence_classifier,
+        axis_equivalence_classifier=axis_equivalence_classifier,
         progress_callback=progress_callback,
     )
     await ObjectiveRepo.replace(collection_id, candidate_facts)
@@ -332,10 +325,3 @@ def _log_unexpected_failure(worker: AsyncTask[dict[str, Any]]) -> None:
         logger.info("Objective Discovery run cancelled during backend shutdown")
     except Exception:  # noqa: BLE001
         logger.exception("Objective Discovery run crashed after scheduling")
-
-
-def _get_response_client() -> StructuredResponseClient:
-    global _response_client
-    if _response_client is None:
-        _response_client = objective_input_service.get_response_client()
-    return _response_client

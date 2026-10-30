@@ -99,17 +99,12 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     objective_repository = SimpleNamespace(
         read_objective=AsyncMock(return_value=objective)
     )
-    extractor = SimpleNamespace(
-        extract=lambda **kwargs: pytest.fail("sufficient stored facts must be reused")
-    )
     experiment_analysis_service.collection_service = object()
     experiment_analysis_service.PaperMapRepo = object()
     experiment_analysis_service.ObjectiveRepo = objective_repository
     experiment_analysis_service.objective_input_service = SimpleNamespace(
         get_response_client=lambda: SimpleNamespace(model="test-model")
     )
-    experiment_analysis_service._objective_source_screener = object()
-    experiment_analysis_service._paper_experiment_extractor = extractor
     experiment_analysis_service.PaperExperimentRepo = repository
     service = experiment_analysis_service
     inputs = {

@@ -19,12 +19,11 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
     assemble_source_documents,
-    normalize_optional_text,
     render_markdown_table,
     render_plain_table_text,
-    safe_int,
 )
-from domain.source.artifacts import _is_missing_value
+from infra.source.mapping.values import normalize_optional_text, safe_int
+from infra.source.mapping.values import _is_missing_value
 
 logger = logging.getLogger(__name__)
 

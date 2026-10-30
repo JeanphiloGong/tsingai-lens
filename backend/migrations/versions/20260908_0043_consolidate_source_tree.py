@@ -31,10 +31,9 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
-    normalize_optional_text,
-    safe_int,
 )
-from domain.source.artifacts import _is_missing_value
+from infra.source.mapping.values import normalize_optional_text, safe_int
+from infra.source.mapping.values import _is_missing_value
 
 revision: str = "20260908_0043"
 down_revision: str | Sequence[str] | None = "20260907_0042"

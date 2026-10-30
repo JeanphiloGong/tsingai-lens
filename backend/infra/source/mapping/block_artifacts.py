@@ -6,9 +6,9 @@ import pandas as pd
 
 from domain.source import (
     SourceBlock,
-    normalize_optional_text,
     update_heading_stack,
 )
+from infra.source.mapping.values import normalize_optional_text
 from infra.source.artifact_bundle import source_block_payload
 from infra.source.contracts.artifact_schemas import BLOCKS_FINAL_COLUMNS
 from infra.source.mapping.layout_binding import (

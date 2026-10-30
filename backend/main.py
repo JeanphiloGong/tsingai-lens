@@ -93,6 +93,8 @@ from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
 )
+from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.file.object_store import FileObjectStore
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from utils.logger import (
@@ -176,6 +178,8 @@ class ApplicationRuntime:
     """Database and worker resources owned by one running process."""
 
     database_engine: AsyncEngine
+    collection_workspace: FileCollectionWorkspace
+    object_store: FileObjectStore
     feedback_analysis_worker: FeedbackAnalysisWorker
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker
     tool_failure_analysis_worker: ToolFailureAnalysisWorker
@@ -188,6 +192,9 @@ class ApplicationRuntime:
 async def build_application_runtime() -> ApplicationRuntime:
     database_engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=database_engine)
+    collection_workspace = FileCollectionWorkspace(DATA_DIR / "collections")
+    object_store = FileObjectStore(collection_workspace.root_dir)
+    collection_service.configure_file_resources(collection_workspace.root_dir)
     try:
         await auth_session_service.ensure_bootstrap_user()
         chat_model = OpenAIChatModel()
@@ -320,6 +327,8 @@ async def build_application_runtime() -> ApplicationRuntime:
         sample_generator = OpenAIFeedbackSampleGenerator()
         return ApplicationRuntime(
             database_engine=database_engine,
+            collection_workspace=collection_workspace,
+            object_store=object_store,
             feedback_analysis_worker=FeedbackAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,

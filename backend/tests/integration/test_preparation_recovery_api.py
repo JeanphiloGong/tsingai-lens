@@ -51,7 +51,11 @@ def test_upload_classification_retry_content_and_research_readiness(
             return None
 
     classifier = Classifier()
-    document_profile_service._document_profile_extractor = classifier
+    monkeypatch.setattr(
+        document_profile_service,
+        "build_default_document_profile_extractor",
+        lambda: classifier,
+    )
     document_preparation_service._source_artifact_builder = parse_sources
     monkeypatch.setattr(
         pipeline_run_routes,

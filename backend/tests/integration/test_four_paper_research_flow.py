@@ -491,17 +491,18 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
 
     model = _FourPaperResearchModel()
     from application.core.document_profiles import service as document_profile_service
-    from application.core.objectives import (
-        objective_analysis_service,
-        objective_discovery_service,
-        objective_input_service,
-    )
+    from application.core.objectives import objective_input_service
 
-    monkeypatch.setattr(document_profile_service, "_document_profile_extractor", model)
-    monkeypatch.setattr(objective_input_service, "_response_client", model)
-    monkeypatch.setattr(objective_discovery_service, "_response_client", model)
-    monkeypatch.setattr(objective_analysis_service, "_objective_source_screener", None)
-    monkeypatch.setattr(objective_analysis_service, "_paper_experiment_extractor", None)
+    monkeypatch.setattr(
+        document_profile_service,
+        "build_default_document_profile_extractor",
+        lambda: model,
+    )
+    monkeypatch.setattr(
+        objective_input_service,
+        "build_default_structured_response_client",
+        lambda: model,
+    )
     with TestClient(create_app()) as client:
         login = client.post(
             f"{API_PREFIX}/auth/login",

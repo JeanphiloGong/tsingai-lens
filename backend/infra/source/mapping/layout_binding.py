@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from domain.source import normalize_optional_text
+from infra.source.mapping.values import normalize_optional_text
 
 
 def first_page(provenance: Any) -> int | None:

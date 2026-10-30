@@ -87,9 +87,6 @@ class ResearchObjectivesNotReadyError(ResourceConflictException):
 from repositories.paper_map_repository import PaperMapRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 
-_response_client = None
-
-
 async def resolve_prepared_document_inputs(
     collection_id: str,
     document_ids: tuple[str, ...],
@@ -286,10 +283,7 @@ async def load_or_build_paper_maps(
 
 
 def get_response_client() -> StructuredResponseClient:
-    global _response_client
-    if _response_client is None:
-        _response_client = build_default_structured_response_client()
-    return _response_client
+    return build_default_structured_response_client()
 
 
 async def _load_source_documents(

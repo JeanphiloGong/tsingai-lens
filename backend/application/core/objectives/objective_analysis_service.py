@@ -430,10 +430,6 @@ from repositories.objective_repository import ObjectiveRepo
 from repositories.paper_experiment_repository import PaperExperimentRepo
 from repositories.paper_map_repository import PaperMapRepo
 
-_objective_source_screener = None
-_paper_experiment_extractor = None
-
-
 async def preview_objective_scope(
     collection_id: str,
     objective_id: str,
@@ -460,7 +456,6 @@ async def generate_experiment_analysis_artifacts(
     analysis: ObjectiveAnalysis,
     progress_callback: ProgressCallback | None = None,
 ) -> ObjectiveExperimentAnalysisArtifacts:
-    global _objective_source_screener, _paper_experiment_extractor
     if analysis.collection_id != collection_id:
         raise ValueError("analysis belongs to another collection")
     active_objective = await ObjectiveRepo.read_objective(
@@ -475,10 +470,8 @@ async def generate_experiment_analysis_artifacts(
         document_inputs=analysis.document_inputs,
     )
     response_client = objective_input_service.get_response_client()
-    if _objective_source_screener is None:
-        _objective_source_screener = ObjectiveSourceScreener(response_client)
-    if _paper_experiment_extractor is None:
-        _paper_experiment_extractor = PaperExperimentExtractor(response_client)
+    source_screener = ObjectiveSourceScreener(response_client)
+    paper_experiment_extractor = PaperExperimentExtractor(response_client)
     model_name = str(
         getattr(response_client, "model", None) or analysis.model_name or ""
     ).strip()
@@ -545,6 +538,8 @@ async def generate_experiment_analysis_artifacts(
                     objective_inputs=document_objective_inputs,
                     progress_callback=document_progress_callback,
                     stored_revisions=stored_revisions,
+                    source_screener=source_screener,
+                    paper_experiment_extractor=paper_experiment_extractor,
                 )
         except Exception as exc:  # noqa: BLE001
             record_analysis_failure(
@@ -622,10 +617,12 @@ def _reconstruct_document_experiments(
     objective_inputs: ObjectiveAnalysisInputs,
     progress_callback: ProgressCallback | None,
     stored_revisions: Sequence[StoredPaperExperimentRevision] = (),
+    source_screener: ObjectiveSourceScreener,
+    paper_experiment_extractor: PaperExperimentExtractor,
 ) -> DocumentExperimentArtifacts:
     screened_sources = screen_sources(
         collection_id=collection_id,
-        source_screener=_objective_source_screener,
+        source_screener=source_screener,
         objectives=(objective,),
         paper_maps=objective_inputs["paper_maps"],
         documents=objective_inputs["documents"],
@@ -648,8 +645,6 @@ def _reconstruct_document_experiments(
     document_input = next(
         item for item in analysis.document_inputs if item.document_id == document_id
     )
-    if _paper_experiment_extractor is None:
-        raise RuntimeError("PaperExperiment Draft extractor is not configured")
     bundle = build_bundle_from_routes(
         document_id=document_id,
         source_fingerprint=document_input.preparation_fingerprint,
@@ -678,7 +673,7 @@ def _reconstruct_document_experiments(
             ),
         )
         if reused_revisions
-        else _paper_experiment_extractor.extract(objective=objective, bundle=bundle)
+        else paper_experiment_extractor.extract(objective=objective, bundle=bundle)
     )
     frame = next(
         (item for item in screened_sources if item.document_id == document_id),

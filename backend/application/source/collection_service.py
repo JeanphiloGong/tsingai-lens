@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -44,9 +45,18 @@ def collection_details(record: StoredCollection) -> dict[str, Any]:
 
 from repositories.collection_repository import CollectionRepo
 
-workspace = FileCollectionWorkspace()
-root_dir = workspace.root_dir
-object_store = FileObjectStore(root_dir)
+workspace: FileCollectionWorkspace | None = None
+root_dir: Path | None = None
+object_store: FileObjectStore | None = None
+
+
+def configure_file_resources(root: Path) -> None:
+    """Attach the process-owned collection workspace after application startup."""
+
+    global workspace, root_dir, object_store
+    workspace = FileCollectionWorkspace(root)
+    root_dir = workspace.root_dir
+    object_store = FileObjectStore(root_dir)
 
 
 def write_figure_asset(

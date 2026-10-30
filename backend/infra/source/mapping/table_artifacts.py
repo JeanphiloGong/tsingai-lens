@@ -17,10 +17,9 @@ from domain.source import (
     extract_unit_hint,
     find_nearest_caption_block,
     make_table_id,
-    normalize_optional_text,
     resolve_heading_path_for_page,
-    safe_int,
 )
+from infra.source.mapping.values import normalize_optional_text, safe_int
 from infra.source.artifact_bundle import (
     source_table_cell_payload,
     source_table_payload,

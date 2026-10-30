@@ -26,13 +26,10 @@ from domain.source.artifacts import (
     build_table_caption_blocks,
     extract_unit_hint,
     find_nearest_caption_block,
-    first_non_null,
     make_table_id,
-    normalize_optional_text,
     render_markdown_table,
     render_plain_table_text,
     resolve_heading_path_for_page,
-    safe_int,
     update_heading_stack,
 )
 from domain.source.collection import Collection, Document
@@ -65,12 +62,9 @@ __all__ = [
     "build_table_caption_blocks",
     "extract_unit_hint",
     "find_nearest_caption_block",
-    "first_non_null",
     "make_table_id",
-    "normalize_optional_text",
     "render_markdown_table",
     "render_plain_table_text",
     "resolve_heading_path_for_page",
-    "safe_int",
     "update_heading_stack",
 ]

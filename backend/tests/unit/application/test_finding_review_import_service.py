@@ -6,9 +6,7 @@ from typing import (
 
 import pytest
 from application.evaluation.finding_feedback_service import parse_curated_finding
-from application.evaluation.finding_review_import_service import (
-    FindingReviewImportService,
-)
+from application.evaluation import finding_review_import_service
 from domain.core import Finding
 from domain.core.finding import (
     Finding,
@@ -152,7 +150,8 @@ def test_curated_finding_rejects_invalid_scientific_scope(scope) -> None:
 
 async def test_import_accepts_canonical_finding_identity() -> None:
     feedback = _FeedbackService()
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(action="accept", note="Evidence and statement agree.")],
         reviewer="expert-1",
         user_id="user-1",
@@ -179,7 +178,8 @@ async def test_import_accepts_canonical_finding_identity() -> None:
 
 async def test_import_rejects_stale_analysis_version() -> None:
     feedback = _FeedbackService()
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(action="accept", analysis_version=2)],
         reviewer="expert-1",
         user_id="user-1",
@@ -198,7 +198,8 @@ async def test_import_rejects_stale_analysis_version() -> None:
 
 async def test_import_rejects_unknown_finding() -> None:
     feedback = _FeedbackService()
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(action="reject", finding_id="missing", issue_type="overclaim")],
         reviewer="expert-1",
         user_id="user-1",
@@ -210,7 +211,8 @@ async def test_import_rejects_unknown_finding() -> None:
 
 async def test_import_applies_curation_with_version_local_evidence() -> None:
     feedback = _FeedbackService()
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[
             _identity(
                 action="correct",
@@ -251,7 +253,8 @@ async def test_import_dry_run_rejects_noncanonical_curated_finding() -> None:
     malformed = _finding()
     malformed.pop("scientific_context")
 
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(action="correct", curated_finding=malformed)],
         reviewer="expert-1",
         dry_run=True,
@@ -268,7 +271,8 @@ async def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
     cross_identity = _finding()
     cross_identity["objective_id"] = "objective-other"
 
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(action="correct", curated_finding=cross_identity)],
         reviewer="expert-1",
         dry_run=True,
@@ -285,7 +289,8 @@ async def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
 async def test_import_dry_run_rejects_invalid_curated_status() -> None:
     feedback = _FeedbackService()
 
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[
             _identity(
                 action="correct",
@@ -308,7 +313,8 @@ async def test_import_dry_run_rejects_invalid_curated_status() -> None:
 async def test_import_rejects_retired_review_jsonl_aliases() -> None:
     feedback = _FeedbackService()
 
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(expert_action="accept", expert_note="legacy")],
         reviewer="expert-1",
         dry_run=True,
@@ -327,7 +333,8 @@ async def test_import_rejects_retired_review_jsonl_aliases() -> None:
 
 async def test_import_rejects_claim_identity_instead_of_ignoring_it() -> None:
     feedback = _FeedbackService()
-    result = await FindingReviewImportService(feedback).import_rows(
+    finding_review_import_service.finding_feedback_service = feedback
+    result = await finding_review_import_service.import_rows(
         rows=[_identity(action="accept", claim_id="legacy-claim")],
         reviewer="expert-1",
         user_id="user-1",

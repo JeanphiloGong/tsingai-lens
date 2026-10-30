@@ -366,9 +366,8 @@ class EvaluationRepository:
             )
 
 
-def _sorted_records(value: Any) -> list[dict[str, Any]]:
-    records = [item for item in value or () if isinstance(item, dict)]
-    return sorted(records, key=lambda item: tuple(str(item.get(key) or "") for key in (
+def _sorted_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(records, key=lambda item: tuple(str(item.get(key, "")) for key in (
         "document_id", "family", "item_key", "metric", "failure_id", "score_id", "item_id", "gold_item_id"
     )))
 
@@ -377,4 +376,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-__all__ = ['EvaluationRepository']
+__all__ = ['EvaluationRepository', 'EvaluationRepo']
+
+
+EvaluationRepo = EvaluationRepository()

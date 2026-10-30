@@ -30,38 +30,28 @@ async def import_review_decisions(
     reviewer: str,
     user_id: str,
     dry_run: bool = False,
-    feedback_service=None,
 ) -> dict:
     backend_root = str(DEFAULT_BACKEND_ROOT)
     if backend_root not in sys.path:
         sys.path.insert(0, backend_root)
-    from application.evaluation import (
-        FindingReviewImportService,
-        finding_feedback_service,
+    from application.evaluation import finding_review_import_service
+    from infra.persistence.database import (
+        AsyncSessionLocal,
+        DatabaseSettings,
+        build_database_engine,
     )
 
-    engine = None
-    if feedback_service is None:
-        from infra.persistence.database import (  # noqa: PLC0415
-            AsyncSessionLocal,
-            DatabaseSettings,
-            build_database_engine,
-        )
-
-        engine = build_database_engine(DatabaseSettings())
-        AsyncSessionLocal.configure(bind=engine)
-
-        feedback_service = finding_feedback_service
+    engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=engine)
     try:
-        return await FindingReviewImportService(feedback_service).import_jsonl_file(
+        return await finding_review_import_service.import_jsonl_file(
             input_path=input_path,
             reviewer=reviewer,
             user_id=user_id,
             dry_run=dry_run,
         )
     finally:
-        if engine is not None:
-            await engine.dispose()
+        await engine.dispose()
 
 
 def render_text_summary(summary: dict) -> str:

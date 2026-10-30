@@ -11,12 +11,12 @@ from application.chat.capabilities.finding_review import (
     CurateFindingToolRequest,
 )
 from application.evaluation import finding_feedback_service
-from application.evaluation.core_evaluation_service import CoreEvaluationService
+from application.evaluation import core_evaluation_service
 from application.evaluation.finding_feedback_service import parse_curated_finding
-from application.evaluation.gold_service import EvaluationGoldService
+from application.evaluation import gold_service
+from application.evaluation import prediction_snapshot_service
 from application.evaluation.prediction_snapshot_service import (
     CoreArtifactsNotReadyForEvaluationError,
-    EvaluationPredictionSnapshotService,
 )
 from domain.core import (
     Finding,
@@ -495,10 +495,9 @@ async def test_evaluation_gold_service_registers_gold_set_for_collection(
     *, postgres_session_factory
 ):
     repository = EvaluationRepository()
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(),
-        evaluation_repository=repository,
-    )
+    gold_service.collection_service = FakeCollectionService()
+    gold_service.EvaluationRepo = repository
+    service = gold_service
 
     gold_set = await service.register_gold_set(
         collection_id="col-gold",
@@ -525,10 +524,9 @@ async def test_evaluation_gold_service_accepts_collection_file_storage_key(
     *, postgres_session_factory
 ):
     repository = EvaluationRepository()
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(),
-        evaluation_repository=repository,
-    )
+    gold_service.collection_service = FakeCollectionService()
+    gold_service.EvaluationRepo = repository
+    service = gold_service
 
     await service.register_gold_set(
         collection_id="col-gold",
@@ -553,10 +551,9 @@ async def test_evaluation_gold_service_accepts_collection_file_storage_key(
 async def test_evaluation_gold_service_rejects_missing_collection(
     *, postgres_session_factory
 ):
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(existing=set()),
-        evaluation_repository=EvaluationRepository(),
-    )
+    gold_service.collection_service = FakeCollectionService(existing=set())
+    gold_service.EvaluationRepo = EvaluationRepository()
+    service = gold_service
 
     with pytest.raises(FileNotFoundError):
         await service.register_gold_set(
@@ -569,10 +566,9 @@ async def test_evaluation_gold_service_rejects_missing_collection(
 async def test_evaluation_gold_service_rejects_gold_item_outside_collection(
     *, postgres_session_factory
 ):
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(),
-        evaluation_repository=EvaluationRepository(),
-    )
+    gold_service.collection_service = FakeCollectionService()
+    gold_service.EvaluationRepo = EvaluationRepository()
+    service = gold_service
 
     with pytest.raises(ValueError, match="gold item document is not in collection"):
         await service.register_gold_set(
@@ -785,14 +781,13 @@ async def _finding_feedback_service(*, postgres_session_factory) -> ModuleType:
 
 def _prediction_snapshot_service(
     objective_repository: ObjectiveRepository,
-) -> tuple[EvaluationPredictionSnapshotService, EvaluationRepository]:
+) -> tuple[ModuleType, EvaluationRepository]:
     evaluation_repository = EvaluationRepository()
+    prediction_snapshot_service.collection_service = FakeCollectionService()
+    prediction_snapshot_service.ObjectiveRepo = objective_repository
+    prediction_snapshot_service.EvaluationRepo = evaluation_repository
     return (
-        EvaluationPredictionSnapshotService(
-            collection_service=FakeCollectionService(),
-            objective_repository=objective_repository,
-            evaluation_repository=evaluation_repository,
-        ),
+        prediction_snapshot_service,
         evaluation_repository,
     )
 
@@ -825,6 +820,7 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
     item = snapshot.items[0]
     assert item.family == "objective_findings"
     assert item.item_key == "obj-1:v1:finding-1"
+    assert item.document_id == "doc-1"
     assert item.payload["analysis_version"] == 1
     assert item.payload["finding_id"] == "finding-1"
     assert item.payload["evidence"][0]["source_excerpt"] == (
@@ -882,12 +878,11 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(
     repository.list_contributions = reject_legacy_read
 
     evaluation_repository = EvaluationRepository()
-    snapshot_service = EvaluationPredictionSnapshotService(
-        collection_service=FakeCollectionService(),
-        objective_repository=repository,
-        evaluation_repository=evaluation_repository,
-        experiment_projection=projection,
-    )
+    prediction_snapshot_service.collection_service = FakeCollectionService()
+    prediction_snapshot_service.ObjectiveRepo = repository
+    prediction_snapshot_service.EvaluationRepo = evaluation_repository
+    prediction_snapshot_service.experiment_projection = projection
+    snapshot_service = prediction_snapshot_service
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
     finding_feedback_service.ObjectiveRepo = repository
     finding_feedback_service.experiment_compatibility_projection = projection
@@ -902,6 +897,7 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(
     )
 
     assert snapshot.items[0].payload["finding_id"] == "finding-1"
+    assert snapshot.items[0].document_id == "doc-1"
     assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
 
 

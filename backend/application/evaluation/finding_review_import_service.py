@@ -31,190 +31,184 @@ _ISSUES = frozenset(
 )
 
 
-class FindingReviewImportService:
-    """Validate and apply human decisions to published Finding versions."""
+from application.evaluation import finding_feedback_service
 
-    def __init__(self, feedback_service: Any) -> None:
-        if feedback_service is None:
-            raise ValueError("feedback_service is required")
-        self.feedback_service = feedback_service
 
-    async def import_rows(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        reviewer: str,
-        user_id: str,
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        reviewer = _human_reviewer(reviewer)
-        validated: list[dict[str, Any]] = []
-        errors: list[dict[str, Any]] = []
-        for line_number, row in enumerate(rows, start=1):
-            try:
-                validated.append(
-                    await self._decision(row, line_number=line_number, user_id=user_id)
-                )
-            except (
-                ValueError,
-                RequestInvalidException,
-                ResourceConflictException,
-                ResourceNotFoundException,
-            ) as exc:
-                errors.append({"line": line_number, "message": str(exc)})
-        if errors:
-            return _summary(
-                status="fail",
-                dry_run=dry_run,
-                decisions=validated,
-                errors=errors,
-                written_count=0,
+async def import_rows(
+    *,
+    rows: list[dict[str, Any]],
+    reviewer: str,
+    user_id: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    reviewer = _human_reviewer(reviewer)
+    validated: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for line_number, row in enumerate(rows, start=1):
+        try:
+            validated.append(
+                await _decision(row, line_number=line_number, user_id=user_id)
             )
-
-        written_count = 0
-        if not dry_run:
-            for decision in validated:
-                action = decision["action"]
-                if action == "skip":
-                    continue
-                payload = dict(decision["payload"])
-                if action == "correct":
-                    await self.feedback_service.record_curation(
-                        reviewer=reviewer,
-                        user_id=user_id,
-                        **payload,
-                    )
-                else:
-                    await self.feedback_service.record_feedback(
-                        reviewer=reviewer,
-                        user_id=user_id,
-                        **payload,
-                    )
-                written_count += 1
+        except (
+            ValueError,
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ) as exc:
+            errors.append({"line": line_number, "message": str(exc)})
+    if errors:
         return _summary(
-            status="pass",
+            status="fail",
             dry_run=dry_run,
             decisions=validated,
-            errors=[],
-            written_count=written_count,
+            errors=errors,
+            written_count=0,
         )
 
-    async def import_jsonl_file(
-        self,
-        *,
-        input_path: Path,
-        reviewer: str,
-        user_id: str,
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        return await self.import_rows(
-            rows=read_review_jsonl(input_path),
-            reviewer=reviewer,
-            user_id=user_id,
-            dry_run=dry_run,
+    written_count = 0
+    if not dry_run:
+        for decision in validated:
+            action = decision["action"]
+            if action == "skip":
+                continue
+            payload = dict(decision["payload"])
+            if action == "correct":
+                await finding_feedback_service.record_curation(
+                    reviewer=reviewer,
+                    user_id=user_id,
+                    **payload,
+                )
+            else:
+                await finding_feedback_service.record_feedback(
+                    reviewer=reviewer,
+                    user_id=user_id,
+                    **payload,
+                )
+            written_count += 1
+    return _summary(
+        status="pass",
+        dry_run=dry_run,
+        decisions=validated,
+        errors=[],
+        written_count=written_count,
+    )
+
+
+async def import_jsonl_file(
+    *,
+    input_path: Path,
+    reviewer: str,
+    user_id: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return await import_rows(
+        rows=read_review_jsonl(input_path),
+        reviewer=reviewer,
+        user_id=user_id,
+        dry_run=dry_run,
+    )
+
+
+async def _decision(
+    row: dict[str, Any],
+    *,
+    line_number: int,
+    user_id: str,
+) -> dict[str, Any]:
+    if "expert_action" in row or "expert_note" in row:
+        raise ValueError(
+            "expert_action and expert_note are not review JSONL fields"
         )
+    action = row.get("action")
+    if not isinstance(action, str):
+        raise ValueError("action must be accept, reject, correct, or skip")
+    action = action.strip().lower()
+    if action not in _ACTIONS:
+        raise ValueError("action must be accept, reject, correct, or skip")
+    identity = _identity(row)
+    if action == "skip":
+        return {"line": line_number, "action": action, "payload": identity}
+    note = row.get("note")
+    if note is not None:
+        if not isinstance(note, str):
+            raise ValueError("note must be text")
+        note = note.strip() or None
 
-    async def _decision(
-        self,
-        row: dict[str, Any],
-        *,
-        line_number: int,
-        user_id: str,
-    ) -> dict[str, Any]:
-        if "expert_action" in row or "expert_note" in row:
-            raise ValueError(
-                "expert_action and expert_note are not review JSONL fields"
-            )
-        action = row.get("action")
-        if not isinstance(action, str):
-            raise ValueError("action must be accept, reject, correct, or skip")
-        action = action.strip().lower()
-        if action not in _ACTIONS:
-            raise ValueError("action must be accept, reject, correct, or skip")
-        identity = _identity(row)
-        if action == "skip":
-            return {"line": line_number, "action": action, "payload": identity}
-        note = row.get("note")
-        if note is not None:
-            if not isinstance(note, str):
-                raise ValueError("note must be text")
-            note = note.strip() or None
-
-        if action == "accept":
-            await self._require_dataset_item(identity, user_id=user_id)
-            return {
-                "line": line_number,
-                "action": action,
-                "payload": {
-                    **identity,
-                    "review_status": "correct",
-                    "issue_type": "none",
-                    "note": note,
-                },
-            }
-        if action == "reject":
-            await self._require_dataset_item(identity, user_id=user_id)
-            issue_type = row.get("issue_type")
-            if not isinstance(issue_type, str):
-                raise ValueError("reject requires a valid issue_type")
-            issue_type = issue_type.strip().lower()
-            if issue_type not in _ISSUES:
-                raise ValueError("reject requires a valid issue_type")
-            return {
-                "line": line_number,
-                "action": action,
-                "payload": {
-                    **identity,
-                    "review_status": "incorrect",
-                    "issue_type": issue_type,
-                    "note": note,
-                },
-            }
-
-        curated_finding = row.get("curated_finding")
-        if not isinstance(curated_finding, dict):
-            raise ValueError("correct requires one complete curated_finding")
-        candidate = parse_curated_finding(curated_finding)
-        await self.feedback_service.validate_curation(
-            **identity,
-            curated_finding=candidate,
-            user_id=user_id,
-        )
-        curated_status = row.get("curated_status", "limited")
-        if not isinstance(curated_status, str):
-            raise ValueError("curated_status must be text")
-        curated_status = curated_status.strip() or "limited"
-        if curated_status not in {"supported", "limited", "conflicted", "unsupported"}:
-            raise ValueError("correct requires a valid curated_status")
+    if action == "accept":
+        await _require_dataset_item(identity, user_id=user_id)
         return {
             "line": line_number,
             "action": action,
             "payload": {
                 **identity,
-                "curated_status": curated_status,
-                "curated_finding": candidate,
+                "review_status": "correct",
+                "issue_type": "none",
+                "note": note,
+            },
+        }
+    if action == "reject":
+        await _require_dataset_item(identity, user_id=user_id)
+        issue_type = row.get("issue_type")
+        if not isinstance(issue_type, str):
+            raise ValueError("reject requires a valid issue_type")
+        issue_type = issue_type.strip().lower()
+        if issue_type not in _ISSUES:
+            raise ValueError("reject requires a valid issue_type")
+        return {
+            "line": line_number,
+            "action": action,
+            "payload": {
+                **identity,
+                "review_status": "incorrect",
+                "issue_type": issue_type,
                 "note": note,
             },
         }
 
-    async def _require_dataset_item(
-        self,
-        identity: dict[str, Any],
-        *,
-        user_id: str,
-    ) -> dict[str, Any]:
-        dataset = await self.feedback_service.export_dataset(
-            collection_id=identity["collection_id"],
-            objective_id=identity["objective_id"],
-            user_id=user_id,
-        )
-        for item in dataset.get("items", []):
-            if (
-                item.get("analysis_version") == identity["analysis_version"]
-                and item.get("finding_id") == identity["finding_id"]
-            ):
-                return item
-        raise ValueError("Finding version is not present in the current dataset")
+    curated_finding = row.get("curated_finding")
+    if not isinstance(curated_finding, dict):
+        raise ValueError("correct requires one complete curated_finding")
+    candidate = parse_curated_finding(curated_finding)
+    await finding_feedback_service.validate_curation(
+        **identity,
+        curated_finding=candidate,
+        user_id=user_id,
+    )
+    curated_status = row.get("curated_status", "limited")
+    if not isinstance(curated_status, str):
+        raise ValueError("curated_status must be text")
+    curated_status = curated_status.strip() or "limited"
+    if curated_status not in {"supported", "limited", "conflicted", "unsupported"}:
+        raise ValueError("correct requires a valid curated_status")
+    return {
+        "line": line_number,
+        "action": action,
+        "payload": {
+            **identity,
+            "curated_status": curated_status,
+            "curated_finding": candidate,
+            "note": note,
+        },
+    }
+
+
+async def _require_dataset_item(
+    identity: dict[str, Any],
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    dataset = await finding_feedback_service.export_dataset(
+        collection_id=identity["collection_id"],
+        objective_id=identity["objective_id"],
+        user_id=user_id,
+    )
+    for item in dataset.get("items", []):
+        if (
+            item.get("analysis_version") == identity["analysis_version"]
+            and item.get("finding_id") == identity["finding_id"]
+        ):
+            return item
+    raise ValueError("Finding version is not present in the current dataset")
 
 
 def read_review_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -294,4 +288,4 @@ def _summary(
     }
 
 
-__all__ = ["FindingReviewImportService", "read_review_jsonl"]
+__all__ = ["import_rows", "import_jsonl_file", "read_review_jsonl"]

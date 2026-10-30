@@ -87,7 +87,13 @@ actor's user ID and authorize the Collection before accessing scientific data.
 | Map merging or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
 | One paper's scientific experiment flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
-| Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.py` | `test_finding_summary.py` |
+| Optional single-paragraph Finding summary | `finding_summary.py`, called by the current app's `ObjectiveAnalysisService` | `test_finding_summary.py` |
+
+The current app's Analysis runtime owns an optional Finding summary request and
+its lazily created summary client. This client has a 60-second timeout and no
+provider retries, stays separate from the analysis client, and closes with its
+runtime. Authorization and fixed-version reads precede client creation. The
+summary helper receives the actual client and never constructs or closes one.
 
 For a scientific stage, continue to [`analysis/README.md`](analysis/README.md).
 For cross-module verification, use the commands in

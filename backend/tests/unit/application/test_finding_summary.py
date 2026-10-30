@@ -376,7 +376,9 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
     with pytest.raises(
         ResourceConflictException, match="published analysis has changed"
     ):
-        await service.summarize_finding(
+        runtime = service.ObjectiveAnalysisService()
+        runtime._summary_client = ModelStub()
+        await runtime.summarize_finding(
             "col-1",
             "obj-1",
             "finding-1",

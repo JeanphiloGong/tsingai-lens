@@ -33,7 +33,7 @@ def api():
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     service = SimpleNamespace(summarize_finding=AsyncMock())
-    research_objective_routes.objective_analysis_service = service
+    app.state.runtime = SimpleNamespace(objective_analysis_service=service)
     app.dependency_overrides[get_current_user_id] = lambda: "owner-1"
     app.include_router(router, prefix="/api/v1")
     with TestClient(app) as client:
@@ -155,11 +155,14 @@ def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
     monkeypatch.setattr(
         research_objective_routes, "objective_analysis_service", analysis_service
     )
+    runtime = analysis_service.ObjectiveAnalysisService()
+    app.state.runtime = SimpleNamespace(objective_analysis_service=runtime)
     app.include_router(router, prefix="/api/v1")
     with TestClient(app) as client:
         response = client.post(URL, json={"analysis_version": 1})
     assert response.status_code == 200
     assert response.json()["code"] == code
+    assert runtime._summary_client is None
     repository.read_objective.assert_not_awaited()
     generate.assert_not_called()
     if access == "anonymous":

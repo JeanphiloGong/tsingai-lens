@@ -134,6 +134,58 @@ async def test_analysis_clients_are_lazy_and_owned_by_their_runtime(monkeypatch)
         await second.close()
 
 
+
+async def test_summary_client_is_lazy_separate_and_owned_by_each_app(monkeypatch):
+    from unittest.mock import Mock
+    from application.core.objectives.llm.structured_response import StructuredResponseClient
+
+    clients = []
+    summary_sdks = []
+
+    def build_client():
+        summary_sdk = SimpleNamespace(close=Mock())
+        sdk = SimpleNamespace(close=Mock(), with_options=Mock(return_value=summary_sdk))
+        client = StructuredResponseClient(client=sdk, model="test-model")
+        clients.append((client, sdk))
+        summary_sdks.append(summary_sdk)
+        return client
+
+    monkeypatch.setattr(objective_analysis_service, "build_default_structured_response_client", build_client)
+    first = objective_analysis_service.ObjectiveAnalysisService()
+    second = objective_analysis_service.ObjectiveAnalysisService()
+    assert clients == []
+    try:
+        analysis_client = first._get_response_client()
+        summary_client = first._get_summary_client()
+        assert first._get_summary_client() is summary_client
+        assert analysis_client is not summary_client
+        assert analysis_client.client is clients[0][1]
+        clients[0][1].with_options.assert_not_called()
+        clients[1][1].with_options.assert_called_once_with(timeout=60.0, max_retries=0)
+        other_summary = second._get_summary_client()
+        assert other_summary is not summary_client
+        await first.close()
+        summary_sdks[1].close.assert_called_once()
+        summary_sdks[2].close.assert_not_called()
+    finally:
+        await first.close()
+        await second.close()
+
+
+async def test_summary_client_configuration_failure_uses_safe_error(monkeypatch):
+    from application.core.objectives.finding_summary import FindingSummaryUnavailable
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(objective_analysis_service, "build_default_structured_response_client", Mock(
+        side_effect=ValueError("private provider configuration"),
+    ))
+    runtime = objective_analysis_service.ObjectiveAnalysisService()
+    with pytest.raises(FindingSummaryUnavailable) as error:
+        runtime._get_summary_client()
+    assert error.value.data["code"] == "summary_generation_failed"
+    assert "private provider" not in str(error.value)
+    assert runtime._summary_client is None
+
 def _objective(
     *,
     published: int | None = None,

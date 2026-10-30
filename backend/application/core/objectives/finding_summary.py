@@ -84,7 +84,7 @@ def summarize_finding_evidence(
     finding: dict[str, Any],
     evidence: list[dict[str, Any]],
     language: str,
-    response_client: StructuredResponseClient | None = None,
+    response_client: StructuredResponseClient,
 ) -> dict[str, Any]:
     expected = {
         evidence_id
@@ -141,19 +141,15 @@ def summarize_finding_evidence(
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    client = response_client
     try:
-        client = response_client or StructuredResponseClient()
-        if response_client is None:
-            client.client = client.client.with_options(timeout=60.0, max_retries=0)
-        prompt_tokens = client.estimate_prompt_tokens(
+        prompt_tokens = response_client.estimate_prompt_tokens(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             response_model=FindingSummaryModelOutput,
         )
         if prompt_tokens > MAX_PROMPT_TOKENS:
             raise FindingSummaryUnavailable("summary_input_too_large")
-        result = client.complete(
+        result = response_client.complete(
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             response_model=FindingSummaryModelOutput,
@@ -174,7 +170,7 @@ def summarize_finding_evidence(
             finding["finding_id"],
             finding["analysis_version"],
             len(evidence),
-            client.model,
+            response_client.model,
         )
         return {
             **{
@@ -189,7 +185,7 @@ def summarize_finding_evidence(
             **summary.model_dump(),
             "language": language,
             "references": [item for item in references if item["id"] in cited],
-            "model": client.model,
+            "model": response_client.model,
             "prompt_version": PROMPT_VERSION,
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -202,6 +198,3 @@ def summarize_finding_evidence(
             type(exc).__name__,
         )
         raise FindingSummaryUnavailable("summary_generation_failed") from exc
-    finally:
-        if response_client is None and client is not None:
-            client.client.close()

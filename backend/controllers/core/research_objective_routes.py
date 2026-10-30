@@ -237,13 +237,14 @@ async def get_objective_finding(
     summary="Generate a cited reading summary of a published Finding",
 )
 async def summarize_objective_finding(
+    request: Request,
     collection_id: str,
     objective_id: str,
     finding_id: str,
     body: FindingSummaryRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    payload = await objective_analysis_service.summarize_finding(
+    payload = await request.app.state.runtime.objective_analysis_service.summarize_finding(
         collection_id,
         objective_id,
         finding_id,

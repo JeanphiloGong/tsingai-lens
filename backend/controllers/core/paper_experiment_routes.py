@@ -26,7 +26,7 @@ async def read_experiment_analysis(
     analysis_version: int = Query(..., ge=1),
 ) -> Response:
     return make_api_response(
-        data=await experiment_query_service.export_json(
+        data=await experiment_query_service.export_analysis_json(
             collection_id, objective_id, analysis_version, user_id=user_id
         )
     )
@@ -46,7 +46,7 @@ async def export_experiment_analysis(
     format: Literal["json", "csv"] = Query(default="json"),
 ):
     if format == "csv":
-        body = await experiment_query_service.export_csv(
+        body = await experiment_query_service.export_analysis_csv(
             collection_id, objective_id, analysis_version, user_id=user_id
         )
         return Response(
@@ -60,7 +60,7 @@ async def export_experiment_analysis(
             },
         )
     return make_api_response(
-        data=await experiment_query_service.export_json(
+        data=await experiment_query_service.export_analysis_json(
             collection_id, objective_id, analysis_version, user_id=user_id
         )
     )

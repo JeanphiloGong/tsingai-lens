@@ -154,7 +154,7 @@ async def test_query_service_exports_fixed_revision_data(export_kind: str) -> No
     service = experiment_query_service
 
     if export_kind == "json":
-        payload = await service.export_json(
+        payload = await service.export_analysis_json(
             "collection-1", "objective-1", 1, user_id="user-1"
         )
         assert payload["experiments"][0]["experiment_version"] == 1
@@ -163,7 +163,7 @@ async def test_query_service_exports_fixed_revision_data(export_kind: str) -> No
             "b-elongation",
         ]
     else:
-        payload = await service.export_csv(
+        payload = await service.export_analysis_csv(
             "collection-1", "objective-1", 1, user_id="user-1"
         )
         header = payload.splitlines()[0]
@@ -186,7 +186,7 @@ async def test_query_service_rejects_unknown_analysis_snapshot() -> None:
     service = experiment_query_service
 
     with pytest.raises(ResourceNotFoundException, match="Analysis snapshot not found"):
-        await service.export_json("collection-1", "objective-1", 99, user_id="user-1")
+        await service.export_analysis_json("collection-1", "objective-1", 99, user_id="user-1")
 
 
 async def test_query_service_rejects_incomplete_analysis_snapshot() -> None:
@@ -202,7 +202,7 @@ async def test_query_service_rejects_incomplete_analysis_snapshot() -> None:
     with pytest.raises(
         ResourceConflictException, match="Analysis snapshot is not completed"
     ):
-        await service.export_json("collection-1", "objective-1", 1, user_id="user-1")
+        await service.export_analysis_json("collection-1", "objective-1", 1, user_id="user-1")
 
 
 @pytest.fixture(autouse=True)

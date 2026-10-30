@@ -145,7 +145,7 @@ def build_collection_paper_maps(
         paper_map = paper_map_aggregation.drop_signals_resolved_by_relationships(
             paper_map
         )
-        assessment = paper_map_aggregation.assess(
+        assessment = paper_map_aggregation.assess_paper_map(
             paper_map,
             signals=tuple(paper_signals),
             final=False,
@@ -271,7 +271,7 @@ def build_collection_paper_maps(
                 paper_map
             )
             expansion_round += 1
-            assessment = paper_map_aggregation.assess(
+            assessment = paper_map_aggregation.assess_paper_map(
                 paper_map,
                 signals=tuple(paper_signals),
                 final=False,
@@ -279,7 +279,7 @@ def build_collection_paper_maps(
         paper_map = paper_map_aggregation.drop_signals_resolved_by_relationships(
             paper_map
         )
-        final_assessment = paper_map_aggregation.assess(
+        final_assessment = paper_map_aggregation.assess_paper_map(
             paper_map,
             signals=paper_map.unresolved_signals,
             final=True,

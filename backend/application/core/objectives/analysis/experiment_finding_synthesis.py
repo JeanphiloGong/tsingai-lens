@@ -54,7 +54,7 @@ class _SelectedStudy:
     has_incomplete_context: bool
 
 
-def synthesize(
+def synthesize_experiment_findings(
     *,
     collection_id: str,
     objective: ResearchObjective,
@@ -746,4 +746,4 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:28]}"
 
 
-__all__ = ["ExperimentFindingSynthesisResult", "synthesize"]
+__all__ = ["ExperimentFindingSynthesisResult", "synthesize_experiment_findings"]

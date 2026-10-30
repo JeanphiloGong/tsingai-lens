@@ -183,7 +183,7 @@ def _selection(experiment_id: str, suffix: str) -> ObjectiveExperimentSelection:
 
 
 def _synthesize(revisions, selections):
-    return experiment_finding_synthesis_service.synthesize(
+    return experiment_finding_synthesis_service.synthesize_experiment_findings(
         collection_id="collection-1",
         objective=_objective(),
         analysis_version=1,
@@ -429,7 +429,7 @@ def test_matches_non_ascii_objective_terms_without_dropping_them() -> None:
         factors=("预热",),
     )
 
-    result = experiment_finding_synthesis_service.synthesize(
+    result = experiment_finding_synthesis_service.synthesize_experiment_findings(
         collection_id="collection-1",
         objective=objective,
         analysis_version=1,

@@ -121,7 +121,7 @@ async def _validate_analysis_snapshot(
         )
 
 
-async def export_json(
+async def export_analysis_json(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -665,7 +665,7 @@ async def export_json(
     }
 
 
-async def export_csv(
+async def export_analysis_csv(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -1087,6 +1087,6 @@ async def export_csv(
 __all__ = [
     "ExperimentAnalysisBundle",
     "read_analysis_bundle",
-    "export_json",
-    "export_csv",
+    "export_analysis_json",
+    "export_analysis_csv",
 ]

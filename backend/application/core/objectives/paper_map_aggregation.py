@@ -380,7 +380,7 @@ def _unique_text_values(values: Any) -> tuple[str, ...]:
     return tuple(unique)
 
 
-def assess(
+def assess_paper_map(
     paper_map: PaperResearchMap,
     *,
     signals: tuple[PaperResearchSignal, ...],

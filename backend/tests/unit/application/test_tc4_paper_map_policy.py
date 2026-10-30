@@ -470,7 +470,7 @@ def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery
     )
 
     filtered = paper_map_aggregation.drop_signals_resolved_by_relationships(paper_map)
-    assessment = paper_map_aggregation.assess(
+    assessment = paper_map_aggregation.assess_paper_map(
         filtered,
         signals=filtered.unresolved_signals,
         final=True,
@@ -713,7 +713,7 @@ def test_tc4_background_relationship_is_not_unclear_ownership():
         ),
     )
 
-    assessment = paper_map_aggregation.assess(
+    assessment = paper_map_aggregation.assess_paper_map(
         paper_map,
         signals=(),
         final=True,

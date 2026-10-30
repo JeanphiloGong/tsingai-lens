@@ -779,7 +779,7 @@ async def write_experiment_analysis(
         selections=(*prepared.selections, *reused_selections),
     )
     if allow_finding and prepared.selections:
-        synthesis = experiment_finding_synthesis_service.synthesize(
+        synthesis = experiment_finding_synthesis_service.synthesize_experiment_findings(
             collection_id=collection_id,
             objective=objective,
             analysis_version=analysis.analysis_version,
@@ -918,7 +918,7 @@ async def write_selection_finding_revision(
         for item in selections
     )
     source_revisions = tuple(item.revision for item in revisions)
-    synthesis = experiment_finding_synthesis_service.synthesize(
+    synthesis = experiment_finding_synthesis_service.synthesize_experiment_findings(
         collection_id=collection_id,
         objective=objective,
         analysis_version=analysis.analysis_version,

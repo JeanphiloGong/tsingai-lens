@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from application.feedback import analysis_handler
+
 import asyncio
 import json
 import os
@@ -88,10 +90,11 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
+    analysis_handler.ChatRepo = chain.chat
     worker = FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     )
 
     terminal = await worker.run_once()
@@ -121,10 +124,11 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         reason="incorrect",
         comment="Check preheating.",
     )
+    analysis_handler.ChatRepo = chain.chat
     await FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
@@ -370,10 +374,11 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         reason="incorrect",
         comment="Paper B's figure caption records preheating at 200 C.",
     )
+    analysis_handler.ChatRepo = chain.chat
     await FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     await chain.case_service.save_annotation_for_user(
@@ -681,10 +686,11 @@ async def test_reclaimed_build_rejects_old_lease_completion(
         rating="not_helpful",
         reason="incorrect",
     )
+    analysis_handler.ChatRepo = chain.chat
     await FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()

@@ -248,21 +248,17 @@ async def build_application_runtime() -> ApplicationRuntime:
             feedback_analysis_worker=FeedbackAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,
-                handler=FeedbackAnalysisHandler(chat_repository=ChatRepo),
+                handler=FeedbackAnalysisHandler(),
             ),
             correction_signal_analysis_worker=CorrectionSignalAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,
-                handler=CorrectionSignalAnalysisHandler(
-                    chat_repository=ChatRepo,
-                    engine=correction_engine,
-                    model_name=correction_engine.model_name,
-                ),
+                handler=CorrectionSignalAnalysisHandler(engine=correction_engine, model_name=correction_engine.model_name),
             ),
             tool_failure_analysis_worker=ToolFailureAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,
-                handler=ToolFailureAnalysisHandler(chat_repository=ChatRepo),
+                handler=ToolFailureAnalysisHandler(),
             ),
             dataset_sample_build_worker=DatasetSampleBuildWorker(
                 job_repository=AnalysisJobRepo,

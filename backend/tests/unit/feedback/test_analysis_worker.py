@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import analysis_handler
+
 from dataclasses import replace
 
 import pytest
@@ -143,10 +145,11 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases()
     before = (chat.question, chat.answer)
+    analysis_handler.ChatRepo = chat
     result = await FeedbackAnalysisWorker(
         job_repository=jobs,
         case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
     assert result.status == "succeeded"
     assert jobs.finished and jobs.finished[0] == "succeeded"
@@ -173,10 +176,11 @@ def test_conversation_capture_excludes_target_and_later_corrections() -> None:
 async def test_worker_cancels_withdrawn_feedback_without_case() -> None:
     jobs = _Jobs(_job("feedback-withdrawn"))
     cases = _Cases()
+    analysis_handler.ChatRepo = _Chat(feedback=None)
     worker = FeedbackAnalysisWorker(
         job_repository=jobs,
         case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=_Chat(feedback=None)),
+        handler=FeedbackAnalysisHandler(),
     )
     result = await worker.run_once()
     assert result.status == "cancelled"
@@ -200,10 +204,11 @@ async def test_worker_cancels_a_superseded_feedback_version() -> None:
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key="older-version"))
     cases = _Cases()
 
+    analysis_handler.ChatRepo = chat
     result = await FeedbackAnalysisWorker(
         job_repository=jobs,
         case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
 
     assert result.status == "cancelled"
@@ -226,10 +231,11 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases(fail_on_save=True)
 
+    analysis_handler.ChatRepo = chat
     result = await FeedbackAnalysisWorker(
         job_repository=jobs,
         case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
 
     assert result.status == "failed"
@@ -239,10 +245,11 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
 async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:
     jobs = _Jobs(replace(_job("feedback-1"), payload_version=2))
     cases = _Cases()
+    analysis_handler.ChatRepo = _Chat(feedback=None)
     worker = FeedbackAnalysisWorker(
         job_repository=jobs,
         case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=_Chat(feedback=None)),
+        handler=FeedbackAnalysisHandler(),
     )
     result = await worker.run_once()
     assert result.status == "failed"
@@ -258,7 +265,8 @@ async def test_feedback_digest_is_stable_when_the_same_version_is_reanalysed():
         now="2026-09-24T00:00:03+00:00",
     )
     job = _job(chat.feedback.feedback_id, idempotency_key=chat.feedback.analysis_version_key)
-    handler = FeedbackAnalysisHandler(chat_repository=chat)
+    analysis_handler.ChatRepo = chat
+    handler = FeedbackAnalysisHandler()
     first, snapshot, _ = await handler.handle(job)
     second, repeated_snapshot, _ = await handler.handle(job)
     assert second.input_digest == first.input_digest

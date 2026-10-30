@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import analysis_handler
+
 from hashlib import sha256
 from types import SimpleNamespace
 
@@ -57,10 +59,11 @@ async def _prepare_case(chain) -> object:
     from application.feedback.analysis_handler import FeedbackAnalysisHandler
     from application.feedback.analysis_worker import FeedbackAnalysisWorker
 
+    analysis_handler.ChatRepo = chain.chat
     worker = FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     )
     terminal_job = await worker.run_once()
     assert terminal_job is not None and terminal_job.result_id is not None

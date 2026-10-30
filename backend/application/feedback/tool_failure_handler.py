@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repositories.chat_repository import ChatRepo
+
 
 from domain.feedback.tool_failure import TOOL_FAILURE_SIGNAL_TYPE
 
@@ -69,11 +71,9 @@ class ToolFailureAnalysisHandler:
     def __init__(
         self,
         *,
-        chat_repository: Any,
         engine: ToolFailureAnalysisEngine | None = None,
         model_name: str = "rule-based-tool-failure-v1",
     ) -> None:
-        self.chat_repository = chat_repository
         self.engine = engine or RuleBasedToolFailureAnalysisEngine()
         self.model_name = model_name
 
@@ -102,9 +102,9 @@ class ToolFailureAnalysisHandler:
         if job.idempotency_key != expected_key:
             raise AnalysisInputError("tool_failure_identity_mismatch")
 
-        session = await self.chat_repository.read_session(values["session_id"])
-        messages = await self.chat_repository.read_messages(values["session_id"])
-        call = await self.chat_repository.read_tool_call(values["tool_call_id"])
+        session = await ChatRepo.read_session(values["session_id"])
+        messages = await ChatRepo.read_messages(values["session_id"])
+        call = await ChatRepo.read_tool_call(values["tool_call_id"])
         if session is None or not messages or call is None:
             raise AnalysisInputError("tool_failure_withdrawn")
         if call.session_id != values["session_id"]:

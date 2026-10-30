@@ -1,3 +1,5 @@
+
+from application.feedback import analysis_handler
 """Feedback ingestion, source changes, and selected publication against PostgreSQL."""
 
 import asyncio
@@ -66,10 +68,11 @@ async def _analyze(chain, answer=None):
         reason="incorrect",
         comment="The figure caption records the missing preheating condition.",
     )
+    analysis_handler.ChatRepo = chain.chat
     terminal = await FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
     assert terminal.status == "succeeded"
     cases = await chain.cases.list_cases(collection_id=COLLECTION_ID)
@@ -245,10 +248,11 @@ async def test_case_and_all_sample_jobs_roll_back_together(
         reason="incorrect",
         comment="Check the caption.",
     )
+    analysis_handler.ChatRepo = chain.chat
     failed = await FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     ).run_once()
     assert failed.status == "failed"
     async with postgres_session_factory() as session:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repositories.chat_repository import ChatRepo
+
 from domain.feedback.correction_signal import CORRECTION_SIGNAL_TYPE
 
 import json
@@ -92,11 +94,9 @@ class CorrectionSignalAnalysisHandler:
     def __init__(
         self,
         *,
-        chat_repository: Any,
         engine: CorrectionSignalAnalysisEngine | None = None,
         model_name: str = "rule-based-correction-v1",
     ) -> None:
-        self.chat_repository = chat_repository
         self.engine = engine or RuleBasedCorrectionSignalAnalysisEngine()
         self.model_name = model_name
 
@@ -123,8 +123,8 @@ class CorrectionSignalAnalysisHandler:
         )
         if job.idempotency_key != expected_idempotency_key:
             raise AnalysisInputError("correction_signal_identity_mismatch")
-        session = await self.chat_repository.read_session(session_id)
-        messages = await self.chat_repository.read_messages(session_id)
+        session = await ChatRepo.read_session(session_id)
+        messages = await ChatRepo.read_messages(session_id)
         if session is None or not messages:
             raise AnalysisInputError("correction_signal_withdrawn")
         positions = {message.message_id: index for index, message in enumerate(messages)}
@@ -163,7 +163,7 @@ class CorrectionSignalAnalysisHandler:
         )
         original_question = _previous_user_question(messages, anchor)
         challenge_messages = messages[:positions[trigger_id] + 1]
-        audit = await read_chat_coverage_audit(self.chat_repository, session_id, challenge_messages)
+        audit = await read_chat_coverage_audit(session_id, challenge_messages)
         coverage = build_evidence_coverage(challenge_messages, anchor, audit=audit)
         draft = await self.engine.analyze(
             signal=signal, session=session, anchor=anchor, trigger=trigger,
@@ -185,7 +185,7 @@ class CorrectionSignalAnalysisHandler:
                     break
         related_end = positions[corrected.message_id] + 1 if corrected else positions[trigger_id] + 1
         related_messages = messages[:related_end]
-        audit = await read_chat_coverage_audit(self.chat_repository, session_id, related_messages)
+        audit = await read_chat_coverage_audit(session_id, related_messages)
         coverage = build_evidence_coverage(related_messages, anchor, audit=audit)
         corrected_coverage = build_evidence_coverage(related_messages, corrected, audit=audit) if corrected else None
         pairing_assessment = {

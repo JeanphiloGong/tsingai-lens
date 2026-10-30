@@ -16,7 +16,7 @@ from application.feedback.source_coverage import (
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.chat.feedback import ChatMessageFeedback
 from domain.feedback import AnalysisResult, EvidenceCoverage, FeedbackProblemType
-from repositories.chat_repository import ChatRepository
+from repositories.chat_repository import ChatRepo
 
 
 class AnalysisInputError(ValueError):
@@ -96,11 +96,9 @@ class FeedbackAnalysisHandler:
     def __init__(
         self,
         *,
-        chat_repository: ChatRepository,
         engine: FeedbackAnalysisEngine | None = None,
         model_name: str = "rule-based-v1",
     ) -> None:
-        self.chat_repository = chat_repository
         self.engine = engine or RuleBasedFeedbackAnalysisEngine()
         self.model_name = model_name
 
@@ -110,23 +108,22 @@ class FeedbackAnalysisHandler:
         feedback_id = job.payload.get("feedback_id")
         if not isinstance(feedback_id, str) or not feedback_id:
             raise AnalysisInputError("feedback_id_missing")
-        feedback = await self.chat_repository.read_feedback_by_id(feedback_id)
+        feedback = await ChatRepo.read_feedback_by_id(feedback_id)
         if feedback is None:
             raise AnalysisInputError("feedback_withdrawn")
         if job.idempotency_key != feedback.analysis_version_key:
             raise FeedbackVersionSupersededError("feedback_version_superseded")
-        session = await self.chat_repository.read_session(feedback.session_id)
-        answer = await self.chat_repository.read_message(feedback.message_id)
+        session = await ChatRepo.read_session(feedback.session_id)
+        answer = await ChatRepo.read_message(feedback.message_id)
         if session is None or answer is None or answer.session_id != feedback.session_id:
             raise AnalysisInputError("feedback_context_missing")
         if answer.content == "":
             raise AnalysisInputError("feedback_answer_empty")
-        messages = await self.chat_repository.read_messages(feedback.session_id)
+        messages = await ChatRepo.read_messages(feedback.session_id)
         coverage = build_evidence_coverage(
             messages,
             answer,
             audit=await read_chat_coverage_audit(
-                self.chat_repository,
                 feedback.session_id,
                 messages,
             ),
@@ -140,7 +137,7 @@ class FeedbackAnalysisHandler:
         )
         # The engine may be slow enough for the user to edit the feedback while
         # it runs. Re-read the mutable source before creating a durable result.
-        current_feedback = await self.chat_repository.read_feedback_by_id(feedback_id)
+        current_feedback = await ChatRepo.read_feedback_by_id(feedback_id)
         if current_feedback is None:
             raise AnalysisInputError("feedback_withdrawn")
         if current_feedback.analysis_version_key != job.idempotency_key:
@@ -277,7 +274,6 @@ def conversation_before_answer(messages: tuple[ChatMessage, ...], answer: ChatMe
 
 
 async def read_chat_coverage_audit(
-    repository: ChatRepository,
     session_id: str,
     messages: tuple[ChatMessage, ...],
 ) -> ChatCoverageAudit:
@@ -292,7 +288,7 @@ async def read_chat_coverage_audit(
         collected: list[Any] = []
         offset = 0
         while offset < 10_000:
-            batch = await repository.read_model_calls(session_id, limit=200, offset=offset)
+            batch = await ChatRepo.read_model_calls(session_id, limit=200, offset=offset)
             collected.extend(batch)
             if len(batch) < 200:
                 break
@@ -313,7 +309,7 @@ async def read_chat_coverage_audit(
     tool_audit_error = False
     for tool_call_id in tool_ids:
         try:
-            record = await repository.read_tool_call(tool_call_id)
+            record = await ChatRepo.read_tool_call(tool_call_id)
         except Exception:  # noqa: BLE001
             tool_audit_error = True
             continue

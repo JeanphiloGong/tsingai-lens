@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import analysis_handler, tool_failure_handler
+
 import json
 import subprocess
 import sys
@@ -226,10 +228,11 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert job.payload_version == 1
     assert job.idempotency_key == feedback.analysis_version_key
 
+    analysis_handler.ChatRepo = chain.chat
     worker = FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     )
     terminal_job = await worker.run_once()
     assert terminal_job is not None
@@ -415,10 +418,11 @@ async def test_withdrawn_feedback_cancels_pending_job_without_creating_a_case(
     assert await chain.chat.read_feedback_by_id(feedback.feedback_id) is None
     assert await chain.cases.list_cases(collection_id=COLLECTION_ID) == ()
 
+    analysis_handler.ChatRepo = chain.chat
     worker = FeedbackAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        handler=FeedbackAnalysisHandler(),
     )
     assert await worker.run_once() is None
 
@@ -534,10 +538,11 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     assert duplicate_job.job_id == first_job.job_id
     assert first_job.job_type == TOOL_FAILURE_JOB_TYPE
 
+    tool_failure_handler.ChatRepo = chain.chat
     worker = ToolFailureAnalysisWorker(
         job_repository=chain.jobs,
         case_repository=chain.cases,
-        handler=ToolFailureAnalysisHandler(chat_repository=chain.chat),
+        handler=ToolFailureAnalysisHandler(),
     )
     terminal_job = await worker.run_once()
     assert terminal_job is not None

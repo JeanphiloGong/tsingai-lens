@@ -249,7 +249,12 @@ def _isolate_application_module_dependencies(monkeypatch):
 
     from application.chat.capabilities import published_findings, research_planning
 
+    from application.feedback import analysis_handler, correction_signal_handler, tool_failure_handler
+
     dependencies = (
+        (analysis_handler, ["ChatRepo"]),
+        (correction_signal_handler, ["ChatRepo"]),
+        (tool_failure_handler, ["ChatRepo"]),
         (published_findings, ["collection_service", "ObjectiveRepo", "objective_analysis_service", "finding_feedback_service"]),
         (research_planning, ["collection_service", "finding_feedback_service", "experiment_plan_service"]),
         (finding_authoring, ["finding_authoring_service"]),

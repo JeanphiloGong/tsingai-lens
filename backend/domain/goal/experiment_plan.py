@@ -9,10 +9,6 @@ ExperimentPlanStatus = Literal["draft", "ready_for_review", "archived"]
 EXPERIMENT_PLAN_STATUSES = {"draft", "ready_for_review", "archived"}
 
 
-class ExperimentPlanRevisionConflictError(ValueError):
-    """The requested parent already has a successor or was otherwise superseded."""
-
-
 @dataclass(frozen=True)
 class ExperimentPlanRecord:
     plan_id: str
@@ -95,6 +91,5 @@ class ExperimentPlanRecord:
 __all__ = [
     "EXPERIMENT_PLAN_STATUSES",
     "ExperimentPlanRecord",
-    "ExperimentPlanRevisionConflictError",
     "ExperimentPlanStatus",
 ]

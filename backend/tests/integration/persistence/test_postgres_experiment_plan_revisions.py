@@ -14,8 +14,8 @@ import pytest
 from domain.core import ResearchObjective
 from domain.goal import (
     ExperimentPlanRecord,
-    ExperimentPlanRevisionConflictError,
 )
+from exceptions import ResourceConflictException
 from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.experiment_plan_repository import (
     ExperimentPlanRepository,
@@ -166,8 +166,12 @@ async def test_postgres_allows_only_one_concurrent_successor(
 
     assert sum(isinstance(item, ExperimentPlanRecord) for item in outcomes) == 1
     assert sum(
-        isinstance(item, ExperimentPlanRevisionConflictError) for item in outcomes
+        isinstance(item, ResourceConflictException) for item in outcomes
     ) == 1
+    conflict = next(item for item in outcomes if isinstance(item, ResourceConflictException))
+    assert conflict.code == 200204
+    assert conflict.data["code"] == "experiment_plan_revision_superseded"
+    assert conflict.data["parent_plan_id"] == parent.plan_id
     leaves = await experiment_plan_repository.list_plans(COLLECTION_ID, OBJECTIVE_ID)
     assert len(leaves) == 1
     assert leaves[0].parent_plan_id == parent.plan_id

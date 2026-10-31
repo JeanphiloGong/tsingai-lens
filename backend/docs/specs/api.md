@@ -907,7 +907,10 @@ capabilities:
   atomically without starting or publishing Objective analysis and without
   creating an Objective Selection. A later Objective analysis may select one or
   more fixed revisions for comparison. It does not create a Finding; a Finding
-  remains a separate Evidence/Selection-backed write;
+  remains a separate Evidence/Selection-backed write. A conflicting fixed revision
+  is rejected with `paper_experiment_revision_immutable` or
+  `paper_experiment_revision_identity_conflict`, preserving its experiment ID and
+  version in the tool result;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work;
@@ -1546,6 +1549,12 @@ Saving a plan never schedules or claims that an experiment was executed.
 the request must include at least one of `title`, `content`, `status`, or
 `structured_plan`. The service creates a new immutable plan revision; it does
 not mutate the historical revision addressed by `plan_id`.
+Only one successor can be saved for a parent revision. A second update returns
+`200204` with `data.code: experiment_plan_revision_superseded` and the parent
+plan ID; it creates no revision and leaves the accepted successor intact.
+An attempted overwrite or duplicate revision identity also returns `200204`,
+with `experiment_plan_revision_immutable` or
+`experiment_plan_revision_identity_conflict` and the affected plan identity.
 
 ### Documents And Source Verification
 

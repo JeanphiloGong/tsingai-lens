@@ -4,8 +4,8 @@ import pytest
 
 from domain.goal import (
     ExperimentPlanRecord,
-    ExperimentPlanRevisionConflictError,
 )
+from exceptions import ResourceConflictException
 from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 pytestmark = pytest.mark.anyio
@@ -77,10 +77,31 @@ async def test_append_rejects_a_second_successor_of_the_same_revision(*, postgre
     await repository.upsert_plan(parent)
     await repository.append_plan_revision(first_child)
 
-    with pytest.raises(ExperimentPlanRevisionConflictError):
+    with pytest.raises(ResourceConflictException) as rejected:
         await repository.append_plan_revision(competing_child)
 
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "experiment_plan_revision_superseded"
+    assert rejected.value.data["parent_plan_id"] == parent.plan_id
+    assert await repository.read_plan("col-1", "objective-1", competing_child.plan_id) is None
     assert await repository.list_plans("col-1", "objective-1") == (first_child,)
+
+
+async def test_append_rejects_an_existing_revision_identity(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository()
+    parent = _plan()
+    occupied = _plan(plan_id="occupied-plan")
+    await repository.upsert_plan(parent)
+    await repository.upsert_plan(occupied)
+
+    with pytest.raises(ResourceConflictException) as rejected:
+        await repository.append_plan_revision(
+            _plan(plan_id=occupied.plan_id, plan_version=2, parent_plan_id=parent.plan_id),
+        )
+
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "experiment_plan_revision_identity_conflict"
+    assert await repository.read_plan("col-1", "objective-1", occupied.plan_id) == occupied
 
 
 async def test_existing_revision_is_immutable(*, postgres_session_factory) -> None:
@@ -88,9 +109,12 @@ async def test_existing_revision_is_immutable(*, postgres_session_factory) -> No
     original = _plan()
     await repository.upsert_plan(original)
 
-    with pytest.raises(ExperimentPlanRevisionConflictError):
+    with pytest.raises(ResourceConflictException) as rejected:
         await repository.upsert_plan(_plan(title="Silently overwritten"))
 
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "experiment_plan_revision_immutable"
+    assert rejected.value.data["plan_id"] == original.plan_id
     assert await repository.read_plan("col-1", "objective-1", original.plan_id) == original
 
 

@@ -22,6 +22,7 @@ from domain.core.scientific_fact import (
     ScientificAttribute,
     ScientificVariable,
 )
+from exceptions import ResourceConflictException
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentalVariantRow,
     ExperimentComparisonMeasurementRow,
@@ -34,10 +35,6 @@ from infra.persistence.postgres.models.paper_experiment import (
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
-class PaperExperimentRevisionConflictError(ValueError):
-    """Raised when an existing experiment version would be overwritten."""
 
 
 @dataclass(frozen=True)
@@ -175,8 +172,13 @@ async def _add_revision(
         stored = await load_experiment_revision(db, existing)
         if stored.revision == validated:
             return stored
-        raise PaperExperimentRevisionConflictError(
-            "paper experiment revisions are immutable"
+        raise ResourceConflictException(
+            "paper experiment revisions are immutable",
+            data={
+                "code": "paper_experiment_revision_immutable",
+                "experiment_id": validated.experiment_id,
+                "experiment_version": validated.experiment_version,
+            },
         )
 
     row = PaperExperimentRow(
@@ -211,8 +213,13 @@ async def _add_revision(
         await db.flush()
     except IntegrityError as exc:
         if _constraint_name(exc) == "uq_paper_experiment_identity_version":
-            raise PaperExperimentRevisionConflictError(
-                "paper experiment revision identity already exists"
+            raise ResourceConflictException(
+                "paper experiment revision identity already exists",
+                data={
+                    "code": "paper_experiment_revision_identity_conflict",
+                    "experiment_id": validated.experiment_id,
+                    "experiment_version": validated.experiment_version,
+                },
             ) from exc
         raise
     return await load_experiment_revision(db, row)
@@ -826,7 +833,6 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 
 __all__ = [
     "PaperExperimentRepository",
-    "PaperExperimentRevisionConflictError",
     "StoredPaperExperimentRevision",
 ]
 

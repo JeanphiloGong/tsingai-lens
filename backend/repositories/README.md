@@ -30,6 +30,11 @@ call `Finding.validate_experiment_support()` or
 owns independent-experiment rules; repositories retain reference, scope, version
 and concurrency checks. Rejection rolls back the whole publication.
 
+Plan and PaperExperiment revision conflicts use the shared
+`ResourceConflictException` at the existing locked check or known unique
+constraint. The exception carries the revision identity and reason; the HTTP
+and Agent boundaries serialize it. Other database failures propagate unchanged.
+
 Feedback review locks, annotation digests, request identities and sequence numbers
 remain transactional checks. Annotation content rules belong to the existing
 domain object and review service. Model configuration and provider failures are

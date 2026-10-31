@@ -25,8 +25,9 @@ from repositories.collection_repository import (
 )
 from repositories.paper_experiment_repository import (
     PaperExperimentRepository,
-    PaperExperimentRevisionConflictError,
 )
+from exceptions import ResourceConflictException
+from sqlalchemy.exc import IntegrityError
 from tests.unit.application.test_experiment_analysis_writer import (
     _physical_split_experiment,
 )
@@ -377,11 +378,69 @@ async def test_same_version_is_idempotent_but_conflicting_version_is_rejected(
         )
 
     conflicting = replace(_revision(), label="Changed after publication")
-    with pytest.raises(PaperExperimentRevisionConflictError):
+    with pytest.raises(ResourceConflictException) as rejected:
         async with database.AsyncSessionLocal() as db, db.begin():
             await paper_experiment_repository.add_revision(
                 db, conflicting, created_at=NOW
             )
+
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "paper_experiment_revision_immutable"
+    assert rejected.value.data["experiment_id"] == "experiment-1"
+    assert rejected.value.data["experiment_version"] == 1
+    async with database.AsyncSessionLocal() as db:
+        assert await paper_experiment_repository.read_revision(db, "experiment-1", 1) == first
+
+
+async def test_concurrent_conflicting_versions_return_one_business_conflict(
+    paper_experiment_repository, monkeypatch,
+) -> None:
+    ready = asyncio.Event()
+    readers = 0
+
+    async def save(revision):
+        nonlocal readers
+        async with database.AsyncSessionLocal() as db, db.begin():
+            scalar = db.scalar
+
+            async def read_before_either_insert(statement):
+                nonlocal readers
+                result = await scalar(statement)
+                monkeypatch.setattr(db, "scalar", scalar)
+                readers += 1
+                if readers == 2:
+                    ready.set()
+                await asyncio.wait_for(ready.wait(), timeout=5)
+                return result
+
+            monkeypatch.setattr(db, "scalar", read_before_either_insert)
+            return await paper_experiment_repository.add_revision(db, revision, created_at=NOW)
+
+    outcomes = await asyncio.gather(
+        save(_revision()), save(replace(_revision(), label="Competing interpretation")),
+        return_exceptions=True,
+    )
+    conflicts = [item for item in outcomes if isinstance(item, ResourceConflictException)]
+    assert len(conflicts) == 1
+    assert conflicts[0].code == 200204
+    assert conflicts[0].data["code"] == "paper_experiment_revision_identity_conflict"
+    assert conflicts[0].data["experiment_id"] == "experiment-1"
+    saved = next(item for item in outcomes if not isinstance(item, Exception))
+    async with database.AsyncSessionLocal() as db:
+        assert await paper_experiment_repository.list_latest_for_document(db, "paper-experiment-doc") == (saved,)
+
+
+async def test_unrelated_integrity_failure_propagates_and_rolls_back(
+    paper_experiment_repository,
+) -> None:
+    with pytest.raises(IntegrityError):
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await paper_experiment_repository.add_revision(
+                db, replace(_revision(), document_id="missing-document"),
+            )
+
+    async with database.AsyncSessionLocal() as db:
+        assert await paper_experiment_repository.list_latest_for_document(db, "paper-experiment-doc") == ()
 
 
 async def test_invalid_domain_revision_does_not_create_experiment_head(

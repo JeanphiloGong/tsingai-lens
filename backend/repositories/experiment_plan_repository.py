@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 from domain.goal import (
     ExperimentPlanRecord,
-    ExperimentPlanRevisionConflictError,
 )
+from exceptions import ResourceConflictException
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.chat import ChatMessageRow, ChatSessionRow
 from infra.persistence.postgres.models.objective_workspace import (
@@ -48,8 +48,13 @@ class ExperimentPlanRepository:
                 )
                 if existing == plan:
                     return existing
-                raise ExperimentPlanRevisionConflictError(
-                    "experiment plan revisions are immutable"
+                raise ResourceConflictException(
+                    "experiment plan revisions are immutable",
+                    data={
+                        "code": "experiment_plan_revision_immutable",
+                        "plan_id": plan.plan_id,
+                        "plan_version": plan.plan_version,
+                    },
                 )
             row = ObjectiveExperimentPlan(
                 plan_id=plan.plan_id,
@@ -106,8 +111,14 @@ class ExperimentPlanRepository:
                 raise ValueError("experiment plan parent revision was not found")
             _validate_successor(parent_row, plan)
             if await db.get(ObjectiveExperimentPlan, plan.plan_id) is not None:
-                raise ExperimentPlanRevisionConflictError(
-                    "experiment plan revision identity already exists"
+                raise ResourceConflictException(
+                    "experiment plan revision identity already exists",
+                    data={
+                        "code": "experiment_plan_revision_identity_conflict",
+                        "plan_id": plan.plan_id,
+                        "plan_version": plan.plan_version,
+                        "parent_plan_id": parent_plan_id,
+                    },
                 )
             existing_child = await db.scalar(
                 select(ObjectiveExperimentPlan.plan_id).where(
@@ -115,8 +126,13 @@ class ExperimentPlanRepository:
                 )
             )
             if existing_child is not None:
-                raise ExperimentPlanRevisionConflictError(
-                    "experiment plan revision has already been superseded"
+                raise ResourceConflictException(
+                    "experiment plan revision has already been superseded",
+                    data={
+                        "code": "experiment_plan_revision_superseded",
+                        "plan_id": plan.plan_id,
+                        "parent_plan_id": parent_plan_id,
+                    },
                 )
             await _validate_source_message(db, plan)
             row = ObjectiveExperimentPlan(
@@ -144,8 +160,13 @@ class ExperimentPlanRepository:
                 if _constraint_name(exc) == (
                     "uq_objective_experiment_plans_parent_plan_id"
                 ):
-                    raise ExperimentPlanRevisionConflictError(
-                        "experiment plan revision has already been superseded"
+                    raise ResourceConflictException(
+                        "experiment plan revision has already been superseded",
+                        data={
+                            "code": "experiment_plan_revision_superseded",
+                            "plan_id": plan.plan_id,
+                            "parent_plan_id": parent_plan_id,
+                        },
                     ) from exc
                 raise
             return ExperimentPlanRecord(

@@ -5,7 +5,8 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage, isApiErrorCode } from '../../../_shared/api';
-	import { authState } from '../../../_shared/auth';
+	import { authState } from '../../../_shared/authState';
+
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,

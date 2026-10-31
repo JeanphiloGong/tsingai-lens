@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { API_PREFIX } from './base';
-import { clearAuthState } from './auth';
+import { clearAuthState } from './authState';
+
 import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {

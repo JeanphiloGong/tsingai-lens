@@ -61,3 +61,9 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
 
 There is one browser contract. Do not add alternate API origins, compatibility
 normalizers, or parallel Objective result types.
+
+`authState.ts` owns browser authentication state, cross-tab invalidation, and
+user-scoped storage cleanup without making network requests. `auth.ts` owns
+login, logout, and current-session requests and updates that state. `api.ts`
+imports invalidation directly from `authState.ts`, so the base request helper
+does not depend on the network auth module.

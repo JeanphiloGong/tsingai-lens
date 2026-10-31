@@ -1,14 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
-import {
-	authState,
-	clearAuthState,
-	fetchCurrentSession,
-	login,
-	logout,
-	startAuthSynchronization
-} from './auth';
+import { authState, clearAuthState, startAuthSynchronization } from './authState';
+import { fetchCurrentSession, login, logout } from './auth';
 
 const fetchMock = vi.fn();
 function jsonResponse(data: unknown) {

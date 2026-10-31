@@ -5,7 +5,8 @@ import {
 } from './api';
 import { language } from './i18n';
 import { get } from 'svelte/store';
-import { authState } from './auth';
+import { authState } from './authState';
+
 
 function apiResponse(code: number, data: unknown, message = 'success') {
 	return new Response(JSON.stringify({ code, message, data, meta: null }), {

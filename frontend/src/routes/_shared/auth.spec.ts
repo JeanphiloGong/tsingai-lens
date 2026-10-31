@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 
 
-import { authState, clearAuthState, fetchCurrentSession, login } from './auth';
+import { authState, clearAuthState } from './authState';
+import { fetchCurrentSession, login } from './auth';
 
 const fetch = vi.fn();
 function apiResponse(code: number, data: unknown) {

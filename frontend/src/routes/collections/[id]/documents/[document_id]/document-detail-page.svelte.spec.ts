@@ -9,7 +9,8 @@ const agent = writable<DocumentAgentState>({
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
-import { authState } from '../../../../_shared/auth';
+import { authState } from '../../../../_shared/authState';
+
 
 type DocumentDetailPageState = {
 	params: {

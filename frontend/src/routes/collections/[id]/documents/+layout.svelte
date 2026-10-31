@@ -3,7 +3,8 @@
 	import { writable } from 'svelte/store';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { authState } from '../../../_shared/auth';
+	import { authState } from '../../../_shared/authState';
+
 	import { collections } from '../../../_shared/collections';
 	import { t } from '../../../_shared/i18n';
 	import {

@@ -4,7 +4,8 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { authState, fetchCurrentSession, logout, startAuthSynchronization } from './_shared/auth';
+  import { authState, startAuthSynchronization } from './_shared/authState';
+import { fetchCurrentSession, logout } from './_shared/auth';
   import { API_DOCS_PATH } from './_shared/base';
   import { collections } from './_shared/collections';
   import { errorMessage } from './_shared/api';

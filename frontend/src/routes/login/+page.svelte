@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { authState, login } from '../_shared/auth';
+	import { authState } from '../_shared/authState';
+import { login } from '../_shared/auth';
 	import { errorMessage } from '../_shared/api';
 	import { language, t } from '../_shared/i18n';
 	import { ChevronDown, Globe2 } from '@lucide/svelte';

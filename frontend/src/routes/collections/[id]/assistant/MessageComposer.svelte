@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import { authState } from '../../../_shared/auth';
+	import { authState } from '../../../_shared/authState';
+
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { ChevronDown, Quote, X, ArrowUpRight } from '@lucide/svelte';
 	import type { ChatSourceContext } from '../../../_shared/chatSessions';

@@ -5,7 +5,8 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { Plus, Upload, Search, Library, ArrowRight, Ellipsis } from '@lucide/svelte';
 	import { errorMessage } from './_shared/api';
-	import { authState } from './_shared/auth';
+	import { authState } from './_shared/authState';
+
 	import {
 		createCollection,
 		collections,

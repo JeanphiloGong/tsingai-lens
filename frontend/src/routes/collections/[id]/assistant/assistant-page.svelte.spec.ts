@@ -1,7 +1,8 @@
 import { page as browserPage, userEvent } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
-import { authState, fetchCurrentSession, login, logout } from '../../../_shared/auth';
+import { authState } from '../../../_shared/authState';
+import { fetchCurrentSession, login, logout } from '../../../_shared/auth';
 import { collections } from '../../../_shared/collections';
 
 import type {

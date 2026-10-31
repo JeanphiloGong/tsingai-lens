@@ -41,6 +41,9 @@ from repositories.paper_map_repository import PaperMapRepository
 from repositories.source_artifact_repository import (  # noqa: E402
     SourceArtifactRepository,
 )
+from application.core.objectives.analysis.analysis_record_source import is_experiment_backed_analysis
+from application.core.objectives.analysis import experiment_projection
+from application.core.objectives.analysis_records import list_all_evidence, list_all_findings
 
 
 ARTIFACT_NAMES = (
@@ -163,20 +166,28 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
             version = objective.published_analysis_version
             if version is None:
                 continue
-            objective_evidence, _ = await objective_repository.list_evidence(
-                collection_id,
-                objective.objective_id,
-                version,
-                offset=0,
-                limit=10_000,
-            )
-            objective_findings, _ = await objective_repository.list_findings(
-                collection_id,
-                objective.objective_id,
-                version,
-                offset=0,
-                limit=10_000,
-            )
+            analysis = await objective_repository.read_analysis(
+                collection_id, objective.objective_id, version
+            ) if hasattr(objective_repository, "read_analysis") else None
+            if is_experiment_backed_analysis(analysis):
+                objective_findings, objective_evidence, _ = (
+                    await experiment_projection.read_analysis_records(
+                        collection_id, objective.objective_id, version
+                    )
+                )
+            else:
+                objective_evidence = await list_all_evidence(
+                    objective_repository,
+                    collection_id,
+                    objective.objective_id,
+                    version,
+                )
+                objective_findings = await list_all_findings(
+                    objective_repository,
+                    collection_id,
+                    objective.objective_id,
+                    version,
+                )
             evidence.extend(
                 {
                     "collection_id": item.collection_id,

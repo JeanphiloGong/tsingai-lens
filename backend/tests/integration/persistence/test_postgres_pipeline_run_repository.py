@@ -16,7 +16,7 @@ from repositories.pipeline_run_repository import (
     PipelineRun,
     PipelineRunRepository,
     PipelineRunStatus,
- )
+)
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)

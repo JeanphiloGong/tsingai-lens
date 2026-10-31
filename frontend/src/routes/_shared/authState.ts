@@ -27,7 +27,9 @@ export function clearAuthState() {
 			authInvalidationKey,
 			crypto.getRandomValues(new Uint32Array(4)).join('-')
 		);
-	} catch {}
+	} catch {
+		// Local sign-out still works when browser storage is unavailable.
+	}
 }
 export function invalidateAuth() {
 	authGeneration += 1;
@@ -54,6 +56,8 @@ export function clearOtherUsersChatStorage(keepUserId = '') {
 				)
 					storage.removeItem(key);
 			}
-		} catch {}
+		} catch {
+			// Browser storage restrictions must not prevent signing out.
+		}
 	}
 }

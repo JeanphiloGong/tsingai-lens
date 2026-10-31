@@ -1,4 +1,5 @@
 from __future__ import annotations
+from application.feedback import conversation_context
 
 from tests.support.feedback_workers import CorrectionAnalyzerFixture, CorrectionWorkerFixture
 
@@ -208,7 +209,7 @@ def test_correction_signal_job_key_is_bounded_and_content_digest_is_canonicalize
 async def test_handler_accepts_surrounding_trigger_whitespace():
     messages = _messages(trigger_text="  不对，图注里有预热信息。  ")
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     handler = CorrectionAnalyzerFixture()
     result, _, _ = await handler.handle(_job(messages))
     assert result.signal_id == "correction_signal:challenge-1"
@@ -217,7 +218,7 @@ async def test_handler_accepts_surrounding_trigger_whitespace():
 async def test_handler_produces_unresolved_candidate_without_inventing_target():
     messages = _messages()
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     handler = CorrectionAnalyzerFixture()
     result, snapshot, source_ids = await handler.handle(_job(messages))
 
@@ -252,7 +253,7 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
         ),
     )
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     result, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(original))
     assert snapshot["corrected_answer"] == "Paper B was preheated at 200 C."
     assert snapshot["corrected_message_id"] == "answer-2"
@@ -324,7 +325,7 @@ async def test_challenge_does_not_link_an_answer_from_a_later_question():
         ),
     )
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     _, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(original))
     assert not snapshot.get("corrected_answer")
 
@@ -349,7 +350,7 @@ async def test_challenge_changing_task_scope_does_not_form_a_preference_pair(
         ),
     )
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     _, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(original))
     assert snapshot["analysis"]["resolution"] == "task_scope_changed"
     assert not snapshot.get("corrected_answer")
@@ -380,7 +381,7 @@ async def test_task_assessment_blocks_scope_changes_without_keyword_matches(rela
             )
 
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     _, snapshot, _ = await CorrectionAnalyzerFixture(engine=Engine()).handle(_job(original))
     assert snapshot["pairing_assessment"]["task_relation"] == relation
     assert not snapshot.get("corrected_message_id")
@@ -406,7 +407,7 @@ async def test_handler_keeps_selected_context_requested_until_a_read_is_verified
         *_messages()[1:],
     )
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     result, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(messages))
 
     assert (
@@ -445,7 +446,7 @@ async def test_handler_rejects_cross_session_order_and_non_correction(
     job = _job(original) if error == "order_invalid" else _job(messages)
     with pytest.raises(ValueError, match=error):
         correction_signal_handler.ChatRepo = _Chat(messages)
-        analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+        analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
         await CorrectionAnalyzerFixture().handle(
             job
         )
@@ -456,7 +457,7 @@ async def test_handler_rejects_a_job_with_an_unbound_idempotency_key():
     invalid = replace(_job(messages), idempotency_key="correction-signal:wrong")
     with pytest.raises(ValueError, match="identity_mismatch"):
         correction_signal_handler.ChatRepo = _Chat(messages)
-        analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+        analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
         await CorrectionAnalyzerFixture().handle(
             invalid
         )
@@ -465,7 +466,7 @@ async def test_handler_rejects_a_job_with_an_unbound_idempotency_key():
 async def test_correction_signal_result_cannot_claim_a_training_target():
     messages = _messages()
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     handler_result = CorrectionAnalyzerFixture()
     result, _, _ = await handler_result.handle(_job(messages))
 
@@ -478,7 +479,7 @@ async def test_worker_persists_case_only_after_valid_signal_analysis():
     jobs = _Jobs(_job(messages))
     cases = _Cases()
     correction_signal_handler.ChatRepo = _Chat(messages)
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     correction_signal_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = correction_signal_worker.AnalysisJobRepo
     correction_signal_worker.FeedbackCaseRepo = cases
@@ -500,7 +501,7 @@ async def test_worker_cancels_when_trigger_disappears_instead_of_creating_case()
     cases = _Cases()
     chat = _Chat(messages[:-1])
     correction_signal_handler.ChatRepo = chat
-    analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
     correction_signal_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = correction_signal_worker.AnalysisJobRepo
     correction_signal_worker.FeedbackCaseRepo = cases

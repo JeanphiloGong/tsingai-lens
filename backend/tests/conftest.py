@@ -252,7 +252,7 @@ def _isolate_application_module_dependencies(monkeypatch):
 
     from application.chat.capabilities import published_findings, research_planning
 
-    from application.feedback import analysis_handler, correction_signal_handler, tool_failure_handler
+    from application.feedback import analysis_handler, correction_signal_handler, tool_failure_handler, conversation_context
 
     from application.feedback import analysis_worker, correction_signal_worker, tool_failure_worker, sample_build_worker, worker_lease
 
@@ -263,6 +263,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (sample_build_worker, ["AnalysisJobRepo", "FeedbackCaseRepo", "FeedbackDatasetRepo", "FeedbackDatasetSampleRepo"]),
         (worker_lease, ["AnalysisJobRepo"]),
         (analysis_handler, ["ChatRepo"]),
+        (conversation_context, ["ChatRepo"]),
         (correction_signal_handler, ["ChatRepo"]),
         (tool_failure_handler, ["ChatRepo"]),
         (published_findings, ["collection_service", "ObjectiveRepo", "objective_analysis_service", "finding_feedback_service"]),

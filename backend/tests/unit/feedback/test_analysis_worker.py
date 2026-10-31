@@ -1,4 +1,5 @@
 from __future__ import annotations
+from application.feedback import conversation_context
 
 from tests.support.feedback_workers import FeedbackAnalyzerFixture, FeedbackWorkerFixture
 
@@ -147,7 +148,7 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases()
     before = (chat.question, chat.answer)
-    analysis_handler.ChatRepo = chat
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
     analysis_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = cases
@@ -177,7 +178,7 @@ def test_conversation_capture_excludes_target_and_later_corrections() -> None:
 async def test_worker_cancels_withdrawn_feedback_without_case() -> None:
     jobs = _Jobs(_job("feedback-withdrawn"))
     cases = _Cases()
-    analysis_handler.ChatRepo = _Chat(feedback=None)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = _Chat(feedback=None)
     analysis_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = cases
@@ -204,7 +205,7 @@ async def test_worker_cancels_a_superseded_feedback_version() -> None:
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key="older-version"))
     cases = _Cases()
 
-    analysis_handler.ChatRepo = chat
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
     analysis_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = cases
@@ -230,7 +231,7 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases(fail_on_save=True)
 
-    analysis_handler.ChatRepo = chat
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
     analysis_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = cases
@@ -243,7 +244,7 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
 async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:
     jobs = _Jobs(replace(_job("feedback-1"), payload_version=2))
     cases = _Cases()
-    analysis_handler.ChatRepo = _Chat(feedback=None)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = _Chat(feedback=None)
     analysis_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = cases
@@ -262,7 +263,7 @@ async def test_feedback_digest_is_stable_when_the_same_version_is_reanalysed():
         now="2026-09-24T00:00:03+00:00",
     )
     job = _job(chat.feedback.feedback_id, idempotency_key=chat.feedback.analysis_version_key)
-    analysis_handler.ChatRepo = chat
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
     handler = FeedbackAnalyzerFixture()
     first, snapshot, _ = await handler.handle(job)
     second, repeated_snapshot, _ = await handler.handle(job)

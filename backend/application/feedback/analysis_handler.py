@@ -12,17 +12,12 @@ from uuid import uuid4
 from application.feedback.errors import AnalysisInputError, FeedbackVersionSupersededError
 from application.feedback.conversation_context import conversation_before_answer, read_chat_coverage_audit
 from application.feedback.source_coverage import (
-    ChatCoverageAudit,
     build_evidence_coverage,
 )
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.chat.feedback import ChatMessageFeedback
 from domain.feedback import AnalysisResult, EvidenceCoverage, FeedbackProblemType
 from repositories.chat_repository import ChatRepo
-
-
-
-
 
 
 @dataclass(frozen=True)
@@ -246,14 +241,9 @@ async def analyze_feedback_job(
     return result, context_snapshot, (feedback.feedback_id,)
 
 
-
 def _previous_user_question(messages: tuple[ChatMessage, ...], answer: ChatMessage) -> str:
     prior = [item["content"] for item in conversation_before_answer(messages, answer) if item["role"] == "user"]
     return prior[-1] if prior else ""
-
-
-
-
 
 
 __all__ = [

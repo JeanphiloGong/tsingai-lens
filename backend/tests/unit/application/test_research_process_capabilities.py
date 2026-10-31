@@ -21,7 +21,7 @@ from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from repositories.pipeline_run_repository import (
     PipelineNodeStatus,
     PipelineRunStatus,
- )
+)
 from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio

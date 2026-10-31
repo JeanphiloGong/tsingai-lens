@@ -8,7 +8,6 @@ import {
 	nextAuthGeneration
 } from './authState';
 import type { AuthUser } from './authState';
-export type { AuthUser } from './authState';
 type AuthSessionPayload = { user: AuthUser };
 function setAuthenticated(payload: unknown) {
 	const user = (payload as AuthSessionPayload)?.user;
@@ -43,6 +42,7 @@ export async function fetchCurrentSession() {
 }
 export async function login(email: string, password: string) {
 	const generation = nextAuthGeneration();
+	// The earlier logout must clear its cookie before login sets a new one.
 	if (logoutRequest) await logoutRequest.catch(() => undefined);
 	if (!isCurrentAuthGeneration(generation)) throw new Error('error.authSessionChanged');
 	const data = await requestJson('/auth/login', {

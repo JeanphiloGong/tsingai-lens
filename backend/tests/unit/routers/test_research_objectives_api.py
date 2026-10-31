@@ -73,7 +73,7 @@ from repositories.pipeline_run_repository import (
     ExecutionTimestamps,
     PipelineRun,
     PipelineRunStatus,
- )
+)
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 

@@ -12,7 +12,7 @@ from repositories.pipeline_run_repository import (
     ExecutionTimestamps,
     PipelineNodeStatus,
     PipelineRunStatus,
- )
+)
 
 
 class _Runs:

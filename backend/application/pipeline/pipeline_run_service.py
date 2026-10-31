@@ -20,7 +20,7 @@ from repositories.pipeline_run_repository import (
     PipelineRunJobSnapshot,
     PipelineRunStatus,
     PipelineRunSummary,
- )
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _PIPELINE_NODES: dict[str, dict[str, tuple[str, ...]]] = {

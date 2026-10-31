@@ -42,7 +42,7 @@ from repositories.pipeline_run_repository import (
     PipelineRun,
     PipelineRunJobSnapshot,
     PipelineRunRepo,
- )
+)
 from repositories.source_artifact_repository import SourceArtifactRepo
 from sqlalchemy.ext.asyncio import AsyncSession
 

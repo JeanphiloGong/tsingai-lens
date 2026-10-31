@@ -892,7 +892,6 @@ async def _local_objective_bundle(
     with contextlib.redirect_stdout(io.StringIO()):
 
         from application.evaluation import finding_dataset_service
-        from application.evaluation import finding_feedback_service  # noqa: PLC0415
         from infra.persistence.database import (  # noqa: PLC0415
             AsyncSessionLocal,
             DatabaseSettings,
@@ -910,7 +909,6 @@ async def _local_objective_bundle(
         try:
             repository = ObjectiveRepository()
             review_repository = FindingReviewRepository()
-            feedback_service = finding_feedback_service
             objective = await repository.read_objective(collection_id, objective_id)
             if objective is None or objective.published_analysis_version is None:
                 raise FileNotFoundError(

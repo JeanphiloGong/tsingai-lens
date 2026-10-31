@@ -69,5 +69,3 @@ async def read_chat_coverage_audit(
         tool_calls=tool_calls,
         tool_audit_error=tool_audit_error,
     )
-
-

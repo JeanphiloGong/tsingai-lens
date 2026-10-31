@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping
 
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.dataset import Dataset
@@ -19,9 +19,6 @@ from application.feedback.sample_builder_support import (
 )
 
 
-class SampleBuildInputError(ValueError):
-    """The source case cannot produce a truthful candidate yet."""
-
 
 @dataclass(frozen=True)
 class SftBuildCandidate:
@@ -33,17 +30,6 @@ class SftBuildCandidate:
 class SftBuildNeedsInput:
     missing_reasons: tuple[str, ...]
 
-
-class SftSampleBuilderProtocol(Protocol):
-    async def build(
-        self,
-        *,
-        dataset: Dataset,
-        sample: DatasetSample,
-        case: FeedbackCase,
-        annotation: FeedbackAnnotation | None,
-        review_note: str | None = None,
-    ) -> SftBuildCandidate | SftBuildNeedsInput: ...
 
 
 class SftSampleBuilder:
@@ -136,9 +122,7 @@ def _candidate_target(
 
 
 __all__ = [
-    "SampleBuildInputError",
     "SftBuildCandidate",
     "SftBuildNeedsInput",
     "SftSampleBuilder",
-    "SftSampleBuilderProtocol",
 ]

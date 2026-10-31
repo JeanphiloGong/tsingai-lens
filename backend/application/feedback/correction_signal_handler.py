@@ -14,11 +14,8 @@ from hashlib import sha256
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from application.feedback.analysis_handler import (
-    AnalysisInputError,
-    conversation_before_answer,
-    read_chat_coverage_audit,
-)
+from application.feedback.errors import AnalysisInputError
+from application.feedback.conversation_context import conversation_before_answer, read_chat_coverage_audit
 from application.feedback.source_coverage import build_evidence_coverage
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.feedback import (

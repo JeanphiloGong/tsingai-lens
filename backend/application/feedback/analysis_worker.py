@@ -8,7 +8,8 @@ import logging
 from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo, LeaseLostError
 from repositories.feedback_case_repository import FeedbackCaseRepo, FeedbackCaseWriteConflict
 
-from application.feedback.analysis_handler import AnalysisInputError, FeedbackAnalysisEngine, analyze_feedback_job
+from application.feedback.errors import AnalysisInputError
+from application.feedback.analysis_handler import FeedbackAnalysisEngine, analyze_feedback_job
 
 
 logger = logging.getLogger(__name__)

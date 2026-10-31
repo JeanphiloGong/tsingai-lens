@@ -8,7 +8,7 @@ import logging
 from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo, LeaseLostError
 from repositories.feedback_case_repository import FeedbackCaseRepo, FeedbackCaseWriteConflict
 
-from application.feedback.analysis_handler import AnalysisInputError
+from application.feedback.errors import AnalysisInputError
 from application.feedback.correction_signal_handler import CorrectionSignalAnalysisEngine, analyze_correction_signal_job
 
 

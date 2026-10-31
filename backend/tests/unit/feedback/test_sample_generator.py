@@ -5,7 +5,7 @@ import httpx
 import pytest
 from openai import AsyncOpenAI
 
-from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
+from application.feedback.sample_generation import OpenAIFeedbackSampleGenerator
 
 
 pytestmark = pytest.mark.anyio

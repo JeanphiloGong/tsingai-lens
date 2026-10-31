@@ -10,7 +10,7 @@ from dataclasses import replace
 
 import pytest
 
-from application.feedback.analysis_handler import conversation_before_answer
+from application.feedback.conversation_context import conversation_before_answer
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
 from repositories.analysis_job_repository import AnalysisJob

@@ -20,7 +20,7 @@ from repositories.analysis_job_repository import AnalysisJobRepo, LeaseLostError
 from application.feedback.sample_build_worker import execute_dataset_sample_build_job
 
 from openai import AsyncOpenAI
-from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
+from application.feedback.sample_generation import OpenAIFeedbackSampleGenerator
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from application.feedback.preference_sample_builder import PreferenceSampleBuilder
 from application.feedback.evaluation_sample_builder import EvaluationSampleBuilder

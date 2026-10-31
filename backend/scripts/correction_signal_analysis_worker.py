@@ -20,7 +20,7 @@ from repositories.analysis_job_repository import AnalysisJobRepo, LeaseLostError
 from application.feedback.correction_signal_worker import execute_correction_signal_analysis_job
 from application.feedback.worker_lease import run_with_lease_heartbeat
 
-from infra.llm.correction_signal_analysis import OpenAICorrectionSignalAnalysisEngine
+from application.feedback.correction_scope_analysis import OpenAICorrectionSignalAnalysisEngine
 from openai import AsyncOpenAI
 
 

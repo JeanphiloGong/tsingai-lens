@@ -3386,27 +3386,6 @@ def _objective_missing_context_fields(
     return frozenset(missing)
 
 
-def _objective_test_context_applies_to_outcome(
-    attribute: Any,
-    outcome: str,
-    *,
-    context_attributes: Iterable[Any] = (),
-    reference_attributes: Iterable[Any] = (),
-) -> bool:
-    """Return whether one test fact is usable for a result outcome.
-
-    Keep this small compatibility helper at the extraction boundary while the
-    shared applicability rule lives in ``property_matching``. Callers that
-    have the full Source context should pass it so source-local aliases such as
-    ``sample density`` can be checked against their normalization fact.
-    """
-
-    return property_matching.test_context_attribute_applies_to_outcome(
-        attribute,
-        outcome,
-        context_attributes=context_attributes,
-        reference_attributes=reference_attributes,
-    )
 
 
 def _objective_attribute_is_experimental_context(attribute: Any) -> bool:

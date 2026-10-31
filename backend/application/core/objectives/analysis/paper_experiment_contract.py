@@ -3002,10 +3002,6 @@ def _test_binding_resolution(
     return "exact"
 
 
-def _variant_is_exact(variant: Mapping[str, Any]) -> bool:
-    """Backward-compatible predicate for callers outside this module."""
-
-    return _variant_binding_resolution(variant) == "exact"
 
 
 _REPORTED_MEASUREMENT_SCOPE_FIELDS = (

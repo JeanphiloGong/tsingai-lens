@@ -14,7 +14,6 @@ from application.feedback.preference_sample_builder import (
     PreferenceSampleBuilder,
 )
 from application.feedback.sft_sample_builder import (
-    SampleBuildInputError,
     SftBuildCandidate,
     SftBuildNeedsInput,
     SftSampleBuilder,
@@ -23,7 +22,6 @@ from application.feedback.sft_sample_builder import (
 __all__ = [
     "RuleBasedToolFailureAnalysisEngine",
     "ToolFailureAnalysisDraft",
-    "SampleBuildInputError",
     "SftBuildCandidate",
     "SftBuildNeedsInput",
     "SftSampleBuilder",

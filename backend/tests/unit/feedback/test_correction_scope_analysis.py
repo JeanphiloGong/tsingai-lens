@@ -6,7 +6,7 @@ import json
 import pytest
 
 from domain.feedback import CorrectionSignal, EvidenceCoverage
-from infra.llm.correction_signal_analysis import OpenAICorrectionSignalAnalysisEngine
+from application.feedback.correction_scope_analysis import OpenAICorrectionSignalAnalysisEngine
 from tests.unit.feedback.test_correction_signal import _messages
 
 

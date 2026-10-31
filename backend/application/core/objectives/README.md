@@ -88,10 +88,10 @@ actor's user ID and authorize the Collection before accessing scientific data.
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
 | Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.summarize_objective_finding()` | `test_finding_summary.py` |
 
-The current app's Analysis runtime owns an optional Finding summary request and
-its lazily created summary client. This client has a 60-second timeout and no
-provider retries, stays separate from the analysis client, and closes with its
-runtime. Authorization and fixed-version reads precede client creation. The
+`analysis_service.summarize_objective_finding()` owns its request client.
+This client has a 60-second timeout and no provider retries, stays separate
+from the worker's analysis client, and closes after the request, including
+failure or cancellation. Authorization and fixed-version reads precede client creation. The
 summary helper receives the actual client and never constructs or closes one.
 
 For a scientific stage, continue to [`analysis/README.md`](analysis/README.md).

@@ -323,35 +323,6 @@ async def summarize_objective_finding(
     analysis_version: int,
     language: str,
 ) -> dict[str, Any]:
-    owns_client = response_client is None
-    client = response_client or build_default_structured_response_client()
-    if owns_client:
-        client.client = client.client.with_options(timeout=60.0, max_retries=0)
-    try:
-        return await _summarize_objective_finding(
-            collection_id,
-            objective_id,
-            finding_id,
-            response_client=client,
-            user_id=user_id,
-            analysis_version=analysis_version,
-            language=language,
-        )
-    finally:
-        if owns_client:
-            client.client.close()
-
-
-async def _summarize_objective_finding(
-    collection_id: str,
-    objective_id: str,
-    finding_id: str,
-    *,
-    response_client: StructuredResponseClient,
-    user_id: str,
-    analysis_version: int,
-    language: str,
-) -> dict[str, Any]:
     try:
         detail = await get_finding(
             collection_id,
@@ -390,221 +361,238 @@ async def _summarize_objective_finding(
         )
     if total > MAX_SUMMARY_EVIDENCE:
         raise FindingSummaryUnavailable("summary_input_too_large")
-    summary_task = asyncio.create_task(
-        to_thread(
-            summarize_finding_evidence,
-            finding=detail["finding"],
-            evidence=[
-                (
-                    {
-                        "collection_id": item.collection_id,
-                        "objective_id": item.objective_id,
-                        "analysis_version": item.analysis_version,
-                        "evidence_id": item.evidence_id,
-                        "document_id": item.document_id,
-                        "source_kind": item.source_kind,
-                        "source_ref": item.source_ref,
-                        "source_excerpt": item.source_excerpt,
-                        "page_numbers": list(item.page_numbers),
-                        "evidence_role": item.evidence_role,
-                        "selection_status": item.selection_status,
-                        "selection_reason": item.selection_reason,
-                        "evidence_status": (
-                            experiment_evidence_disposition(item)[0]
-                            if experiment_backed
-                            else item.evidence_status
-                        ),
-                        "evidence_status_reason": (
-                            experiment_evidence_disposition(item)[1]
-                            if experiment_backed
-                            else item.evidence_status_reason
-                        ),
-                        "changed_variables": [
-                            {
-                                "name": variable.name,
-                                "baseline_value": variable.baseline_value,
-                                "target_value": variable.target_value,
-                                "unit": variable.unit,
-                            }
-                            for variable in item.changed_variables
-                        ],
-                        "comparison": (
-                            {
-                                "baseline_label": item.comparison.baseline_label,
-                                "target_label": item.comparison.target_label,
-                                "axis_names": list(item.comparison.axis_names),
-                                "comparable": item.comparison.comparable,
-                                "incomparability_reasons": list(
-                                    item.comparison.incomparability_reasons
-                                ),
-                            }
-                            if item.comparison
-                            else None
-                        ),
-                        "reported_result": (
-                            {
-                                "outcome": item.reported_result.outcome,
-                                "value": item.reported_result.value,
-                                "baseline_value": item.reported_result.baseline_value,
-                                "target_value": item.reported_result.target_value,
-                                "unit": item.reported_result.unit,
-                                "direction": item.reported_result.direction,
-                                "result_text": item.reported_result.result_text,
-                                "result_kind": item.reported_result.result_kind,
-                            }
-                            if item.reported_result
-                            else None
-                        ),
-                        "attribution_scope": item.attribution_scope,
-                        "scientific_context": {
-                            "material": [
-                                {
-                                    "name": attribute.name,
-                                    "value": attribute.value,
-                                    "unit": attribute.unit,
-                                    **(
-                                        {"context_scope": attribute.context_scope}
-                                        if attribute.context_scope != "unknown"
-                                        else {}
-                                    ),
-                                    **(
-                                        {
-                                            "applies_to_outcomes": list(
-                                                attribute.applies_to_outcomes
-                                            )
-                                        }
-                                        if attribute.applies_to_outcomes
-                                        else {}
-                                    ),
-                                }
-                                for attribute in item.scientific_context.material
-                            ],
-                            "sample": [
-                                {
-                                    "name": attribute.name,
-                                    "value": attribute.value,
-                                    "unit": attribute.unit,
-                                    **(
-                                        {"context_scope": attribute.context_scope}
-                                        if attribute.context_scope != "unknown"
-                                        else {}
-                                    ),
-                                    **(
-                                        {
-                                            "applies_to_outcomes": list(
-                                                attribute.applies_to_outcomes
-                                            )
-                                        }
-                                        if attribute.applies_to_outcomes
-                                        else {}
-                                    ),
-                                }
-                                for attribute in item.scientific_context.sample
-                            ],
-                            "process": [
-                                {
-                                    "name": attribute.name,
-                                    "value": attribute.value,
-                                    "unit": attribute.unit,
-                                    **(
-                                        {"context_scope": attribute.context_scope}
-                                        if attribute.context_scope != "unknown"
-                                        else {}
-                                    ),
-                                    **(
-                                        {
-                                            "applies_to_outcomes": list(
-                                                attribute.applies_to_outcomes
-                                            )
-                                        }
-                                        if attribute.applies_to_outcomes
-                                        else {}
-                                    ),
-                                }
-                                for attribute in item.scientific_context.process
-                            ],
-                            "test": [
-                                {
-                                    "name": attribute.name,
-                                    "value": attribute.value,
-                                    "unit": attribute.unit,
-                                    **(
-                                        {"context_scope": attribute.context_scope}
-                                        if attribute.context_scope != "unknown"
-                                        else {}
-                                    ),
-                                    **(
-                                        {
-                                            "applies_to_outcomes": list(
-                                                attribute.applies_to_outcomes
-                                            )
-                                        }
-                                        if attribute.applies_to_outcomes
-                                        else {}
-                                    ),
-                                }
-                                for attribute in item.scientific_context.test
-                            ],
-                        },
-                        "resolution_status": item.resolution_status,
-                        "failure_reason": item.failure_reason,
-                        "confidence": item.confidence,
-                        "origin": item.origin,
-                        "source_analysis_version": item.source_analysis_version,
-                        "supersedes_evidence_id": item.supersedes_evidence_id,
-                        "superseded_by_evidence_id": item.superseded_by_evidence_id,
-                        "created_by_user_id": item.created_by_user_id,
-                        "created_by_tool_call_id": item.created_by_tool_call_id,
-                        "created_at": (
-                            item.created_at.isoformat()
-                            if item.created_at is not None
-                            else None
-                        ),
-                        "authoring_note": item.authoring_note,
-                        **(
-                            {
-                                "supports_finding": item.comparison is None
-                                or item.comparison.comparable,
-                                "eligible_for_finding_authoring": item.comparison
-                                is None
-                                or item.comparison.comparable,
-                                "warnings": list(item.warnings),
-                            }
-                            if experiment_backed
-                            else {}
-                        ),
-                        **({"warnings": list(item.warnings)} if item.warnings else {}),
-                        **(
-                            {
-                                "related_source_refs": [
-                                    dict(item) for item in item.related_source_refs
-                                ]
-                            }
-                            if item.related_source_refs
-                            or item.related_source_refs_explicit
-                            else {}
-                        ),
-                    }
+    owns_client = response_client is None
+    if owns_client:
+        try:
+            response_client = build_default_structured_response_client()
+        except Exception as exc:
+            raise FindingSummaryUnavailable("summary_generation_failed") from exc
+    try:
+        if owns_client:
+            try:
+                response_client.client = response_client.client.with_options(
+                    timeout=60.0, max_retries=0
                 )
-                for item in records
-            ],
-            language=language,
-            response_client=response_client,
+            except Exception as exc:
+                raise FindingSummaryUnavailable("summary_generation_failed") from exc
+        summary_task = asyncio.create_task(
+            to_thread(
+                summarize_finding_evidence,
+                finding=detail["finding"],
+                evidence=[
+                    (
+                        {
+                            "collection_id": item.collection_id,
+                            "objective_id": item.objective_id,
+                            "analysis_version": item.analysis_version,
+                            "evidence_id": item.evidence_id,
+                            "document_id": item.document_id,
+                            "source_kind": item.source_kind,
+                            "source_ref": item.source_ref,
+                            "source_excerpt": item.source_excerpt,
+                            "page_numbers": list(item.page_numbers),
+                            "evidence_role": item.evidence_role,
+                            "selection_status": item.selection_status,
+                            "selection_reason": item.selection_reason,
+                            "evidence_status": (
+                                experiment_evidence_disposition(item)[0]
+                                if experiment_backed
+                                else item.evidence_status
+                            ),
+                            "evidence_status_reason": (
+                                experiment_evidence_disposition(item)[1]
+                                if experiment_backed
+                                else item.evidence_status_reason
+                            ),
+                            "changed_variables": [
+                                {
+                                    "name": variable.name,
+                                    "baseline_value": variable.baseline_value,
+                                    "target_value": variable.target_value,
+                                    "unit": variable.unit,
+                                }
+                                for variable in item.changed_variables
+                            ],
+                            "comparison": (
+                                {
+                                    "baseline_label": item.comparison.baseline_label,
+                                    "target_label": item.comparison.target_label,
+                                    "axis_names": list(item.comparison.axis_names),
+                                    "comparable": item.comparison.comparable,
+                                    "incomparability_reasons": list(
+                                        item.comparison.incomparability_reasons
+                                    ),
+                                }
+                                if item.comparison
+                                else None
+                            ),
+                            "reported_result": (
+                                {
+                                    "outcome": item.reported_result.outcome,
+                                    "value": item.reported_result.value,
+                                    "baseline_value": item.reported_result.baseline_value,
+                                    "target_value": item.reported_result.target_value,
+                                    "unit": item.reported_result.unit,
+                                    "direction": item.reported_result.direction,
+                                    "result_text": item.reported_result.result_text,
+                                    "result_kind": item.reported_result.result_kind,
+                                }
+                                if item.reported_result
+                                else None
+                            ),
+                            "attribution_scope": item.attribution_scope,
+                            "scientific_context": {
+                                "material": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.material
+                                ],
+                                "sample": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.sample
+                                ],
+                                "process": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.process
+                                ],
+                                "test": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.test
+                                ],
+                            },
+                            "resolution_status": item.resolution_status,
+                            "failure_reason": item.failure_reason,
+                            "confidence": item.confidence,
+                            "origin": item.origin,
+                            "source_analysis_version": item.source_analysis_version,
+                            "supersedes_evidence_id": item.supersedes_evidence_id,
+                            "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                            "created_by_user_id": item.created_by_user_id,
+                            "created_by_tool_call_id": item.created_by_tool_call_id,
+                            "created_at": (
+                                item.created_at.isoformat()
+                                if item.created_at is not None
+                                else None
+                            ),
+                            "authoring_note": item.authoring_note,
+                            **(
+                                {
+                                    "supports_finding": item.comparison is None
+                                    or item.comparison.comparable,
+                                    "eligible_for_finding_authoring": item.comparison
+                                    is None
+                                    or item.comparison.comparable,
+                                    "warnings": list(item.warnings),
+                                }
+                                if experiment_backed
+                                else {}
+                            ),
+                            **({"warnings": list(item.warnings)} if item.warnings else {}),
+                            **(
+                                {
+                                    "related_source_refs": [
+                                        dict(item) for item in item.related_source_refs
+                                    ]
+                                }
+                                if item.related_source_refs
+                                or item.related_source_refs_explicit
+                                else {}
+                            ),
+                        }
+                    )
+                    for item in records
+                ],
+                language=language,
+                response_client=response_client,
+            )
         )
-    )
-    try:
-        result = await asyncio.shield(summary_task)
-    except asyncio.CancelledError:
-        await asyncio.gather(summary_task, return_exceptions=True)
-        raise
-    try:
-        await _published_version(collection_id, objective_id, analysis_version)
-    except ResourceConflictException as exc:
-        raise ResourceConflictException(
-            "The published analysis has changed. Reload before generating a summary.",
-            data={"code": "summary_stale_analysis"},
-        ) from exc
-    return result
+        try:
+            result = await asyncio.shield(summary_task)
+        except asyncio.CancelledError:
+            await asyncio.gather(summary_task, return_exceptions=True)
+            raise
+        try:
+            await _published_version(collection_id, objective_id, analysis_version)
+        except ResourceConflictException as exc:
+            raise ResourceConflictException(
+                "The published analysis has changed. Reload before generating a summary.",
+                data={"code": "summary_stale_analysis"},
+            ) from exc
+        return result
+    finally:
+        if owns_client:
+            response_client.client.close()
 
 
 async def start_objective_analysis(

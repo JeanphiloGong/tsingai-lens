@@ -408,3 +408,61 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_summary_authorizes_before_constructing_provider(monkeypatch):
+    from application.core.objectives import analysis_service as service
+    from exceptions import ResourceNotFoundException
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(service, "get_finding", AsyncMock(side_effect=ResourceNotFoundException("hidden")))
+    factory = Mock(side_effect=AssertionError("Provider must not be constructed before authorization"))
+    monkeypatch.setattr(service, "build_default_structured_response_client", factory)
+    with pytest.raises(ResourceNotFoundException):
+        await service.summarize_objective_finding(
+            "col", "objective", "finding", user_id="other-user", analysis_version=1, language="en"
+        )
+    factory.assert_not_called()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("provider_fails", [False, True])
+async def test_summary_owns_bounded_provider_until_request_finishes(monkeypatch, provider_fails):
+    from application.core.objectives import analysis_service as service
+    from unittest.mock import Mock
+
+    events = []
+    async def get_finding(*args, **kwargs):
+        events.append("authorized")
+        return {"finding": {}}
+    async def read_evidence(*args, **kwargs):
+        events.append("evidence")
+        return (), 0
+    def build():
+        events.append("construct")
+        return client
+    def summarize(**kwargs):
+        events.append("request")
+        if provider_fails:
+            raise FindingSummaryUnavailable("summary_generation_failed")
+        return {"model": "test"}
+    provider = SimpleNamespace(
+        with_options=Mock(), close=Mock(side_effect=lambda: events.append("close"))
+    )
+    provider.with_options.return_value = provider
+    client = SimpleNamespace(client=provider)
+    monkeypatch.setattr(service, "get_finding", get_finding)
+    monkeypatch.setattr(service, "should_read_experiment_projection", AsyncMock(return_value=False))
+    monkeypatch.setattr(service, "ObjectiveRepo", SimpleNamespace(list_evidence=read_evidence))
+    monkeypatch.setattr(service, "build_default_structured_response_client", build)
+    monkeypatch.setattr(service, "summarize_finding_evidence", summarize)
+    monkeypatch.setattr(service, "_published_version", AsyncMock())
+    if provider_fails:
+        with pytest.raises(FindingSummaryUnavailable):
+            await service.summarize_objective_finding("col", "obj", "finding", user_id="user", analysis_version=1, language="en")
+    else:
+        assert await service.summarize_objective_finding("col", "obj", "finding", user_id="user", analysis_version=1, language="en") == {"model": "test"}
+    assert events == ["authorized", "evidence", "construct", "request", "close"]
+    provider.with_options.assert_called_once_with(timeout=60.0, max_retries=0)
+    provider.close.assert_called_once()

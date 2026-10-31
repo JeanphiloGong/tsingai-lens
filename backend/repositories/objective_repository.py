@@ -46,11 +46,7 @@ from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisORM,
     ObjectiveResearchORM,
 )
-from repositories.pipeline_run_repository import (
-    ExecutionStats,
-    ModelUsage,
-    TokenUsage,
-)
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from sqlalchemy import func, select, update, or_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 

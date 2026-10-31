@@ -59,7 +59,7 @@ from application.core.paper_facts.extraction import (
     build_table_matrix_repair_prompt,
 )
 from infra.llm.usage import capture_llm_usage
-from repositories.pipeline_run_repository import ModelUsage, TokenUsage
+from infra.execution_stats import ModelUsage, TokenUsage
 
 
 def test_paper_research_map_contract_bounds_model_output():

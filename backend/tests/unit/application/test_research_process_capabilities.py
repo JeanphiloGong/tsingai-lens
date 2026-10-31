@@ -15,13 +15,11 @@ from application.chat.capabilities.research_process_start import (
 from application.pipeline import pipeline_run_service
 from controllers.schemas.source.pipeline_run import pipeline_run_response
 from domain.chat import ToolResultStatus
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from repositories.pipeline_run_repository import (
-    ExecutionStats,
-    ModelUsage,
     PipelineNodeStatus,
     PipelineRunStatus,
-    TokenUsage,
-)
+ )
 from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio

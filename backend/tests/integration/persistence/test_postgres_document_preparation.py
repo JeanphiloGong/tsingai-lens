@@ -21,7 +21,7 @@ from repositories.document_profile_repository import (
 from repositories.paper_map_repository import PaperMapRepository
 from repositories.pipeline_run_repository import (
     PipelineRunRepository,
-)
+ )
 from sqlalchemy import select
 from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,

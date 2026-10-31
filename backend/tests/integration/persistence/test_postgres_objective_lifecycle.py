@@ -26,11 +26,8 @@ from domain.core.research_objective import (
     normalize_objective_terms,
 )
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
-from repositories.pipeline_run_repository import (
-    ExecutionStats,
-    ModelUsage,
-    TokenUsage,
-)
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
+
 from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,
     _source,

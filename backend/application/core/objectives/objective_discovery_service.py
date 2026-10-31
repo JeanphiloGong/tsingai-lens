@@ -39,7 +39,7 @@ from repositories.pipeline_run_repository import (
     PipelineRun,
     PipelineRunJobSnapshot,
     PipelineRunRepo,
-)
+ )
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)

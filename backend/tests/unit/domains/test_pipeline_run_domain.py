@@ -7,14 +7,12 @@ import pytest
 from application.pipeline import pipeline_run_service
 from application.pipeline import pipeline_run_service as module
 from controllers.schemas.source.pipeline_run import pipeline_run_response
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from repositories.pipeline_run_repository import (
-    ExecutionStats,
     ExecutionTimestamps,
-    ModelUsage,
     PipelineNodeStatus,
     PipelineRunStatus,
-    TokenUsage,
-)
+ )
 
 
 class _Runs:

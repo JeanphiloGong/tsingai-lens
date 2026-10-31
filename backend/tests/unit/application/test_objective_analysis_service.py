@@ -65,10 +65,8 @@ from repositories.objective_repository import (
     ObjectiveAnalysis,
     StoredObjective,
 )
-from repositories.pipeline_run_repository import (
-    ModelUsage,
-    TokenUsage,
-)
+from infra.execution_stats import ModelUsage, TokenUsage
+
 
 pytestmark = pytest.mark.anyio
 

@@ -6,17 +6,15 @@ from dataclasses import replace
 
 import pytest
 
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from repositories.pipeline_run_repository import (
-    ExecutionStats,
     ExecutionTimestamps,
     PipelineNodeRun,
     PipelineNodeStatus,
-    ModelUsage,
-    TokenUsage,
     PipelineRun,
     PipelineRunRepository,
     PipelineRunStatus,
-)
+ )
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)

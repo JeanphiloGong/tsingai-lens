@@ -12,8 +12,8 @@ from uuid import uuid4
 from exceptions import ResourceNotFoundException
 from infra.persistence.database import AsyncSessionLocal
 from repositories.collection_repository import CollectionRepo
+from infra.execution_stats import ExecutionStats
 from repositories.pipeline_run_repository import (
-    ExecutionStats,
     ExecutionTimestamps,
     PipelineNodeRun,
     PipelineNodeStatus,
@@ -21,7 +21,7 @@ from repositories.pipeline_run_repository import (
     PipelineRunJobSnapshot,
     PipelineRunStatus,
     PipelineRunSummary,
-)
+ )
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _PIPELINE_NODES: dict[str, dict[str, tuple[str, ...]]] = {

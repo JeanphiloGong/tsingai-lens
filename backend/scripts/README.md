@@ -7,6 +7,28 @@ Benchmark and probe scripts live under [`benchmarks/`](benchmarks/). Keep
 general local debugging helpers at this level instead of adding them to the
 benchmark-only directory.
 
+## Research Workers
+
+HTTP and Agent calls enqueue work; run these independent processes to execute it:
+
+```bash
+cd backend
+./.venv/bin/python scripts/run_document_preparation.py
+./.venv/bin/python scripts/run_objective_discovery.py
+./.venv/bin/python scripts/run_objective_analysis.py
+```
+
+Use `--once` to claim at most one job. `--lease-seconds` defaults to 300 and
+`--heartbeat-seconds` to 30; the heartbeat must be shorter than the lease.
+Each process executes one job at a time. Start additional concrete processes
+for concurrency. They need the same PostgreSQL database, model configuration
+and shared `DATA_DIR` object directory as Web. No worker is started by FastAPI.
+Stop old Web execution processes before applying migration `20261031_0090`, then
+start the new Web and worker processes. Only expired running work is reclaimed;
+failed jobs retain their existing explicit retry policy. A Web restart does not
+mark live worker jobs interrupted. SIGTERM and Ctrl+C cancel and await the owned asyncio
+tasks; synchronous parser/model threads finish within their actual call budgets.
+
 ## Feedback Analysis Worker
 
 Run one feedback-analysis job:

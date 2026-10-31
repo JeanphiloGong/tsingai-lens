@@ -102,7 +102,6 @@ uv sync
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
-export DOCUMENT_PREPARATION_MAX_CONCURRENCY=3
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
 export LENS_DATABASE_URL='postgresql+psycopg://lens:<password>@localhost:5432/lens-postgres-dev'
 
@@ -113,3 +112,7 @@ uvicorn main:app --reload --port 8010
 
 PostgreSQL is the maintained structured-state authority. Alembic is the only
 schema authority. Do not add a runtime schema fallback or compatibility read.
+
+Research task execution requires the three independent workers documented in
+[`scripts/README.md`](scripts/README.md#research-workers). HTTP requests only
+queue work; Web startup does not resume or interrupt worker executions.

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from exceptions import ResourceNotFoundException
+from infra.persistence.database import AsyncSessionLocal
 from repositories.collection_repository import CollectionRepo
 from repositories.pipeline_run_repository import (
     ExecutionStats,
@@ -16,9 +18,11 @@ from repositories.pipeline_run_repository import (
     PipelineNodeRun,
     PipelineNodeStatus,
     PipelineRun,
-    PipelineRunSummary,
+    PipelineRunJobSnapshot,
     PipelineRunStatus,
+    PipelineRunSummary,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _PIPELINE_NODES: dict[str, dict[str, tuple[str, ...]]] = {
     "document_preparation": {
@@ -155,18 +159,11 @@ async def list_runs(
     )
 
 
-async def list_interrupted_runs() -> list[PipelineRunSummary]:
-    """Read durable queued/running work before startup recovery admits requests."""
-    return [
-        run
-        for status in ("queued", "running")
-        for run in await PipelineRunRepo.list_runs(status=status)
-    ]
-
-
 async def update_run(
     run_id: str,
     *,
+    job: PipelineRunJobSnapshot,
+    db: AsyncSession | None = None,
     status: str | None = None,
     current_node: str | None = None,
     progress_percent: int | None = None,
@@ -176,67 +173,71 @@ async def update_run(
 ) -> PipelineRun:
     if progress_percent is not None and not 0 <= progress_percent <= 100:
         raise ValueError("progress_percent must be between zero and 100")
-    stored = await PipelineRunRepo.read_run(run_id)
-    if stored is None:
-        raise ResourceNotFoundException(
-            "Pipeline run not found.",
-            data={"code": "pipeline_run_not_found", "run_id": run_id},
-        )
-    now = _now_iso()
-    resolved_status = PipelineRunStatus(status or stored.status)
-    updated = stored
-    if (
-        resolved_status is PipelineRunStatus.RUNNING
-        and stored.timestamps.started_at is None
-    ):
-        updated = replace(
+    async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
+        await PipelineRunRepo.lock_job(db, job)
+        stored = await PipelineRunRepo.read_run(run_id, db=db)
+        if stored is None:
+            raise ResourceNotFoundException(
+                "Pipeline run not found.",
+                data={"code": "pipeline_run_not_found", "run_id": run_id},
+            )
+        now = _now_iso()
+        resolved_status = PipelineRunStatus(status or stored.status)
+        updated = stored
+        if (
+            resolved_status is PipelineRunStatus.RUNNING
+            and stored.timestamps.started_at is None
+        ):
+            updated = replace(
+                updated,
+                status=PipelineRunStatus.RUNNING,
+                timestamps=replace(updated.timestamps, started_at=now, updated_at=now),
+            )
+        updated = _transition_nodes(
             updated,
-            status=PipelineRunStatus.RUNNING,
-            timestamps=replace(updated.timestamps, started_at=now, updated_at=now),
-        )
-    updated = _transition_nodes(
-        updated,
-        current_node=current_node or stored.current_node,
-        status=resolved_status,
-        errors=tuple(errors or ()),
-        now=now,
-    )
-    if resolved_status.is_terminal:
-        timestamps = replace(updated.timestamps, finished_at=now, updated_at=now)
-        updated = replace(
-            updated,
+            current_node=current_node or stored.current_node,
             status=resolved_status,
-            timestamps=timestamps,
-            stats=replace(updated.stats, duration_ms=timestamps.duration_ms()),
+            errors=tuple(errors or ()),
+            now=now,
         )
-    else:
-        updated = replace(updated, status=resolved_status)
-    updated = replace(
-        updated,
-        current_node=current_node if current_node is not None else stored.current_node,
-        progress_percent=(
-            progress_percent
-            if progress_percent is not None
-            else stored.progress_percent
-        ),
-        progress_detail=(
-            progress_detail if progress_detail is not None else stored.progress_detail
-        ),
-        errors=(tuple(errors) if errors is not None else updated.errors),
-        warnings=(tuple(warnings) if warnings is not None else updated.warnings),
-        timestamps=replace(updated.timestamps, updated_at=now),
-    )
-    if not await PipelineRunRepo.update_run(updated):
-        raise ResourceNotFoundException(
-            "Pipeline run not found.",
-            data={"code": "pipeline_run_not_found", "run_id": run_id},
+        if resolved_status.is_terminal:
+            timestamps = replace(updated.timestamps, finished_at=now, updated_at=now)
+            updated = replace(
+                updated,
+                status=resolved_status,
+                timestamps=timestamps,
+                stats=replace(updated.stats, duration_ms=timestamps.duration_ms()),
+            )
+        else:
+            updated = replace(updated, status=resolved_status)
+        updated = replace(
+            updated,
+            current_node=current_node
+            if current_node is not None
+            else stored.current_node,
+            progress_percent=(
+                progress_percent
+                if progress_percent is not None
+                else stored.progress_percent
+            ),
+            progress_detail=(
+                progress_detail
+                if progress_detail is not None
+                else stored.progress_detail
+            ),
+            errors=(tuple(errors) if errors is not None else updated.errors),
+            warnings=(tuple(warnings) if warnings is not None else updated.warnings),
+            timestamps=replace(updated.timestamps, updated_at=now),
         )
-    return updated
+        await PipelineRunRepo.update_run(updated, job=job, db=db)
+        return updated
 
 
 async def finish_run(
     run_id: str,
     *,
+    job: PipelineRunJobSnapshot,
+    db: AsyncSession | None = None,
     status: str,
     current_node: str | None = None,
     progress_percent: int = 100,
@@ -249,6 +250,8 @@ async def finish_run(
         raise ValueError("finished pipeline run requires a terminal status")
     return await update_run(
         run_id,
+        job=job,
+        db=db,
         status=resolved.value,
         current_node=current_node,
         progress_percent=progress_percent,
@@ -256,16 +259,6 @@ async def finish_run(
         errors=errors,
         warnings=warnings,
     )
-
-
-async def append_error(run_id: str, error: str) -> PipelineRun:
-    stored = await PipelineRunRepo.read_run(run_id)
-    if stored is None:
-        raise ResourceNotFoundException(
-            "Pipeline run not found.",
-            data={"code": "pipeline_run_not_found", "run_id": run_id},
-        )
-    return await update_run(run_id, errors=(*stored.errors, str(error)))
 
 
 def _new_run(

@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from application.core.objectives import analysis_service as actual_analysis_service
-from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
     ResearchObjectiveNotFoundError,
@@ -346,7 +345,7 @@ class _Service:
         self.dispatch_failure_version: int | None = None
         self.start_calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-    async def start_analysis(
+    async def start_objective_analysis(
         self, collection_id, objective_id, document_ids, *, user_id
     ):
         self.start_calls.append((collection_id, objective_id, document_ids))
@@ -1087,6 +1086,9 @@ def _client(
     )
     research_objective_routes.objective_analysis_service = service or _Service()
     scope_and_discovery = discovery_service or _DiscoveryService()
+    research_objective_routes.start_objective_discovery = (
+        scope_and_discovery.start_objective_discovery
+    )
     app.state.runtime = SimpleNamespace(
         objective_discovery_service=scope_and_discovery,
         objective_analysis_service=research_objective_routes.objective_analysis_service,
@@ -1346,22 +1348,6 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
     ]
 
 
-def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:
-    class DispatchFailureService(_Service):
-        async def start_analysis(
-            self, collection_id, objective_id, document_ids, *, user_id
-        ):
-            raise ObjectiveAnalysisDispatchError(collection_id, objective_id, 1)
-
-    response = _client(DispatchFailureService(), raise_server_exceptions=False).post(
-        "/collections/col-1/objectives/obj-1/analysis",
-        json={"document_ids": ["paper-1"]},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["code"] == 200205
-    assert response.json()["data"]["code"] == "objective_analysis_dispatch_failed"
-    assert response.json()["data"]["analysis_version"] == 1
 
 
 def test_duplicate_objective_detail_route_is_not_registered() -> None:

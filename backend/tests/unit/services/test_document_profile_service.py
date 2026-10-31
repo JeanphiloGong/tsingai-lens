@@ -5,6 +5,7 @@ from types import ModuleType
 
 import pandas as pd
 import pytest
+from application.core.document_profiles import extraction as profile_extraction
 from application.core.document_profiles import service as document_profile_service
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
@@ -62,22 +63,29 @@ async def _write_source_artifacts(
 async def _build_profiles(
     profile_service: ModuleType,
     collection_id: str,
+    *,
+    extractor=None,
 ) -> tuple[DocumentProfile, ...]:
+    if extractor is None:
+        extractor = profile_extraction.build_default_document_profile_extractor()
     documents = await profile_service.SourceArtifactRepo.read_collection_documents(
         collection_id
     )
-    return tuple(
+    result = tuple(
         [
             await profile_service.build_document_profile(
                 collection_id,
                 document.document_id,
                 source_fingerprint=f"source-{document.document_id}",
                 profile_fingerprint=f"profile-{document.document_id}",
-                extractor=profile_service.build_default_document_profile_extractor(),
+                extractor=extractor,
             )
             for document in documents
         ]
     )
+    for profile in result:
+        await profile_service.DocumentProfileRepo.replace(collection_id, profile)
+    return result
 
 
 async def test_document_profile_service_builds_profiles_and_summary(
@@ -303,19 +311,21 @@ async def test_document_profile_service_short_circuits_insufficient_content(
     class ExplodingExtractor:
         def extract_document_profile(self, payload):  # noqa: ANN001
             raise AssertionError("extract_document_profile should not be called")
+
     document_profile_service.collection_service = collection_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
-    document_profile_service.build_default_document_profile_extractor = (
-        lambda: ExplodingExtractor()
-    )
     profile_service = document_profile_service
-    collection = await collection_service.create_collection("Sparse Profiles", workspace=collection_workspace)
+    collection = await collection_service.create_collection(
+        "Sparse Profiles", workspace=collection_workspace
+    )
     collection_id = collection["collection_id"]
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
     await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await _build_profiles(profile_service, collection_id)
+    await _build_profiles(
+        profile_service, collection_id, extractor=ExplodingExtractor()
+    )
 
     payload = await profile_service.list_document_profiles(
         collection_id, user_id="local-user"
@@ -380,14 +390,14 @@ async def test_document_profile_service_continues_after_one_model_format_failure
             trace = self.last_trace
             self.last_trace = None
             return trace
+
     document_profile_service.collection_service = collection_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
-    document_profile_service.build_default_document_profile_extractor = (
-        lambda: OneFailedProfileExtractor()
-    )
     profile_service = document_profile_service
-    collection = await collection_service.create_collection("Partial Profiles", workspace=collection_workspace)
+    collection = await collection_service.create_collection(
+        "Partial Profiles", workspace=collection_workspace
+    )
     collection_id = collection["collection_id"]
     documents = pd.DataFrame(
         [
@@ -406,7 +416,9 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     await _write_source_artifacts(profile_service, collection_id, documents)
 
     with caplog.at_level("WARNING"):
-        profiles = await _build_profiles(profile_service, collection_id)
+        profiles = await _build_profiles(
+            profile_service, collection_id, extractor=OneFailedProfileExtractor()
+        )
 
     records = {
         profile["document_id"]: profile

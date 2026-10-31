@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import (
     Any,
     Final,
@@ -34,6 +36,7 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from infra.persistence.database import AsyncSessionLocal
+from infra.persistence.postgres.models.document import Document
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document_preparation import (
@@ -48,7 +51,7 @@ from repositories.pipeline_run_repository import (
     ModelUsage,
     TokenUsage,
 )
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update, or_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
@@ -279,6 +282,17 @@ class StoredObjective:
     updated_at: datetime | None = None
 
 
+class AnalysisLeaseLostError(RuntimeError):
+    """A superseded analysis worker cannot change or publish its version."""
+
+
+@dataclass(frozen=True)
+class ObjectiveAnalysisJobSnapshot:
+    analysis: ObjectiveAnalysis
+    worker_id: str
+    lease_version: int
+
+
 class ObjectiveRepository:
     backend_name = "postgres"
 
@@ -286,18 +300,18 @@ class ObjectiveRepository:
         self,
         collection_id: str,
         facts: ObjectiveFactSet,
+        *,
+        db: AsyncSession | None = None,
     ) -> None:
         for objective in facts.research_objectives:
             if objective.collection_id != collection_id:
                 raise ValueError("objective belongs to another collection")
             if objective.origin != "system_discovered":
-                raise ValueError(
-                    "Objective discovery can only replace system candidates"
-                )
+                raise ValueError("Objective discovery can only replace system candidates")
 
         now = datetime.now(timezone.utc)
         objective_ids = [item.objective_id for item in facts.research_objectives]
-        async with AsyncSessionLocal() as db, db.begin():
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             collection = await db.get(Collection, collection_id, with_for_update=True)
             if collection is None:
                 raise FileNotFoundError(f"collection not found: {collection_id}")
@@ -352,9 +366,7 @@ class ObjectiveRepository:
                         confirmation_status=row.payload.get(
                             "confirmation_status", "candidate"
                         ),
-                        active_analysis_version=row.payload.get(
-                            "active_analysis_version"
-                        ),
+                        active_analysis_version=row.payload.get("active_analysis_version"),
                         published_analysis_version=row.payload.get(
                             "published_analysis_version"
                         ),
@@ -377,6 +389,7 @@ class ObjectiveRepository:
                         updated_at=now,
                     )
                 )
+
 
     async def read(self, collection_id: str) -> ObjectiveFactSet:
         async with AsyncSessionLocal() as db:
@@ -842,9 +855,10 @@ class ObjectiveRepository:
         created_by_user_id: str | None = None,
         created_by_tool_call_id: str | None = None,
         source_analysis_version: int | None = None,
+        db: AsyncSession | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         now = datetime.now(timezone.utc)
-        async with AsyncSessionLocal() as db, db.begin():
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             row = await self._locked_objective(db, collection_id, objective_id)
             objective = ResearchObjective(
                 collection_id=row.collection_id,
@@ -857,9 +871,7 @@ class ObjectiveRepository:
                 constraints=tuple(row.payload.get("constraints", ())),
                 requested_comparator=row.payload.get("requested_comparator"),
                 seed_document_ids=tuple(row.payload.get("seed_document_ids", ())),
-                excluded_document_ids=tuple(
-                    row.payload.get("excluded_document_ids", ())
-                ),
+                excluded_document_ids=tuple(row.payload.get("excluded_document_ids", ())),
                 confidence=row.payload.get("confidence", 0.0),
                 reason=row.payload.get("reason"),
                 source_relationship_ids=tuple(
@@ -871,9 +883,7 @@ class ObjectiveRepository:
                 rank=row.payload.get("rank"),
                 confirmation_status=row.payload["confirmation_status"],
                 active_analysis_version=row.payload.get("active_analysis_version"),
-                published_analysis_version=row.payload.get(
-                    "published_analysis_version"
-                ),
+                published_analysis_version=row.payload.get("published_analysis_version"),
                 origin=row.payload["origin"],
                 created_by_user_id=row.payload.get("created_by_user_id"),
                 created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
@@ -922,15 +932,9 @@ class ObjectiveRepository:
                                 request_count=item["request_count"],
                                 token_usage=(
                                     TokenUsage(
-                                        input_tokens=item["token_usage"][
-                                            "input_tokens"
-                                        ],
-                                        output_tokens=item["token_usage"][
-                                            "output_tokens"
-                                        ],
-                                        total_tokens=item["token_usage"][
-                                            "total_tokens"
-                                        ],
+                                        input_tokens=item["token_usage"]["input_tokens"],
+                                        output_tokens=item["token_usage"]["output_tokens"],
+                                        total_tokens=item["token_usage"]["total_tokens"],
                                     )
                                     if item.get("token_usage") is not None
                                     else None
@@ -949,9 +953,7 @@ class ObjectiveRepository:
                     ),
                     status=active_row.payload["status"],
                     phase=active_row.payload["phase"],
-                    processed_document_count=active_row.payload[
-                        "processed_document_count"
-                    ],
+                    processed_document_count=active_row.payload["processed_document_count"],
                     total_document_count=active_row.payload["total_document_count"],
                     current_document_id=active_row.payload.get("current_document_id"),
                     progress_message=active_row.payload.get("progress_message"),
@@ -959,9 +961,7 @@ class ObjectiveRepository:
                     error_message=active_row.payload.get("error_message"),
                     created_at=_datetime_or_none(active_row.payload.get("created_at")),
                     started_at=_datetime_or_none(active_row.payload.get("started_at")),
-                    completed_at=_datetime_or_none(
-                        active_row.payload.get("completed_at")
-                    ),
+                    completed_at=_datetime_or_none(active_row.payload.get("completed_at")),
                     diagnostics=tuple(active_row.payload.get("diagnostics", ())),
                     origin=active_row.payload.get("origin", "system_generated"),
                     scientific_record_source=active_row.payload.get(
@@ -1057,9 +1057,7 @@ class ObjectiveRepository:
                         if analysis.stats.token_usage is not None
                         else None
                     ),
-                    "model_usage": [
-                        asdict(item) for item in analysis.stats.model_usage
-                    ],
+                    "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                     "unreported_request_count": analysis.stats.unreported_request_count,
                     "prompt_versions": dict(analysis.stats.prompt_versions),
                 },
@@ -1108,21 +1106,102 @@ class ObjectiveRepository:
             )
             return objective, analysis
 
-    async def claim_analysis(
+    async def start_authored_analysis(
         self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> ObjectiveAnalysis | None:
-        async with AsyncSessionLocal() as db, db.begin():
-            row = await self._locked_analysis(
-                db,
-                collection_id,
-                objective_id,
-                analysis_version,
+        db: AsyncSession,
+        analysis: ObjectiveAnalysis,
+        *,
+        user_id: str,
+        execution_id: str,
+    ) -> ObjectiveAnalysisJobSnapshot:
+        objective = await self._locked_objective(
+            db, analysis.collection_id, analysis.objective_id
+        )
+        row = await self._locked_analysis(db, *analysis.key)
+        if (
+            row.status != "queued"
+            or analysis.origin != "human_authored"
+            or row.payload.get("created_by_user_id") != user_id
+            or objective.payload.get("active_analysis_version") != analysis.analysis_version
+        ):
+            raise ResourceConflictException(
+                "Finding analysis snapshot could not be started.",
+                data={
+                    "code": "analysis_claim_conflict",
+                    "analysis_version": analysis.analysis_version,
+                },
             )
-            if row.status != "queued":
+        now = datetime.now(timezone.utc)
+        running = analysis.start(started_at=now)
+        row.status = running.status
+        row.payload = {
+            **row.payload,
+            "status": running.status,
+            "phase": running.phase,
+            "started_at": now.isoformat(),
+        }
+        row.worker_id = execution_id
+        row.lease_version += 1
+        row.heartbeat_at = now
+        row.lease_expires_at = now + timedelta(minutes=5)
+        row.updated_at = now
+        return ObjectiveAnalysisJobSnapshot(running, execution_id, row.lease_version)
+
+    async def claim_next_objective_analysis_job(
+        self, *, worker_id: str, lease_duration: timedelta
+    ) -> ObjectiveAnalysisJobSnapshot | None:
+        now = datetime.now(timezone.utc)
+        claimable = or_(
+            ObjectiveAnalysisRecord.status == "queued",
+            (ObjectiveAnalysisRecord.status == "running")
+            & (ObjectiveAnalysisRecord.lease_expires_at <= now),
+        )
+        async with AsyncSessionLocal() as db, db.begin():
+            # All multi-record analysis transactions lock Objective before Analysis.
+            objective = await db.scalar(
+                select(ObjectiveResearchRecord)
+                .where(
+                    exists(
+                        select(ObjectiveAnalysisRecord.analysis_version).where(
+                            ObjectiveAnalysisRecord.collection_id
+                            == ObjectiveResearchRecord.collection_id,
+                            ObjectiveAnalysisRecord.objective_id
+                            == ObjectiveResearchRecord.objective_id,
+                            ObjectiveAnalysisRecord.analysis_version
+                            == ObjectiveResearchRecord.payload[
+                                "active_analysis_version"
+                            ].as_integer(),
+                            ObjectiveAnalysisRecord.payload["origin"].as_string()
+                            == "system_generated",
+                            claimable,
+                        )
+                    )
+                )
+                .order_by(
+                    ObjectiveResearchRecord.created_at, ObjectiveResearchRecord.objective_id
+                )
+                .with_for_update(skip_locked=True)
+                .limit(1)
+            )
+            if objective is None:
                 return None
+            row = await db.scalar(
+                select(ObjectiveAnalysisRecord)
+                .where(
+                    ObjectiveAnalysisRecord.collection_id == objective.collection_id,
+                    ObjectiveAnalysisRecord.objective_id == objective.objective_id,
+                    ObjectiveAnalysisRecord.analysis_version
+                    == objective.payload["active_analysis_version"],
+                    claimable,
+                )
+                .with_for_update(skip_locked=True)
+            )
+            if row is None:
+                return None
+            row.worker_id = worker_id
+            row.lease_version += 1
+            row.lease_expires_at = now + lease_duration
+            row.heartbeat_at = now
             analysis = ObjectiveAnalysis(
                 collection_id=row.payload["collection_id"],
                 objective_id=row.payload["objective_id"],
@@ -1158,9 +1237,7 @@ class ObjectiveRepository:
                                 "unreported_request_count", 0
                             ),
                         )
-                        for item in (row.payload.get("stats") or {}).get(
-                            "model_usage", ()
-                        )
+                        for item in (row.payload.get("stats") or {}).get("model_usage", ())
                     ),
                     prompt_versions=(row.payload.get("stats") or {}).get(
                         "prompt_versions", {}
@@ -1194,7 +1271,13 @@ class ObjectiveRepository:
                 abstention_reason=row.payload.get("abstention_reason"),
                 abstention_note=row.payload.get("abstention_note"),
             )
-            analysis = analysis.start(started_at=datetime.now(timezone.utc))
+            analysis = (
+                analysis.start(started_at=now)
+                if analysis.status == "queued"
+                else replace(
+                    analysis, phase="starting", error_code=None, error_message=None
+                )
+            )
             row.status = analysis.status
             previous = dict(row.payload or {})
             next_analysis_payload = {
@@ -1218,9 +1301,7 @@ class ObjectiveRepository:
                         if analysis.stats.token_usage is not None
                         else None
                     ),
-                    "model_usage": [
-                        asdict(item) for item in analysis.stats.model_usage
-                    ],
+                    "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                     "unreported_request_count": analysis.stats.unreported_request_count,
                     "prompt_versions": dict(analysis.stats.prompt_versions),
                 },
@@ -1261,7 +1342,69 @@ class ObjectiveRepository:
                     next_analysis_payload[key] = previous[key]
             row.payload = next_analysis_payload
             row.updated_at = datetime.now(timezone.utc)
-            return analysis
+            return ObjectiveAnalysisJobSnapshot(
+                analysis=analysis, worker_id=worker_id, lease_version=row.lease_version
+            )
+
+    async def renew_analysis_lease(
+        self, job: ObjectiveAnalysisJobSnapshot, *, lease_duration: timedelta
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as db, db.begin():
+            changed = await db.execute(
+                update(ObjectiveAnalysisRecord)
+                .where(
+                    ObjectiveAnalysisRecord.collection_id == job.analysis.collection_id,
+                    ObjectiveAnalysisRecord.objective_id == job.analysis.objective_id,
+                    ObjectiveAnalysisRecord.analysis_version
+                    == job.analysis.analysis_version,
+                    ObjectiveAnalysisRecord.status == "running",
+                    ObjectiveAnalysisRecord.worker_id == job.worker_id,
+                    ObjectiveAnalysisRecord.lease_version == job.lease_version,
+                    ObjectiveAnalysisRecord.lease_expires_at > now,
+                )
+                .values(heartbeat_at=now, lease_expires_at=now + lease_duration)
+            )
+            if changed.rowcount != 1:
+                raise AnalysisLeaseLostError(f"analysis lease lost: {job.analysis.key}")
+
+    async def lock_analysis_job(
+        self, db: AsyncSession, job: ObjectiveAnalysisJobSnapshot
+    ) -> None:
+        objective = await self._locked_objective(
+            db, job.analysis.collection_id, job.analysis.objective_id
+        )
+        row = await self._locked_analysis(db, *job.analysis.key)
+        now = datetime.now(timezone.utc)
+        if (
+            row.status != "running"
+            or row.worker_id != job.worker_id
+            or row.lease_version != job.lease_version
+            or row.lease_expires_at is None
+            or row.lease_expires_at <= now
+            or objective.payload.get("active_analysis_version")
+            != job.analysis.analysis_version
+        ):
+            raise AnalysisLeaseLostError(f"analysis lease lost: {job.analysis.key}")
+
+    async def check_analysis_inputs(
+        self, db: AsyncSession, analysis: ObjectiveAnalysis
+    ) -> None:
+        for item in sorted(analysis.document_inputs, key=lambda item: item.document_id):
+            document = await db.get(Document, item.document_id, with_for_update=True)
+            preparation = await db.get(
+                DocumentPreparationRow, item.document_id, with_for_update=True
+            )
+            if (
+                document is None
+                or document.collection_id != analysis.collection_id
+                or document.status != "ready"
+                or preparation is None
+                or not preparation.profile_json
+                or preparation.profile_json.get("profile_fingerprint")
+                != item.preparation_fingerprint
+            ):
+                raise ValueError("analysis document input changed")
 
     async def update_analysis_progress(
         self,
@@ -1269,6 +1412,7 @@ class ObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        job: ObjectiveAnalysisJobSnapshot,
         phase: str,
         processed_document_count: int,
         total_document_count: int,
@@ -1276,9 +1420,10 @@ class ObjectiveRepository:
         progress_message: str | None,
     ) -> ObjectiveAnalysis:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await self._locked_analysis(
-                db, collection_id, objective_id, analysis_version
-            )
+            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+                raise ValueError("analysis mutation belongs to another job")
+            await self.lock_analysis_job(db, job)
+            row = await self._locked_analysis(db, *job.analysis.key)
             analysis = ObjectiveAnalysis(
                 collection_id=row.payload["collection_id"],
                 objective_id=row.payload["objective_id"],
@@ -1314,9 +1459,7 @@ class ObjectiveRepository:
                                 "unreported_request_count", 0
                             ),
                         )
-                        for item in (row.payload.get("stats") or {}).get(
-                            "model_usage", ()
-                        )
+                        for item in (row.payload.get("stats") or {}).get("model_usage", ())
                     ),
                     prompt_versions=(row.payload.get("stats") or {}).get(
                         "prompt_versions", {}
@@ -1379,9 +1522,7 @@ class ObjectiveRepository:
                         if analysis.stats.token_usage is not None
                         else None
                     ),
-                    "model_usage": [
-                        asdict(item) for item in analysis.stats.model_usage
-                    ],
+                    "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                     "unreported_request_count": analysis.stats.unreported_request_count,
                     "prompt_versions": dict(analysis.stats.prompt_versions),
                 },
@@ -1430,15 +1571,17 @@ class ObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        job: ObjectiveAnalysisJobSnapshot,
         stats: ExecutionStats,
         model_name: str | None,
         prompt_versions: dict[str, str],
         diagnostics: tuple[dict[str, Any], ...],
     ) -> ObjectiveAnalysis:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await self._locked_analysis(
-                db, collection_id, objective_id, analysis_version
-            )
+            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+                raise ValueError("analysis mutation belongs to another job")
+            await self.lock_analysis_job(db, job)
+            row = await self._locked_analysis(db, *job.analysis.key)
             analysis = replace(
                 ObjectiveAnalysis(
                     collection_id=row.payload["collection_id"],
@@ -1464,15 +1607,9 @@ class ObjectiveRepository:
                                 request_count=item["request_count"],
                                 token_usage=(
                                     TokenUsage(
-                                        input_tokens=item["token_usage"][
-                                            "input_tokens"
-                                        ],
-                                        output_tokens=item["token_usage"][
-                                            "output_tokens"
-                                        ],
-                                        total_tokens=item["token_usage"][
-                                            "total_tokens"
-                                        ],
+                                        input_tokens=item["token_usage"]["input_tokens"],
+                                        output_tokens=item["token_usage"]["output_tokens"],
+                                        total_tokens=item["token_usage"]["total_tokens"],
                                     )
                                     if item.get("token_usage") is not None
                                     else None
@@ -1545,9 +1682,7 @@ class ObjectiveRepository:
                         if analysis.stats.token_usage is not None
                         else None
                     ),
-                    "model_usage": [
-                        asdict(item) for item in analysis.stats.model_usage
-                    ],
+                    "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                     "unreported_request_count": analysis.stats.unreported_request_count,
                     "prompt_versions": dict(analysis.stats.prompt_versions),
                 },
@@ -1596,15 +1731,17 @@ class ObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        job: ObjectiveAnalysisJobSnapshot,
         error_code: str,
         error_message: str,
         expected_status: str | None = None,
         contributions: tuple[PaperContribution, ...] = (),
     ) -> ObjectiveAnalysis:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await self._locked_analysis(
-                db, collection_id, objective_id, analysis_version
-            )
+            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+                raise ValueError("analysis mutation belongs to another job")
+            await self.lock_analysis_job(db, job)
+            row = await self._locked_analysis(db, *job.analysis.key)
             analysis = ObjectiveAnalysis(
                 collection_id=row.payload["collection_id"],
                 objective_id=row.payload["objective_id"],
@@ -1640,9 +1777,7 @@ class ObjectiveRepository:
                                 "unreported_request_count", 0
                             ),
                         )
-                        for item in (row.payload.get("stats") or {}).get(
-                            "model_usage", ()
-                        )
+                        for item in (row.payload.get("stats") or {}).get("model_usage", ())
                     ),
                     prompt_versions=(row.payload.get("stats") or {}).get(
                         "prompt_versions", {}
@@ -1682,13 +1817,9 @@ class ObjectiveRepository:
             if contributions:
                 if any(item.key[:3] != key for item in contributions):
                     raise ValueError("analysis artifact belongs to another version")
-                input_documents = {
-                    item.document_id for item in analysis.document_inputs
-                }
+                input_documents = {item.document_id for item in analysis.document_inputs}
                 if {item.document_id for item in contributions} != input_documents:
-                    raise ValueError(
-                        "paper contributions must cover every analysis input"
-                    )
+                    raise ValueError("paper contributions must cover every analysis input")
                 self._write_contributions(row, contributions)
             analysis = analysis.fail(
                 error_code=error_code,
@@ -1718,9 +1849,7 @@ class ObjectiveRepository:
                         if analysis.stats.token_usage is not None
                         else None
                     ),
-                    "model_usage": [
-                        asdict(item) for item in analysis.stats.model_usage
-                    ],
+                    "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                     "unreported_request_count": analysis.stats.unreported_request_count,
                     "prompt_versions": dict(analysis.stats.prompt_versions),
                 },
@@ -1763,168 +1892,6 @@ class ObjectiveRepository:
             row.updated_at = datetime.now(timezone.utc)
             return analysis
 
-    async def interrupt_active_analyses(self) -> int:
-        now = datetime.now(timezone.utc)
-        async with AsyncSessionLocal() as db, db.begin():
-            rows = tuple(
-                await db.scalars(
-                    select(ObjectiveAnalysisRecord)
-                    .where(ObjectiveAnalysisRecord.status.in_(("queued", "running")))
-                    .with_for_update()
-                )
-            )
-            for row in rows:
-                analysis = ObjectiveAnalysis(
-                    collection_id=row.payload["collection_id"],
-                    objective_id=row.payload["objective_id"],
-                    analysis_version=row.payload["analysis_version"],
-                    document_inputs=tuple(
-                        (
-                            PreparedDocumentInput(
-                                document_id=item["document_id"],
-                                preparation_fingerprint=item["preparation_fingerprint"],
-                            )
-                            for item in row.payload.get("document_inputs", ())
-                        )
-                    ),
-                    pipeline_version=row.payload["pipeline_version"],
-                    model_name=row.payload.get("model_name"),
-                    prompt_versions=row.payload.get("prompt_versions", {}),
-                    stats=ExecutionStats(
-                        duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
-                        model_usage=tuple(
-                            ModelUsage(
-                                model_name=item["model_name"],
-                                request_count=item["request_count"],
-                                token_usage=(
-                                    TokenUsage(
-                                        input_tokens=item["token_usage"][
-                                            "input_tokens"
-                                        ],
-                                        output_tokens=item["token_usage"][
-                                            "output_tokens"
-                                        ],
-                                        total_tokens=item["token_usage"][
-                                            "total_tokens"
-                                        ],
-                                    )
-                                    if item.get("token_usage") is not None
-                                    else None
-                                ),
-                                unreported_request_count=item.get(
-                                    "unreported_request_count", 0
-                                ),
-                            )
-                            for item in (row.payload.get("stats") or {}).get(
-                                "model_usage", ()
-                            )
-                        ),
-                        prompt_versions=(row.payload.get("stats") or {}).get(
-                            "prompt_versions", {}
-                        ),
-                    ),
-                    status=row.payload["status"],
-                    phase=row.payload["phase"],
-                    processed_document_count=row.payload["processed_document_count"],
-                    total_document_count=row.payload["total_document_count"],
-                    current_document_id=row.payload.get("current_document_id"),
-                    progress_message=row.payload.get("progress_message"),
-                    error_code=row.payload.get("error_code"),
-                    error_message=row.payload.get("error_message"),
-                    created_at=_datetime_or_none(row.payload.get("created_at")),
-                    started_at=_datetime_or_none(row.payload.get("started_at")),
-                    completed_at=_datetime_or_none(row.payload.get("completed_at")),
-                    diagnostics=tuple(row.payload.get("diagnostics", ())),
-                    origin=row.payload.get("origin", "system_generated"),
-                    scientific_record_source=row.payload.get(
-                        "scientific_record_source",
-                        (
-                            "experiment_graph"
-                            if row.payload.get("origin", "system_generated")
-                            == "system_generated"
-                            else "authored_snapshot"
-                        ),
-                    ),
-                    source_analysis_version=row.payload.get("source_analysis_version"),
-                    created_by_user_id=row.payload.get("created_by_user_id"),
-                    created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
-                    abstention_reason=row.payload.get("abstention_reason"),
-                    abstention_note=row.payload.get("abstention_note"),
-                ).fail(
-                    error_code="analysis_interrupted",
-                    error_message=(
-                        "Objective analysis was interrupted by a backend restart. "
-                        "Retry the analysis."
-                    ),
-                    completed_at=now,
-                )
-                row.status = analysis.status
-                previous = dict(row.payload or {})
-                next_analysis_payload = {
-                    "collection_id": analysis.collection_id,
-                    "objective_id": analysis.objective_id,
-                    "analysis_version": analysis.analysis_version,
-                    "document_inputs": [
-                        {
-                            "document_id": document_input.document_id,
-                            "preparation_fingerprint": document_input.preparation_fingerprint,
-                        }
-                        for document_input in analysis.document_inputs
-                    ],
-                    "pipeline_version": analysis.pipeline_version,
-                    "model_name": analysis.model_name,
-                    "prompt_versions": dict(analysis.prompt_versions),
-                    "stats": {
-                        "duration_ms": analysis.stats.duration_ms,
-                        "token_usage": (
-                            asdict(analysis.stats.token_usage)
-                            if analysis.stats.token_usage is not None
-                            else None
-                        ),
-                        "model_usage": [
-                            asdict(item) for item in analysis.stats.model_usage
-                        ],
-                        "unreported_request_count": analysis.stats.unreported_request_count,
-                        "prompt_versions": dict(analysis.stats.prompt_versions),
-                    },
-                    "status": analysis.status,
-                    "phase": analysis.phase,
-                    "processed_document_count": analysis.processed_document_count,
-                    "total_document_count": analysis.total_document_count,
-                    "current_document_id": analysis.current_document_id,
-                    "progress_message": analysis.progress_message,
-                    "error_code": analysis.error_code,
-                    "error_message": analysis.error_message,
-                    "created_at": (
-                        analysis.created_at.isoformat()
-                        if analysis.created_at is not None
-                        else None
-                    ),
-                    "started_at": (
-                        analysis.started_at.isoformat()
-                        if analysis.started_at is not None
-                        else None
-                    ),
-                    "completed_at": (
-                        analysis.completed_at.isoformat()
-                        if analysis.completed_at is not None
-                        else None
-                    ),
-                    "origin": analysis.origin,
-                    "scientific_record_source": analysis.scientific_record_source,
-                    "source_analysis_version": analysis.source_analysis_version,
-                    "created_by_user_id": analysis.created_by_user_id,
-                    "created_by_tool_call_id": analysis.created_by_tool_call_id,
-                    "abstention_reason": analysis.abstention_reason,
-                    "abstention_note": analysis.abstention_note,
-                }
-                next_analysis_payload["diagnostics"] = analysis.diagnostics
-                for key in ("paper_contributions", "evidence_records", "findings"):
-                    if key in previous:
-                        next_analysis_payload[key] = previous[key]
-                row.payload = next_analysis_payload
-                row.updated_at = datetime.now(timezone.utc)
-            return len(rows)
 
     async def publish_analysis(
         self,
@@ -1932,6 +1899,7 @@ class ObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        job: ObjectiveAnalysisJobSnapshot,
         contributions: tuple[PaperContribution, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],
@@ -1940,10 +1908,13 @@ class ObjectiveRepository:
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id, analysis_version)
         async with AsyncSessionLocal() as db, db.begin():
-            analysis_row = await self._locked_analysis(db, *key)
-            objective_row = await self._locked_objective(
-                db, collection_id, objective_id
-            )
+            await self.lock_analysis_job(db, job)
+            analysis_row = await self._locked_analysis(db, *job.analysis.key)
+            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+                raise ValueError("analysis publication belongs to another job")
+            await self.check_analysis_inputs(db, job.analysis)
+            objective_row = await self._locked_objective(db, collection_id, objective_id)
+
             analysis = ObjectiveAnalysis(
                 collection_id=analysis_row.payload["collection_id"],
                 objective_id=analysis_row.payload["objective_id"],
@@ -1991,9 +1962,7 @@ class ObjectiveRepository:
                 ),
                 status=analysis_row.payload["status"],
                 phase=analysis_row.payload["phase"],
-                processed_document_count=analysis_row.payload[
-                    "processed_document_count"
-                ],
+                processed_document_count=analysis_row.payload["processed_document_count"],
                 total_document_count=analysis_row.payload["total_document_count"],
                 current_document_id=analysis_row.payload.get("current_document_id"),
                 progress_message=analysis_row.payload.get("progress_message"),
@@ -2001,9 +1970,7 @@ class ObjectiveRepository:
                 error_message=analysis_row.payload.get("error_message"),
                 created_at=_datetime_or_none(analysis_row.payload.get("created_at")),
                 started_at=_datetime_or_none(analysis_row.payload.get("started_at")),
-                completed_at=_datetime_or_none(
-                    analysis_row.payload.get("completed_at")
-                ),
+                completed_at=_datetime_or_none(analysis_row.payload.get("completed_at")),
                 diagnostics=tuple(analysis_row.payload.get("diagnostics", ())),
                 origin=analysis_row.payload.get("origin", "system_generated"),
                 scientific_record_source=analysis_row.payload.get(
@@ -2015,13 +1982,9 @@ class ObjectiveRepository:
                         else "authored_snapshot"
                     ),
                 ),
-                source_analysis_version=analysis_row.payload.get(
-                    "source_analysis_version"
-                ),
+                source_analysis_version=analysis_row.payload.get("source_analysis_version"),
                 created_by_user_id=analysis_row.payload.get("created_by_user_id"),
-                created_by_tool_call_id=analysis_row.payload.get(
-                    "created_by_tool_call_id"
-                ),
+                created_by_tool_call_id=analysis_row.payload.get("created_by_tool_call_id"),
                 abstention_reason=analysis_row.payload.get("abstention_reason"),
                 abstention_note=analysis_row.payload.get("abstention_note"),
             )
@@ -2066,9 +2029,7 @@ class ObjectiveRepository:
                 mechanisms=tuple(objective_row.payload.get("mechanisms", ())),
                 constraints=tuple(objective_row.payload.get("constraints", ())),
                 requested_comparator=objective_row.payload.get("requested_comparator"),
-                seed_document_ids=tuple(
-                    objective_row.payload.get("seed_document_ids", ())
-                ),
+                seed_document_ids=tuple(objective_row.payload.get("seed_document_ids", ())),
                 excluded_document_ids=tuple(
                     objective_row.payload.get("excluded_document_ids", ())
                 ),
@@ -2081,9 +2042,7 @@ class ObjectiveRepository:
                 parent_analysis_version=objective_row.payload.get(
                     "parent_analysis_version"
                 ),
-                derivation_basis=tuple(
-                    objective_row.payload.get("derivation_basis", ())
-                ),
+                derivation_basis=tuple(objective_row.payload.get("derivation_basis", ())),
                 rank=objective_row.payload.get("rank"),
                 confirmation_status=objective_row.payload["confirmation_status"],
                 active_analysis_version=objective_row.payload.get(
@@ -2126,9 +2085,7 @@ class ObjectiveRepository:
                         if analysis.stats.token_usage is not None
                         else None
                     ),
-                    "model_usage": [
-                        asdict(item) for item in analysis.stats.model_usage
-                    ],
+                    "model_usage": [asdict(item) for item in analysis.stats.model_usage],
                     "unreported_request_count": analysis.stats.unreported_request_count,
                     "prompt_versions": dict(analysis.stats.prompt_versions),
                 },
@@ -2183,6 +2140,7 @@ class ObjectiveRepository:
         objective_id: str,
         analysis_version: int,
         *,
+        job: ObjectiveAnalysisJobSnapshot,
         contributions: tuple[PaperContribution, ...] = (),
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
@@ -2194,17 +2152,14 @@ class ObjectiveRepository:
         analysis state and deliberately does not copy legacy Evidence payloads.
         """
 
-        analysis_row = await self._locked_analysis(
-            db,
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        objective_row = await self._locked_objective(
-            db,
-            collection_id,
-            objective_id,
-        )
+        await self.lock_analysis_job(db, job)
+        analysis_row = await self._locked_analysis(db, *job.analysis.key)
+        if (collection_id, objective_id, analysis_version) != job.analysis.key:
+            raise ValueError("analysis publication belongs to another job")
+        if job.analysis.origin == "system_generated":
+            await self.check_analysis_inputs(db, job.analysis)
+        objective_row = await self._locked_objective(db, collection_id, objective_id)
+
         analysis = ObjectiveAnalysis(
             collection_id=analysis_row.payload["collection_id"],
             objective_id=analysis_row.payload["objective_id"],
@@ -2222,9 +2177,7 @@ class ObjectiveRepository:
             model_name=analysis_row.payload.get("model_name"),
             prompt_versions=analysis_row.payload.get("prompt_versions", {}),
             stats=ExecutionStats(
-                duration_ms=(analysis_row.payload.get("stats") or {}).get(
-                    "duration_ms"
-                ),
+                duration_ms=(analysis_row.payload.get("stats") or {}).get("duration_ms"),
                 model_usage=tuple(
                     ModelUsage(
                         model_name=item["model_name"],
@@ -2238,9 +2191,7 @@ class ObjectiveRepository:
                             if item.get("token_usage") is not None
                             else None
                         ),
-                        unreported_request_count=item.get(
-                            "unreported_request_count", 0
-                        ),
+                        unreported_request_count=item.get("unreported_request_count", 0),
                     )
                     for item in (analysis_row.payload.get("stats") or {}).get(
                         "model_usage", ()
@@ -2320,23 +2271,17 @@ class ObjectiveRepository:
                 objective_row.payload.get("source_relationship_ids", ())
             ),
             parent_objective_id=objective_row.payload.get("parent_objective_id"),
-            parent_analysis_version=objective_row.payload.get(
-                "parent_analysis_version"
-            ),
+            parent_analysis_version=objective_row.payload.get("parent_analysis_version"),
             derivation_basis=tuple(objective_row.payload.get("derivation_basis", ())),
             rank=objective_row.payload.get("rank"),
             confirmation_status=objective_row.payload["confirmation_status"],
-            active_analysis_version=objective_row.payload.get(
-                "active_analysis_version"
-            ),
+            active_analysis_version=objective_row.payload.get("active_analysis_version"),
             published_analysis_version=objective_row.payload.get(
                 "published_analysis_version"
             ),
             origin=objective_row.payload["origin"],
             created_by_user_id=objective_row.payload.get("created_by_user_id"),
-            created_by_tool_call_id=objective_row.payload.get(
-                "created_by_tool_call_id"
-            ),
+            created_by_tool_call_id=objective_row.payload.get("created_by_tool_call_id"),
         ).publish_analysis(
             collection_id=analysis.collection_id,
             objective_id=analysis.objective_id,
@@ -2379,14 +2324,10 @@ class ObjectiveRepository:
             "error_code": analysis.error_code,
             "error_message": analysis.error_message,
             "created_at": (
-                analysis.created_at.isoformat()
-                if analysis.created_at is not None
-                else None
+                analysis.created_at.isoformat() if analysis.created_at is not None else None
             ),
             "started_at": (
-                analysis.started_at.isoformat()
-                if analysis.started_at is not None
-                else None
+                analysis.started_at.isoformat() if analysis.started_at is not None else None
             ),
             "completed_at": (
                 analysis.completed_at.isoformat()

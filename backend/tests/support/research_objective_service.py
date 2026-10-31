@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import claim_analysis_fixture
+
 from datetime import datetime, timezone
 from hashlib import sha256
 from types import ModuleType
@@ -239,7 +241,8 @@ async def queue_running_analysis(
         model_name="test-model",
         prompt_versions={},
     )
-    claimed = await service.objective_repository.claim_analysis(
+    claimed = await claim_analysis_fixture(
+        service.objective_repository,
         collection_id,
         objective_id,
         queued.analysis_version,

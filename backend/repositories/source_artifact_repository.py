@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from sqlalchemy.ext.asyncio import AsyncSession
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -45,6 +48,8 @@ class SourceArtifactRepository:
         self,
         collection_id: str,
         document: SourceDocument,
+        *,
+        db: AsyncSession | None = None,
     ) -> None:
         self._validate_document_aggregate(document)
         artifact = {
@@ -167,7 +172,7 @@ class SourceArtifactRepository:
             or hashlib.sha256(serialized.encode("utf-8")).hexdigest()
         )
         now = datetime.now(timezone.utc)
-        async with AsyncSessionLocal() as db, db.begin():
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             owner = await db.get(DocumentRow, document.document_id)
             if owner is None or owner.collection_id != collection_id:
                 raise FileNotFoundError(
@@ -177,9 +182,7 @@ class SourceArtifactRepository:
             values = {
                 "document_id": document.document_id,
                 "source_format": str(
-                    metadata.get("source_format")
-                    or metadata.get("file_type")
-                    or "unknown"
+                    metadata.get("source_format") or metadata.get("file_type") or "unknown"
                 ),
                 "parser_name": str(metadata.get("source_parser") or "unknown"),
                 "parser_version": str(metadata.get("parser_version") or "unknown"),
@@ -200,6 +203,7 @@ class SourceArtifactRepository:
             else:
                 for key, value in values.items():
                     setattr(row, key, value)
+
 
     async def read_document(
         self,
@@ -531,9 +535,11 @@ class SourceArtifactRepository:
         self,
         document_id: str,
         references: SourceReferenceSet,
+        *,
+        db: AsyncSession | None = None,
     ) -> None:
         self._validate_references(document_id, references)
-        async with AsyncSessionLocal() as db, db.begin():
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             row = await db.get(DocumentPreparationRow, document_id)
             if row is None or not row.artifact_json:
                 raise FileNotFoundError(f"source document not found: {document_id}")
@@ -608,6 +614,7 @@ class SourceArtifactRepository:
             }
             row.artifact_json = artifact
             row.updated_at = datetime.now(timezone.utc)
+
 
     async def read_collection_references(
         self,

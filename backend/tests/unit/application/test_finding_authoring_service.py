@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import claim_analysis_fixture, analysis_job_fixture
+
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -129,8 +131,10 @@ class _Repository:
     async def queue_analysis(self, *args, **kwargs):
         return _objective(), _analysis(2, "queued")
 
-    async def claim_analysis(self, *args, **kwargs):
-        return _analysis(2, "running")
+    async def start_authored_analysis(self, db, analysis, **kwargs):
+        from repositories.objective_repository import ObjectiveAnalysisJobSnapshot
+
+        return ObjectiveAnalysisJobSnapshot(_analysis(2, "running"), "test-author", 1)
 
     async def list_contributions(self, *args, **kwargs):
         return (
@@ -312,7 +316,7 @@ async def test_unknown_parent_is_rejected_before_creating_a_revision(
 
 
 @pytest.mark.anyio
-async def test_selection_version_rolls_back_and_marks_running_snapshot_failed(
+async def test_selection_version_rolls_back_without_leaving_a_queued_snapshot(
     monkeypatch,
 ):
     repository = _Repository(fail_publish=True)
@@ -337,7 +341,7 @@ async def test_selection_version_rolls_back_and_marks_running_snapshot_failed(
         )
 
     assert transactions.events == ["begin", "rollback"]
-    assert repository.failed["expected_status"] == "running"
+    assert repository.failed is None
 
 
 async def test_authored_publication_preserves_coverage_with_real_repository(
@@ -367,7 +371,7 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
         model_name=None,
         prompt_versions={},
     )
-    await repository.claim_analysis("collection-1", "objective-1", 1)
+    await claim_analysis_fixture(repository, "collection-1", "objective-1", 1)
     coverage = tuple(
         PaperContribution(
             collection_id="collection-1",
@@ -396,7 +400,12 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
     )
     async with database.AsyncSessionLocal() as db, db.begin():
         objective, source = await repository.publish_experiment_analysis(
-            db, "collection-1", "objective-1", 1, contributions=coverage
+            db,
+            "collection-1",
+            "objective-1",
+            1,
+            contributions=coverage,
+            job=analysis_job_fixture(repository, "collection-1", "objective-1", 1),
         )
 
     writer = _Writer()

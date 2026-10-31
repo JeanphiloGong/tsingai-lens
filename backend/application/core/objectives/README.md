@@ -23,12 +23,12 @@ Use the following entry points when modifying the Core workflow:
 | Task | Entry point | Result |
 |---|---|---|
 | Resolve selected ready papers | `objective_input_service.resolve_prepared_document_inputs()` | frozen input set; no parsing |
-| Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
+| Discover candidates | `objective_discovery_service.start_objective_discovery()` | queued discovery run |
 | Form candidates | `objective_candidate_service.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
-| Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
+| Queue analysis | `analysis_service.start_objective_analysis()` | queued versioned analysis |
 | Reconstruct experiments | `objective_analysis_service.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
-| Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / module read functions | immutable published snapshot |
+| Publish/read analysis | `analysis_service.execute_objective_analysis_job()` / module read functions | immutable published snapshot |
 
 Paper Map construction is intentionally split by responsibility:
 
@@ -55,19 +55,18 @@ Agent paper authoring calls `prepare_paper_experiment_draft()` and
 `write_prepared_paper_experiments()` directly. Preparation checks the current
 Sources; the approved write persists immutable paper revisions without publishing
 an Objective analysis or Finding.
-`ObjectiveAnalysisService` belongs to the current app and owns the admitted tasks
-and concurrency limit. Shutdown cancels and awaits its work before disposing the
-database engine. Read operations remain module functions and do not require a
-running analysis component.
-The instance also creates its structured-response client, Source screener,
-Paper Map extractor, and PaperExperiment extractor only when execution needs
-them. Scientific operations
-receive those concrete components explicitly. Shutdown closes the owned client
-after cancelling and awaiting the admitted tasks.
+`scripts/run_objective_analysis.py` claims a fixed analysis version from
+`ObjectiveRepo`, creates the actual structured-response client and extraction
+components, and passes them explicitly to `execute_objective_analysis_job()`.
+The lease is checked for progress, diagnostics, failure and result publication;
+the experiment graph and published-version pointer commit together. The entry
+point owns its operation and heartbeat and closes the model client on exit.
+Read operations remain module functions. The optional synchronous Finding summary
+uses a separate request client with a 60-second budget and zero provider retries.
 
-`ObjectiveDiscoveryService` similarly owns its lazy response client, Paper Map
-extractor, and axis-equivalence classifier. It passes them directly into map and
-candidate operations, then closes the client after its discovery tasks stop.
+`run_objective_discovery.py` similarly owns discovery's model client. Selected
+preparation fingerprints are frozen when queued. Paper Maps, candidates and
+completion writes use short transactions guarded by the claimed run lease.
 
 The analysis module imports `objective_input_service` and
 `document_profiles.service` directly. It does not reach through the scientific
@@ -87,7 +86,7 @@ actor's user ID and authorize the Collection before accessing scientific data.
 | Map merging or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
 | One paper's scientific experiment flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
-| Optional single-paragraph Finding summary | `finding_summary.py`, called by the current app's `ObjectiveAnalysisService` | `test_finding_summary.py` |
+| Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.summarize_objective_finding()` | `test_finding_summary.py` |
 
 The current app's Analysis runtime owns an optional Finding summary request and
 its lazily created summary client. This client has a 60-second timeout and no
@@ -179,12 +178,10 @@ paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,
 states, methods, or broad outcome families into a directly comparable question.
 
-Each application constructs its own `ObjectiveDiscoveryService` in its runtime.
-The instance tracks admitted tasks, logs unexpected failures, and cancels and
-awaits its own tasks at shutdown. Repository access and candidate algorithms are
-direct module calls; they are not constructor-injected dependencies. Startup
-recovery turns durable interrupted runs into retryable failures before requests
-are accepted.
+Discovery is durable work claimed by a concrete worker, rather than a task owned
+by an HTTP process. A new worker may take over an expired lease; the superseded
+worker cannot publish late progress, cached maps or candidates. Restarting Web
+does not mark these jobs failed.
 
 The discovered Objective list is a bounded human review set, not the complete
 Paper Map. The map remains the discovery ledger: every emitted relationship,

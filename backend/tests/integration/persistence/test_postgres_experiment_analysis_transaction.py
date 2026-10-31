@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture
+
 from infra.persistence import database
 
 from dataclasses import replace
@@ -162,15 +164,41 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
 
     with pytest.raises(RuntimeError, match="forced rollback"):
         async with database.AsyncSessionLocal() as db, db.begin():
-            stored = await experiments.add_revision(db, revision, created_by='test-agent')
-            await selections.add_selection(db, COLLECTION_ID, selection, revision_id=stored.revision_id)
-            await objective_repository.publish_experiment_analysis(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version, contributions=(_contribution(analysis.analysis_version, 'doc_a'), _contribution(analysis.analysis_version, 'doc_b')))
+            stored = await experiments.add_revision(
+                db, revision, created_by="test-agent"
+            )
+            await selections.add_selection(
+                db, COLLECTION_ID, selection, revision_id=stored.revision_id
+            )
+            await objective_repository.publish_experiment_analysis(
+                db,
+                COLLECTION_ID,
+                OBJECTIVE_ID,
+                analysis.analysis_version,
+                contributions=(
+                    _contribution(analysis.analysis_version, "doc_a"),
+                    _contribution(analysis.analysis_version, "doc_b"),
+                ),
+                job=analysis_job_fixture(
+                    objective_repository,
+                    COLLECTION_ID,
+                    OBJECTIVE_ID,
+                    analysis.analysis_version,
+                ),
+            )
             raise RuntimeError("forced rollback")
 
     async with database.AsyncSessionLocal() as db, db.begin():
-        assert await experiments.read_latest_revision(db, 'experiment-transaction') is None
+        assert (
+            await experiments.read_latest_revision(db, "experiment-transaction") is None
+        )
     async with database.AsyncSessionLocal() as db, db.begin():
-        assert await selections.list_selections(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+        assert (
+            await selections.list_selections(
+                db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version
+            )
+            == ()
+        )
     restored = await objective_repository.read_analysis(
         COLLECTION_ID,
         OBJECTIVE_ID,
@@ -186,7 +214,18 @@ async def test_experiment_graph_publication_does_not_require_paper_contributions
     _, analysis = await _queue_and_claim(objective_repository)
 
     async with database.AsyncSessionLocal() as db, db.begin():
-        await objective_repository.publish_experiment_analysis(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version)
+        await objective_repository.publish_experiment_analysis(
+            db,
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+            job=analysis_job_fixture(
+                objective_repository,
+                COLLECTION_ID,
+                OBJECTIVE_ID,
+                analysis.analysis_version,
+            ),
+        )
 
     published = await objective_repository.read_analysis(
         COLLECTION_ID,
@@ -195,11 +234,14 @@ async def test_experiment_graph_publication_does_not_require_paper_contributions
     )
     assert published is not None
     assert published.status == "succeeded"
-    assert await objective_repository.list_contributions(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    assert (
+        await objective_repository.list_contributions(
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+        )
+        == ()
+    )
 
 
 async def test_single_study_finding_persists_without_a_comparison_group(

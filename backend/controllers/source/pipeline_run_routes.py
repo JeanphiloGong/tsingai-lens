@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from application.pipeline import pipeline_run_service
+from application.source.document_preparation_service import queue_document_preparation
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.source.pipeline_run import (
     pipeline_run_response,
@@ -28,9 +29,7 @@ async def prepare_collection_document(
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    run = await request.app.state.runtime.document_preparation_service.queue_document_preparation(
-        collection_id, document_id, user_id=user_id
-    )
+    run = await queue_document_preparation(collection_id, document_id, user_id=user_id)
     return make_api_response(data=PipelineRunResponse(**pipeline_run_response(run)))
 
 

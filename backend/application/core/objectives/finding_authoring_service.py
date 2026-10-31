@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from uuid import uuid4
 
 from application.core.objectives.analysis import (
     experiment_analysis_writer,
@@ -114,63 +115,51 @@ async def create_selection_version(
     coverage = await ObjectiveRepo.list_contributions(
         collection_id, objective_id, source_analysis_version
     )
-    _objective, queued = await ObjectiveRepo.queue_analysis(
-        collection_id,
-        objective_id,
-        document_inputs=source_analysis.document_inputs,
-        pipeline_version=source_analysis.pipeline_version,
-        model_name=source_analysis.model_name,
-        prompt_versions=dict(source_analysis.prompt_versions),
-        origin="human_authored",
-        created_by_user_id=created_by_user_id,
-        source_analysis_version=source_analysis_version,
-    )
-    claimed = await ObjectiveRepo.claim_analysis(
-        collection_id, objective_id, queued.analysis_version
-    )
-    if claimed is None:
-        raise ResourceConflictException(
-            "Finding analysis snapshot could not be claimed.",
-            data={
-                "code": "analysis_claim_conflict",
-                "analysis_version": queued.analysis_version,
-            },
+    async with AsyncSessionLocal() as db, db.begin():
+        _objective, queued = await ObjectiveRepo.queue_analysis(
+            collection_id,
+            objective_id,
+            document_inputs=source_analysis.document_inputs,
+            pipeline_version=source_analysis.pipeline_version,
+            model_name=source_analysis.model_name,
+            prompt_versions=dict(source_analysis.prompt_versions),
+            origin="human_authored",
+            created_by_user_id=created_by_user_id,
+            source_analysis_version=source_analysis_version,
+            db=db,
         )
-    try:
-        async with AsyncSessionLocal() as db, db.begin():
-            result = await experiment_analysis_writer.write_selection_finding_revision(
-                collection_id=collection_id,
-                objective=objective,
-                analysis=claimed,
-                revisions=source.revisions,
-                selections=chosen,
-                created_by=created_by_user_id,
-                parent_finding_id=parent_finding_id,
-                limitations=limitations,
-                db=db,
-            )
-            await ObjectiveRepo.publish_experiment_analysis(
-                db,
-                collection_id,
-                objective_id,
-                claimed.analysis_version,
-                contributions=tuple(
-                    replace(item, analysis_version=claimed.analysis_version)
-                    for item in coverage
-                ),
-                abstention_reason=abstention_reason,
-                abstention_note=("\n".join(limitations) if abstention_reason else None),
-            )
-    except Exception as exc:
-        await ObjectiveRepo.fail_analysis(
+        job = await ObjectiveRepo.start_authored_analysis(
+            db,
+            queued,
+            user_id=created_by_user_id,
+            execution_id=f"finding-author:{uuid4().hex}",
+        )
+        claimed = job.analysis
+        result = await experiment_analysis_writer.write_selection_finding_revision(
+            collection_id=collection_id,
+            objective=objective,
+            analysis=claimed,
+            revisions=source.revisions,
+            selections=chosen,
+            created_by=created_by_user_id,
+            parent_finding_id=parent_finding_id,
+            limitations=limitations,
+            db=db,
+        )
+        await ObjectiveRepo.publish_experiment_analysis(
+            db,
             collection_id,
             objective_id,
             claimed.analysis_version,
-            error_code="authored_finding_publish_failed",
-            error_message=str(exc),
-            expected_status="running",
+            job=job,
+            contributions=tuple(
+                replace(item, analysis_version=claimed.analysis_version)
+                for item in coverage
+            ),
+            abstention_reason=abstention_reason,
+            abstention_note=("\n".join(limitations) if abstention_reason else None),
         )
-        raise
+
     mapped = {f"{item.selection_id}:v{claimed.analysis_version}" for item in chosen}
     finding = next(
         (item for item in result.findings if set(item.selection_ids) == mapped),

@@ -49,6 +49,12 @@ class _ImmediateDocumentPreparationService:
         )
         if not created:
             return run
+        from datetime import timedelta
+        from repositories.pipeline_run_repository import PipelineRunRepo
+
+        job = await PipelineRunRepo.claim_next_document_preparation_job(
+            worker_id="test-worker", lease_duration=timedelta(seconds=300)
+        )
         await SourceArtifactRepository().replace_document(
             collection_id,
             SourceDocument(
@@ -85,6 +91,7 @@ class _ImmediateDocumentPreparationService:
         )
         return await self.pipeline_run_service.finish_run(
             run.run_id,
+            job=job,
             status="completed",
             current_node="ready",
             progress_percent=100,
@@ -120,10 +127,10 @@ def app_client(
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     with TestClient(create_app()) as client:
         monkeypatch.setattr(
-            client.app.state.runtime.document_preparation_service,
-            "queue_document_preparation",
+            "controllers.source.pipeline_run_routes.queue_document_preparation",
             _ImmediateDocumentPreparationService(
-                collection_service, pipeline_run_service,
+                collection_service,
+                pipeline_run_service,
                 client.app.state.runtime.object_store,
             ).queue_document_preparation,
         )

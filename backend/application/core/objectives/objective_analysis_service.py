@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from asyncio import Semaphore, gather, to_thread
+from asyncio import Semaphore, to_thread
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Mapping, Sequence
 
@@ -27,7 +28,9 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     screen_sources,
 )
-from application.core.objectives.discovery.paper_understanding.workflow import PaperResearchMapExtractor
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
+)
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_input_service import (
     ObjectiveSourceInputs,
@@ -48,8 +51,12 @@ from domain.core import (
 from domain.core.paper_experiment import PaperExperimentRevision
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.database import AsyncSessionLocal
-from repositories.objective_repository import ObjectiveAnalysis
+from repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveAnalysisJobSnapshot,
+)
 from repositories.paper_experiment_repository import StoredPaperExperimentRevision
+from repositories.paper_map_repository import PaperMapRepo
 
 logger = logging.getLogger(__name__)
 
@@ -432,6 +439,7 @@ from repositories.objective_repository import ObjectiveRepo
 from repositories.paper_experiment_repository import PaperExperimentRepo
 from repositories.paper_map_repository import PaperMapRepo
 
+
 async def preview_objective_scope(
     collection_id: str,
     objective_id: str,
@@ -458,6 +466,7 @@ async def generate_experiment_analysis_artifacts(
     analysis: ObjectiveAnalysis,
     progress_callback: ProgressCallback | None = None,
     *,
+    job: ObjectiveAnalysisJobSnapshot,
     response_client: StructuredResponseClient,
     source_screener: ObjectiveSourceScreener,
     paper_experiment_extractor: PaperExperimentExtractor,
@@ -474,6 +483,7 @@ async def generate_experiment_analysis_artifacts(
         raise ValueError("analysis is not the active objective version")
     objective_inputs = await _build_objective_analysis_inputs(
         collection_id,
+        job=job,
         document_inputs=analysis.document_inputs,
         paper_map_extractor=paper_map_extractor,
     )
@@ -487,17 +497,24 @@ async def generate_experiment_analysis_artifacts(
         nonlocal completed_document_count
         completed_document_count += 1
         if progress_callback is not None:
-            await to_thread(
-                progress_callback,
-                {
-                    "phase": "objective_document_evidence_completed",
-                    "unit": "documents",
-                    "current": completed_document_count,
-                    "total": document_count,
-                    "active_document_id": document_id,
-                    "message": "Finished inspecting one selected paper.",
-                },
+            progress_task = asyncio.create_task(
+                to_thread(
+                    progress_callback,
+                    {
+                        "phase": "objective_document_evidence_completed",
+                        "unit": "documents",
+                        "current": completed_document_count,
+                        "total": document_count,
+                        "active_document_id": document_id,
+                        "message": "Finished inspecting one selected paper.",
+                    },
+                )
             )
+            try:
+                await asyncio.shield(progress_task)
+            except asyncio.CancelledError:
+                await asyncio.gather(progress_task, return_exceptions=True)
+                raise
 
     async def inspect_document(
         document_input: PreparedDocumentInput,
@@ -523,25 +540,30 @@ async def generate_experiment_analysis_artifacts(
 
         try:
             async with extraction_limit:
-                stored_revisions = ()
-                if PaperExperimentRepo is not None:
-                    async with AsyncSessionLocal() as db:
-                        stored_revisions = (
-                            await PaperExperimentRepo.list_latest_for_document(
-                                db, document_input.document_id
-                            )
+                async with AsyncSessionLocal() as db:
+                    stored_revisions = (
+                        await PaperExperimentRepo.list_latest_for_document(
+                            db, document_input.document_id
                         )
-                artifacts = await to_thread(
-                    _reconstruct_document_experiments,
-                    collection_id=collection_id,
-                    analysis=analysis,
-                    objective=active_objective,
-                    objective_inputs=document_objective_inputs,
-                    progress_callback=document_progress_callback,
-                    stored_revisions=stored_revisions,
-                    source_screener=source_screener,
-                    paper_experiment_extractor=paper_experiment_extractor,
+                    )
+                read_task = asyncio.create_task(
+                    to_thread(
+                        _reconstruct_document_experiments,
+                        collection_id=collection_id,
+                        analysis=analysis,
+                        objective=active_objective,
+                        objective_inputs=document_objective_inputs,
+                        progress_callback=document_progress_callback,
+                        stored_revisions=stored_revisions,
+                        source_screener=source_screener,
+                        paper_experiment_extractor=paper_experiment_extractor,
+                    )
                 )
+                try:
+                    artifacts = await asyncio.shield(read_task)
+                except asyncio.CancelledError:
+                    await asyncio.gather(read_task, return_exceptions=True)
+                    raise
         except Exception as exc:  # noqa: BLE001
             record_analysis_failure(
                 exc,
@@ -571,12 +593,12 @@ async def generate_experiment_analysis_artifacts(
         await report_document_completed(document_input.document_id)
         return artifacts
 
-    document_artifacts = await gather(
-        *(
-            inspect_document(document_input)
-            for document_input in analysis.document_inputs
-        )
-    )
+    async with asyncio.TaskGroup() as tasks:
+        document_tasks = [
+            tasks.create_task(inspect_document(item))
+            for item in analysis.document_inputs
+        ]
+    document_artifacts = tuple(task.result() for task in document_tasks)
     contributions = tuple(item.contribution for item in document_artifacts)
     # Findings are synthesized only after immutable experiment revisions
     # and Objective selections have been written.  Keeping this stage
@@ -781,6 +803,7 @@ def _objective_inputs_for_document(
 async def _build_objective_analysis_inputs(
     collection_id: str,
     *,
+    job: ObjectiveAnalysisJobSnapshot,
     document_inputs: tuple[PreparedDocumentInput, ...],
     paper_map_extractor: PaperResearchMapExtractor,
 ) -> ObjectiveAnalysisInputs:
@@ -794,6 +817,11 @@ async def _build_objective_analysis_inputs(
         source_inputs=source_inputs,
         paper_map_extractor=paper_map_extractor,
     )
+    async with AsyncSessionLocal() as db, db.begin():
+        await ObjectiveRepo.lock_analysis_job(db, job)
+        await ObjectiveRepo.check_analysis_inputs(db, job.analysis)
+        for paper_map in paper_maps:
+            await PaperMapRepo.replace(collection_id, paper_map, db=db)
     return {
         **source_inputs,
         "paper_maps": paper_maps,

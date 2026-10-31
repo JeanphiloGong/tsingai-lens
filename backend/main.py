@@ -37,9 +37,6 @@ from application.chat.capabilities import (
     StartResearchProcessCapability,
 )
 from application.chat.session_service import ChatSessionService
-from application.core.objectives.objective_discovery_service import ObjectiveDiscoveryService
-from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.source.document_preparation_service import DocumentPreparationService
 from config import DATA_DIR
 from controllers import auth_routes as auth
 from controllers import feedback_case_routes as feedback_cases
@@ -139,21 +136,15 @@ def _parse_agent_run_limits() -> AgentRunLimits:
     return AgentRunLimits(**values)
 @dataclass(frozen=True)
 class ApplicationRuntime:
-    """Database and worker resources owned by one running process."""
+    """Database, file resources and Chat execution owned by one Web process."""
 
     database_engine: AsyncEngine
     collection_workspace: FileCollectionWorkspace
     object_store: FileObjectStore
-    objective_discovery_service: ObjectiveDiscoveryService
-    document_preparation_service: DocumentPreparationService
-    objective_analysis_service: ObjectiveAnalysisService
     chat_session_service: ChatSessionService
 
     async def close(self) -> None:
         await self.chat_session_service.close()
-        await self.objective_discovery_service.close()
-        await self.document_preparation_service.close()
-        await self.objective_analysis_service.close()
         await self.database_engine.dispose()
 
 
@@ -162,11 +153,6 @@ async def build_application_runtime() -> ApplicationRuntime:
     AsyncSessionLocal.configure(bind=database_engine)
     collection_workspace = FileCollectionWorkspace(DATA_DIR / "collections")
     object_store = FileObjectStore(collection_workspace.root_dir)
-    preparation = DocumentPreparationService(
-        workspace=collection_workspace,
-        object_store=object_store,
-    )
-    analysis = ObjectiveAnalysisService()
     try:
         await auth_session_service.ensure_bootstrap_user()
         chat_model = OpenAIChatModel()
@@ -182,9 +168,7 @@ async def build_application_runtime() -> ApplicationRuntime:
                     InspectTableCapability(),
                     ReadSourceCapability(),
                     InspectResearchProcessCapability(),
-                    StartResearchProcessCapability(
-                        document_preparation_service=preparation,
-                    ),
+                    StartResearchProcessCapability(),
                     QueryPublishedFindingsCapability(),
                     InspectPublishedFindingCapability(),
                     RecordFindingFeedbackCapability(),
@@ -197,7 +181,7 @@ async def build_application_runtime() -> ApplicationRuntime:
                     PreviewResearchScopeCapability(),
                     CreateObjectiveCandidateCapability(),
                     ConfirmObjectiveCapability(),
-                    StartObjectiveAnalysisCapability(objective_analysis_service=analysis),
+                    StartObjectiveAnalysisCapability(),
                     InspectObjectiveAnalysisCapability(),
                     AssessObjectiveQualityCapability(),
                     DeriveObjectiveCapability(),
@@ -212,11 +196,7 @@ async def build_application_runtime() -> ApplicationRuntime:
             database_engine=database_engine,
             collection_workspace=collection_workspace,
             object_store=object_store,
-            objective_discovery_service=ObjectiveDiscoveryService(),
-            document_preparation_service=preparation,
-            objective_analysis_service=analysis,
             chat_session_service=ChatSessionService(runner=runner),
-
         )
     except BaseException:
         await database_engine.dispose()
@@ -228,9 +208,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     runtime = await build_application_runtime()
     application.state.runtime = runtime
     try:
-        await runtime.document_preparation_service.recover_interrupted_runs()
-        await runtime.objective_discovery_service.recover_interrupted_discoveries()
-        await runtime.objective_analysis_service.recover_interrupted_analyses()
         yield
     finally:
         await runtime.close()

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from sqlalchemy.ext.asyncio import AsyncSession
+
 import json
 
 from domain.core.research_objective import (
@@ -27,8 +30,14 @@ from sqlalchemy import select
 
 
 class PaperMapRepository:
-    async def replace(self, collection_id: str, paper_map: PaperResearchMap) -> None:
-        async with AsyncSessionLocal() as db, db.begin():
+    async def replace(
+        self,
+        collection_id: str,
+        paper_map: PaperResearchMap,
+        *,
+        db: AsyncSession | None = None,
+    ) -> None:
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             document = await db.get(Document, paper_map.document_id)
             if document is None or document.collection_id != collection_id:
                 raise FileNotFoundError(
@@ -150,6 +159,7 @@ class PaperMapRepository:
                 "map_version": paper_map.map_version,
                 "generated_at": paper_map.generated_at,
             }
+
 
     async def read(
         self,

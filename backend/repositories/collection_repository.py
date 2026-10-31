@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -183,8 +185,10 @@ class CollectionRepository:
         self,
         collection_id: str,
         document_id: str,
+        *,
+        db: AsyncSession | None = None,
     ) -> StoredDocument | None:
-        async with AsyncSessionLocal() as db:
+        async with AsyncSessionLocal() if db is None else nullcontext(db) as db:
             row = (
                 await db.execute(
                     select(Document, DocumentPreparationRow)
@@ -223,6 +227,7 @@ class CollectionRepository:
                 created_at=_iso(document.created_at),
                 updated_at=_iso(document.updated_at),
             )
+
 
     async def update_collection(self, record: StoredCollection) -> bool:
         async with AsyncSessionLocal() as db, db.begin():
@@ -333,8 +338,10 @@ class CollectionRepository:
             collection.status = "uploaded"
             collection.updated_at = _datetime(updated_at)
 
-    async def update_document(self, record: StoredDocument) -> bool:
-        async with AsyncSessionLocal() as db, db.begin():
+    async def update_document(
+        self, record: StoredDocument, *, db: AsyncSession | None = None
+    ) -> bool:
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             document = record.document
             row = await db.get(Document, document.document_id)
             if row is None:
@@ -348,6 +355,7 @@ class CollectionRepository:
             row.size_bytes = document.size_bytes
             row.updated_at = _datetime(record.updated_at or record.created_at)
             return True
+
 
     async def delete_collection(self, collection_id: str) -> bool:
         async with AsyncSessionLocal() as db, db.begin():

@@ -54,7 +54,6 @@ export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
 export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
-export DOCUMENT_PREPARATION_MAX_CONCURRENCY=3
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
 export LENS_AGENT_MAX_TURN_SECONDS=300
 export LENS_AGENT_MAX_TOOL_CALLS=96
@@ -74,11 +73,13 @@ export LLM_MAX_RETRIES=2
 
 `CORE_EXTRACTION_MAX_CONCURRENCY` is optional. When unset, Core extraction uses
 `4`.
-`DOCUMENT_PREPARATION_MAX_CONCURRENCY` is optional. When unset, up to `3`
-different Documents prepare concurrently in one backend process. This leaves
-database connections available for run finalization and status polling. The
-database still admits only one active preparation Pipeline Run for the same
-Document.
+Preparation, discovery and Objective analysis execute in independent workers.
+Start `scripts/run_document_preparation.py`, `scripts/run_objective_discovery.py`
+and `scripts/run_objective_analysis.py` using the same environment, PostgreSQL
+and shared object directory as Web. See [worker commands](../../scripts/README.md#research-workers).
+Each process claims one job at a time; process count controls concurrency.
+Stop the old in-Web execution processes before applying `20261031_0090` and
+starting the new entry points. Do not run both execution models together.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
 `LLM_REASONING_EFFORT` is optional and applies to both Core extraction and Chat,

@@ -1,19 +1,8 @@
 from __future__ import annotations
 
-from application.core.objectives.analysis.experiment_projection import experiment_evidence_disposition
-
+import asyncio
 import logging
-from asyncio import (
-    CancelledError,
-    Lock,
-    Semaphore,
-    Task,
-    create_task,
-    get_running_loop,
-    gather,
-    run_coroutine_threadsafe,
-    to_thread,
-)
+from asyncio import Lock, get_running_loop, run_coroutine_threadsafe, to_thread
 from dataclasses import asdict, replace
 from time import perf_counter
 from typing import Any, Callable
@@ -29,9 +18,6 @@ from application.core.objectives.analysis import (
     experiment_analysis_writer,
     experiment_projection,
 )
-from application.core.objectives.analysis.experiment_analysis_writer import (
-    ExperimentAnalysisWriteResult,
-)
 from application.core.objectives.analysis.analysis_record_source import (
     is_experiment_backed_analysis,
     should_read_experiment_projection,
@@ -40,20 +26,29 @@ from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
     record_analysis_failure,
 )
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriteResult,
+)
+from application.core.objectives.analysis.experiment_projection import (
+    experiment_evidence_disposition,
+)
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentExtractor,
+)
+from application.core.objectives.analysis.source_screening import (
+    ObjectiveSourceScreener,
+)
 from application.core.objectives.analysis_errors import analysis_error_message
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
+)
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.finding_summary import (
     MAX_SUMMARY_EVIDENCE,
     FindingSummaryUnavailable,
     summarize_finding_evidence,
 )
-from application.core.objectives.discovery.paper_understanding.workflow import PaperResearchMapExtractor
-from application.core.objectives.analysis.paper_experiment_extraction import PaperExperimentExtractor
-from application.core.objectives.analysis.source_screening import ObjectiveSourceScreener
-from application.core.objectives.llm.structured_response import (
-    StructuredResponseClient,
-    build_default_structured_response_client,
-)
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
     ResearchObjectiveNotFoundError,
@@ -62,19 +57,20 @@ from application.source import collection_service
 from domain.core import ResearchObjective
 from domain.core.finding import Finding
 from domain.core.research_objective import ObjectiveEvidence
-from exceptions import (
-    ResourceConflictException,
-    ResourceNotFoundException,
-    ServiceUnavailableException,
-)
+from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.llm.usage import capture_llm_usage
 from infra.persistence.database import AsyncSessionLocal
-from repositories.objective_repository import ObjectiveAnalysis
+from repositories.objective_repository import (
+    AnalysisLeaseLostError,
+    ObjectiveAnalysis,
+    ObjectiveAnalysisJobSnapshot,
+    ObjectiveRepo,
+    StoredObjective,
+)
 
 logger = logging.getLogger(__name__)
 
 _PIPELINE_VERSION = "objective-analysis.v2"
-_ANALYSIS_MAX_CONCURRENCY = 4
 
 
 _EVIDENCE_REVIEW_GAP_LIMIT = 200
@@ -151,7 +147,6 @@ def _evidence_review_summary(
     }
 
 
-
 def _experiment_abstention(
     result: ExperimentAnalysisWriteResult,
 ) -> tuple[str | None, str | None]:
@@ -197,135 +192,174 @@ def _experiment_abstention(
     )
 
 
-class ObjectiveAnalysisDispatchError(ServiceUnavailableException):
-    """A queued Objective analysis could not be handed to an asyncio worker."""
-
-    def __init__(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> None:
-        super().__init__(
-            "Objective analysis could not be scheduled. Retry the analysis.",
-            data={
-                "code": "objective_analysis_dispatch_failed",
-                "collection_id": collection_id,
-                "objective_id": objective_id,
-                "analysis_version": analysis_version,
-            },
-        )
-        self.collection_id = collection_id
-        self.objective_id = objective_id
-        self.analysis_version = analysis_version
-
-
-from repositories.objective_repository import ObjectiveRepo, StoredObjective
-
-
-class ObjectiveAnalysisService:
-    """Own analysis tasks and concurrency admitted by one application."""
-
-    def __init__(self, *, max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY) -> None:
-        self._analysis_semaphore = Semaphore(max_concurrency)
-        self._analysis_tasks: set[Task[dict[str, Any]]] = set()
-        self._response_client: StructuredResponseClient | None = None
-        self._summary_client: StructuredResponseClient | None = None
-        self._source_screener: ObjectiveSourceScreener | None = None
-        self._paper_experiment_extractor: PaperExperimentExtractor | None = None
-        self._paper_map_extractor: PaperResearchMapExtractor | None = None
-
-    async def close(self) -> None:
-        tasks = tuple(self._analysis_tasks)
-        for task in tasks:
-            task.cancel()
-        await gather(*tasks, return_exceptions=True)
-        for client in (self._response_client, self._summary_client):
-            if client is not None:
-                client.client.close()
-
-    def _get_response_client(self) -> StructuredResponseClient:
-        if self._response_client is None:
-            self._response_client = build_default_structured_response_client()
-        return self._response_client
-
-    def _get_summary_client(self) -> StructuredResponseClient:
-        if self._summary_client is None:
+async def execute_objective_analysis_job(
+    job: ObjectiveAnalysisJobSnapshot,
+    *,
+    response_client: StructuredResponseClient,
+    source_screener: ObjectiveSourceScreener,
+    paper_map_extractor: PaperResearchMapExtractor,
+    paper_experiment_extractor: PaperExperimentExtractor,
+) -> dict[str, Any]:
+    collection_id, objective_id, analysis_version = job.analysis.key
+    try:
+        objective = await _require_objective(collection_id, objective_id)
+        claimed = job.analysis
+        async with AsyncSessionLocal() as db, db.begin():
+            await ObjectiveRepo.lock_analysis_job(db, job)
+            await ObjectiveRepo.check_analysis_inputs(db, claimed)
+        usage_started_at = perf_counter()
+        progress_callback = _build_progress_callback(job)
+        with (
+            capture_llm_usage() as usage,
+            capture_analysis_diagnostics() as diagnostics,
+        ):
+            artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
             try:
-                client = build_default_structured_response_client()
-                client.client = client.client.with_options(timeout=60.0, max_retries=0)
+                artifacts = await experiment_analysis_service.generate_experiment_analysis_artifacts(
+                    collection_id,
+                    claimed,
+                    progress_callback=progress_callback,
+                    job=job,
+                    response_client=response_client,
+                    source_screener=source_screener,
+                    paper_map_extractor=paper_map_extractor,
+                    paper_experiment_extractor=paper_experiment_extractor,
+                )
+                _validate_artifacts(artifacts)
             except Exception as exc:
-                logger.warning("Finding summary unavailable error_type=%s", type(exc).__name__)
-                raise FindingSummaryUnavailable("summary_generation_failed") from exc
-            self._summary_client = client
-        return self._summary_client
-
-    def _get_source_screener(self) -> ObjectiveSourceScreener:
-        if self._source_screener is None:
-            self._source_screener = ObjectiveSourceScreener(self._get_response_client())
-        return self._source_screener
-
-    def _get_paper_map_extractor(self) -> PaperResearchMapExtractor:
-        if self._paper_map_extractor is None:
-            self._paper_map_extractor = PaperResearchMapExtractor(self._get_response_client())
-        return self._paper_map_extractor
-
-    def _get_paper_experiment_extractor(self) -> PaperExperimentExtractor:
-        if self._paper_experiment_extractor is None:
-            self._paper_experiment_extractor = PaperExperimentExtractor(
-                self._get_response_client()
+                record_analysis_failure(
+                    exc,
+                    collection_id=collection_id,
+                    objective_id=objective_id,
+                    analysis_version=analysis_version,
+                    stage="generate_artifacts",
+                )
+                raise
+            finally:
+                claimed = await ObjectiveRepo.update_analysis_execution_stats(
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    job=job,
+                    stats=usage.execution_stats(
+                        duration_ms=round((perf_counter() - usage_started_at) * 1000)
+                    ),
+                    model_name=(
+                        usage.model_name
+                        or (artifacts.model_name if artifacts is not None else None)
+                        or claimed.model_name
+                    ),
+                    prompt_versions=usage.prompt_versions,
+                    diagnostics=diagnostics.records,
+                )
+        async with AsyncSessionLocal() as db, db.begin():
+            await ObjectiveRepo.lock_analysis_job(db, job)
+            await ObjectiveRepo.check_analysis_inputs(db, claimed)
+            native_result = await experiment_analysis_writer.write_experiment_analysis(
+                db=db,
+                collection_id=collection_id,
+                objective=objective,
+                analysis=claimed,
+                experiment_outputs=artifacts.experiment_outputs,
+                partial_experiment_outputs=artifacts.partial_experiment_outputs,
+                reused_revisions=artifacts.reused_revisions,
             )
-        return self._paper_experiment_extractor
-
-    async def summarize_finding(
-        self,
-        collection_id: str,
-        objective_id: str,
-        finding_id: str,
-        *,
-        user_id: str,
-        analysis_version: int,
-        language: str,
-    ) -> dict[str, Any]:
-        try:
-            detail = await get_finding(
+            abstention_reason, abstention_note = _experiment_abstention(native_result)
+            objective, completed = await ObjectiveRepo.publish_experiment_analysis(
+                db,
                 collection_id,
                 objective_id,
-                finding_id,
-                analysis_version=analysis_version,
-                user_id=user_id,
+                analysis_version,
+                job=job,
+                contributions=artifacts.contributions,
+                abstention_reason=abstention_reason,
+                abstention_note=abstention_note,
             )
-        except ResourceConflictException as exc:
-            raise ResourceConflictException(
-                "The published analysis has changed. Reload before generating a summary.",
-                data={"code": "summary_stale_analysis"},
-            ) from exc
-        experiment_backed = await should_read_experiment_projection(
+        return await _result(collection_id, objective.objective_id, analysis=completed)
+    except AnalysisLeaseLostError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        record_analysis_failure(
+            exc,
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
+            stage="execute_analysis",
         )
-        if experiment_backed:
-            records, total = await experiment_projection.list_analysis_evidence(
+        logger.error(
+            "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
+            collection_id,
+            objective_id,
+            analysis_version,
+            type(exc).__name__,
+        )
+        current = await ObjectiveRepo.read_analysis(
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
+        if current is not None and current.status in {"queued", "running"}:
+            current = await ObjectiveRepo.fail_analysis(
                 collection_id,
                 objective_id,
                 analysis_version,
-                finding_id=finding_id,
-                offset=0,
-                limit=MAX_SUMMARY_EVIDENCE,
+                job=job,
+                error_code=_error_code(exc),
+                error_message=analysis_error_message(_error_code(exc)),
             )
-        else:
-            records, total = await ObjectiveRepo.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                finding_id=finding_id,
-                offset=0,
-                limit=MAX_SUMMARY_EVIDENCE,
-            )
-        if total > MAX_SUMMARY_EVIDENCE:
-            raise FindingSummaryUnavailable("summary_input_too_large")
-        result = await to_thread(
+        return await _result(collection_id, objective_id, analysis=current)
+
+
+async def summarize_objective_finding(
+    collection_id: str,
+    objective_id: str,
+    finding_id: str,
+    *,
+    response_client: StructuredResponseClient,
+    user_id: str,
+    analysis_version: int,
+    language: str,
+) -> dict[str, Any]:
+    try:
+        detail = await get_finding(
+            collection_id,
+            objective_id,
+            finding_id,
+            analysis_version=analysis_version,
+            user_id=user_id,
+        )
+    except ResourceConflictException as exc:
+        raise ResourceConflictException(
+            "The published analysis has changed. Reload before generating a summary.",
+            data={"code": "summary_stale_analysis"},
+        ) from exc
+    experiment_backed = await should_read_experiment_projection(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=analysis_version,
+    )
+    if experiment_backed:
+        records, total = await experiment_projection.list_analysis_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=0,
+            limit=MAX_SUMMARY_EVIDENCE,
+        )
+    else:
+        records, total = await ObjectiveRepo.list_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=0,
+            limit=MAX_SUMMARY_EVIDENCE,
+        )
+    if total > MAX_SUMMARY_EVIDENCE:
+        raise FindingSummaryUnavailable("summary_input_too_large")
+    summary_task = asyncio.create_task(
+        to_thread(
             summarize_finding_evidence,
             finding=detail["finding"],
             evidence=[
@@ -344,13 +378,15 @@ class ObjectiveAnalysisService:
                         "selection_status": item.selection_status,
                         "selection_reason": item.selection_reason,
                         "evidence_status": (
-                                experiment_evidence_disposition(item)[0]
-                                if experiment_backed else item.evidence_status
-                            ),
+                            experiment_evidence_disposition(item)[0]
+                            if experiment_backed
+                            else item.evidence_status
+                        ),
                         "evidence_status_reason": (
-                                experiment_evidence_disposition(item)[1]
-                                if experiment_backed else item.evidence_status_reason
-                            ),
+                            experiment_evidence_disposition(item)[1]
+                            if experiment_backed
+                            else item.evidence_status_reason
+                        ),
                         "changed_variables": [
                             {
                                 "name": variable.name,
@@ -493,11 +529,18 @@ class ObjectiveAnalysisService:
                             else None
                         ),
                         "authoring_note": item.authoring_note,
-                        **({
-                            "supports_finding": item.comparison is None or item.comparison.comparable,
-                            "eligible_for_finding_authoring": item.comparison is None or item.comparison.comparable,
-                            "warnings": list(item.warnings),
-                        } if experiment_backed else {}),
+                        **(
+                            {
+                                "supports_finding": item.comparison is None
+                                or item.comparison.comparable,
+                                "eligible_for_finding_authoring": item.comparison
+                                is None
+                                or item.comparison.comparable,
+                                "warnings": list(item.warnings),
+                            }
+                            if experiment_backed
+                            else {}
+                        ),
                         **({"warnings": list(item.warnings)} if item.warnings else {}),
                         **(
                             {
@@ -505,7 +548,8 @@ class ObjectiveAnalysisService:
                                     dict(item) for item in item.related_source_refs
                                 ]
                             }
-                            if item.related_source_refs or item.related_source_refs_explicit
+                            if item.related_source_refs
+                            or item.related_source_refs_explicit
                             else {}
                         ),
                     }
@@ -513,199 +557,33 @@ class ObjectiveAnalysisService:
                 for item in records
             ],
             language=language,
-            response_client=self._get_summary_client(),
+            response_client=response_client,
         )
-        try:
-            await _published_version(collection_id, objective_id, analysis_version)
-        except ResourceConflictException as exc:
-            raise ResourceConflictException(
-                "The published analysis has changed. Reload before generating a summary.",
-                data={"code": "summary_stale_analysis"},
-            ) from exc
-        return result
+    )
+    try:
+        result = await asyncio.shield(summary_task)
+    except asyncio.CancelledError:
+        await asyncio.gather(summary_task, return_exceptions=True)
+        raise
+    try:
+        await _published_version(collection_id, objective_id, analysis_version)
+    except ResourceConflictException as exc:
+        raise ResourceConflictException(
+            "The published analysis has changed. Reload before generating a summary.",
+            data={"code": "summary_stale_analysis"},
+        ) from exc
+    return result
 
 
-    async def recover_interrupted_analyses(self) -> int:
-        interrupted_count = await ObjectiveRepo.interrupt_active_analyses()
-        if interrupted_count:
-            logger.warning(
-                "Recovered interrupted Objective analyses count=%s",
-                interrupted_count,
-            )
-        return interrupted_count
-
-    async def start_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_ids: tuple[str, ...],
-        *,
-        user_id: str,
-    ) -> dict[str, Any]:
-        """Confirm, queue, and asynchronously dispatch one canonical analysis."""
-        await collection_service.get_collection_for_user(collection_id, user_id)
-
-        payload = await queue_analysis(
-            collection_id,
-            objective_id,
-            document_ids,
-        )
-        analysis = payload.get("analysis")
-        if analysis is None or analysis.status != "queued":
-            return payload
-
-        coroutine = self._execute_scheduled_analysis(
-            collection_id,
-            objective_id,
-            analysis.analysis_version,
-        )
-        try:
-            task = create_task(coroutine)
-        except Exception as exc:  # noqa: BLE001
-            coroutine.close()
-            logger.exception(
-                "Objective analysis dispatch failed collection_id=%s "
-                "objective_id=%s analysis_version=%s",
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            )
-            await fail_analysis_dispatch(
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            )
-            raise ObjectiveAnalysisDispatchError(
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            ) from exc
-        self._analysis_tasks.add(task)
-        task.add_done_callback(self._analysis_tasks.discard)
-        task.add_done_callback(_log_unexpected_analysis_failure)
-        return payload
-
-    async def execute_queued_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> dict[str, Any]:
-        try:
-            objective = await _require_objective(collection_id, objective_id)
-            claimed = await ObjectiveRepo.claim_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-            )
-            if claimed is None:
-                return await _result(collection_id, objective.objective_id)
-            usage_started_at = perf_counter()
-            progress_callback = _build_progress_callback(claimed)
-            with (
-                capture_llm_usage() as usage,
-                capture_analysis_diagnostics() as diagnostics,
-            ):
-                artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
-                try:
-                    artifacts = await experiment_analysis_service.generate_experiment_analysis_artifacts(
-                        collection_id,
-                        claimed,
-                        progress_callback=progress_callback,
-                        response_client=self._get_response_client(),
-                        source_screener=self._get_source_screener(),
-                        paper_map_extractor=self._get_paper_map_extractor(),
-                        paper_experiment_extractor=self._get_paper_experiment_extractor(),
-                    )
-                    _validate_artifacts(artifacts)
-                except Exception as exc:
-                    record_analysis_failure(
-                        exc,
-                        collection_id=collection_id,
-                        objective_id=objective_id,
-                        analysis_version=analysis_version,
-                        stage="generate_artifacts",
-                    )
-                    raise
-                finally:
-                    claimed = await ObjectiveRepo.update_analysis_execution_stats(
-                        collection_id,
-                        objective_id,
-                        analysis_version,
-                        stats=usage.execution_stats(
-                            duration_ms=round((perf_counter() - usage_started_at) * 1000)
-                        ),
-                        model_name=(
-                            usage.model_name
-                            or (artifacts.model_name if artifacts is not None else None)
-                            or claimed.model_name
-                        ),
-                        prompt_versions=usage.prompt_versions,
-                        diagnostics=diagnostics.records,
-                    )
-            async with AsyncSessionLocal() as db, db.begin():
-                native_result = await experiment_analysis_writer.write_experiment_analysis(
-                    db=db,
-                    collection_id=collection_id,
-                    objective=objective,
-                    analysis=claimed,
-                    experiment_outputs=artifacts.experiment_outputs,
-                    partial_experiment_outputs=artifacts.partial_experiment_outputs,
-                    reused_revisions=artifacts.reused_revisions,
-                )
-                abstention_reason, abstention_note = _experiment_abstention(native_result)
-                objective, completed = await ObjectiveRepo.publish_experiment_analysis(
-                    db,
-                    collection_id,
-                    objective_id,
-                    analysis_version,
-                    contributions=artifacts.contributions,
-                    abstention_reason=abstention_reason,
-                    abstention_note=abstention_note,
-                )
-            return await _result(collection_id, objective.objective_id, analysis=completed)
-        except Exception as exc:  # noqa: BLE001
-            record_analysis_failure(
-                exc,
-                collection_id=collection_id,
-                objective_id=objective_id,
-                analysis_version=analysis_version,
-                stage="execute_analysis",
-            )
-            logger.error(
-                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
-                collection_id,
-                objective_id,
-                analysis_version,
-                type(exc).__name__,
-            )
-            current = await ObjectiveRepo.read_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-            )
-            if current is not None and current.status in {"queued", "running"}:
-                current = await ObjectiveRepo.fail_analysis(
-                    collection_id,
-                    objective_id,
-                    analysis_version,
-                    error_code=_error_code(exc),
-                    error_message=analysis_error_message(_error_code(exc)),
-                )
-            return await _result(collection_id, objective_id, analysis=current)
-
-    async def _execute_scheduled_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> dict[str, Any]:
-        async with self._analysis_semaphore:
-            return await self.execute_queued_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-            )
+async def start_objective_analysis(
+    collection_id: str,
+    objective_id: str,
+    document_ids: tuple[str, ...],
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    return await queue_analysis(collection_id, objective_id, document_ids)
 
 
 async def queue_analysis(
@@ -724,25 +602,6 @@ async def queue_analysis(
         pipeline_version=_PIPELINE_VERSION,
         model_name=None,
         prompt_versions={},
-    )
-    return await _result(collection_id, objective.objective_id, analysis=analysis)
-
-
-async def fail_analysis_dispatch(
-    collection_id: str,
-    objective_id: str,
-    analysis_version: int,
-) -> dict[str, Any]:
-    objective = await _require_objective(collection_id, objective_id)
-    analysis = await ObjectiveRepo.fail_analysis(
-        collection_id,
-        objective_id,
-        analysis_version,
-        error_code="analysis_dispatch_failed",
-        error_message=(
-            "Objective analysis could not be scheduled. Retry the analysis."
-        ),
-        expected_status="queued",
     )
     return await _result(collection_id, objective.objective_id, analysis=analysis)
 
@@ -1272,7 +1131,6 @@ async def _finding_evidence_reviews(
     return reviews
 
 
-
 async def list_evidence(
     collection_id: str,
     objective_id: str,
@@ -1633,15 +1491,6 @@ async def _all_published_evidence(
             return tuple(records)
 
 
-def _log_unexpected_analysis_failure(task: Task[dict[str, Any]]) -> None:
-    try:
-        task.result()
-    except CancelledError:
-        logger.info("Objective analysis task cancelled during backend shutdown")
-    except Exception:  # noqa: BLE001
-        logger.exception("Objective analysis crashed after service scheduling")
-
-
 def _validate_artifacts(
     artifacts: ObjectiveExperimentAnalysisArtifacts,
 ) -> None:
@@ -1841,8 +1690,9 @@ async def _published_version(
 
 
 def _build_progress_callback(
-    analysis: ObjectiveAnalysis,
+    job: ObjectiveAnalysisJobSnapshot,
 ) -> Callable[[dict[str, Any]], None]:
+    analysis = job.analysis
     loop = get_running_loop()
     completed_document_ids: set[str] = set()
     progress_lock = Lock()
@@ -1860,6 +1710,7 @@ def _build_progress_callback(
                 analysis.collection_id,
                 analysis.objective_id,
                 analysis.analysis_version,
+                job=job,
                 phase=progress.get("phase") or "running",
                 processed_document_count=max(
                     analysis.processed_document_count,
@@ -1889,10 +1740,7 @@ def _error_code(exc: Exception) -> str:
 
 
 __all__ = [
-    "ObjectiveAnalysisDispatchError",
-    "ObjectiveAnalysisService",
     "queue_analysis",
-    "fail_analysis_dispatch",
     "get_analysis_state",
     "get_analysis_status",
     "list_objectives",

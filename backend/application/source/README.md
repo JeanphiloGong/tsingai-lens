@@ -7,8 +7,8 @@ one-Document preparation orchestration.
 
 - HTTP upload: `controllers/source/collection_routes.py:upload_collection_document`
 - Import implementation: `source_import_service.add_document()`
-- Queue preparation: `DocumentPreparationService.queue_document_preparation()`
-- Execute preparation: `DocumentPreparationService.run_document_preparation()`
+- Queue preparation: `document_preparation_service.queue_document_preparation()`
+- Execute preparation: `document_preparation_service.execute_document_preparation_job()`
 - Read prepared Source: `artifact_input_service` module functions
 
 The preparation input is one stored Document. The output is the current
@@ -55,12 +55,13 @@ and is lazy: discovery or analysis builds it only for the explicitly selected
 ready Documents, then reuses it while its document and PaperMap policy
 fingerprint still match.
 
-The app runtime constructs `DocumentPreparationService` with the actual file
-workspace and object store. Each instance owns its concurrency semaphore, active
-tasks, lazy Source builder, and lazy Profile extractor. HTTP and Agent admission
-use that instance; shutdown cancels and awaits its tasks. Business operations
-and repository instances are imported directly rather than injected as services.
-The Profile build function receives the actual extractor explicitly.
+The queue function stores a `queued` Pipeline Run and returns immediately.
+`scripts/run_document_preparation.py` claims one queued or expired job at a time,
+creates the actual workspace, object store and Profile extractor, and executes
+the Source/Profile business function. Each stage commits only while the claimed
+worker ID and lease version remain current. The entry point owns its operation
+and heartbeat tasks and closes the client and database engine on exit. Run more
+worker processes for concurrency. A Web restart does not interrupt live workers.
 
 The app runtime creates one actual workspace and object store. Collection creation
 and deletion receive that workspace explicitly. Uploads, original-file downloads,
@@ -85,7 +86,7 @@ classification. A completed but scientifically uncertain Profile is reusable.
 - `source_archive_service.py`: Original-file lookup and bounded reproduction
   archives. It verifies stored bytes but does not change Collection state.
 - `document_preparation_service.py`: Source/Profile preparation sequence,
-  concurrency, fingerprinting, and failure handling.
+  fingerprinting, staged publication, and failure handling.
 - `artifact_input_service.py`: current Source loading for downstream consumers.
 - `document_markdown_service.py`: display Markdown from the current Source tree.
 - `reference_extraction_service.py`: deterministic references from one prepared

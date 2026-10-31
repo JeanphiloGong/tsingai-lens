@@ -91,6 +91,17 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         )
         monkeypatch.setattr("repositories.chat_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr(
+            "application.pipeline.pipeline_run_service.AsyncSessionLocal", factory
+        )
+        monkeypatch.setattr(
+            "application.source.document_preparation_service.AsyncSessionLocal", factory
+        )
+        monkeypatch.setattr(
+            "application.core.objectives.objective_discovery_service.AsyncSessionLocal",
+            factory,
+        )
+
+        monkeypatch.setattr(
             "repositories.model_connection_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
@@ -140,20 +151,17 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _patch_domain_model_extractors(monkeypatch):
-    from application.core.document_profiles import service as document_profile_service
-    from application.core.objectives import analysis_service, objective_discovery_service
+    from application.core.document_profiles import extraction
+    from application.core.objectives.llm import structured_response
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
     monkeypatch.setattr(
-        document_profile_service,
-        "build_default_document_profile_extractor",
-        lambda: fake,
+        extraction, "build_default_document_profile_extractor", lambda: fake
     )
-    for owner in (analysis_service, objective_discovery_service):
-        monkeypatch.setattr(
-            owner, "build_default_structured_response_client", lambda: fake
-        )
+    monkeypatch.setattr(
+        structured_response, "build_default_structured_response_client", lambda: fake
+    )
 
 
 @pytest.fixture
@@ -175,13 +183,6 @@ def object_store(collection_workspace):
     return FileObjectStore(collection_workspace.root_dir)
 
 
-@pytest.fixture
-def document_preparation_runtime(collection_workspace, object_store):
-    from application.source.document_preparation_service import DocumentPreparationService
-    return DocumentPreparationService(
-        workspace=collection_workspace,
-        object_store=object_store, max_concurrency=1,
-    )
 
 
 @pytest.fixture

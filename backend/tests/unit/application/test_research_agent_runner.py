@@ -5113,22 +5113,41 @@ async def test_capability_permission_failure_keeps_a_distinct_error_contract(err
 
 
 @pytest.mark.parametrize("confirmation", [None, "candidate"])
-async def test_analysis_prerequisites_return_actionable_rejections_without_scheduling(confirmation):
+async def test_analysis_prerequisites_return_actionable_rejections_without_scheduling(
+    confirmation,
+):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
-    from application.chat.capabilities.objective_analysis import StartObjectiveAnalysisCapability, StartObjectiveAnalysisToolRequest
+    from application.chat.capabilities.objective_analysis import (
+        StartObjectiveAnalysisCapability,
+        StartObjectiveAnalysisToolRequest,
+    )
 
     analysis = SimpleNamespace(start_analysis=AsyncMock())
-    objective_analysis.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
-    objective_analysis.ObjectiveRepo = SimpleNamespace(read_objective=AsyncMock(return_value=(
-            None if confirmation is None else SimpleNamespace(confirmation_status=confirmation)
-        )))
-    capability = StartObjectiveAnalysisCapability(objective_analysis_service=analysis)
+    objective_analysis.collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock()
+    )
+    objective_analysis.ObjectiveRepo = SimpleNamespace(
+        read_objective=AsyncMock(
+            return_value=(
+                None
+                if confirmation is None
+                else SimpleNamespace(confirmation_status=confirmation)
+            )
+        )
+    )
+    capability = StartObjectiveAnalysisCapability()
     result = await capability.execute(
         CapabilityExecutionContext.for_call(_context(), "start-1"),
-        StartObjectiveAnalysisToolRequest(objective_id="objective-1", document_ids=["paper-1"]),
+        StartObjectiveAnalysisToolRequest(
+            objective_id="objective-1", document_ids=["paper-1"]
+        ),
     )
-    assert result.error_code == ("objective_not_found" if confirmation is None else "objective_confirmation_required")
+    assert result.error_code == (
+        "objective_not_found"
+        if confirmation is None
+        else "objective_confirmation_required"
+    )
     assert result.status is ToolResultStatus.FAILED
     analysis.start_analysis.assert_not_awaited()
 

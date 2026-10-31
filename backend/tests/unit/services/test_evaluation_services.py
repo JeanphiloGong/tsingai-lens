@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture, claim_analysis_fixture
+
 from application.chat.capabilities import finding_review
 
 from application.core.objectives.analysis import analysis_record_source
@@ -347,10 +349,8 @@ async def _published_objective_repository(
         model_name="model-1",
         prompt_versions={},
     )
-    running = await repository.claim_analysis(
-        "col-gold",
-        "obj-1",
-        analysis.analysis_version,
+    running = await claim_analysis_fixture(
+        repository, "col-gold", "obj-1", analysis.analysis_version
     )
     assert running is not None
     evidence = ObjectiveEvidence(
@@ -447,6 +447,7 @@ async def _published_objective_repository(
         ),
         evidence_records=(evidence,),
         findings=(finding,),
+        job=analysis_job_fixture(repository, "col-gold", "obj-1", 1),
     )
     return repository
 
@@ -610,7 +611,17 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
         source_analysis_version=1,
         created_by_user_id="researcher-1",
     )
-    await repository.claim_analysis("col-gold", "obj-1", 2)
+    from uuid import uuid4
+
+    queued = await repository.read_analysis("col-gold", "obj-1", 2)
+    async with postgres_session_factory() as db, db.begin():
+        job = await repository.start_authored_analysis(
+            db,
+            queued,
+            user_id="researcher-1",
+            execution_id=f"test-author:{uuid4().hex}",
+        )
+    repository._fixture_jobs[job.analysis.key] = job
     await repository.publish_analysis(
         "col-gold",
         "obj-1",
@@ -620,6 +631,7 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
         ),
         evidence_records=tuple(replace(item, analysis_version=2) for item in evidence),
         findings=tuple(replace(item, analysis_version=2) for item in findings),
+        job=analysis_job_fixture(repository, "col-gold", "obj-1", 2),
     )
 
     class RejectingProjection:

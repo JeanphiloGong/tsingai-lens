@@ -1,3 +1,4 @@
+from tests.support.research_jobs import analysis_job_fixture, claim_analysis_fixture
 from exceptions import ProjectException
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -97,8 +98,8 @@ async def _queue_and_claim(repository):
         model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
-    claimed = await repository.claim_analysis(
-        COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version
+    claimed = await claim_analysis_fixture(
+        repository, COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version
     )
     assert claimed is not None
     return objective, claimed
@@ -197,7 +198,9 @@ async def test_finding_http_revision_and_abstention_are_persisted(
         model_name=None,
         prompt_versions={},
     )
-    analysis = await repository.claim_analysis(COLLECTION_ID, objective.objective_id, 1)
+    analysis = await claim_analysis_fixture(
+        repository, COLLECTION_ID, objective.objective_id, 1
+    )
     experiments = PaperExperimentRepository()
     experiment_analysis_writer.PaperExperimentRepo = experiments
     experiment_analysis_writer.ExperimentAnalysisRepo = ExperimentAnalysisRepository()
@@ -234,7 +237,14 @@ async def test_finding_http_revision_and_abstention_are_persisted(
     )
     async with database.AsyncSessionLocal() as db, db.begin():
         await repository.publish_experiment_analysis(
-            db, COLLECTION_ID, objective.objective_id, 1, contributions=coverage
+            db,
+            COLLECTION_ID,
+            objective.objective_id,
+            1,
+            contributions=coverage,
+            job=analysis_job_fixture(
+                repository, COLLECTION_ID, objective.objective_id, 1
+            ),
         )
     experiment_query_service.PaperExperimentRepo = experiments
     experiment_query_service.ObjectiveExperimentSelectionRepo = (
@@ -272,7 +282,9 @@ async def test_finding_http_revision_and_abstention_are_persisted(
                 ],
             },
         )
-        assert revised.status_code == 200 and revised.json()["code"] == 200, revised.text
+        assert revised.status_code == 200 and revised.json()["code"] == 200, (
+            revised.text
+        )
         current = await query.read_analysis_bundle(
             COLLECTION_ID, objective.objective_id, 2
         )
@@ -295,7 +307,9 @@ async def test_finding_http_revision_and_abstention_are_persisted(
                 ],
             },
         )
-        assert abstained.status_code == 200 and abstained.json()["code"] == 200, abstained.text
+        assert abstained.status_code == 200 and abstained.json()["code"] == 200, (
+            abstained.text
+        )
         assert abstained.json()["data"]["finding"] is None
         assert abstained.json()["data"]["abstention_reason"] == "insufficient_evidence"
     stored = await repository.read_analysis(COLLECTION_ID, objective.objective_id, 3)
@@ -370,11 +384,20 @@ async def test_published_evidence_gap_survives_a_failed_followup(
     assert isinstance(queued, ObjectiveAnalysis)
     assert queued_objective.active_analysis_version == queued.analysis_version
     assert await repository.read_analysis(*queued.key) == queued
-    with pytest.raises(ValueError, match="only running"):
-        async with database.AsyncSessionLocal() as db, db.begin():
-            await repository.publish_experiment_analysis(db, *queued.key)
+    from repositories.objective_repository import (
+        ObjectiveAnalysisJobSnapshot,
+        AnalysisLeaseLostError,
+    )
 
-    running = await repository.claim_analysis(*queued.key)
+    with pytest.raises(AnalysisLeaseLostError):
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await repository.publish_experiment_analysis(
+                db,
+                *queued.key,
+                job=ObjectiveAnalysisJobSnapshot(queued, "not-a-worker", 0),
+            )
+
+    running = await claim_analysis_fixture(repository, *queued.key)
     assert running.status == "running"
     stats = ExecutionStats(
         duration_ms=100,
@@ -386,6 +409,7 @@ async def test_published_evidence_gap_survives_a_failed_followup(
         model_name="analysis-model",
         prompt_versions={},
         diagnostics=(),
+        job=analysis_job_fixture(repository, *queued.key),
     )
     async with database.AsyncSessionLocal() as db, db.begin():
         published_objective, published = await repository.publish_experiment_analysis(
@@ -393,6 +417,7 @@ async def test_published_evidence_gap_survives_a_failed_followup(
             *queued.key,
             abstention_reason="no_comparable_evidence",
             abstention_note="The selected papers report power settings but no comparable porosity measurements.",
+            job=analysis_job_fixture(repository, *queued.key),
         )
     assert published_objective.published_analysis_version == queued.analysis_version
     assert published.status == "succeeded"
@@ -410,11 +435,12 @@ async def test_published_evidence_gap_survives_a_failed_followup(
         model_name="analysis-model",
         prompt_versions={},
     )
-    await repository.claim_analysis(*retry.key)
+    await claim_analysis_fixture(repository, *retry.key)
     failed = await repository.fail_analysis(
         *retry.key,
         error_code="provider_timeout",
         error_message="The source analysis timed out.",
+        job=analysis_job_fixture(repository, *retry.key),
     )
     assert failed.status == "failed"
     assert failed.abstention_reason is None

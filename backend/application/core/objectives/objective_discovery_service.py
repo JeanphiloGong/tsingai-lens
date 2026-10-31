@@ -1,13 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from asyncio import (
-    CancelledError,
-)
-from asyncio import Task as AsyncTask
-from asyncio import (
-    create_task,
     gather,
     get_running_loop,
     run_coroutine_threadsafe,
@@ -25,259 +21,170 @@ from application.core.objectives import (
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
-from application.core.objectives.discovery.paper_understanding.workflow import PaperResearchMapExtractor
-from application.core.objectives.llm.structured_response import (
-    StructuredResponseClient,
-    build_default_structured_response_client,
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
 )
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
 )
 from application.pipeline import pipeline_run_service
 from application.source import collection_service
-from domain.core import ObjectiveFactSet, PreparedDocumentInput
-from exceptions import ServiceUnavailableException
+from domain.core import PreparedDocumentInput
+from infra.persistence.database import AsyncSessionLocal
+from repositories.objective_repository import ObjectiveRepo
+from repositories.paper_map_repository import PaperMapRepo
+from repositories.pipeline_run_repository import (
+    PipelineLeaseLostError,
+    PipelineRun,
+    PipelineRunJobSnapshot,
+    PipelineRunRepo,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
-from repositories.objective_repository import ObjectiveRepo
-from repositories.pipeline_run_repository import PipelineRun
+async def start_objective_discovery(
+    collection_id: str,
+    document_ids: tuple[str, ...],
+    *,
+    user_id: str,
+) -> PipelineRun:
+    """Queue or reuse one collection-level Objective Discovery run."""
+    await collection_service.get_collection_for_user(collection_id, user_id)
+
+    document_inputs = await objective_input_service.resolve_prepared_document_inputs(
+        collection_id,
+        document_ids,
+    )
+    run, _ = await pipeline_run_service.get_or_create_collection_run(
+        collection_id=collection_id,
+        pipeline_name="objective_discovery",
+        input_fingerprint=_objective_discovery_fingerprint(document_inputs),
+        context={
+            "document_inputs": [
+                {
+                    "document_id": item.document_id,
+                    "preparation_fingerprint": item.preparation_fingerprint,
+                }
+                for item in document_inputs
+            ]
+        },
+    )
+    return run
 
 
-class ObjectiveDiscoveryService:
-    """Own the discovery tasks admitted by one application."""
-
-    def __init__(self) -> None:
-        self._workers: set[AsyncTask[PipelineRun]] = set()
-        self._response_client: StructuredResponseClient | None = None
-        self._paper_map_extractor: PaperResearchMapExtractor | None = None
-        self._axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None
-
-    async def close(self) -> None:
-        workers = tuple(self._workers)
-        for worker in workers:
-            worker.cancel()
-        await gather(*workers, return_exceptions=True)
-        if self._response_client is not None:
-            self._response_client.client.close()
-
-    def _get_response_client(self) -> StructuredResponseClient:
-        if self._response_client is None:
-            self._response_client = build_default_structured_response_client()
-        return self._response_client
-
-    def _get_paper_map_extractor(self) -> PaperResearchMapExtractor:
-        if self._paper_map_extractor is None:
-            self._paper_map_extractor = PaperResearchMapExtractor(self._get_response_client())
-        return self._paper_map_extractor
-
-    def _get_axis_equivalence_classifier(self) -> ResearchAxisEquivalenceClassifier:
-        if self._axis_equivalence_classifier is None:
-            self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
-                self._get_response_client()
-            )
-        return self._axis_equivalence_classifier
-
-    async def recover_interrupted_discoveries(self) -> int:
-        """Make persisted discovery runs retryable after a backend restart."""
-
-        run_service = pipeline_run_service
-        active_runs = await run_service.list_interrupted_runs()
-        interrupted_count = 0
-        for run in active_runs:
-            if run.pipeline_name != "objective_discovery":
-                continue
-            await run_service.finish_run(
-                run.run_id,
-                status="failed",
-                current_node="interrupted",
-                progress_percent=run.progress_percent,
-                errors=[
-                    *run.errors,
-                    "Research question formation was interrupted by a backend restart.",
-                ],
-                progress_detail={
-                    "phase": "interrupted",
-                    "unit": "documents",
-                    "message": "Research question formation was interrupted. Retry it.",
-                },
-            )
-            interrupted_count += 1
-        if interrupted_count:
-            logger.warning(
-                "Recovered interrupted Objective Discovery runs count=%s",
-                interrupted_count,
-            )
-        return interrupted_count
-
-    async def start_objective_discovery(
-        self,
-        collection_id: str,
-        document_ids: tuple[str, ...],
-        *,
-        user_id: str,
-    ) -> PipelineRun:
-        """Queue or reuse one collection-level Objective Discovery run."""
-        await collection_service.get_collection_for_user(collection_id, user_id)
-
-        document_inputs = await objective_input_service.resolve_prepared_document_inputs(
-            collection_id,
-            document_ids,
+async def _check_discovery_inputs(
+    db: AsyncSession, job: PipelineRunJobSnapshot
+) -> tuple[PreparedDocumentInput, ...]:
+    await PipelineRunRepo.lock_job(db, job)
+    document_inputs = tuple(
+        PreparedDocumentInput(**item) for item in job.run.context["document_inputs"]
+    )
+    for item in sorted(document_inputs, key=lambda item: item.document_id):
+        record = await collection_service.get_document(
+            job.run.collection_id, item.document_id, db=db
         )
-        run_service = pipeline_run_service
-        run, created = await run_service.get_or_create_collection_run(
-            collection_id=collection_id,
-            pipeline_name="objective_discovery",
-            input_fingerprint=_objective_discovery_fingerprint(document_inputs),
-            context={"document_ids": [item.document_id for item in document_inputs]},
-        )
-        if not created:
-            return run
+        if (
+            record.document.status != "ready"
+            or record.document.preparation_fingerprint != item.preparation_fingerprint
+        ):
+            raise ValueError("discovery document input changed")
+    if _objective_discovery_fingerprint(document_inputs) != job.run.input_fingerprint:
+        raise ValueError("discovery policy or input changed")
+    return document_inputs
 
-        coroutine = self.run_objective_discovery(
-            run.run_id,
-            collection_id,
-            tuple(item.document_id for item in document_inputs),
-        )
-        try:
-            background = create_task(coroutine)
-        except Exception as exc:  # noqa: BLE001
-            coroutine.close()
-            await run_service.finish_run(
-                run.run_id,
-                status="failed",
-                current_node="dispatch_failed",
-                progress_percent=0,
-                errors=["Research question formation could not be scheduled."],
-            )
-            raise ServiceUnavailableException(
-                "Research question formation could not be scheduled. Retry it.",
-                data={
-                    "code": "objective_discovery_dispatch_failed",
-                    "run_id": run.run_id,
-                    "collection_id": collection_id,
-                },
-            ) from exc
-        self._workers.add(background)
-        background.add_done_callback(self._workers.discard)
-        background.add_done_callback(_log_unexpected_failure)
-        return run
 
-    async def run_objective_discovery(
-        self,
-        run_id: str,
-        collection_id: str,
-        document_ids: tuple[str, ...],
-    ) -> PipelineRun:
-        """Execute one admitted discovery run and persist its state."""
-
-        run_service = pipeline_run_service
-        await run_service.update_run(
-            run_id,
-            status="running",
-            current_node="paper_map",
-            progress_percent=5,
-            progress_detail={
-                "phase": "paper_map",
-                "current": 0,
-                "total": len(document_ids),
-                "unit": "documents",
-                "message": "Mapping the selected papers before forming research questions.",
-            },
-        )
-        pending_progress_updates: list[Any] = []
-        progress_callback = _build_discovery_progress_callback(
-            run_id,
-            pending_progress_updates,
-        )
-        try:
-            facts = await self.discover_and_replace_objective_candidates(
-                collection_id,
-                document_ids,
-                progress_callback=progress_callback,
+async def execute_objective_discovery_job(
+    job: PipelineRunJobSnapshot, *, client: StructuredResponseClient
+) -> PipelineRun:
+    run_id = job.run.run_id
+    collection_id = job.run.collection_id
+    pending_progress_updates: list[Any] = []
+    progress_callback = _build_discovery_progress_callback(
+        job, pending_progress_updates
+    )
+    try:
+        async with AsyncSessionLocal() as db, db.begin():
+            document_inputs = await _check_discovery_inputs(db, job)
+            await pipeline_run_service.update_run(
+                run_id, job=job, db=db, current_node="paper_map", progress_percent=5
             )
-            await _flush_progress_updates(pending_progress_updates)
-            return await run_service.finish_run(
-                run_id,
-                status="completed",
-                current_node="objectives_ready",
-                progress_percent=100,
-                progress_detail={
-                    "phase": "objectives_ready",
-                    "current": len(document_ids),
-                    "total": len(document_ids),
-                    "unit": "documents",
-                    "message": "Candidate research questions are ready for review.",
-                    "objective_count": len(facts.research_objectives),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Objective Discovery failed collection_id=%s run_id=%s",
-                collection_id,
-                run_id,
-            )
-            await _flush_progress_updates(pending_progress_updates)
-            await run_service.finish_run(
-                run_id,
-                status="failed",
-                current_node="failed",
-                progress_percent=100,
-                errors=[str(exc)],
-                progress_detail={
-                    "phase": "failed",
-                    "unit": "documents",
-                    "message": "Research question formation failed. Retry it.",
-                },
-            )
-            raise
-
-    async def discover_and_replace_objective_candidates(
-        self,
-        collection_id: str,
-        document_ids: tuple[str, ...],
-        progress_callback: ProgressCallback | None = None,
-    ) -> ObjectiveFactSet:
-        """Build maps for the selected papers, form candidates, and persist them."""
-
-        document_inputs = await objective_input_service.resolve_prepared_document_inputs(
-            collection_id,
-            document_ids,
-        )
         source_inputs = await objective_input_service.load_source_inputs(
-            collection_id,
-            document_inputs=document_inputs,
+            collection_id, document_inputs=document_inputs
         )
         paper_maps = await objective_input_service.load_or_build_paper_maps(
             collection_id,
             document_inputs=document_inputs,
             source_inputs=source_inputs,
-            paper_map_extractor=self._get_paper_map_extractor(),
+            paper_map_extractor=PaperResearchMapExtractor(client),
             progress_callback=progress_callback,
         )
-        candidate_facts = await to_thread(
-            objective_candidate_service.discover_candidate_facts,
-            collection_id,
-            paper_maps=paper_maps,
-            document_inputs=document_inputs,
-            axis_equivalence_classifier=self._get_axis_equivalence_classifier(),
-            progress_callback=progress_callback,
+        async with AsyncSessionLocal() as db, db.begin():
+            await _check_discovery_inputs(db, job)
+            for paper_map in paper_maps:
+                await PaperMapRepo.replace(collection_id, paper_map, db=db)
+        candidate_task = asyncio.create_task(
+            to_thread(
+                objective_candidate_service.discover_candidate_facts,
+                collection_id,
+                paper_maps=paper_maps,
+                document_inputs=document_inputs,
+                axis_equivalence_classifier=ResearchAxisEquivalenceClassifier(client),
+                progress_callback=progress_callback,
+            )
         )
-        await ObjectiveRepo.replace(collection_id, candidate_facts)
-        logger.info(
-            "Research objective candidates finished collection_id=%s paper_map_count=%s objective_count=%s",
-            collection_id,
-            len(paper_maps),
-            len(candidate_facts.research_objectives),
+        try:
+            facts = await asyncio.shield(candidate_task)
+        except asyncio.CancelledError:
+            await asyncio.gather(candidate_task, return_exceptions=True)
+            raise
+        await _flush_progress_updates(pending_progress_updates)
+        async with AsyncSessionLocal() as db, db.begin():
+            await _check_discovery_inputs(db, job)
+            await ObjectiveRepo.replace(collection_id, facts, db=db)
+            return await pipeline_run_service.finish_run(
+                run_id,
+                job=job,
+                db=db,
+                status="completed",
+                current_node="objectives_ready",
+                progress_percent=100,
+                progress_detail={
+                    "phase": "objectives_ready",
+                    "unit": "documents",
+                    "current": len(document_inputs),
+                    "total": len(document_inputs),
+                    "message": "Candidate research questions are ready for review.",
+                    "objective_count": len(facts.research_objectives),
+                },
+            )
+    except PipelineLeaseLostError:
+        raise
+    except Exception as exc:
+        logger.exception("Objective discovery failed run_id=%s", run_id)
+        await _flush_progress_updates(pending_progress_updates)
+        return await pipeline_run_service.finish_run(
+            run_id,
+            job=job,
+            status="failed",
+            current_node="failed",
+            errors=[str(exc)],
+            progress_detail={
+                "phase": "failed",
+                "unit": "documents",
+                "message": "Research question formation failed. Retry it.",
+            },
         )
-        return candidate_facts
+    finally:
+        await _flush_progress_updates(pending_progress_updates)
 
 
 def _build_discovery_progress_callback(
-    run_id: str,
+    job: PipelineRunJobSnapshot,
     pending_updates: list[Any],
 ) -> ProgressCallback:
     loop = get_running_loop()
@@ -305,7 +212,8 @@ def _build_discovery_progress_callback(
             pending_updates.append(
                 run_coroutine_threadsafe(
                     pipeline_run_service.update_run(
-                        run_id,
+                        job.run.run_id,
+                        job=job,
                         current_node=phase,
                         progress_percent=last_percent,
                         progress_detail=dict(progress),
@@ -351,12 +259,3 @@ def _safe_progress_int(value: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-
-
-def _log_unexpected_failure(worker: AsyncTask[PipelineRun]) -> None:
-    try:
-        worker.result()
-    except CancelledError:
-        logger.info("Objective Discovery run cancelled during backend shutdown")
-    except Exception:  # noqa: BLE001
-        logger.exception("Objective Discovery run crashed after scheduling")

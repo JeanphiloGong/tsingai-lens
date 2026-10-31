@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import json
-from asyncio import Semaphore, gather, to_thread
+from asyncio import Semaphore, TaskGroup, to_thread
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -243,24 +245,30 @@ async def load_or_build_paper_maps(
             )
 
         async with build_limit:
-            paper_map = await to_thread(
-                paper_research_map_service.build_document_paper_map,
-                collection_id,
-                document=documents_by_id[document_id],
-                profile=source_inputs["profiles_by_document_id"][document_id],
-                document_tree=source_inputs["document_trees_by_document_id"][
-                    document_id
-                ],
-                paper_map_extractor=paper_map_extractor,
-                progress_callback=report_document_progress,
+            paper_map_task = asyncio.create_task(
+                to_thread(
+                    paper_research_map_service.build_document_paper_map,
+                    collection_id,
+                    document=documents_by_id[document_id],
+                    profile=source_inputs["profiles_by_document_id"][document_id],
+                    document_tree=source_inputs["document_trees_by_document_id"][
+                        document_id
+                    ],
+                    paper_map_extractor=paper_map_extractor,
+                    progress_callback=report_document_progress,
+                )
             )
+            try:
+                paper_map = await asyncio.shield(paper_map_task)
+            except asyncio.CancelledError:
+                await asyncio.gather(paper_map_task, return_exceptions=True)
+                raise
         paper_map = replace(
             paper_map,
             input_fingerprint=map_input_fingerprints[document_id],
             map_version=PAPER_RESEARCH_MAP_POLICY_VERSION,
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
-        await PaperMapRepo.replace(collection_id, paper_map)
         maps_by_document_id[document_id] = paper_map
         completed_map_count += 1
         if progress_callback is not None:
@@ -275,7 +283,9 @@ async def load_or_build_paper_maps(
                 }
             )
 
-    await gather(*(build_map(document_id) for document_id in stale_document_ids))
+    async with TaskGroup() as tasks:
+        for document_id in stale_document_ids:
+            tasks.create_task(build_map(document_id))
     return tuple(maps_by_document_id[document_id] for document_id in document_ids)
 
 

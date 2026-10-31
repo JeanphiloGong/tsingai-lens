@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import pipeline_job_fixture
+
 import pytest
 from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
@@ -41,13 +43,18 @@ async def test_pipeline_run_service_lists_scope_status_and_progress(
         scope_id="doc_b",
         input_fingerprint="fingerprint-b",
     )
-    await service.finish_run(run_a.run_id, status="completed")
+    await service.finish_run(
+        run_a.run_id,
+        status="completed",
+        job=await pipeline_job_fixture(service.PipelineRunRepo, run_a.run_id),
+    )
     await service.finish_run(
         run_b.run_id,
         status="failed",
         current_node="source_parsing",
         progress_percent=35,
         errors=["invalid PDF"],
+        job=await pipeline_job_fixture(service.PipelineRunRepo, run_b.run_id),
     )
 
     runs = await service.list_runs(collection_id="col_a", user_id="user-1")
@@ -80,6 +87,7 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure(
         current_node="source_parsing",
         progress_percent=25,
         progress_detail={"phase": "source_parsing", "unit": "document"},
+        job=await pipeline_job_fixture(service.PipelineRunRepo, run.run_id),
     )
     assert running.nodes[0].status == "running"
 
@@ -88,6 +96,7 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure(
         status="failed",
         current_node="source_parsing",
         errors=["invalid PDF"],
+        job=await pipeline_job_fixture(service.PipelineRunRepo, run.run_id),
     )
     assert failed.status == "failed"
     assert failed.errors == ("invalid PDF",)
@@ -120,7 +129,11 @@ async def test_document_run_reuses_active_and_matching_completed_work(
     assert active_created is False
     assert active.run_id == first.run_id
 
-    await service.finish_run(first.run_id, status="completed")
+    await service.finish_run(
+        first.run_id,
+        status="completed",
+        job=await pipeline_job_fixture(service.PipelineRunRepo, first.run_id),
+    )
     completed, completed_created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -161,7 +174,11 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context(
     assert active.run_id == first.run_id
     assert active.context == {"document_ids": ["doc_a"]}
 
-    await service.finish_run(first.run_id, status="failed")
+    await service.finish_run(
+        first.run_id,
+        status="failed",
+        job=await pipeline_job_fixture(service.PipelineRunRepo, first.run_id),
+    )
     retry, retry_created = await service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -190,6 +207,7 @@ async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
         status="failed",
         current_node="document_profile",
         errors=[raw_error],
+        job=await pipeline_job_fixture(service.PipelineRunRepo, run.run_id),
     )
     detail = await service.get_run(run.run_id, user_id="user-1")
     listing = await service.list_runs(collection_id="col_a", user_id="user-1")

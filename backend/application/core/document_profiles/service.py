@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import json
 import logging
 from asyncio import to_thread
@@ -8,12 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from application.core.document_profiles.extraction import (
-    DOCUMENT_PROFILE_PROMPT_VERSION,
-    DocumentProfileExtractionError,
-    DocumentProfileExtractor,
-    build_default_document_profile_extractor,
-)
+from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileExtractionError, DocumentProfileExtractor
 from application.source import collection_service
 from domain.core.document_profile import (
     PROFILE_STATUS_COMPLETED,
@@ -279,13 +276,20 @@ async def build_document_profile(
         document_id,
         len(document.blocks),
     )
-    profile = await to_thread(
-        _profile_document,
-        collection_id=collection_id,
-        document=document,
-        file_lookup=file_lookup,
-        extractor=extractor,
+    profile_task = asyncio.create_task(
+        to_thread(
+            _profile_document,
+            collection_id=collection_id,
+            document=document,
+            file_lookup=file_lookup,
+            extractor=extractor,
+        )
     )
+    try:
+        profile = await asyncio.shield(profile_task)
+    except asyncio.CancelledError:
+        await asyncio.gather(profile_task, return_exceptions=True)
+        raise
     profile = replace(
         profile,
         source_fingerprint=source_fingerprint,
@@ -293,7 +297,6 @@ async def build_document_profile(
         profile_fingerprint=profile_fingerprint,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
-    await DocumentProfileRepo.replace(collection_id, profile)
     logger.info(
         "Document profile build finished collection_id=%s document_id=%s doc_type=%s warning_count=%s",
         collection_id,

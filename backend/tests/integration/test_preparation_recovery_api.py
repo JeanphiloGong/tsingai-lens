@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 from application.core.document_profiles import service as document_profile_service
@@ -53,17 +52,15 @@ def test_upload_classification_retry_content_and_research_readiness(
             return None
 
     classifier = Classifier()
+    from application.source import document_preparation_service as preparation
+    from controllers.source import pipeline_run_routes
+    from repositories.pipeline_run_repository import PipelineRunRepo
+    from datetime import timedelta
+
     monkeypatch.setattr(
-        document_profile_service,
-        "build_default_document_profile_extractor",
-        lambda: classifier,
-    )
-    preparation = app_client.app.state.runtime.document_preparation_service
-    preparation._source_artifact_builder = parse_sources
-    monkeypatch.setattr(
-        preparation,
+        pipeline_run_routes,
         "queue_document_preparation",
-        preparation.__class__.queue_document_preparation.__get__(preparation),
+        preparation.queue_document_preparation,
     )
     collection_id = _create_collection(app_client, "LPBF classification recovery")
     text = b"Laser power and Ti-6Al-4V porosity\n\nMethods\nLaser power was varied from 100 W to 150 W.\n\nResults\nPorosity decreased from 2.0% to 0.5%."
@@ -72,12 +69,24 @@ def test_upload_classification_retry_content_and_research_readiness(
     document_path = f"/api/v1/collections/{collection_id}/documents/{document_id}"
 
     async def finish_workers():
-        await asyncio.gather(*tuple(preparation._active_workers))
+        job = await PipelineRunRepo.claim_next_document_preparation_job(
+            worker_id="test-worker", lease_duration=timedelta(seconds=300)
+        )
+        assert job is not None
+        await preparation.execute_document_preparation_job(
+            job,
+            workspace=collection_workspace,
+            object_store=app_client.app.state.runtime.object_store,
+            source_artifact_builder=parse_sources,
+            profile_extractor=classifier,
+        )
 
     first = app_client.post(f"{document_path}/preparation")
     assert first.status_code == 200
     app_client.portal.call(finish_workers)
-    first_run = app_client.get(f"/api/v1/pipeline-runs/{first.json()['data']['run_id']}").json()["data"]
+    first_run = app_client.get(
+        f"/api/v1/pipeline-runs/{first.json()['data']['run_id']}"
+    ).json()["data"]
     assert first_run["status"] == "partial_success"
     assert first_run["warnings"]
     profile = app_client.get(f"{document_path}/profile").json()["data"]
@@ -90,7 +99,10 @@ def test_upload_classification_retry_content_and_research_readiness(
         / "documents"
         / document_id
     )
-    assert (source_output_dir / "documents.json").is_file()
+    assert not source_output_dir.exists()
+    assert not tuple(
+        collection_workspace.get_paths(collection_id).output_dir.glob("preparation/*")
+    )
     assert not (source_output_dir / "cache").exists()
     input_service = objective_input_service
     with pytest.raises(ResearchObjectivesNotReadyError):
@@ -104,7 +116,9 @@ def test_upload_classification_retry_content_and_research_readiness(
     assert retry.status_code == 200
     assert retry.json()["data"]["run_id"] != first.json()["data"]["run_id"]
     app_client.portal.call(finish_workers)
-    retry_run = app_client.get(f"/api/v1/pipeline-runs/{retry.json()['data']['run_id']}").json()["data"]
+    retry_run = app_client.get(
+        f"/api/v1/pipeline-runs/{retry.json()['data']['run_id']}"
+    ).json()["data"]
     assert retry_run["status"] == "completed"
     assert retry_run["warnings"] == []
     current_profile = app_client.get(f"{document_path}/profile").json()["data"]

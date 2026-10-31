@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from datetime import datetime, timezone
 
 from domain.core.document_profile import DocumentProfile
@@ -14,7 +17,13 @@ from sqlalchemy import select
 
 
 class DocumentProfileRepository:
-    async def replace(self, collection_id: str, profile: DocumentProfile) -> None:
+    async def replace(
+        self,
+        collection_id: str,
+        profile: DocumentProfile,
+        *,
+        db: AsyncSession | None = None,
+    ) -> None:
         next_profile = {
             "document_id": profile.document_id,
             "title": profile.title,
@@ -27,12 +36,11 @@ class DocumentProfileRepository:
             "profile_fingerprint": profile.profile_fingerprint,
             "generated_at": profile.generated_at,
         }
-        async with AsyncSessionLocal() as db, db.begin():
+        async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             document = await db.get(Document, profile.document_id)
             if document is None or document.collection_id != collection_id:
                 raise FileNotFoundError(
-                    "collection document not found: "
-                    f"{collection_id}/{profile.document_id}"
+                    f"collection document not found: {collection_id}/{profile.document_id}"
                 )
             row = await db.get(DocumentPreparationRow, profile.document_id)
             if row is None:
@@ -48,6 +56,7 @@ class DocumentProfileRepository:
                 return
             row.profile_json = next_profile
             row.updated_at = datetime.now(timezone.utc)
+
 
     async def read(
         self,

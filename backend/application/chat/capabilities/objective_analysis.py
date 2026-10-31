@@ -15,11 +15,6 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from application.core.objectives.analysis_service import (
-    ObjectiveAnalysisDispatchError,
-    ObjectiveAnalysisService,
-    get_analysis_state,
-)
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from exceptions import RequestInvalidException, ResourceConflictException, ResourceNotFoundException
 from pydantic import BaseModel, ConfigDict, Field
@@ -120,10 +115,6 @@ class StartObjectiveAnalysisCapability:
         input_model=StartObjectiveAnalysisToolRequest,
     )
 
-    def __init__(
-        self, *, objective_analysis_service: ObjectiveAnalysisService,
-    ) -> None:
-        self.objective_analysis_service = objective_analysis_service
 
     async def execute(
         self,
@@ -152,17 +143,12 @@ class StartObjectiveAnalysisCapability:
                 error_code="objective_confirmation_required",
                 error_message="Confirm the research Objective before starting analysis.",
             )
-        try:
-            payload = await self.objective_analysis_service.start_analysis(
-                context.collection_id,
-                arguments.objective_id,
-                tuple(arguments.document_ids),
-                user_id=context.user_id,
-            )
-        except ObjectiveAnalysisDispatchError:
-            payload = await get_analysis_state(
-                context.collection_id, arguments.objective_id, user_id=context.user_id
-            )
+        payload = await objective_analysis_service.start_objective_analysis(
+            context.collection_id,
+            arguments.objective_id,
+            tuple(arguments.document_ids),
+            user_id=context.user_id,
+        )
         projection = _project_analysis(payload)
         status = projection["analysis"]["status"]
         ref = _analysis_ref(context.collection_id, arguments.objective_id, projection)
@@ -173,8 +159,7 @@ class StartObjectiveAnalysisCapability:
                 data=projection,
                 resource_refs=(ref,),
                 error_code=(
-                    projection["analysis"].get("error_code")
-                    or "objective_analysis_failed"
+                    projection["analysis"].get("error_code") or "objective_analysis_failed"
                 ),
                 error_message=(
                     projection["analysis"].get("error_message")

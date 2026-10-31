@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture, claim_analysis_fixture
+
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -737,7 +739,9 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
         model_name=None,
         prompt_versions={},
     )
-    analysis = await repository.claim_analysis(collection_id, objective.objective_id, 1)
+    analysis = await claim_analysis_fixture(
+        repository, collection_id, objective.objective_id, 1
+    )
     writer, _, graphs = _writer()
     source = await writer.write_experiment_analysis(
         collection_id=collection_id,
@@ -770,7 +774,14 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
     )
     async with database.AsyncSessionLocal() as db, db.begin():
         await repository.publish_experiment_analysis(
-            db, collection_id, objective.objective_id, 1, contributions=coverage
+            db,
+            collection_id,
+            objective.objective_id,
+            1,
+            contributions=coverage,
+            job=analysis_job_fixture(
+                repository, collection_id, objective.objective_id, 1
+            ),
         )
     query = SimpleNamespace(read_analysis_bundle=AsyncMock(return_value=source))
 

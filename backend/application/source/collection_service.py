@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -229,8 +231,10 @@ async def set_agent_default_permission_for_user(
 async def get_document(
     collection_id: str,
     document_id: str,
+    *,
+    db: AsyncSession | None = None,
 ) -> StoredDocument:
-    record = await CollectionRepo.read_document(collection_id, document_id)
+    record = await CollectionRepo.read_document(collection_id, document_id, db=db)
     if record is None:
         raise ResourceNotFoundException(
             f"document not found: {collection_id}/{document_id}",
@@ -253,8 +257,9 @@ async def update_document_preparation(
     profile_fingerprint: str | None = None,
     parser_version: str | None = None,
     document_analysis_version: str | None = None,
+    db: AsyncSession | None = None,
 ) -> StoredDocument:
-    current = await get_document(collection_id, document_id)
+    current = await get_document(collection_id, document_id, db=db)
     document = current.document
     updated = replace(
         current,
@@ -289,7 +294,7 @@ async def update_document_preparation(
             ),
         ),
     )
-    if not await CollectionRepo.update_document(updated):
+    if not await CollectionRepo.update_document(updated, db=db):
         raise ResourceNotFoundException(
             f"document not found: {collection_id}/{document_id}",
             data={

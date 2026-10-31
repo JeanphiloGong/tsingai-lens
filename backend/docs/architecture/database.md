@@ -436,7 +436,7 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260924_0075`. Revisions `0044` and `0045` move preparation provenance and
+`20261031_0090`. Revisions `0044` and `0045` move preparation provenance and
 Task history into artifact-owned and Pipeline Run records.
 Revisions `0047`-`0053` merge Paper Maps, Chat results, Objective intermediate,
 discovery, evaluation child records, and redundant Source/count storage into
@@ -627,6 +627,10 @@ for Source, Profile, Objective, Evidence, or Finding results.
 | `input_fingerprint` | `VARCHAR(64)` | Yes | — | Identity of the complete input state consumed by the run. A later run writes successor experiment revisions; it does not reuse a per-document scientific checkpoint. |
 | `status` | `VARCHAR(32)` | No | IDX; `queued` / `running` / `completed` / `partial_success` / `failed` | Current technical lifecycle state used for polling and recovery. |
 | `record_json` | `JSONB` | No | — | Complete validated Pipeline Run snapshot: current node, progress, node telemetry, errors, warnings, statistics, context, timestamps, and retry lineage. |
+| `worker_id` | `VARCHAR(255)` | Yes | — | Process identity of the current execution owner. |
+| `lease_version` | `INTEGER` | No | default `0` | Increments on each claim; stale owners cannot publish. |
+| `lease_expires_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Worker-claim index | Expiry used for renewal and takeover. |
+| `heartbeat_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Last successful claim or renewal. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Time the run was admitted. Also mirrored inside the typed snapshot timestamps. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Last run-state update; used to order history and detect interrupted active runs. |
 
@@ -744,6 +748,10 @@ The complete identity is `(collection_id, objective_id, analysis_version)` and l
 | `analysis_version` | `INTEGER` | No | PK (composite); positive integer | Positive analysis version; retries create a new version. |
 | `status` | `VARCHAR(16)` | No | `queued` / `running` / `succeeded` / `failed`; IDX | Lifecycle or execution status for the objective analyses record. |
 | `payload` | `JSONB` | No | — | Frozen document inputs, execution statistics, authored snapshot data, and analysis metadata. Automatic experiment facts are stored in the PaperExperiment family. |
+| `worker_id` | `VARCHAR(255)` | Yes | — | Process identity of the current execution owner. |
+| `lease_version` | `INTEGER` | No | default `0` | Increments on each claim; stale owners cannot publish. |
+| `lease_expires_at` | `TIMESTAMP WITH TIME ZONE` | Yes | Worker-claim index | Expiry used for renewal and takeover. |
+| `heartbeat_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Last successful claim or renewal. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 
@@ -957,4 +965,15 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, currently `20260924_0075` for a fully migrated database. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, currently `20261031_0090` for a fully migrated database. |
+
+## Research Execution Leases
+
+Migration `20261031_0090` adds the execution-owner fields listed for
+`pipeline_runs` and `objective_analyses` above. `ix_pipeline_runs_worker_claim`
+covers `(pipeline_name, status, lease_expires_at, created_at)`;
+`ix_objective_analyses_worker_claim` covers `(status, lease_expires_at, created_at)`.
+Claims increment `lease_version`. Stage, progress, failure and publication
+writes require the same running, unexpired lease. Automatic analysis locks
+Objective before Analysis, then its input and scientific result rows.
+These fields are internal and are not added to HTTP or scientific domain models.

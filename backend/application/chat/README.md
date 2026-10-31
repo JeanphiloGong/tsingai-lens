@@ -613,8 +613,8 @@ Collection context, paper browsing, research-scope preview, and Source inspectio
 handlers import their owning business modules and concrete repositories directly.
 Their classes implement the tool protocol and need no dependency-only constructors.
 Objective proposal, creation, confirmation, derivation and inspection follow the
-same direct calls. Starting an analysis retains the current app's actual
-`ObjectiveAnalysisService` so task scheduling stays with its runtime owner.
+same direct calls. Starting an analysis directly calls the queue function; the independent
+analysis worker owns execution. Preparation submission uses the same direct calls.
 Finding review, Finding authoring, and paper-experiment authoring also call their
 owning modules directly. Draft validation always checks the canonical selections;
 experiment writes read their approved draft and digest from the actual Chat store.

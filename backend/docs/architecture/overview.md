@@ -36,19 +36,16 @@ The scientific meaning belongs to the Core services and analysis stages.
 
 [`../../main.py`](../../main.py) is the assembly point. `create_app()` configures
 routes, middleware, and the startup lifecycle. On startup,
-`build_application_runtime()` binds the database session factory, configures the
-Chat runner and model-call observer, and constructs background worker resources.
-Repositories expose concrete singletons beside their implementations. Controllers
-import stateless application operations directly. Components that own live tasks
-belong to the current app's `ApplicationRuntime`: discovery, document preparation,
-Objective analysis, and Chat use their runtime instances. Shutdown cancels
-and awaits those instances' tasks before
-disposing the engine. The runtime also constructs file resources and background
-workers. Feedback handlers and workers import concrete repositories directly
-and retain only actual engines, builders, handlers and execution limits. The
-Analysis runtime also owns its optional, lazily created Finding summary client;
-its request options remain separate from analysis execution. Startup recovers
-interrupted preparation, discovery, and analysis.
+`build_application_runtime()` binds the database session factory, creates Web file
+resources, and configures the Chat runner and model-call observer. Repositories
+expose concrete singletons beside their implementations; controllers call the
+owning business functions directly. Preparation, discovery and analysis are
+queued in PostgreSQL and executed by concrete scripts. Feedback and dataset
+sample entry points similarly create only their own database and model resources.
+Each worker owns its operation and heartbeat and closes its resources on exit.
+The optional synchronous Finding summary owns a separate request client with
+its existing budget. `ApplicationRuntime` retains Chat's actual streaming
+lifecycle; browser disconnect still leaves the Chat turn running.
 The four legacy snapshot handlers remain unmounted.
 
 `controllers/exception_router.py` owns the four centralized exception handlers;
@@ -303,21 +300,16 @@ import locations.
 
 ## Restart Recovery And Scientific Versioning
 
-The process-local background workers are not durable queues. Before the API
-starts serving requests, startup recovery converts persisted work that no live
-worker can own into retryable state:
+Research jobs are durable execution records. Independent workers claim queued
+jobs or take over expired running leases. `worker_id`, `lease_version`,
+`lease_expires_at` and `heartbeat_at` belong to `pipeline_runs` and
+`objective_analyses`; they are not scientific domain states. Every stage or result
+write checks ownership and fixed inputs in the same transaction as publication.
+A Web restart never interrupts another process's work. Lost leases cancel the
+local operation and heartbeat, and late workers cannot publish.
 
-- queued or running Document preparation runs become failed with the
-  `interrupted` node; a Document left in `processing` returns to `stored`, while
-  already written Source and DocumentProfile artifacts remain
-  available for fingerprinted reuse. Research-facing status projects this
-  technical interruption as `not_started` rather than a scientific failure;
-- queued or running Objective analyses become failed with
-  `analysis_interrupted`; an unpublished interrupted analysis is not projected
-  as active work, so the current state is `not_started` until the researcher
-  retries it; and
-- recovery never resumes a scientific operation from an unknown in-memory
-  position and never treats a restart as a scientific absence or conclusion.
+A Profile failure preserves completed Source and remains retryable. Failed or
+interrupted new analysis work never clears the previous published version.
 
 Published analyses are immutable readable snapshots. An interrupted or failed
 new analysis does not replace the published version. A retry uses the selected

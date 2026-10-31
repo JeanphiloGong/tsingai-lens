@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.objective_repository import ObjectiveAnalysisJobSnapshot
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -158,7 +160,9 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
         lambda **kwargs: bundles[kwargs["document_id"]],
     )
     artifacts = await service.generate_experiment_analysis_artifacts(
-        "collection-1", analysis,
+        "collection-1",
+        analysis,
+        job=ObjectiveAnalysisJobSnapshot(analysis, "test-worker", 1),
         response_client=SimpleNamespace(model="test-model"),
         paper_map_extractor=service_module.PaperResearchMapExtractor(
             SimpleNamespace(model="test-model")

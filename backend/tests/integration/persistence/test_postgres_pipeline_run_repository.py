@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import update_pipeline_fixture
+
 from dataclasses import replace
 
 import pytest
@@ -63,10 +65,13 @@ async def test_document_run_reuses_active_and_matching_completed_work(
     assert (reused_active, created) == (first, False)
 
     completed = replace(
-        first, status=PipelineRunStatus.COMPLETED,
-        timestamps=replace(first.timestamps, started_at=NOW, finished_at="2026-08-27T10:01:00+00:00"),
+        first,
+        status=PipelineRunStatus.COMPLETED,
+        timestamps=replace(
+            first.timestamps, started_at=NOW, finished_at="2026-08-27T10:01:00+00:00"
+        ),
     )
-    assert await runs.update_run(completed) is True
+    await update_pipeline_fixture(runs, completed)
 
     reused_completed, created = await runs.get_or_create_document_run(
         _run("run-matching-request", "fingerprint-a")
@@ -99,9 +104,17 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
     )
     assert (reused_active, created) == (first, False)
 
-    assert await runs.update_run(
-        replace(first, status=PipelineRunStatus.COMPLETED,
-                timestamps=replace(first.timestamps, started_at=NOW, finished_at="2026-08-27T10:01:00+00:00"))
+    await update_pipeline_fixture(
+        runs,
+        replace(
+            first,
+            status=PipelineRunStatus.COMPLETED,
+            timestamps=replace(
+                first.timestamps,
+                started_at=NOW,
+                finished_at="2026-08-27T10:01:00+00:00",
+            ),
+        ),
     )
     retry = _run(
         "run-discovery-retry",
@@ -119,8 +132,11 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
     queued = _run("run-round-trip", "fingerprint-a")
     await runs.add_run(queued)
     source_node = PipelineNodeRun(
-        name="source_parsing", status=PipelineNodeStatus.SUCCEEDED,
-        timestamps=ExecutionTimestamps(started_at=NOW, finished_at="2026-08-27T10:00:10+00:00"),
+        name="source_parsing",
+        status=PipelineNodeStatus.SUCCEEDED,
+        timestamps=ExecutionTimestamps(
+            started_at=NOW, finished_at="2026-08-27T10:00:10+00:00"
+        ),
         output_summary={"block_count": 12},
         stats=ExecutionStats(
             duration_ms=10000,
@@ -132,18 +148,20 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
         ),
     )
     running = replace(
-        queued, status=PipelineRunStatus.RUNNING,
+        queued,
+        status=PipelineRunStatus.RUNNING,
         nodes=(source_node, queued.nodes[1]),
         stats=source_node.stats,
         timestamps=replace(queued.timestamps, started_at=NOW),
-        current_node="document_profile", progress_percent=45,
+        current_node="document_profile",
+        progress_percent=45,
         progress_detail={"unit": "document", "message": "Profiling."},
         warnings=("low confidence title",),
     )
 
-    assert await runs.update_run(running) is True
+    await update_pipeline_fixture(runs, running)
     assert await runs.read_run(running.run_id) == running
-    summary, = await runs.list_runs(collection_id=COLLECTION_ID)
+    (summary,) = await runs.list_runs(collection_id=COLLECTION_ID)
     assert summary.run_id == running.run_id
     assert summary.progress_percent == 45
     assert summary.warnings == ["low confidence title"]

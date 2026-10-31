@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture
+
 from infra.persistence import database
 
 from dataclasses import replace
@@ -194,9 +196,14 @@ async def _publish_next_analysis(objective_repository):
         COLLECTION_ID,
         OBJECTIVE_ID,
         version,
-        contributions=tuple(_contribution(version, document_id) for document_id in ("doc_a", "doc_b")),
+        contributions=tuple(
+            _contribution(version, document_id) for document_id in ("doc_a", "doc_b")
+        ),
         evidence_records=_analysis_evidence(version),
         findings=(_finding(version),),
+        job=analysis_job_fixture(
+            objective_repository, COLLECTION_ID, OBJECTIVE_ID, version
+        ),
     )
     return analysis
 

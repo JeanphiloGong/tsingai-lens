@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from contextlib import nullcontext
 from enum import StrEnum
 from typing import Any
 
@@ -12,7 +13,7 @@ from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -229,6 +230,17 @@ class PipelineRunSummary:
 _ACTIVE_STATUSES = ("queued", "running")
 
 _SUCCESS_STATUSES = ("completed", "partial_success")
+
+
+class PipelineLeaseLostError(RuntimeError):
+    """A superseded pipeline worker cannot change state or publish."""
+
+
+@dataclass(frozen=True)
+class PipelineRunJobSnapshot:
+    run: PipelineRun
+    worker_id: str
+    lease_version: int
 
 
 class PipelineRunRepository:
@@ -688,8 +700,10 @@ class PipelineRunRepository:
             )
             return run, True
 
-    async def read_run(self, run_id: str) -> PipelineRun | None:
-        async with AsyncSessionLocal() as db:
+    async def read_run(
+        self, run_id: str, *, db: AsyncSession | None = None
+    ) -> PipelineRun | None:
+        async with AsyncSessionLocal() if db is None else nullcontext(db) as db:
             row = await db.get(PipelineRunRow, run_id)
             if row is None:
                 return None
@@ -724,9 +738,7 @@ class PipelineRunRepository:
                                         "unreported_request_count", 0
                                     ),
                                 )
-                                for item in (node.get("stats") or {}).get(
-                                    "model_usage", ()
-                                )
+                                for item in (node.get("stats") or {}).get("model_usage", ())
                             ),
                             prompt_versions=(node.get("stats") or {}).get(
                                 "prompt_versions", {}
@@ -756,9 +768,7 @@ class PipelineRunRepository:
                         )
                         for item in (payload.get("stats") or {}).get("model_usage", ())
                     ),
-                    prompt_versions=(payload.get("stats") or {}).get(
-                        "prompt_versions", {}
-                    ),
+                    prompt_versions=(payload.get("stats") or {}).get("prompt_versions", {}),
                 ),
                 timestamps=ExecutionTimestamps(
                     created_at=_iso(row.created_at),
@@ -832,73 +842,173 @@ class PipelineRunRepository:
                 for row in rows
             )
 
-    async def update_run(self, run: PipelineRun) -> bool:
+    async def claim_next_document_preparation_job(
+        self, *, worker_id: str, lease_duration: timedelta
+    ) -> PipelineRunJobSnapshot | None:
+        now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(PipelineRunRow, run.run_id)
-            if row is None:
-                return False
-            row.collection_id = run.collection_id
-            row.pipeline_name = run.pipeline_name
-            row.scope_type = run.scope_type
-            row.scope_id = run.scope_id
-            row.mode = run.mode
-            row.input_fingerprint = run.input_fingerprint
-            row.status = run.status.value
-            row.record_json = {
-                **asdict(run),
-                "status": run.status.value,
-                "nodes": {
-                    node.name: {
-                        **asdict(node),
-                        "dependencies": list(node.dependencies),
-                        "status": node.status.value,
-                        "errors": list(node.errors),
-                        "warnings": list(node.warnings),
-                        "stats": {
-                            "duration_ms": node.stats.duration_ms,
-                            "token_usage": (
-                                asdict(node.stats.token_usage)
-                                if node.stats.token_usage is not None
-                                else None
-                            ),
-                            "model_usage": [
-                                asdict(item) for item in node.stats.model_usage
-                            ],
-                            "unreported_request_count": node.stats.unreported_request_count,
-                            "prompt_versions": dict(node.stats.prompt_versions),
-                        },
-                        "timestamps": {
-                            key: value
-                            for key, value in asdict(node.timestamps).items()
-                            if value is not None or key in ("started_at", "finished_at")
-                        },
-                    }
-                    for node in run.nodes
-                },
-                "errors": list(run.errors),
-                "warnings": list(run.warnings),
-                "stats": {
-                    "duration_ms": run.stats.duration_ms,
-                    "token_usage": (
-                        asdict(run.stats.token_usage)
-                        if run.stats.token_usage is not None
-                        else None
+            row = await db.scalar(
+                select(PipelineRunRow)
+                .where(
+                    PipelineRunRow.pipeline_name == "document_preparation",
+                    or_(
+                        PipelineRunRow.status == "queued",
+                        (PipelineRunRow.status == "running")
+                        & (PipelineRunRow.lease_expires_at <= now),
                     ),
-                    "model_usage": [asdict(item) for item in run.stats.model_usage],
-                    "unreported_request_count": run.stats.unreported_request_count,
-                    "prompt_versions": dict(run.stats.prompt_versions),
-                },
-                "timestamps": {
-                    key: value
-                    for key, value in asdict(run.timestamps).items()
-                    if value is not None or key in ("started_at", "finished_at")
-                },
-            }
-            row.updated_at = _datetime(
-                run.timestamps.updated_at or datetime.now(timezone.utc)
+                )
+                .order_by(PipelineRunRow.created_at, PipelineRunRow.run_id)
+                .with_for_update(skip_locked=True)
+                .limit(1)
             )
-            return True
+            if row is None:
+                return None
+            row.status = "running"
+            row.worker_id = worker_id
+            row.lease_version += 1
+            row.heartbeat_at = now
+            row.lease_expires_at = now + lease_duration
+            row.updated_at = now
+            await db.flush()
+            run = await self.read_run(row.run_id, db=db)
+            return PipelineRunJobSnapshot(
+                run=run, worker_id=worker_id, lease_version=row.lease_version
+            )
 
+
+    async def claim_next_objective_discovery_job(
+        self, *, worker_id: str, lease_duration: timedelta
+    ) -> PipelineRunJobSnapshot | None:
+        now = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
+                select(PipelineRunRow)
+                .where(
+                    PipelineRunRow.pipeline_name == "objective_discovery",
+                    or_(
+                        PipelineRunRow.status == "queued",
+                        (PipelineRunRow.status == "running")
+                        & (PipelineRunRow.lease_expires_at <= now),
+                    ),
+                )
+                .order_by(PipelineRunRow.created_at, PipelineRunRow.run_id)
+                .with_for_update(skip_locked=True)
+                .limit(1)
+            )
+            if row is None:
+                return None
+            row.status = "running"
+            row.worker_id = worker_id
+            row.lease_version += 1
+            row.heartbeat_at = now
+            row.lease_expires_at = now + lease_duration
+            row.updated_at = now
+            await db.flush()
+            run = await self.read_run(row.run_id, db=db)
+            return PipelineRunJobSnapshot(
+                run=run, worker_id=worker_id, lease_version=row.lease_version
+            )
+
+
+    async def renew_lease(
+        self, job: PipelineRunJobSnapshot, *, lease_duration: timedelta
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as db, db.begin():
+            changed = await db.execute(
+                update(PipelineRunRow)
+                .where(
+                    PipelineRunRow.run_id == job.run.run_id,
+                    PipelineRunRow.status == "running",
+                    PipelineRunRow.worker_id == job.worker_id,
+                    PipelineRunRow.lease_version == job.lease_version,
+                    PipelineRunRow.lease_expires_at > now,
+                )
+                .values(heartbeat_at=now, lease_expires_at=now + lease_duration)
+            )
+            if changed.rowcount != 1:
+                raise PipelineLeaseLostError(f"pipeline lease lost: {job.run.run_id}")
+
+    async def lock_job(self, db: AsyncSession, job: PipelineRunJobSnapshot) -> None:
+        # Enqueue locks the collection before looking up its active run.
+        await db.get(Collection, job.run.collection_id, with_for_update=True)
+        if job.run.scope_type == "document":
+            await db.get(Document, job.run.scope_id, with_for_update=True)
+        row = await db.get(PipelineRunRow, job.run.run_id, with_for_update=True)
+        now = datetime.now(timezone.utc)
+        if (
+            row is None
+            or row.status != "running"
+            or row.worker_id != job.worker_id
+            or row.lease_version != job.lease_version
+            or row.lease_expires_at is None
+            or row.lease_expires_at <= now
+        ):
+            raise PipelineLeaseLostError(f"pipeline lease lost: {job.run.run_id}")
+
+    async def update_run(
+        self, run: PipelineRun, *, job: PipelineRunJobSnapshot, db: AsyncSession
+    ) -> None:
+        await self.lock_job(db, job)
+        row = await db.get(PipelineRunRow, job.run.run_id)
+        if run.run_id != job.run.run_id:
+            raise ValueError("pipeline result belongs to another run")
+        row.collection_id = run.collection_id
+        row.pipeline_name = run.pipeline_name
+        row.scope_type = run.scope_type
+        row.scope_id = run.scope_id
+        row.mode = run.mode
+        row.input_fingerprint = run.input_fingerprint
+        row.status = run.status.value
+        row.record_json = {
+            **asdict(run),
+            "status": run.status.value,
+            "nodes": {
+                node.name: {
+                    **asdict(node),
+                    "dependencies": list(node.dependencies),
+                    "status": node.status.value,
+                    "errors": list(node.errors),
+                    "warnings": list(node.warnings),
+                    "stats": {
+                        "duration_ms": node.stats.duration_ms,
+                        "token_usage": (
+                            asdict(node.stats.token_usage)
+                            if node.stats.token_usage is not None
+                            else None
+                        ),
+                        "model_usage": [asdict(item) for item in node.stats.model_usage],
+                        "unreported_request_count": node.stats.unreported_request_count,
+                        "prompt_versions": dict(node.stats.prompt_versions),
+                    },
+                    "timestamps": {
+                        key: value
+                        for key, value in asdict(node.timestamps).items()
+                        if value is not None or key in ("started_at", "finished_at")
+                    },
+                }
+                for node in run.nodes
+            },
+            "errors": list(run.errors),
+            "warnings": list(run.warnings),
+            "stats": {
+                "duration_ms": run.stats.duration_ms,
+                "token_usage": (
+                    asdict(run.stats.token_usage)
+                    if run.stats.token_usage is not None
+                    else None
+                ),
+                "model_usage": [asdict(item) for item in run.stats.model_usage],
+                "unreported_request_count": run.stats.unreported_request_count,
+                "prompt_versions": dict(run.stats.prompt_versions),
+            },
+            "timestamps": {
+                key: value
+                for key, value in asdict(run.timestamps).items()
+                if value is not None or key in ("started_at", "finished_at")
+            },
+        }
+        row.updated_at = _datetime(run.timestamps.updated_at or datetime.now(timezone.utc))
     @staticmethod
     async def _active_run(
         db: AsyncSession,

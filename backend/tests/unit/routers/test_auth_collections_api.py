@@ -191,7 +191,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
         }.issubset(capability_names)
 
 
-def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
+def test_web_lifespan_does_not_claim_or_interrupt_worker_jobs(
     monkeypatch,
     tmp_path,
     auth_session_service,
@@ -207,18 +207,6 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
     from main import create_app
     from repositories.pipeline_run_repository import PipelineRunRepository
 
-    preparation_recovery = AsyncMock(return_value=0)
-    analysis_recovery = AsyncMock(return_value=0)
-    monkeypatch.setattr(
-        document_preparation_service.DocumentPreparationService,
-        "recover_interrupted_runs",
-        preparation_recovery,
-    )
-    monkeypatch.setattr(
-        objective_analysis_service.ObjectiveAnalysisService,
-        "recover_interrupted_analyses",
-        analysis_recovery,
-    )
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
@@ -229,8 +217,7 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
 
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     with TestClient(create_app()):
-        preparation_recovery.assert_awaited_once_with()
-        analysis_recovery.assert_awaited_once_with()
+        assert not hasattr(create_app, "_active_workers")
 
 
 def test_collections_api_requires_login(

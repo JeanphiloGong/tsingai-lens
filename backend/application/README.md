@@ -60,16 +60,12 @@ HTTP controllers import the owning module functions. Those functions use the
 concrete repository singletons defined in `repositories/*_repository.py`.
 They own resource authorization and orchestrate reads, domain decisions, and
 writes; callers pass the actor's user ID explicitly. Stateless operations do not
-need service objects or forwarding interfaces. Runtime components with live
-tasks belong to `ApplicationRuntime`; controllers obtain those components from
-their own app's runtime. `ObjectiveDiscoveryService`,
-`DocumentPreparationService`, `ObjectiveAnalysisService`, and `ChatSessionService`
-retain their own admitted tasks and cancel and await them on shutdown. Chat keeps
-its existing session operations on the runtime owner alongside its runner and
-model-call observer. Feedback handlers and workers call concrete repository
-instances directly; their constructors retain actual engines, handlers, builders
-and execution limits. Lease renewal and terminal writes use the claimed job
-worker identity and lease version.
+need service objects or forwarding interfaces. Research task submission stores work for concrete independent workers. The
+preparation, discovery and analysis entry points own their actual model and file
+resources, claims and lease heartbeats. Feedback and sample worker scripts also
+create only their own resources and never construct the Web runtime.
+`ApplicationRuntime` owns the database, Web file resources and current Chat
+runtime. Chat preserves disconnect continuation, approval and snapshot replay.
 
 External formats are parsed at their input boundary. An expected missing
 resource, invalid decision, stale version, or write conflict is reported by its

@@ -9,7 +9,7 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from application.source import collection_service
-from application.source.document_preparation_service import DocumentPreparationService
+from application.source.document_preparation_service import queue_document_preparation
 from application.pipeline.pipeline_run_service import document_preparation_error_message
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,12 +38,6 @@ class StartResearchProcessCapability:
         input_model=StartResearchProcessToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        document_preparation_service: DocumentPreparationService,
-    ) -> None:
-        self.document_preparation_service = document_preparation_service
 
     async def execute(
         self,
@@ -64,9 +58,7 @@ class StartResearchProcessCapability:
                     "Upload at least one paper before starting literature analysis."
                 ),
             )
-        available_ids = {
-            str(document.get("document_id") or "") for document in documents
-        }
+        available_ids = {str(document.get("document_id") or "") for document in documents}
         requested_ids = tuple(
             dict.fromkeys(
                 str(document_id).strip()
@@ -78,9 +70,7 @@ class StartResearchProcessCapability:
             str(document.get("document_id") or "") for document in documents
         )
         missing_ids = [
-            document_id
-            for document_id in selected_ids
-            if document_id not in available_ids
+            document_id for document_id in selected_ids if document_id not in available_ids
         ]
         if missing_ids:
             return ChatToolResult(
@@ -95,7 +85,7 @@ class StartResearchProcessCapability:
         queued_runs = []
         for document_id in selected_ids:
             queued_runs.append(
-                await self.document_preparation_service.queue_document_preparation(
+                await queue_document_preparation(
                     context.collection_id,
                     document_id,
                     user_id=context.user_id,
@@ -114,7 +104,9 @@ class StartResearchProcessCapability:
             )
             observation["warnings"] = list(run.warnings)
             observation["stats"].update(
-                token_usage=(asdict(run.stats.token_usage) if run.stats.token_usage else None),
+                token_usage=(
+                    asdict(run.stats.token_usage) if run.stats.token_usage else None
+                ),
                 model_usage=[asdict(item) for item in run.stats.model_usage],
                 unreported_request_count=run.stats.unreported_request_count,
             )
@@ -129,12 +121,15 @@ class StartResearchProcessCapability:
                 )
                 record["warnings"] = list(node.warnings)
                 record["stats"].update(
-                    token_usage=(asdict(node.stats.token_usage) if node.stats.token_usage else None),
+                    token_usage=(
+                        asdict(node.stats.token_usage) if node.stats.token_usage else None
+                    ),
                     model_usage=[asdict(item) for item in node.stats.model_usage],
                     unreported_request_count=node.stats.unreported_request_count,
                 )
                 record["timestamps"] = {
-                    key: value for key, value in record["timestamps"].items()
+                    key: value
+                    for key, value in record["timestamps"].items()
                     if value is not None or key in ("started_at", "finished_at")
                 }
                 nodes[node.name] = record

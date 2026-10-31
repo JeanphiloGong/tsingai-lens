@@ -328,27 +328,44 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
     finding, evidence = review_input()
     records = tuple(
         ObjectiveEvidence(
-            collection_id="col-1", objective_id="obj-1", analysis_version=1,
-            evidence_id=item["evidence_id"], document_id=item["document_id"],
-            source_kind=item["source_kind"], source_ref=item["source_ref"],
-            source_excerpt=item["source_excerpt"], page_numbers=tuple(item["page_numbers"]),
-            related_source_refs=(), evidence_role="direct_result",
-            selection_status="extracted", selection_reason=None,
-            changed_variables=(), comparison=None,
+            collection_id="col-1",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id=item["evidence_id"],
+            document_id=item["document_id"],
+            source_kind=item["source_kind"],
+            source_ref=item["source_ref"],
+            source_excerpt=item["source_excerpt"],
+            page_numbers=tuple(item["page_numbers"]),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="extracted",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
             reported_result=ScientificResult(
-                outcome="tensile strength", result_text=item["source_excerpt"],
+                outcome="tensile strength",
+                result_text=item["source_excerpt"],
                 value=item.get("reported_result", {}).get("value"),
-                unit="MPa", direction="unknown",
+                unit="MPa",
+                direction="unknown",
             ),
-            attribution_scope="descriptive_only", scientific_context=ScientificContext(),
-            resolution_status="resolved", failure_reason=None, confidence=0.8,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="resolved",
+            failure_reason=None,
+            confidence=0.8,
         )
         for item in evidence
     )
     objective_analysis_service.ObjectiveRepo = SimpleNamespace(
-        read_analysis=AsyncMock(return_value=SimpleNamespace(
-            status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot",
-        )),
+        read_analysis=AsyncMock(
+            return_value=SimpleNamespace(
+                status="succeeded",
+                origin="human_authored",
+                scientific_record_source="authored_snapshot",
+            )
+        ),
         list_evidence=AsyncMock(return_value=(records, 2)),
     )
     analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
@@ -376,12 +393,11 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
     with pytest.raises(
         ResourceConflictException, match="published analysis has changed"
     ):
-        runtime = service.ObjectiveAnalysisService()
-        runtime._summary_client = ModelStub()
-        await runtime.summarize_finding(
+        await service.summarize_objective_finding(
             "col-1",
             "obj-1",
             "finding-1",
+            response_client=ModelStub(),
             analysis_version=1,
             language="en",
             user_id="user-1",

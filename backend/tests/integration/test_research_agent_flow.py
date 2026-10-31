@@ -29,9 +29,6 @@ class _ObjectiveRepository:
         assert collection_id
         return ()
 
-    async def interrupt_active_analyses(self) -> int:
-        return 0
-
 
 class _CandidateArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")

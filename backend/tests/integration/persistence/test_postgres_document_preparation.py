@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import replace
 
 import pytest
 from application.pipeline import pipeline_run_service
-from application.source import collection_service, document_preparation_service
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from domain.core import DocumentProfile, PaperResearchMap
 from infra.persistence import database
@@ -24,7 +22,6 @@ from repositories.paper_map_repository import PaperMapRepository
 from repositories.pipeline_run_repository import (
     PipelineRunRepository,
 )
-from repositories.source_artifact_repository import SourceArtifactRepository
 from sqlalchemy import select
 from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,
@@ -155,52 +152,56 @@ async def test_paper_map_requires_a_profile_in_the_shared_row(
         await paper_maps.replace(COLLECTION_ID, _paper_map("doc_a"))
 
 
-async def test_postgres_restart_recovery_is_retryable_and_api_readable(
-    document_preparation_runtime,
-    source_repository, tmp_path, *, postgres_session_factory
+async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_readable(
+    source_repository,
+    tmp_path,
+    *,
+    postgres_session_factory,
 ) -> None:
-    collection_service.CollectionRepo = CollectionRepository()
-    await collection_service.update_document_preparation(
-        COLLECTION_ID,
-        "doc_a",
-        status="processing",
-    )
-    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
-    run, created = await pipeline_run_service.get_or_create_document_run(
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import update
+    from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
+    from repositories.pipeline_run_repository import PipelineLeaseLostError
+
+    runs = PipelineRunRepository()
+    pipeline_run_service.PipelineRunRepo = runs
+    run, _ = await pipeline_run_service.get_or_create_document_run(
         collection_id=COLLECTION_ID,
         document_id="doc_a",
         pipeline_name="document_preparation",
         input_fingerprint="restart-input",
     )
-    assert created is True
-    await pipeline_run_service.update_run(run.run_id, status="running")
-    document_preparation_service.collection_service = collection_service
-    document_preparation_service.pipeline_run_service = pipeline_run_service
-    document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
-    document_preparation_service.document_profile_service = object()
-    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_runtime
-
-    recovered = await service.recover_interrupted_runs()
-
-    recovered_run = await pipeline_run_service.get_run(
-        run.run_id, user_id="user_source"
+    original = await runs.claim_next_document_preparation_job(
+        worker_id="old", lease_duration=timedelta(seconds=60)
     )
-    assert recovered == 1
-    assert recovered_run.status == "failed"
-    assert recovered_run.current_node == "interrupted"
+    assert (
+        await runs.claim_next_document_preparation_job(
+            worker_id="new", lease_duration=timedelta(seconds=60)
+        )
+        is None
+    )
+    async with postgres_session_factory() as db, db.begin():
+        await db.execute(
+            update(PipelineRunRow)
+            .where(PipelineRunRow.run_id == run.run_id)
+            .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        )
+    replacement = await runs.claim_next_document_preparation_job(
+        worker_id="new", lease_duration=timedelta(seconds=60)
+    )
+    assert replacement.lease_version == original.lease_version + 1
+    with pytest.raises(PipelineLeaseLostError):
+        await pipeline_run_service.finish_run(run.run_id, job=original, status="failed")
+    finished = await pipeline_run_service.finish_run(
+        run.run_id, job=replacement, status="failed", current_node="source_parsing"
+    )
     from controllers.schemas.source.pipeline_run import pipeline_run_response
 
-    assert PipelineRunResponse(**pipeline_run_response(recovered_run)).status == "failed"
-    assert (
-        await collection_service.get_document(COLLECTION_ID, "doc_a")
-    ).document.status == ("stored")
-
-    retry, retry_created = await pipeline_run_service.get_or_create_document_run(
+    assert PipelineRunResponse(**pipeline_run_response(finished)).status == "failed"
+    retry, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=COLLECTION_ID,
         document_id="doc_a",
         pipeline_name="document_preparation",
         input_fingerprint="restart-input",
     )
-    assert retry_created is True
-    assert retry.run_id != run.run_id
+    assert created and retry.run_id != run.run_id

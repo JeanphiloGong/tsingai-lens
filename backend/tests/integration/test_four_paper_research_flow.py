@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import timedelta
+from functools import partial
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
@@ -504,18 +506,18 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     )
 
     model = _FourPaperResearchModel()
-    from application.core.document_profiles import service as document_profile_service
-    from application.core.objectives import analysis_service, objective_discovery_service
-
-    monkeypatch.setattr(
-        document_profile_service,
-        "build_default_document_profile_extractor",
-        lambda: model,
+    from scripts import (
+        run_document_preparation,
+        run_objective_analysis,
+        run_objective_discovery,
     )
-    for owner in (analysis_service, objective_discovery_service):
-        monkeypatch.setattr(
-            owner, "build_default_structured_response_client", lambda: model
-        )
+
+    worker_options = {
+        "worker_id": "four-paper-worker",
+        "lease_duration": timedelta(seconds=300),
+        "heartbeat_interval": 30,
+        "once": True,
+    }
     with TestClient(create_app()) as client:
         login = client.post(
             f"{API_PREFIX}/auth/login",
@@ -568,6 +570,17 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         assert run_history.status_code == 200
         assert run_history.json()["code"] == 200, run_history.text
         for run in run_history.json()["data"]["items"]:
+            assert run["status"] == "queued"
+            client.portal.call(
+                partial(
+                    run_document_preparation.run_forever,
+                    workspace=client.app.state.runtime.collection_workspace,
+                    object_store=client.app.state.runtime.object_store,
+                    profile_extractor=model,
+                    **worker_options,
+                )
+            )
+        for run in run_history.json()["data"]["items"]:
             completed_run = _wait_for_run(client, run["run_id"])
             assert completed_run["status"] == "completed", completed_run
 
@@ -587,6 +600,10 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         assert discovered.json()["code"] == 200, discovered.text
         discovery_run = discovered.json()["data"]
         assert discovery_run["run_id"]
+        assert discovery_run["status"] == "queued"
+        client.portal.call(
+            partial(run_objective_discovery.run_forever, client=model, **worker_options)
+        )
         completed_discovery = _wait_for_run(
             client,
             discovery_run["run_id"],
@@ -613,6 +630,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         )
         assert queued_analysis.status_code == 200, queued_analysis.text
         assert queued_analysis.json()["code"] == 200, queued_analysis.text
+        client.portal.call(
+            partial(run_objective_analysis.run_forever, client=model, **worker_options)
+        )
         analysis = _wait_for_analysis(client, collection_id, objective_id)
         assert analysis["published_analysis"] is not None, (
             analysis["active_analysis"]["status"],
@@ -634,9 +654,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             for item in evidence.json()["data"]["items"]
             if item["reported_result"] is not None
         ]
-        assert all(
-            item["scientific_context"]["process"] for item in direct_evidence
-        ), direct_evidence
+        assert all(item["scientific_context"]["process"] for item in direct_evidence), (
+            direct_evidence
+        )
         assert {item["document_id"] for item in direct_evidence} == {
             paper_a_id,
             paper_b_id,

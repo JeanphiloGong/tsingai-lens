@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, ANY, Mock
 
 import pytest
 from application.core.objectives.finding_summary import FindingSummaryUnavailable
@@ -26,13 +26,28 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 @pytest.fixture
-def api():
+def api(monkeypatch):
     app = FastAPI()
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
-    service = SimpleNamespace(summarize_finding=AsyncMock())
+    service = SimpleNamespace(
+        summarize_finding=AsyncMock(),
+        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
+    )
+    service.summarize_objective_finding = service.summarize_finding
+    monkeypatch.setattr(
+        research_objective_routes, "objective_analysis_service", service
+    )
+    sdk = SimpleNamespace(close=Mock())
+    sdk.with_options = Mock(return_value=sdk)
+    service.summary_sdk = sdk
+    monkeypatch.setattr(
+        research_objective_routes,
+        "build_default_structured_response_client",
+        lambda: SimpleNamespace(client=sdk),
+    )
     app.state.runtime = SimpleNamespace(objective_analysis_service=service)
     app.dependency_overrides[get_current_user_id] = lambda: "owner-1"
     app.include_router(router, prefix="/api/v1")
@@ -75,8 +90,18 @@ def test_summary_returns_versioned_citations_without_publishing(api):
     )
     assert response.json()["data"]["references"][0]["page_numbers"] == [5]
     service.summarize_finding.assert_awaited_once_with(
-        "col-1", "obj-1", "f-1", analysis_version=2, language="zh", user_id="owner-1"
+        "col-1",
+        "obj-1",
+        "f-1",
+        analysis_version=2,
+        language="zh",
+        user_id="owner-1",
+        response_client=ANY,
     )
+    service.summary_sdk.with_options.assert_called_once_with(
+        timeout=60.0, max_retries=0
+    )
+    service.summary_sdk.close.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -123,6 +148,17 @@ def test_optional_summary_errors_are_explicit_and_safe(api, error, status, code)
     assert "private detail" not in response.text
     if code:
         assert response.json()["data"]["code"] == code
+    service.summary_sdk.close.assert_called_once()
+
+
+def test_summary_closes_client_when_request_options_fail(api):
+    client, service = api
+    service.summary_sdk.with_options.side_effect = RuntimeError("private detail")
+    response = client.post(URL, json={"analysis_version": 1})
+    assert response.json()["data"]["code"] == "summary_generation_failed"
+    assert "private detail" not in response.text
+    service.summarize_finding.assert_not_awaited()
+    service.summary_sdk.close.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -155,14 +191,11 @@ def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
     monkeypatch.setattr(
         research_objective_routes, "objective_analysis_service", analysis_service
     )
-    runtime = analysis_service.ObjectiveAnalysisService()
-    app.state.runtime = SimpleNamespace(objective_analysis_service=runtime)
     app.include_router(router, prefix="/api/v1")
     with TestClient(app) as client:
         response = client.post(URL, json={"analysis_version": 1})
     assert response.status_code == 200
     assert response.json()["code"] == code
-    assert runtime._summary_client is None
     repository.read_objective.assert_not_awaited()
     generate.assert_not_called()
     if access == "anonymous":

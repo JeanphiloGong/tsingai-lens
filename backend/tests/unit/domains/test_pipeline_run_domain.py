@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from application.pipeline import pipeline_run_service
@@ -17,10 +18,13 @@ from repositories.pipeline_run_repository import (
 
 
 class _Runs:
-    async def read_run(self, run_id):
+    async def lock_job(self, db, job):
+        return None
+
+    async def read_run(self, run_id, **_kwargs):
         return self.run
 
-    async def update_run(self, run):
+    async def update_run(self, run, **_kwargs):
         self.run = run
         return True
 
@@ -51,14 +55,24 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
         ("document_profile", ("source_parsing",)),
     ]
     run_id = runs.run.run_id
-    await service.update_run(run_id, status="running", current_node="source_parsing")
-    running = await service.update_run(run_id, current_node="source_parsing")
+    await service.update_run(
+        run_id,
+        status="running",
+        current_node="source_parsing",
+        job=SimpleNamespace(),
+        db=object(),
+    )
+    running = await service.update_run(
+        run_id, current_node="source_parsing", job=SimpleNamespace(), db=object()
+    )
     assert running.nodes[0].status == "running"
     profiling = await service.update_run(
         run_id,
         current_node="document_profile",
         progress_percent=50,
         progress_detail={"unit": "document", "message": "Profiling."},
+        job=SimpleNamespace(),
+        db=object(),
     )
     assert profiling.nodes[0].status == "succeeded"
     assert profiling.nodes[1].status == "running"
@@ -68,6 +82,8 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
         status="failed",
         current_node="document_profile",
         errors=["private provider text"],
+        job=SimpleNamespace(),
+        db=object(),
     )
     assert result.nodes[0].status == "succeeded"
     assert result.nodes[1].status == "failed"
@@ -96,7 +112,9 @@ async def test_progress_without_a_node_keeps_reported_errors():
         context=None,
     )
     runs.run = replace(runs.run, errors=("dispatch failure",))
-    result = await service.update_run(runs.run.run_id, progress_percent=10)
+    result = await service.update_run(
+        runs.run.run_id, progress_percent=10, job=SimpleNamespace(), db=object()
+    )
     assert runs.run.errors == ("dispatch failure",)
     assert result.progress_percent == 10
 
@@ -120,9 +138,15 @@ async def test_partial_success_skips_unstarted_nodes():
         ("objective_candidates", ("paper_map",)),
     ]
     await service.update_run(
-        runs.run.run_id, status="running", current_node="paper_map"
+        runs.run.run_id,
+        status="running",
+        current_node="paper_map",
+        job=SimpleNamespace(),
+        db=object(),
     )
-    result = await service.finish_run(runs.run.run_id, status="partial_success")
+    result = await service.finish_run(
+        runs.run.run_id, status="partial_success", job=SimpleNamespace(), db=object()
+    )
     assert result.nodes[0].status == "succeeded"
     assert result.nodes[1].status == "skipped"
     assert result.nodes[1].timestamps.started_at is None
@@ -133,7 +157,9 @@ async def test_invalid_progress_is_rejected_before_loading():
     pipeline_run_service.PipelineRunRepo = _Runs()
     service = pipeline_run_service
     with pytest.raises(ValueError, match="progress_percent"):
-        await service.update_run("run-1", progress_percent=101)
+        await service.update_run(
+            "run-1", progress_percent=101, job=SimpleNamespace(), db=object()
+        )
 
 
 def test_execution_stats_aggregate_usage_by_model() -> None:

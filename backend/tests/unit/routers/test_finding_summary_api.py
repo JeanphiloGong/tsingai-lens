@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, ANY, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from application.core.objectives.finding_summary import FindingSummaryUnavailable
@@ -40,15 +40,6 @@ def api(monkeypatch):
     monkeypatch.setattr(
         research_objective_routes, "objective_analysis_service", service
     )
-    sdk = SimpleNamespace(close=Mock())
-    sdk.with_options = Mock(return_value=sdk)
-    service.summary_sdk = sdk
-    monkeypatch.setattr(
-        research_objective_routes,
-        "build_default_structured_response_client",
-        lambda: SimpleNamespace(client=sdk),
-    )
-    app.state.runtime = SimpleNamespace(objective_analysis_service=service)
     app.dependency_overrides[get_current_user_id] = lambda: "owner-1"
     app.include_router(router, prefix="/api/v1")
     with TestClient(app) as client:
@@ -96,12 +87,7 @@ def test_summary_returns_versioned_citations_without_publishing(api):
         analysis_version=2,
         language="zh",
         user_id="owner-1",
-        response_client=ANY,
     )
-    service.summary_sdk.with_options.assert_called_once_with(
-        timeout=60.0, max_retries=0
-    )
-    service.summary_sdk.close.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -133,6 +119,11 @@ def test_summary_rejects_unversioned_or_client_supplied_facts(api, payload):
             "summary_stale_analysis",
         ),
         (
+            FindingSummaryUnavailable("summary_generation_failed"),
+            200205,
+            "summary_generation_failed",
+        ),
+        (
             FindingSummaryUnavailable("summary_input_too_large"),
             200205,
             "summary_input_too_large",
@@ -148,17 +139,6 @@ def test_optional_summary_errors_are_explicit_and_safe(api, error, status, code)
     assert "private detail" not in response.text
     if code:
         assert response.json()["data"]["code"] == code
-    service.summary_sdk.close.assert_called_once()
-
-
-def test_summary_closes_client_when_request_options_fail(api):
-    client, service = api
-    service.summary_sdk.with_options.side_effect = RuntimeError("private detail")
-    response = client.post(URL, json={"analysis_version": 1})
-    assert response.json()["data"]["code"] == "summary_generation_failed"
-    assert "private detail" not in response.text
-    service.summarize_finding.assert_not_awaited()
-    service.summary_sdk.close.assert_called_once()
 
 
 @pytest.mark.parametrize(

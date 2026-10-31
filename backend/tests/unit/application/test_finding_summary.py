@@ -427,8 +427,8 @@ async def test_summary_authorizes_before_constructing_provider(monkeypatch):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("provider_fails", [False, True])
-async def test_summary_owns_bounded_provider_until_request_finishes(monkeypatch, provider_fails):
+@pytest.mark.parametrize("failure_stage", [None, "request", "options"])
+async def test_summary_owns_bounded_provider_until_request_finishes(monkeypatch, failure_stage):
     from application.core.objectives import analysis_service as service
     from unittest.mock import Mock
 
@@ -444,13 +444,15 @@ async def test_summary_owns_bounded_provider_until_request_finishes(monkeypatch,
         return client
     def summarize(**kwargs):
         events.append("request")
-        if provider_fails:
+        if failure_stage == "request":
             raise FindingSummaryUnavailable("summary_generation_failed")
         return {"model": "test"}
     provider = SimpleNamespace(
         with_options=Mock(), close=Mock(side_effect=lambda: events.append("close"))
     )
     provider.with_options.return_value = provider
+    if failure_stage == "options":
+        provider.with_options.side_effect = RuntimeError("private provider details")
     client = SimpleNamespace(client=provider)
     monkeypatch.setattr(service, "get_finding", get_finding)
     monkeypatch.setattr(service, "should_read_experiment_projection", AsyncMock(return_value=False))
@@ -458,11 +460,11 @@ async def test_summary_owns_bounded_provider_until_request_finishes(monkeypatch,
     monkeypatch.setattr(service, "build_default_structured_response_client", build)
     monkeypatch.setattr(service, "summarize_finding_evidence", summarize)
     monkeypatch.setattr(service, "_published_version", AsyncMock())
-    if provider_fails:
+    if failure_stage is not None:
         with pytest.raises(FindingSummaryUnavailable):
             await service.summarize_objective_finding("col", "obj", "finding", user_id="user", analysis_version=1, language="en")
     else:
         assert await service.summarize_objective_finding("col", "obj", "finding", user_id="user", analysis_version=1, language="en") == {"model": "test"}
-    assert events == ["authorized", "evidence", "construct", "request", "close"]
+    assert events == ["authorized", "evidence", "construct", *(["request"] if failure_stage != "options" else []), "close"]
     provider.with_options.assert_called_once_with(timeout=60.0, max_retries=0)
     provider.close.assert_called_once()

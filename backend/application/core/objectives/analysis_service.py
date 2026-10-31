@@ -48,7 +48,10 @@ from application.core.objectives.finding_summary import (
     FindingSummaryUnavailable,
     summarize_finding_evidence,
 )
-from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.objectives.llm.structured_response import (
+    StructuredResponseClient,
+    build_default_structured_response_client,
+)
 from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
     ResearchObjectiveNotFoundError,
@@ -311,6 +314,35 @@ async def execute_objective_analysis_job(
 
 
 async def summarize_objective_finding(
+    collection_id: str,
+    objective_id: str,
+    finding_id: str,
+    *,
+    response_client: StructuredResponseClient | None = None,
+    user_id: str,
+    analysis_version: int,
+    language: str,
+) -> dict[str, Any]:
+    owns_client = response_client is None
+    client = response_client or build_default_structured_response_client()
+    if owns_client:
+        client.client = client.client.with_options(timeout=60.0, max_retries=0)
+    try:
+        return await _summarize_objective_finding(
+            collection_id,
+            objective_id,
+            finding_id,
+            response_client=client,
+            user_id=user_id,
+            analysis_version=analysis_version,
+            language=language,
+        )
+    finally:
+        if owns_client:
+            client.client.close()
+
+
+async def _summarize_objective_finding(
     collection_id: str,
     objective_id: str,
     finding_id: str,

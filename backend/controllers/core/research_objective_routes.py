@@ -23,8 +23,6 @@ from controllers.core.research_objective_schemas import (
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.core.research_objectives import analysis_state_response
 from controllers.schemas.source.pipeline_run import PipelineRunResponse, pipeline_run_response
-from application.core.objectives.llm.structured_response import build_default_structured_response_client
-from application.core.objectives.finding_summary import FindingSummaryUnavailable
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -247,29 +245,14 @@ async def summarize_objective_finding(
     body: FindingSummaryRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    await objective_analysis_service.collection_service.get_collection_for_user(
-        collection_id, user_id
+    payload = await objective_analysis_service.summarize_objective_finding(
+        collection_id,
+        objective_id,
+        finding_id,
+        analysis_version=body.analysis_version,
+        language=body.language,
+        user_id=user_id,
     )
-    try:
-        client = build_default_structured_response_client()
-    except Exception as exc:
-        raise FindingSummaryUnavailable("summary_generation_failed") from exc
-    try:
-        try:
-            client.client = client.client.with_options(timeout=60.0, max_retries=0)
-        except Exception as exc:
-            raise FindingSummaryUnavailable("summary_generation_failed") from exc
-        payload = await objective_analysis_service.summarize_objective_finding(
-            collection_id,
-            objective_id,
-            finding_id,
-            analysis_version=body.analysis_version,
-            language=body.language,
-            user_id=user_id,
-            response_client=client,
-        )
-    finally:
-        client.client.close()
     return make_api_response(data=FindingSummaryResponse(**payload))
 
 

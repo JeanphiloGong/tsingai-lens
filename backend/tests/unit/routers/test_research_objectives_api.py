@@ -68,14 +68,12 @@ from repositories.objective_repository import (
     ObjectiveAnalysis,
     StoredObjective,
 )
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from repositories.pipeline_run_repository import (
-    ExecutionStats,
     ExecutionTimestamps,
-    ModelUsage,
     PipelineRun,
     PipelineRunStatus,
-    TokenUsage,
-)
+ )
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 

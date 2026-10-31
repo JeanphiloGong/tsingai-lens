@@ -28,11 +28,11 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261031_0090"
+HEAD_REVISION = "20261101_0091"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 
-def test_model_connection_migration_creates_schema_and_protects_history(
+def test_model_connection_migration_creates_schema_and_protects_records(
     postgres_sync_engine,
 ) -> None:
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
@@ -47,26 +47,21 @@ def test_model_connection_migration_creates_schema_and_protects_history(
         inspector = inspect(connection)
         assert inspector.get_pk_constraint("model_connections")[
             "constrained_columns"
-        ] == ["connection_id", "revision"]
-        assert {
-            item["name"]
-            for item in inspector.get_check_constraints("model_connections")
-        } == {"ck_model_connections_model_connection_revision_positive"}
+        ] == ["connection_id"]
+        assert "revision" not in {
+            item["name"] for item in inspector.get_columns("model_connections")
+        }
+        assert inspector.get_check_constraints("model_connections") == []
         indexes = {
             item["name"]: item for item in inspector.get_indexes("model_connections")
         }
-        assert "ix_model_connections_enabled" in indexes
-        enabled_index = indexes["uq_model_connections_enabled_id"]
-        assert enabled_index["unique"] is True
-        assert enabled_index["column_names"] == ["connection_id"]
-        assert enabled_index["dialect_options"]["postgresql_where"] == "enabled"
+        assert set(indexes) == {"ix_model_connections_enabled"}
 
         connections = Base.metadata.tables["model_connections"]
         now = datetime.now(timezone.utc)
         connection.execute(
             connections.insert().values(
                 connection_id="lab-a",
-                revision=1,
                 display_name="Lab A",
                 base_url="https://model.example.invalid/v1",
                 model="lab-chat-a",
@@ -79,7 +74,7 @@ def test_model_connection_migration_creates_schema_and_protects_history(
                 command.downgrade(config, "20261020_0088")
 
         row = connection.execute(select(connections)).mappings().one()
-        assert (row["connection_id"], row["revision"]) == ("lab-a", 1)
+        assert row["connection_id"] == "lab-a"
         assert row["enabled"] is False
         assert row["api_key_ref"] is None
         assert row["context_window_tokens"] is None
@@ -88,6 +83,90 @@ def test_model_connection_migration_creates_schema_and_protects_history(
         assert (
             MigrationContext.configure(connection).get_current_revision()
             == HEAD_REVISION
+        )
+
+
+def test_model_connection_revision_removal_preserves_configuration(
+    postgres_sync_engine,
+) -> None:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261031_0090")
+        old_connections = Table("model_connections", MetaData(), autoload_with=connection)
+        now = datetime.now(timezone.utc)
+        record = {
+            "connection_id": "lab-a",
+            "revision": 3,
+            "display_name": "Lab A",
+            "base_url": "https://model.example.invalid/v1",
+            "model": "lab-chat-a",
+            "api_key_ref": "env:LENS_MODEL_KEY_LAB_A",
+            "enabled": True,
+            "context_window_tokens": 65536,
+            "max_output_tokens": 8192,
+            "request_timeout_seconds": 180.0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        connection.execute(old_connections.insert().values(record))
+
+        command.upgrade(config, "head")
+        connections = Table("model_connections", MetaData(), autoload_with=connection)
+        expected = {key: value for key, value in record.items() if key != "revision"}
+        assert dict(connection.execute(select(connections)).mappings().one()) == expected
+
+        # Downgrade restores the old shape, not the discarded revision number.
+        command.downgrade(config, "20261031_0090")
+        restored = connection.execute(select(old_connections)).mappings().one()
+        assert dict(restored) == {**expected, "revision": 1}
+        command.upgrade(config, "head")
+        assert dict(connection.execute(select(connections)).mappings().one()) == expected
+
+
+def test_model_connection_revision_removal_refuses_duplicate_ids_without_data_loss(
+    postgres_sync_engine,
+) -> None:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261020_0088")
+        command.upgrade(config, "20261031_0090")
+        connections = Table("model_connections", MetaData(), autoload_with=connection)
+        now = datetime.now(timezone.utc)
+        connection.execute(
+            connections.insert(),
+            [
+                {
+                    "connection_id": "lab-a",
+                    "revision": revision,
+                    "display_name": "Lab A",
+                    "base_url": "https://model.example.invalid/v1",
+                    "model": f"lab-chat-{revision}",
+                    "enabled": revision == 2,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for revision in (1, 2)
+            ],
+        )
+        before = connection.execute(
+            select(connections).order_by(connections.c.revision)
+        ).mappings().all()
+
+        with pytest.raises(RuntimeError, match="Assign distinct connection IDs"):
+            with connection.begin_nested():
+                command.upgrade(config, "head")
+
+        assert connection.execute(
+            select(connections).order_by(connections.c.revision)
+        ).mappings().all() == before
+        assert inspect(connection).get_pk_constraint("model_connections")[
+            "constrained_columns"
+        ] == ["connection_id", "revision"]
+        assert (
+            MigrationContext.configure(connection).get_current_revision()
+            == "20261031_0090"
         )
 
 

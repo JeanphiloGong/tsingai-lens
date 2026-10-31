@@ -328,9 +328,11 @@ lease. Source changes invalidate confirmation while retaining human revisions.
 
 Migration `20261025_0089` adds one PostgreSQL `model_connections` table. Operators
 maintain it with their approved database tools; the application exposes no
-configuration CLI, administrator API, or configuration write route. The primary
-key is `(connection_id, revision)` and a partial unique index permits at most one
-enabled revision per connection. Enabling a row does not verify the provider.
+configuration CLI, administrator API, or configuration write route. Migration
+`20261101_0091` removes configuration revisions: `connection_id` is the primary
+key, and each row is one complete address/model/key-reference configuration.
+Multiple models at the same address use distinct connection IDs. Enabling a row
+does not verify the provider.
 
 The address and model are configuration, not credentials. Store only an
 `api_key_ref`, such as `env:LENS_MODEL_KEY_LAB_A`, and provision its value in the
@@ -338,32 +340,40 @@ server environment. A NULL reference is reserved for services that require no
 API key. Never put a real key in SQL history, database exports, browser state, or
 model audit payloads.
 
-For a new revision, use one transaction and serialize revision allocation for
-that connection. Use a new environment reference if the old credential must
-remain available to bound responses during a rotation. The following values are
-examples for a disposable database, not a live provider configuration:
+Insert configurations directly. The following values show two models at one
+provider address in a disposable database:
 
 ```sql
-BEGIN;
-SELECT pg_advisory_xact_lock(hashtextextended('lab-a', 0));
-UPDATE model_connections
-SET enabled = false, updated_at = now()
-WHERE connection_id = 'lab-a' AND enabled;
 INSERT INTO model_connections (
-  connection_id, revision, display_name, base_url, model, api_key_ref,
+  connection_id, display_name, base_url, model, api_key_ref,
   enabled, context_window_tokens, max_output_tokens,
   request_timeout_seconds, created_at, updated_at
 )
-SELECT 'lab-a', COALESCE(MAX(revision), 0) + 1, 'Lab A',
-       'https://model-a.example.invalid/v1', 'lab-chat-a',
-       'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now()
-FROM model_connections WHERE connection_id = 'lab-a';
-COMMIT;
+VALUES
+  ('lab-a', 'Lab A', 'https://model.example.invalid/v1', 'lab-chat-a',
+   'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now()),
+  ('lab-b', 'Lab B', 'https://model.example.invalid/v1', 'lab-chat-b',
+   'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now());
 ```
 
-Only `enabled` and `updated_at` may change on an existing revision; insert a new
-revision for every other change. This is an operator rule, not a database trigger.
-Do not delete referenced revisions. Disable selection using an UPDATE of
-`enabled`, which leaves history readable. Rollback of an operational change is a
-new revision containing the previous values. Migration downgrade refuses a
-nonempty table, so exporting history alone does not authorize dropping it.
+`list_enabled()` and `read_enabled(connection_id)` expose enabled configurations;
+`read(connection_id)` also reads disabled rows. To hide a configuration from
+selection, set `enabled = false` and update `updated_at`. There is no revision
+allocation or configuration history. This registry alone does not connect Chat
+requests to a selected model.
+
+Before upgrading an existing registry, check for repeated IDs:
+
+```sql
+SELECT connection_id, COUNT(*)
+FROM model_connections
+GROUP BY connection_id
+HAVING COUNT(*) > 1;
+```
+
+Migration `20261101_0091` stops before changing the table if IDs repeat. Assign
+distinct IDs to the configurations to retain, then rerun the migration; it never
+chooses or deletes a row automatically. Other configuration values are preserved.
+Downgrading this migration restores the old schema with revision 1 for every
+row; discarded revision numbers cannot be recovered. Migration `20261025_0089`
+still refuses to drop a nonempty registry.

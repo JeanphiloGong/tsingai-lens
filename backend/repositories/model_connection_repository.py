@@ -1,4 +1,4 @@
-"""PostgreSQL reads and query results for shared model connection revisions."""
+"""PostgreSQL reads and query results for shared model connections."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,7 +13,6 @@ from infra.persistence.postgres.models.model_connection import ModelConnectionRo
 @dataclass(frozen=True)
 class ModelConnectionRecord:
     connection_id: str
-    revision: int
     display_name: str
     base_url: str
     model: str
@@ -37,7 +36,6 @@ class ModelConnectionRepository:
             return tuple(
                 ModelConnectionRecord(
                     connection_id=row.connection_id,
-                    revision=row.revision,
                     display_name=row.display_name,
                     base_url=row.base_url,
                     model=row.model,
@@ -64,7 +62,6 @@ class ModelConnectionRepository:
                 return None
             return ModelConnectionRecord(
                 connection_id=row.connection_id,
-                revision=row.revision,
                 display_name=row.display_name,
                 base_url=row.base_url,
                 model=row.model,
@@ -77,14 +74,13 @@ class ModelConnectionRepository:
                 updated_at=row.updated_at,
             )
 
-    async def read(self, connection_id: str, revision: int) -> ModelConnectionRecord | None:
+    async def read(self, connection_id: str) -> ModelConnectionRecord | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ModelConnectionRow, (connection_id, revision))
+            row = await db.get(ModelConnectionRow, connection_id)
             if row is None:
                 return None
             return ModelConnectionRecord(
                 connection_id=row.connection_id,
-                revision=row.revision,
                 display_name=row.display_name,
                 base_url=row.base_url,
                 model=row.model,

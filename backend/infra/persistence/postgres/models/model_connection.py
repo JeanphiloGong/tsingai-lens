@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from infra.persistence.postgres.base import Base
 
@@ -9,7 +9,6 @@ class ModelConnectionRow(Base):
     __tablename__ = "model_connections"
 
     connection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
@@ -22,12 +21,5 @@ class ModelConnectionRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
-        CheckConstraint("revision >0", name="model_connection_revision_positive"),
         Index("ix_model_connections_enabled", "enabled"),
-        Index(
-            "uq_model_connections_enabled_id",
-            "connection_id",
-            unique=True,
-            postgresql_where=text("enabled"),
-        )
     )

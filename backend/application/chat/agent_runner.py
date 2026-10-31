@@ -59,6 +59,12 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
+from exceptions import (
+    PermissionDeniedException,
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 from utils.logger import get_request_id
 
 logger = logging.getLogger(__name__)
@@ -2631,7 +2637,19 @@ class ResearchAgentRunner:
                 str(exc)[:500],
                 data={"recoverable": True},
             )
-        except PermissionError:
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ) as exc:
+            data = exc.data if isinstance(exc.data, Mapping) else {}
+            call, result = ResearchAgentRunner._failure(
+                call,
+                str(data.get("code") or exc.code),
+                exc.message,
+                data=data,
+            )
+        except (PermissionError, PermissionDeniedException):
             call, result = ResearchAgentRunner._failure(
                 call, "tool_permission_denied", "The current authority does not permit this research action.",
             )

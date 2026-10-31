@@ -657,6 +657,12 @@ The handler calls the owning Source, Core, or Goal service. The Runner does not
 need a branch for each new capability. A read or draft returns an observation;
 an approved write may persist a scientific resource through its existing owner.
 
+Resource, state-conflict and request rejections from the shared business
+exceptions retain their public message, reason and data in the tool observation.
+Objective creation and confirmation preserve their existing tool rejection codes
+and include the owning operation's reason and correction guidance. Ordinary
+`ValueError`, file and unexpected dependency failures remain internal errors.
+
 Provider and capability exception logs contain sanitized metadata only. Provider
 and capability messages, response bodies and tracebacks are omitted; low-risk
 structural model errors may retain a bounded message and source location for

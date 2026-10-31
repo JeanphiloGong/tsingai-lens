@@ -48,6 +48,12 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.chat.permissions import AUTO_ACTIONS
+from exceptions import (
+    PermissionDeniedException,
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -2760,6 +2766,43 @@ async def test_requested_calls_deduplicates_success_only_in_memory_write() -> No
     assert requested == ()
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        ResourceConflictException(
+            "The approved Sources changed; inspect the current plan before retrying.",
+            data={"code": "research_plan_sources_stale", "plan_id": "plan-1"},
+        ),
+        ResourceNotFoundException(
+            "The Objective no longer exists; inspect the available questions.",
+            data={"code": "objective_not_found", "objective_id": "obj-1"},
+        ),
+        RequestInvalidException("Select exactly one outcome before retrying."),
+    ],
+)
+async def test_capability_business_rejection_reaches_the_next_model_turn(error) -> None:
+    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=error)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),
+        ModelTurn(content="当前依据已变化，需要重新检查后再决定。"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((capability,)))
+
+    result = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="检查研究依据",
+    )
+
+    failure = result.tool_results[-1]
+    assert failure.status is ToolResultStatus.FAILED
+    assert failure.error_code == (error.data or {}).get("code", str(error.code))
+    assert failure.error_message == error.message
+    assert failure.data == (error.data or {})
+    call = next(item for item in result.tool_calls if item.name == capability.spec.name)
+    assert call.status is ToolCallStatus.FAILED
+    assert call.error_code == failure.error_code
+    assert any(message.tool_result == failure for message in model.contexts[-1])
+
+
 async def test_capability_exception_is_sanitized_before_returning_to_model(caplog) -> None:
     capability = _Capability(
         "get_collection_context",
@@ -5053,8 +5096,9 @@ async def test_incomplete_curation_is_rejected_before_approval_without_alias_rep
     assert not capability.executed_arguments
 
 
-async def test_capability_permission_failure_keeps_a_distinct_error_contract():
-    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=PermissionError("private authority details"))
+@pytest.mark.parametrize("error", [PermissionError("private authority details"), PermissionDeniedException()])
+async def test_capability_permission_failure_keeps_a_distinct_error_contract(error):
+    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=error)
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),

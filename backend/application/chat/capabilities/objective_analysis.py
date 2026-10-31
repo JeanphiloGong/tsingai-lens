@@ -21,6 +21,7 @@ from application.core.objectives.analysis_service import (
     get_analysis_state,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from exceptions import RequestInvalidException, ResourceConflictException, ResourceNotFoundException
 from pydantic import BaseModel, ConfigDict, Field
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=240)]
@@ -77,12 +78,13 @@ class ConfirmObjectiveCapability:
                 user_id=context.user_id,
                 objective_id=arguments.objective_id,
             )
-        except (ValueError, FileNotFoundError):
+        except (RequestInvalidException, ResourceConflictException, ResourceNotFoundException) as exc:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status=ToolResultStatus.FAILED,
                 error_code="objective_confirmation_rejected",
-                error_message="The Objective could not be confirmed. Check that it exists, has one outcome and still meets its derivation prerequisites.",
+                error_message=f"{exc.message} Check that the Objective exists, has one outcome and still meets its derivation prerequisites.",
+                data=exc.data or {},
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,

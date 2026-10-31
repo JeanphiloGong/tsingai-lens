@@ -5,6 +5,7 @@ from __future__ import annotations
 from application.core.objectives import objective_authoring_service
 
 from domain.chat import ToolResultStatus
+from exceptions import RequestInvalidException, ResourceConflictException, ResourceNotFoundException
 
 from pydantic import ConfigDict, Field, field_validator
 
@@ -70,11 +71,12 @@ class CreateObjectiveCandidateCapability:
                 tool_call_id=context.tool_call_id,
                 **arguments.model_dump(),
             )
-        except (ValueError, FileNotFoundError):
+        except (RequestInvalidException, ResourceConflictException, ResourceNotFoundException) as exc:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
                 error_code="objective_candidate_rejected",
-                error_message="The Objective candidate was rejected. Check its question, single outcome and current published derivation basis.",
+                error_message=f"{exc.message} Check the question, single outcome and current published derivation basis.",
+                data=exc.data or {},
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,

@@ -34,6 +34,7 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from infra.persistence.database import AsyncSessionLocal
+from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
@@ -636,8 +637,9 @@ class ObjectiveRepository:
                     or existing.created_by_user_id != created_by_user_id
                     or replace(existing, rank=None) != replace(objective, rank=None)
                 ):
-                    raise ValueError(
-                        "authored candidate tool call already created a different objective"
+                    raise ResourceConflictException(
+                        "authored candidate tool call already created a different objective",
+                        data={"code": "objective_candidate_identity_conflict", "tool_call_id": created_by_tool_call_id},
                     )
                 return existing
             collision = await db.get(
@@ -645,7 +647,10 @@ class ObjectiveRepository:
                 (objective.collection_id, objective.objective_id),
             )
             if collision is not None:
-                raise ValueError("research objective identity collision")
+                raise ResourceConflictException(
+                    "research objective identity collision",
+                    data={"code": "objective_candidate_identity_conflict", "objective_id": objective.objective_id},
+                )
             maximum_rank = await db.scalar(
                 select(func.max(ObjectiveResearchRecord.rank)).where(
                     ObjectiveResearchRecord.collection_id == objective.collection_id
@@ -3729,8 +3734,9 @@ class ObjectiveRepository:
             .with_for_update()
         )
         if row is None:
-            raise FileNotFoundError(
-                f"research objective not found: {collection_id}/{objective_id}"
+            raise ResourceNotFoundException(
+                "The research Objective was not found.",
+                data={"code": "objective_not_found", "collection_id": collection_id, "objective_id": objective_id},
             )
         return row
 

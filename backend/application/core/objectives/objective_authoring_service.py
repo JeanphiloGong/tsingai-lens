@@ -17,6 +17,7 @@ from domain.core.research_objective import (
     build_research_objective_id,
 )
 from repositories.objective_repository import ObjectiveRepo
+from exceptions import RequestInvalidException, ResourceConflictException, ResourceNotFoundException
 
 
 async def create_chat_assisted_candidate(
@@ -41,22 +42,26 @@ async def create_chat_assisted_candidate(
 
     await collection_service.get_collection_for_user(collection_id, user_id)
     if len(outcomes) != 1:
-        raise ValueError("chat-assisted objective requires exactly one outcome")
+        raise RequestInvalidException("chat-assisted objective requires exactly one outcome")
     if parent_objective_id is not None:
         if parent_analysis_version is None:
-            raise ValueError("derived Objective requires a parent analysis version")
+            raise RequestInvalidException("derived Objective requires a parent analysis version")
         if not derivation_basis:
-            raise ValueError("derived Objective requires a derivation basis")
+            raise RequestInvalidException("derived Objective requires a derivation basis")
         parent = await ObjectiveRepo.read_objective(
             collection_id,
             parent_objective_id,
         )
         if parent is None:
-            raise FileNotFoundError(
-                f"parent research objective not found: {collection_id}/{parent_objective_id}"
+            raise ResourceNotFoundException(
+                "The parent research Objective was not found.",
+                data={"code": "objective_not_found", "objective_id": parent_objective_id},
             )
         if parent.published_analysis_version != parent_analysis_version:
-            raise ValueError("parent Objective analysis version is no longer published")
+            raise ResourceConflictException(
+                "parent Objective analysis version is no longer published",
+                data={"code": "objective_parent_analysis_stale", "objective_id": parent_objective_id},
+            )
         derivation_basis = await _canonicalize_derived_objective_basis(
             collection_id=collection_id,
             parent_objective_id=parent_objective_id,
@@ -103,7 +108,7 @@ async def create_chat_assisted_candidate(
         derivation_basis=tuple(derivation_basis or ()),
     )
     if not is_question_shaped_objective(objective):
-        raise ValueError("chat-assisted objective question is not question-shaped")
+        raise RequestInvalidException("chat-assisted objective question is not question-shaped")
 
     for document_id in dict.fromkeys(
         (*objective.seed_document_ids, *objective.excluded_document_ids)
@@ -159,12 +164,12 @@ async def _canonicalize_derived_objective_basis(
     canonical: list[dict[str, Any]] = []
     for item in derivation_basis:
         if not isinstance(item, Mapping):
-            raise ValueError("objective derivation basis entries must be mappings")
+            raise RequestInvalidException("objective derivation basis entries must be mappings")
         kind = item.get("kind")
         reference_id = item.get("reference_id")
         rationale = item.get("rationale")
         if not kind or not reference_id or not rationale:
-            raise ValueError(
+            raise RequestInvalidException(
                 "objective derivation basis requires reference_id and rationale"
             )
 
@@ -184,7 +189,7 @@ async def _canonicalize_derived_objective_basis(
                     reference_id,
                 )
             if record is None:
-                raise ValueError("Finding is not part of the published parent analysis")
+                raise RequestInvalidException("Finding is not part of the published parent analysis")
             snapshot = {
                 "statement": (record.statement)[:1_000],
             }
@@ -197,7 +202,7 @@ async def _canonicalize_derived_objective_basis(
                 experiment_backed=experiment_backed,
             )
             if record is None:
-                raise ValueError(
+                raise RequestInvalidException(
                     "Evidence gap is not part of the published parent analysis"
                 )
             selection_status = record.selection_status
@@ -206,11 +211,11 @@ async def _canonicalize_derived_objective_basis(
                 else (record.evidence_status, record.evidence_status_reason)
             )
             if selection_status == "failed" or evidence_status == "extraction_failed":
-                raise ValueError(
+                raise RequestInvalidException(
                     "technical extraction failure cannot derive an Objective"
                 )
             if selection_status == "rejected":
-                raise ValueError("rejected Evidence cannot derive an Objective")
+                raise RequestInvalidException("rejected Evidence cannot derive an Objective")
             snapshot = {
                 "evidence_status": evidence_status,
                 "reason": (
@@ -231,7 +236,7 @@ async def _canonicalize_derived_objective_basis(
                 experiment_backed=experiment_backed,
             )
             if record is None:
-                raise ValueError(
+                raise RequestInvalidException(
                     "paper contribution is not part of the published parent analysis"
                 )
             analysis_status = record.analysis_status
@@ -240,7 +245,7 @@ async def _canonicalize_derived_objective_basis(
                 "excluded",
                 "extraction_failed",
             }:
-                raise ValueError("excluded or failed paper cannot derive an Objective")
+                raise RequestInvalidException("excluded or failed paper cannot derive an Objective")
             snapshot = {
                 "document_id": record.document_id,
                 "evidence_disposition": disposition,
@@ -249,7 +254,7 @@ async def _canonicalize_derived_objective_basis(
                 ],
             }
         else:
-            raise ValueError(f"unsupported objective derivation basis kind: {kind}")
+            raise RequestInvalidException(f"unsupported objective derivation basis kind: {kind}")
 
         canonical.append(
             {

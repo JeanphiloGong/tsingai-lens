@@ -26,6 +26,7 @@ from domain.core.research_objective import (
 )
 from domain.core.scientific_fact import ScientificContext, ScientificResult
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from exceptions import RequestInvalidException, ResourceConflictException
 
 pytestmark = pytest.mark.anyio
 
@@ -445,7 +446,7 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(
         created_by_user_id="user-1",
         created_by_tool_call_id="call-retry",
     )
-    with pytest.raises(ValueError, match="already created a different objective"):
+    with pytest.raises(ResourceConflictException, match="already created a different objective"):
         await repository.create_authored_candidate(
             second,
             created_by_user_id="user-1",
@@ -535,7 +536,7 @@ async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_pub
     )
     service = _service(repository=repository)
 
-    with pytest.raises(ValueError, match="analysis version is no longer published"):
+    with pytest.raises(ResourceConflictException, match="analysis version is no longer published"):
         await service.create_chat_assisted_candidate(
             collection_id="col-1",
             user_id="user-1",
@@ -765,7 +766,7 @@ async def test_service_rejects_noncanonical_derivation_basis_before_persistence(
             )
     service = _service(repository=repository)
 
-    with pytest.raises(ValueError, match=expected_error):
+    with pytest.raises(RequestInvalidException, match=expected_error):
         await service.create_chat_assisted_candidate(
             collection_id="col-1",
             user_id="user-1",
@@ -817,7 +818,7 @@ async def test_derived_candidate_requires_the_current_published_parent_version()
     assert created.parent_objective_id == "objective-parent"
     assert repository.created
 
-    with pytest.raises(ValueError, match="no longer published"):
+    with pytest.raises(ResourceConflictException, match="no longer published"):
         await service.create_chat_assisted_candidate(
             **{**kwargs, "tool_call_id": "call-stale", "parent_analysis_version": 2}
         )

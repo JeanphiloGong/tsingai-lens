@@ -48,7 +48,7 @@ class StartResearchProcessCapability:
             context.collection_id,
             context.user_id,
         )
-        documents = tuple(collection.get("documents") or ())
+        documents = collection.documents
         if not documents:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
@@ -58,7 +58,7 @@ class StartResearchProcessCapability:
                     "Upload at least one paper before starting literature analysis."
                 ),
             )
-        available_ids = {str(document.get("document_id") or "") for document in documents}
+        available_ids = {str(document.document.document_id or "") for document in documents}
         requested_ids = tuple(
             dict.fromkeys(
                 str(document_id).strip()
@@ -67,7 +67,7 @@ class StartResearchProcessCapability:
             )
         )
         selected_ids = requested_ids or tuple(
-            str(document.get("document_id") or "") for document in documents
+            str(document.document.document_id or "") for document in documents
         )
         missing_ids = [
             document_id for document_id in selected_ids if document_id not in available_ids

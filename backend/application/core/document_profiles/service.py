@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.collection_repository import StoredCollection
+
 import asyncio
 
 import json
@@ -8,7 +10,7 @@ from asyncio import to_thread
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileExtractionError, DocumentProfileExtractor
 from application.source import collection_service
@@ -548,13 +550,13 @@ def _build_document_content_blocks(
 
 
 def _build_collection_file_lookup(
-    collection: Mapping[str, Any],
+    collection: StoredCollection,
 ) -> dict[str, Any]:
     stored_to_source: dict[str, str] = {}
     resolved_sources: list[str] = []
-    for record in collection["documents"]:
-        original = (record.get("original_filename") or "").strip() or None
-        stored = (record.get("stored_filename") or "").strip() or None
+    for record in collection.documents:
+        original = (record.document.original_filename or "").strip() or None
+        stored = (record.stored_filename or "").strip() or None
         if original:
             resolved_sources.append(original)
         if original and stored:

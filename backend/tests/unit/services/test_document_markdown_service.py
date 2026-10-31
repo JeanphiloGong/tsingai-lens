@@ -52,7 +52,7 @@ async def test_document_markdown_service_projects_source_blocks_and_tables(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
     collection = await collection_service.create_collection("Markdown Collection", workspace=collection_workspace)
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -235,7 +235,7 @@ async def test_document_markdown_preserves_headerless_table_measurements(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
     collection = await collection_service.create_collection("Headerless measurements", workspace=collection_workspace)
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -277,7 +277,7 @@ async def test_document_markdown_service_projects_figure_images(
         "Figure Markdown Collection",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     scratch_asset = (
         collection_workspace.get_paths(collection_id).output_dir
         / "image_assets"
@@ -355,7 +355,7 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_file_is
         "Missing Figure Asset Collection",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     missing_sha256 = sha256(b"missing").hexdigest()
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
@@ -403,7 +403,7 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_is_miss
         tmp_path, postgres_session_factory=postgres_session_factory
     )
     collection = await collection_service.create_collection("Figure Caption Collection", workspace=collection_workspace)
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -447,7 +447,7 @@ async def test_document_markdown_service_falls_back_to_document_text(
         "Markdown Fallback Collection",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -485,7 +485,7 @@ async def test_document_markdown_service_filters_pdf_glyph_garbage(
         "Garbled Markdown Collection",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -561,7 +561,7 @@ async def test_document_markdown_service_keeps_readable_block_with_replacement_g
         tmp_path, postgres_session_factory=postgres_session_factory
     )
     collection = await collection_service.create_collection("Readable Glyph Collection", workspace=collection_workspace)
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -629,7 +629,7 @@ async def test_document_markdown_service_uses_original_filename_for_display(
         "Stored Filename Collection",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     writer = PdfWriter()
     writer.add_blank_page(width=72, height=72)
     pdf = BytesIO()
@@ -648,18 +648,18 @@ async def test_document_markdown_service_uses_original_filename_for_display(
         build_source_documents(
             documents=[
                 {
-                    "id": uploaded["document_id"],
-                    "title": uploaded["stored_filename"],
+                    "id": uploaded.document.document_id,
+                    "title": uploaded.stored_filename,
                     "text": "ignored when block structure is available",
                     "metadata": {
-                        "source_path": uploaded["stored_filename"],
+                        "source_path": uploaded.stored_filename,
                         "source_parser": "docling",
                     },
                 }
             ],
             blocks=[
                 {
-                    "document_id": uploaded["document_id"],
+                    "document_id": uploaded.document.document_id,
                     "block_id": "blk-good",
                     "block_type": "paragraph",
                     "block_order": 1,
@@ -671,14 +671,14 @@ async def test_document_markdown_service_uses_original_filename_for_display(
     )
 
     payload = await markdown_service.get_document_markdown(
-        collection_id, uploaded["document_id"], user_id="local-user",
+        collection_id, uploaded.document.document_id, user_id="local-user",
         object_store=object_store,
     )
 
     assert payload["title"] == "P001-Readable Paper.pdf"
     assert payload["source_filename"] == "P001-Readable Paper.pdf"
     assert payload["markdown"].startswith("# P001-Readable Paper.pdf")
-    assert uploaded["stored_filename"] not in payload["markdown"]
+    assert uploaded.stored_filename not in payload["markdown"]
 
 
 async def test_document_markdown_service_reports_not_ready(
@@ -698,7 +698,7 @@ async def test_document_markdown_service_reports_not_ready(
 
     with pytest.raises(DocumentMarkdownNotReadyError):
         await markdown_service.get_document_markdown(
-            collection["collection_id"], "paper-1", user_id="local-user",
+            collection.collection.collection_id, "paper-1", user_id="local-user",
             object_store=object_store,
         )
 
@@ -714,7 +714,7 @@ async def test_document_markdown_service_reports_missing_document(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
     collection = await collection_service.create_collection("Markdown Missing Document", workspace=collection_workspace)
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,

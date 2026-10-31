@@ -27,6 +27,25 @@ from repositories.paper_map_repository import PaperMapRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 
 
+from domain.source import Collection, Document
+from repositories.collection_repository import StoredCollection, StoredDocument
+
+
+def stored_collection(records):
+    return StoredCollection(
+        collection=Collection("collection-1", "user-1", "Papers", None, "idle"),
+        created_at="2026-11-01", updated_at="2026-11-01",
+        documents=tuple(
+            StoredDocument(
+                document=Document(item["document_id"], item.get("original_filename", item["document_id"]), "digest", None, item["status"], 0),
+                stored_filename=item.get("original_filename", item["document_id"]),
+                storage_key="input/" + item["document_id"], created_at="2026-11-01",
+            )
+            for item in records
+        ),
+    )
+
+
 def document(text, heading="Paper title"):
     return SimpleNamespace(
         document_id="paper-1",
@@ -84,9 +103,7 @@ def test_unprepared_source_remains_unprepared():
     ("No explicitly labelled abstract is available.", "not_found"),
 ])
 def test_browse_prepared_paper_reports_only_real_screening_limitations(text, expected_status):
-    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
-            "documents": [{"document_id": "paper-1", "original_filename": "Preheating.pdf", "status": "ready"}],
-        }))
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection([{"document_id": "paper-1", "original_filename": "Preheating.pdf", "status": "ready"}])))
     collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", title="Preheating", doc_type="experimental", confidence=0.9),
         ]))
@@ -123,9 +140,7 @@ def test_optional_screening_information_does_not_require_researcher_intervention
     if missing == "insufficient_map":
         paper_map.map_status = "insufficient_map"
         paper_map.map_limitations = ("Process scope is not mapped.",)
-    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
-            "documents": [{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}],
-        }))
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection([{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}])))
     collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(
             return_value=[] if missing == "profile" else [profile]
         ))
@@ -162,7 +177,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
             raise OSError("private-storage-detail")
         return document("Abstract: LPBF study.") if document_id == "paper-1" else None
 
-    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={"documents": records}))
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection(records)))
     collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
     collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
     collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
@@ -200,9 +215,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
 
 
 def test_normal_pagination_is_not_a_warning():
-    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
-            "documents": [{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)],
-        }))
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection([{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)])))
     collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
     collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
     collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
@@ -242,7 +255,7 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         },
     ]
     collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock(return_value={"documents": records}),
+        get_collection_for_user=AsyncMock(return_value=stored_collection(records)),
         get_document=AsyncMock(return_value=records[1]),
     )
     sources = SourceArtifactRepository()

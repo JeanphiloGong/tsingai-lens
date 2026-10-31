@@ -149,7 +149,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         client.cookies.set("lens_session", login["session_id"])
         created = client.post(
             "/api/v1/chat-sessions",
-            json={"collection_id": collection["collection_id"]},
+            json={"collection_id": collection.collection.collection_id},
         )
         session_id = created.json()["data"]["session_id"]
 

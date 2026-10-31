@@ -49,16 +49,9 @@ async def register_gold_set(
 async def _collection_document_ids(collection_id: str) -> set[str]:
     keys: set[str] = set()
     collection = await collection_service.get_collection(collection_id)
-    for record in collection["documents"]:
-        for field in (
-            "document_id",
-            "original_filename",
-            "stored_filename",
-            "storage_key",
-        ):
-            value = record.get(field)
-            if value is not None:
-                keys.add(value)
+    for record in collection.documents:
+        keys.update((record.document.document_id, record.document.original_filename,
+                     record.stored_filename, record.storage_key))
     return keys
 
 

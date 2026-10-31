@@ -50,9 +50,9 @@ async def test_goal_service_creates_seed_collection_and_contract(
         "seeded_document_count",
         "source_channels",
     }
-    assert collection["collection_id"] == collection_id
-    assert collection["description"] == "Assess rate capability for LiFePO4."
-    assert collection["documents"] == []
+    assert collection.collection.collection_id == collection_id
+    assert collection.collection.description == "Assess rate capability for LiFePO4."
+    assert collection.documents == ()
 
 
 async def test_goal_service_rejects_empty_goal_signal(

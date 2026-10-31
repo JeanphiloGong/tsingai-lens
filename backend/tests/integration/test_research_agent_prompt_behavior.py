@@ -91,18 +91,18 @@ async def _fixture_collection(
             size_bytes=1,
         ),
         stored_filename="P002-preheating.pdf",
-        storage_key=f"{collection['collection_id']}/P002-preheating.pdf",
+        storage_key=f"{collection.collection.collection_id}/P002-preheating.pdf",
         created_at=now,
         updated_at=now,
     )
     await collection_service.CollectionRepo.add_documents(
-        collection["collection_id"],
+        collection.collection.collection_id,
         (stored_document,),
         updated_at=now,
     )
     sources = SourceArtifactRepository()
     await sources.replace_document(
-        collection["collection_id"],
+        collection.collection.collection_id,
         build_source_documents(
             documents=[record],
             text_units=record.get("text_units", ()),
@@ -113,7 +113,7 @@ async def _fixture_collection(
             figures=record.get("figures", ()),
         )[0],
     )
-    return user_id, collection["collection_id"], document_id, sources
+    return user_id, collection.collection.collection_id, document_id, sources
 
 
 def _runner(

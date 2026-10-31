@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from application.source import collection_service
+from repositories.collection_repository import StoredDocument
 from repositories.paper_map_repository import PaperMapRepo
 from repositories.objective_repository import ObjectiveRepo
 from repositories.document_profile_repository import DocumentProfileRepo
@@ -70,15 +71,15 @@ class GetCollectionContextCapability:
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "collection": {
-                    "collection_id": collection["collection_id"],
-                    "name": collection["name"][:240],
+                    "collection_id": collection.collection.collection_id,
+                    "name": collection.collection.name[:240],
                     "description": (
-                        collection["description"][:1_000]
-                        if collection.get("description")
+                        collection.collection.description[:1_000]
+                        if collection.collection.description
                         else None
                     ),
-                    "status": collection["status"],
-                    "paper_count": collection["paper_count"],
+                    "status": collection.collection.status,
+                    "paper_count": len(collection.documents),
                 },
                 "objective_count": len(objectives),
                 "objectives": objective_records,
@@ -172,12 +173,8 @@ class BrowseCollectionPapersCapability:
             context.collection_id,
             context.user_id,
         )
-        document_records = tuple(collection.get("documents") or ())
-        document_ids = tuple(
-            str(item.get("document_id") or "")
-            for item in document_records
-            if isinstance(item, dict) and str(item.get("document_id") or "").strip()
-        )
+        document_records = collection.documents
+        document_ids = tuple(item.document.document_id for item in document_records)
         profiles = await DocumentProfileRepo.list_collection(
             context.collection_id,
             document_ids=document_ids or None,
@@ -190,9 +187,8 @@ class BrowseCollectionPapersCapability:
         maps_by_id = {paper_map.document_id: paper_map for paper_map in paper_maps}
 
         candidates = [
-            (record, profiles_by_id.get(str(record.get("document_id") or "")))
+            (record, profiles_by_id.get(record.document.document_id))
             for record in document_records
-            if isinstance(record, dict)
         ]
         if arguments.query:
             candidates = [
@@ -205,7 +201,7 @@ class BrowseCollectionPapersCapability:
         ]
         paper_records: list[dict[str, Any]] = []
         for record, profile in visible_candidates:
-            document_id = str(record.get("document_id") or "")
+            document_id = str(record.document.document_id or "")
             paper_map = maps_by_id.get(document_id)
             source_document = None
             try:
@@ -229,7 +225,7 @@ class BrowseCollectionPapersCapability:
                         "stored": "not_prepared",
                         "uploaded": "not_prepared",
                         "failed": "preparation_failed",
-                    }.get(str(record.get("status") or ""), "unavailable")
+                    }.get(str(record.document.status or ""), "unavailable")
             abstract_excerpt, abstract_status = self._abstract_excerpt(source_document)
             screening_limitations: list[str] = []
             if profile is None:
@@ -304,10 +300,10 @@ class BrowseCollectionPapersCapability:
         )
 
     @staticmethod
-    def _matches_query(record: dict[str, Any], profile: Any, query: str) -> bool:
+    def _matches_query(record: StoredDocument, profile: Any, query: str) -> bool:
         values = [
-            record.get("original_filename"),
-            record.get("stored_filename"),
+            record.document.original_filename,
+            record.stored_filename,
             getattr(profile, "title", None),
         ]
         haystack = " ".join(str(value or "") for value in values).casefold()
@@ -316,7 +312,7 @@ class BrowseCollectionPapersCapability:
     @classmethod
     def _paper_record(
         cls,
-        record: dict[str, Any],
+        record: StoredDocument,
         profile: Any,
         paper_map: Any,
         *,
@@ -325,7 +321,7 @@ class BrowseCollectionPapersCapability:
         source_status: str,
         screening_limitations: list[str],
     ) -> dict[str, Any]:
-        document_id = str(record.get("document_id") or "")
+        document_id = str(record.document.document_id or "")
         map_studies = tuple(getattr(paper_map, "studies", ()) or ())
         materials = cls._unique(
             value
@@ -351,15 +347,15 @@ class BrowseCollectionPapersCapability:
         return {
             "document_id": document_id,
             "filename": str(
-                record.get("original_filename")
-                or record.get("stored_filename")
+                record.document.original_filename
+                or record.stored_filename
                 or document_id
             )[:500],
             "title": (
                 str(getattr(profile, "title", None) or "")[:500]
                 or None
             ),
-            "status": str(record.get("status") or "unknown"),
+            "status": str(record.document.status or "unknown"),
             "source_status": source_status,
             "document_type": str(getattr(profile, "doc_type", None) or "uncertain"),
             "profile_confidence": getattr(profile, "confidence", None),

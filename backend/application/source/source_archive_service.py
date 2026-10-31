@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repositories.collection_repository import StoredDocument
+
 import asyncio
 import json
 from pathlib import Path, PurePosixPath
@@ -91,9 +93,9 @@ async def build_source_archive(
     collection = await collection_service.get_collection_for_user(
         collection_id, user_id
     )
-    records = collection["documents"]
-    records_by_document_id = {record["document_id"]: record for record in records}
-    selected_records: list[tuple[str, dict[str, Any]]] = []
+    records = collection.documents
+    records_by_document_id = {record.document.document_id: record for record in records}
+    selected_records: list[tuple[str, StoredDocument]] = []
     for document_id in normalized_document_ids:
         record = records_by_document_id.get(document_id)
         if record is None:
@@ -108,7 +110,7 @@ async def build_source_archive(
         selected_records.append((document_id, record))
 
     selected_size_bytes = sum(
-        max(int(record.get("size_bytes") or 0), 0)
+        max(int(record.document.size_bytes or 0), 0)
         for _document_id, record in selected_records
     )
     if selected_size_bytes > _SOURCE_ARCHIVE_MAX_BYTES:
@@ -146,7 +148,7 @@ async def resolve_document_source_file(
     match_keys = _source_match_keys(document_key, source_filename)
     document_matches = [
         record
-        for record in collection["documents"]
+        for record in collection.documents
         if _source_file_record_matches(record, match_keys)
     ]
     if len(document_matches) == 1:
@@ -175,7 +177,7 @@ async def resolve_document_source_file(
 
 def _write_source_archive(
     collection_id: str,
-    selected_records: list[tuple[str, dict[str, Any]]],
+    selected_records: list[tuple[str, StoredDocument]],
     *,
     object_store: ObjectStore,
 ) -> dict[str, Any]:
@@ -222,9 +224,9 @@ def _write_source_archive(
                         "original_filename": source["filename"],
                         "media_type": source.get("media_type"),
                         "size_bytes": len(content),
-                        "sha256": record.get("sha256"),
-                        "status": record.get("status"),
-                        "created_at": record.get("created_at"),
+                        "sha256": record.document.sha256,
+                        "status": record.document.status,
+                        "created_at": record.created_at,
                     }
                 )
 
@@ -252,15 +254,15 @@ def _write_source_archive(
 
 
 def _source_file_record_matches(
-    record: dict[str, Any],
+    record: StoredDocument,
     match_keys: set[str],
 ) -> bool:
     candidates = (
-        record.get("document_id"),
-        record.get("original_filename"),
-        record.get("stored_filename"),
-        record.get("storage_key"),
-        Path(record.get("storage_key") or "").name,
+        record.document.document_id,
+        record.document.original_filename,
+        record.stored_filename,
+        record.storage_key,
+        Path(record.storage_key or "").name,
     )
     return any(_source_match_value(candidate) in match_keys for candidate in candidates)
 
@@ -285,14 +287,14 @@ def _build_source_file_payload(
     *,
     collection_id: str,
     document_id: str,
-    record: dict[str, Any],
+    record: StoredDocument,
     object_store: ObjectStore,
 ) -> dict[str, Any]:
-    storage_key = record.get("storage_key")
-    expected_sha256 = record.get("sha256")
+    storage_key = record.storage_key
+    expected_sha256 = record.document.sha256
     if not storage_key or not expected_sha256:
         raise DocumentSourceUnavailableError(collection_id, document_id)
-    stored_filename = record.get("stored_filename")
+    stored_filename = record.stored_filename
     if not stored_filename or storage_key != _input_storage_key(
         collection_id, stored_filename
     ):
@@ -321,12 +323,12 @@ def _build_source_file_payload(
             message="The stored source file failed its integrity check.",
         ) from exc
     filename = (
-        record.get("original_filename") or stored_filename or Path(storage_key).name
+        record.document.original_filename or stored_filename or Path(storage_key).name
     )
     return {
         "content": content,
         "filename": filename,
-        "media_type": record.get("media_type"),
+        "media_type": record.document.media_type,
         "source_document_id": document_id,
     }
 

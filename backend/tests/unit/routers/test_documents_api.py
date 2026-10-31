@@ -128,7 +128,7 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
             json.loads(
                 (
                     await documents_controller.list_collection_document_profiles(
-                        collection_id=record["collection_id"],
+                        collection_id=record.collection.collection_id,
                         user_id=_document_request(document_services, object_store=object_store).state.current_user[
                             "user_id"
                         ],
@@ -140,7 +140,7 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
     exc = exc_info.value
     assert exc.code == 200204
     assert exc.data["code"] == "document_profiles_not_ready"
-    assert exc.data["collection_id"] == record["collection_id"]
+    assert exc.data["collection_id"] == record.collection.collection_id
 
 
 async def test_documents_route_returns_404_for_missing_collection(
@@ -185,7 +185,7 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Searchable Collection", workspace=collection_workspace)
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -252,7 +252,7 @@ async def test_document_profile_route_returns_single_profile(
         name="Single Profile Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -299,7 +299,7 @@ async def test_document_profile_route_preserves_normalized_stored_values(
         name="Invalid Profile Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -345,7 +345,7 @@ async def test_document_content_route_uses_stable_block_locator(
         name="Document Locator Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_source_documents(
         document_profile_service.SourceArtifactRepo,
         collection_id,
@@ -430,7 +430,7 @@ async def test_document_markdown_route_returns_markdown_projection(
         name="Markdown Route Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -518,7 +518,7 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
             json.loads(
                 (
                     await documents_controller.get_collection_document_markdown(
-                        collection_id=record["collection_id"],
+                        collection_id=record.collection.collection_id,
                         document_id="paper-1",
                         user_id=_document_request(document_services, object_store=object_store).state.current_user[
                             "user_id"
@@ -532,7 +532,7 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     exc = exc_info.value
     assert exc.code == 200204
     assert exc.data["code"] == "document_markdown_not_ready"
-    assert exc.data["collection_id"] == record["collection_id"]
+    assert exc.data["collection_id"] == record.collection.collection_id
 
 
 @pytest.mark.parametrize("filename, expected_disposition", [
@@ -553,7 +553,7 @@ async def test_document_source_route_streams_current_collection_document(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Source File Collection", workspace=collection_workspace)
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     writer = PdfWriter()
     writer.add_blank_page(width=72, height=72)
     pdf = BytesIO()
@@ -566,7 +566,7 @@ async def test_document_source_route_streams_current_collection_document(
 
     response = await documents_controller.get_collection_document_source(
         collection_id=collection_id,
-        document_id=document["document_id"],
+        document_id=document.document.document_id,
         user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
         request=_document_request(document_services, object_store=object_store),
     )
@@ -594,7 +594,7 @@ async def test_document_source_route_returns_404_when_document_is_missing(
 
     with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_source(
-            collection_id=record["collection_id"],
+            collection_id=record.collection.collection_id,
             document_id="paper-1",
             user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
             request=_document_request(document_services, object_store=object_store),
@@ -618,7 +618,7 @@ async def test_document_source_route_rejects_path_outside_collection(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Unsafe Source Collection", workspace=collection_workspace)
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     unsafe_document = StoredDocument(
         document=Document(
             document_id="paper-1",
@@ -630,7 +630,7 @@ async def test_document_source_route_rejects_path_outside_collection(
         ),
         stored_filename="outside.pdf",
         storage_key="../outside.pdf",
-        created_at=record["created_at"],
+        created_at=record.created_at,
     )
     await collection_service.CollectionRepo.add_documents(
         collection_id,
@@ -666,7 +666,7 @@ async def test_document_source_route_rejects_another_collections_storage_key(
     first = await collection_service.create_collection(name="First source collection", workspace=collection_workspace)
     second = await collection_service.create_collection(name="Second source collection", workspace=collection_workspace)
     payload = b"%PDF-1.4\nsecond collection\n"
-    storage_key = f"{second['collection_id']}/input/paper-2.pdf"
+    storage_key = f"{second.collection.collection_id}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
     object_store.write(storage_key, payload, digest)
     foreign_document = StoredDocument(
@@ -680,17 +680,17 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         ),
         stored_filename="paper-2.pdf",
         storage_key=storage_key,
-        created_at=first["created_at"],
+        created_at=first.created_at,
     )
     await collection_service.CollectionRepo.add_documents(
-        first["collection_id"],
+        first.collection.collection_id,
         (foreign_document,),
         updated_at=foreign_document.created_at,
     )
 
     with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_source(
-            collection_id=first["collection_id"],
+            collection_id=first.collection.collection_id,
             document_id="paper-1",
             user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
             request=_document_request(document_services, object_store=object_store),
@@ -712,7 +712,7 @@ async def test_document_figure_image_route_streams_extracted_asset(
         markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Figure Image Collection", workspace=collection_workspace)
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     content = b"\x89PNG\r\n\x1a\nfixture\n"
     asset_sha256 = sha256(content).hexdigest()
     storage_key = collection_service.write_figure_asset(
@@ -772,7 +772,7 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
         name="Cross Document Figure Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
         collection_id,
@@ -825,7 +825,7 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
         name="Unsafe Figure Image Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
     await _store_source_documents(
@@ -876,7 +876,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
     content = b"figure"
     digest = sha256(content).hexdigest()
     foreign_key = collection_service.write_figure_asset(
-        second["collection_id"],
+        second.collection.collection_id,
         "build-figure",
         "image_assets/figure.png",
         content,
@@ -885,7 +885,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
     )
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        first["collection_id"],
+        first.collection.collection_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -904,7 +904,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
 
     with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_figure_image(
-            collection_id=first["collection_id"],
+            collection_id=first.collection.collection_id,
             document_id="paper-1",
             figure_id="fig-1",
             user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
@@ -932,7 +932,7 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
         name="Unavailable Figure Collection",
         workspace=collection_workspace,
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     content = b"figure"
     digest = sha256(content).hexdigest()
     storage_key = collection_service.write_figure_asset(

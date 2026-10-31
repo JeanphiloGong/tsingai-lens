@@ -131,3 +131,9 @@ These cases cover upload, original-byte archive retrieval,
 partial preparation failure, stage reuse, and HTTP responses. Parser-specific
 tests live under `tests/unit/infra/source/`; fixture and database setup are
 described in [`../../tests/README.md`](../../tests/README.md).
+
+Collection reads, creation and updates return `StoredCollection`; uploads return
+`StoredDocument`. Application callers read the domain value and storage metadata
+directly. The Collection controller constructs the existing HTTP responses, and
+Agent capabilities construct their own observations. Markdown, archives and
+research use cases do not consume an HTTP-shaped Collection dictionary.

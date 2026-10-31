@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.collection_repository import StoredCollection
+
 import re
 from pathlib import Path
 from typing import Any, Mapping
@@ -585,7 +587,7 @@ def _source_filename(document: SourceDocument) -> str | None:
 
 
 def _document_display_names(
-    collection: dict[str, Any],
+    collection: StoredCollection,
     document: SourceDocument,
 ) -> dict[str, str | None]:
     stored_to_original = _stored_to_original_filenames(collection)
@@ -607,11 +609,11 @@ def _document_display_names(
     }
 
 
-def _stored_to_original_filenames(collection: dict[str, Any]) -> dict[str, str]:
+def _stored_to_original_filenames(collection: StoredCollection) -> dict[str, str]:
     filenames: dict[str, str] = {}
-    for record in collection["documents"]:
-        original = normalize_display_text(record.get("original_filename"))
-        stored = normalize_display_text(record.get("stored_filename"))
+    for record in collection.documents:
+        original = normalize_display_text(record.document.original_filename)
+        stored = normalize_display_text(record.stored_filename)
         if original and stored:
             filenames[Path(stored).name] = Path(original).name
     return filenames

@@ -18,7 +18,7 @@ from exceptions import RequestInvalidException
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from repositories.collection_repository import CollectionRepo
+from repositories.collection_repository import CollectionRepo, StoredCollection, StoredDocument
 from starlette.background import BackgroundTask
 from utils.response import ApiResponse, make_api_response
 
@@ -201,6 +201,22 @@ async def _read_upload_content(file: UploadFile) -> bytes:
         return buffered.read()
 
 
+def document_response(record: StoredDocument) -> CollectionDocumentResponse:
+    return CollectionDocumentResponse(
+        **asdict(record.document), stored_filename=record.stored_filename,
+        storage_key=record.storage_key, created_at=record.created_at,
+        updated_at=record.updated_at or record.created_at,
+    )
+
+
+def collection_response(record: StoredCollection) -> CollectionResponse:
+    return CollectionResponse(
+        **asdict(record.collection), created_at=record.created_at,
+        updated_at=record.updated_at, paper_count=len(record.documents),
+        documents=[document_response(item) for item in record.documents],
+    )
+
+
 @collection_router.post(
     "",
     response_model=ApiResponse[CollectionResponse],
@@ -219,7 +235,7 @@ async def create_collection(
         owner_user_id=user_id,
         workspace=request.app.state.runtime.collection_workspace,
     )
-    return make_api_response(data=CollectionResponse(**record))
+    return make_api_response(data=collection_response(record))
 
 
 @collection_router.get(
@@ -252,7 +268,7 @@ async def get_collection(
         collection_id,
         user_id,
     )
-    return make_api_response(data=CollectionResponse(**record))
+    return make_api_response(data=collection_response(record))
 
 
 @collection_router.get(
@@ -330,7 +346,7 @@ async def upload_collection_document(
         user_id=user_id,
         object_store=request.app.state.runtime.object_store,
     )
-    return make_api_response(data=CollectionDocumentResponse(**record))
+    return make_api_response(data=document_response(record))
 
 
 @collection_router.get(
@@ -345,7 +361,7 @@ async def list_collection_documents(
     collection = await collection_service.get_collection_for_user(
         collection_id, user_id
     )
-    items = [CollectionDocumentResponse(**record) for record in collection["documents"]]
+    items = [document_response(record) for record in collection.documents]
     return make_api_response(data=CollectionDocumentListResponse(items=items))
 
 

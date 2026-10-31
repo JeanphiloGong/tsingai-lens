@@ -157,10 +157,10 @@ async def intake_goal(
         owner_user_id=owner_user_id,
         workspace=workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     seed_collection = {
         "collection_id": collection_id,
-        "name": collection["name"],
+        "name": collection.collection.name,
         "created": True,
         "seeded_document_count": 0,
         "source_channels": _build_source_channels(),

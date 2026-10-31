@@ -59,7 +59,8 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import EvaluationGoldItem, FindingCuration, FindingFeedback
-from domain.source import SourceBlock, SourceDocument
+from domain.source import SourceBlock, SourceDocument, Collection, Document
+from repositories.collection_repository import StoredCollection, StoredDocument
 from exceptions import RequestInvalidException, ResourceConflictException
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.evaluation_repository import EvaluationRepository
@@ -98,14 +99,21 @@ class FakeCollectionService:
             ]
         }
 
-    async def get_collection(self, collection_id: str) -> dict:
+    async def get_collection(self, collection_id: str) -> StoredCollection:
         if collection_id not in self.existing:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return {
-            "collection_id": collection_id,
-            "name": "Gold collection",
-            "documents": list(self.documents_by_collection.get(collection_id, [])),
-        }
+        return StoredCollection(
+            collection=Collection(collection_id, "local-user", "Gold collection", None, "idle"),
+            created_at="2026-11-01", updated_at="2026-11-01",
+            documents=tuple(
+                StoredDocument(
+                    document=Document(record["document_id"], record["original_filename"], "digest", None, "ready", 0),
+                    stored_filename=record["stored_filename"], storage_key=record["storage_key"],
+                    created_at="2026-11-01",
+                )
+                for record in self.documents_by_collection.get(collection_id, [])
+            ),
+        )
 
 
 class _RecordedExperimentProjection:

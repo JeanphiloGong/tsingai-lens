@@ -46,7 +46,7 @@ async def test_source_availability_uses_real_collection_lookup(
         "LPBF source inspection", owner_user_id="local-user",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     if state == "unprepared":
         await collection_service.CollectionRepo.add_documents(
             collection_id,
@@ -56,9 +56,9 @@ async def test_source_availability_uses_real_collection_lookup(
                     media_type="application/pdf", status="uploaded", size_bytes=100,
                 ),
                 stored_filename="lpbf.pdf", storage_key="lpbf.pdf",
-                created_at=collection["created_at"],
+                created_at=collection.created_at,
             ),),
-            updated_at=collection["updated_at"],
+            updated_at=collection.updated_at,
         )
     failure = OperationalError("SELECT document", None, RuntimeError("database unavailable"))
     if state == "database_failure":

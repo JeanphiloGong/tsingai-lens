@@ -38,7 +38,7 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 
     saved = await service.set_agent_default_permission_for_user(
-        collection["collection_id"],
+        collection.collection.collection_id,
         "owner",
         mode="auto",
         actions=[],
@@ -50,7 +50,7 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     assert saved["actions"] == sorted(AUTO_ACTIONS)
     assert (
         await service.get_agent_default_permission_for_user(
-            collection["collection_id"], "owner"
+            collection.collection.collection_id, "owner"
         )
         == saved
     )
@@ -70,7 +70,7 @@ async def test_collection_default_permission_can_be_persistent(
     )
 
     saved = await service.set_agent_default_permission_for_user(
-        collection["collection_id"],
+        collection.collection.collection_id,
         "owner",
         mode="auto",
         actions=["create_finding_version"],
@@ -81,7 +81,7 @@ async def test_collection_default_permission_can_be_persistent(
     assert saved["expires_at"] is None
     assert (
         await service.get_agent_default_permission_for_user(
-            collection["collection_id"], "owner"
+            collection.collection.collection_id, "owner"
         )
         == saved
     )
@@ -102,7 +102,7 @@ async def test_collection_default_permission_hides_collection_from_other_users(
 
     with pytest.raises(ResourceNotFoundException):
         await service.get_agent_default_permission_for_user(
-            collection["collection_id"], "other-user"
+            collection.collection.collection_id, "other-user"
         )
 
 
@@ -121,7 +121,7 @@ async def test_collection_default_permission_rejects_stale_revision(
     expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
     await service.set_agent_default_permission_for_user(
-        collection["collection_id"],
+        collection.collection.collection_id,
         "owner",
         mode="read_only",
         actions=[],
@@ -130,7 +130,7 @@ async def test_collection_default_permission_rejects_stale_revision(
     )
     with pytest.raises(ResourceConflictException, match="permission_revision_conflict"):
         await service.set_agent_default_permission_for_user(
-            collection["collection_id"],
+            collection.collection.collection_id,
             "owner",
             mode="auto",
             actions=["create_finding_version"],

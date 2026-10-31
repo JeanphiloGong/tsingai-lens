@@ -11,6 +11,7 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from application.source import collection_service
+from repositories.collection_repository import StoredDocument
 from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
 from repositories.pipeline_run_repository import PipelineRunSummary
@@ -61,7 +62,7 @@ class InspectResearchProcessCapability:
             if document_id and document_id not in latest_by_document:
                 latest_by_document[document_id] = run
 
-        documents = tuple(collection.get("documents") or ())
+        documents = collection.documents
         records = tuple(
             self._document_record(document, latest_by_document)
             for document in documents
@@ -118,12 +119,12 @@ class InspectResearchProcessCapability:
 
     @staticmethod
     def _document_record(
-        document: Mapping[str, Any],
+        document: StoredDocument,
         latest_by_document: Mapping[str, PipelineRunSummary],
     ) -> dict[str, Any]:
-        document_id = str(document.get("document_id") or "")
+        document_id = str(document.document.document_id or "")
         run = latest_by_document.get(document_id)
-        document_status = str(document.get("status") or "stored")
+        document_status = str(document.document.status or "stored")
         run_status = run.status if run is not None else ""
         interrupted = (
             run_status == "failed"
@@ -142,7 +143,7 @@ class InspectResearchProcessCapability:
         )
         return {
             "document_id": document_id,
-            "filename": str(document.get("original_filename") or "")[:300],
+            "filename": str(document.document.original_filename or "")[:300],
             "status": status,
             "run_id": run.run_id if run is not None else None,
             "stage": run.current_node if run is not None else None,

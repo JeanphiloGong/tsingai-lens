@@ -60,7 +60,7 @@ async def test_source_reference_routes_build_and_read_refs(
 ):
     collection_service, repository, request = source_reference_services
     collection = await collection_service.create_collection("Refs Collection", workspace=collection_workspace)
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
@@ -146,7 +146,7 @@ async def test_source_reference_build_route_returns_409_when_source_is_not_ready
             json.loads(
                 (
                     await references_controller.build_collection_references(
-                        collection_id=collection["collection_id"],
+                        collection_id=collection.collection.collection_id,
                         user_id=request.state.current_user["user_id"],
                     )
                 ).body
@@ -156,7 +156,7 @@ async def test_source_reference_build_route_returns_409_when_source_is_not_ready
     exc = exc_info.value
     assert exc.code == 200204
     assert exc.data["code"] == "source_artifacts_not_ready"
-    assert exc.data["collection_id"] == collection["collection_id"]
+    assert exc.data["collection_id"] == collection.collection.collection_id
 
 
 async def test_source_reference_route_returns_404_for_missing_collection(

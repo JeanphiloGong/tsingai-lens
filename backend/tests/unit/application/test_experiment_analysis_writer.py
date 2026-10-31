@@ -721,7 +721,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
         owner_user_id="researcher-1",
         workspace=collection_workspace,
     )
-    collection_id = collection["collection_id"]
+    collection_id = collection.collection.collection_id
     await seed_collection(
         postgres_session_factory, collection_id, document_ids=("paper-a", "paper-b")
     )

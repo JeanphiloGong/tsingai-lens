@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
@@ -22,26 +22,6 @@ from repositories.object_store import ObjectStore
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def document_details(record: StoredDocument) -> dict[str, Any]:
-    return {
-        **asdict(record.document),
-        "stored_filename": record.stored_filename,
-        "storage_key": record.storage_key,
-        "created_at": record.created_at,
-        "updated_at": record.updated_at or record.created_at,
-    }
-
-
-def collection_details(record: StoredCollection) -> dict[str, Any]:
-    return {
-        **asdict(record.collection),
-        "created_at": record.created_at,
-        "updated_at": record.updated_at,
-        "paper_count": len(record.documents),
-        "documents": [document_details(document) for document in record.documents],
-    }
 
 
 from repositories.collection_repository import CollectionRepo
@@ -106,7 +86,7 @@ async def create_collection(
     owner_user_id: str='local-user',
     *,
     workspace: FileCollectionWorkspace,
-) -> dict:
+) -> StoredCollection:
     collection_id = f"col_{uuid4().hex[:12]}"
     now = _now_iso()
     record = StoredCollection(
@@ -126,22 +106,22 @@ async def create_collection(
     except Exception:
         workspace.delete_collection_dir(collection_id)
         raise
-    return collection_details(record)
+    return record
 
 
-async def get_collection(collection_id: str) -> dict:
+async def get_collection(collection_id: str) -> StoredCollection:
     record = await CollectionRepo.read_collection(collection_id)
     if record is None:
         raise ResourceNotFoundException(
             f"collection not found: {collection_id}",
             data={"code": "collection_not_found", "collection_id": collection_id},
         )
-    return collection_details(record)
+    return record
 
 
-async def get_collection_for_user(collection_id: str, owner_user_id: str) -> dict:
+async def get_collection_for_user(collection_id: str, owner_user_id: str) -> StoredCollection:
     record = await get_collection(collection_id)
-    if record["owner_user_id"] != owner_user_id:
+    if record.collection.owner_user_id != owner_user_id:
         raise ResourceNotFoundException(
             f"collection not found: {collection_id}",
             data={"code": "collection_not_found", "collection_id": collection_id},
@@ -306,7 +286,7 @@ async def update_document_preparation(
     return updated
 
 
-async def update_collection(collection_id: str, **fields) -> dict:
+async def update_collection(collection_id: str, **fields) -> StoredCollection:
     current = await CollectionRepo.read_collection(collection_id)
     if current is None:
         raise ResourceNotFoundException(

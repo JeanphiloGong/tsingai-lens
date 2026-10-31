@@ -8,7 +8,6 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
-from application.source.collection_service import document_details
 from domain.source import Document
 from exceptions import RequestInvalidException, ResourceConflictException
 from infra.source.ingestion.upload_validation import validate_upload
@@ -36,7 +35,7 @@ async def add_document(
     user_id: str,
     reuse_existing: bool = False,
     object_store: ObjectStore,
-) -> dict:
+) -> StoredDocument:
     await collection_service.get_collection_for_user(collection_id, user_id)
 
     filename = Path(filename or "upload.bin").name or "upload.bin"
@@ -85,7 +84,7 @@ async def add_document(
         if reuse_existing and isinstance(exc, DocumentContentAlreadyExists):
             for existing in documents:
                 if existing.document.sha256 == digest:
-                    return document_details(existing)
+                    return existing
         if isinstance(exc, DocumentContentAlreadyExists):
             raise ResourceConflictException(
                 "Document content already exists in this collection.",
@@ -95,7 +94,7 @@ async def add_document(
                 },
             ) from exc
         raise
-    return document_details(record)
+    return record
 
 
 __all__ = ["add_document"]

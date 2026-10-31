@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 import os
 import sys
 from datetime import datetime, timezone
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
     database_engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=database_engine)
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
         async with AsyncOpenAI(
             api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
@@ -39,11 +42,16 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
             while True:
                 now = datetime.now(timezone.utc).isoformat()
                 await AnalysisJobRepo.recover_expired_jobs(now=now)
-                job = await AnalysisJobRepo.claim_next_correction_signal_analysis_job(now=now)
+                job = await AnalysisJobRepo.claim_next_correction_signal_analysis_job(
+                    now=now
+                )
                 if job is not None:
                     try:
                         result = await run_with_lease_heartbeat(
-                            job, lambda: execute_correction_signal_analysis_job(job, engine=engine, model_name=engine.model_name),
+                            job,
+                            lambda: execute_correction_signal_analysis_job(
+                                job, engine=engine, model_name=engine.model_name
+                            ),
                         )
                         print(result.status, flush=True)
                     except LeaseLostError:
@@ -54,7 +62,10 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
                     return
                 await asyncio.sleep(interval_seconds)
     finally:
-        await database_engine.dispose()
+        try:
+            await database_engine.dispose()
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 def main() -> None:
@@ -68,13 +79,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")
-    if args.once:
-        asyncio.run(run_loop(args.interval, once=True))
-    else:
-        try:
-            asyncio.run(run_loop(args.interval))
-        except KeyboardInterrupt:
-            return
+    try:
+        asyncio.run(run_loop(args.interval, once=args.once))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        return
 
 
 if __name__ == "__main__":

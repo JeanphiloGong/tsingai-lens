@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 import os
 import sys
 from datetime import datetime, timezone
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
     database_engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=database_engine)
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
         async with AsyncOpenAI(
             api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
@@ -39,9 +42,11 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
             max_retries=0,
         ) as client:
             generator = OpenAIFeedbackSampleGenerator(client=client)
-            builders = {"sft": SftSampleBuilder(generator=generator),
-                        "preference": PreferenceSampleBuilder(generator=generator),
-                        "evaluation": EvaluationSampleBuilder(generator=generator)}
+            builders = {
+                "sft": SftSampleBuilder(generator=generator),
+                "preference": PreferenceSampleBuilder(generator=generator),
+                "evaluation": EvaluationSampleBuilder(generator=generator),
+            }
             await FeedbackDatasetSampleRepo.backfill_existing_cases()
             while True:
                 now = datetime.now(timezone.utc).isoformat()
@@ -49,7 +54,9 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
                 job = await AnalysisJobRepo.claim_next_dataset_sample_build_job(now=now)
                 if job is not None:
                     try:
-                        result = await execute_dataset_sample_build_job(job, builders=builders)
+                        result = await execute_dataset_sample_build_job(
+                            job, builders=builders
+                        )
                         print(result.status, flush=True)
                     except LeaseLostError:
                         logger.warning("Worker lease lost job_id=%s", job.job_id)
@@ -59,7 +66,10 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
                     return
                 await asyncio.sleep(interval_seconds)
     finally:
-        await database_engine.dispose()
+        try:
+            await database_engine.dispose()
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 def main() -> None:
@@ -73,12 +83,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")
-    if args.once:
-        asyncio.run(run_loop(args.interval, once=True))
-        return
     try:
-        asyncio.run(run_loop(args.interval))
-    except KeyboardInterrupt:
+        asyncio.run(run_loop(args.interval, once=args.once))
+    except (KeyboardInterrupt, asyncio.CancelledError):
         return
 
 

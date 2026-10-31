@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
     database_engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=database_engine)
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
         engine = RuleBasedFeedbackAnalysisEngine()
         while True:
@@ -35,7 +38,10 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
             if job is not None:
                 try:
                     result = await run_with_lease_heartbeat(
-                        job, lambda: execute_feedback_analysis_job(job, engine=engine, model_name='rule-based-v1'),
+                        job,
+                        lambda: execute_feedback_analysis_job(
+                            job, engine=engine, model_name="rule-based-v1"
+                        ),
                     )
                     print(result.status, flush=True)
                 except LeaseLostError:
@@ -46,7 +52,10 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
                 return
             await asyncio.sleep(interval_seconds)
     finally:
-        await database_engine.dispose()
+        try:
+            await database_engine.dispose()
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 async def requeue_failed_job(job_id: str) -> str:
@@ -78,15 +87,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")
-    if args.requeue_job is not None:
-        print(asyncio.run(requeue_failed_job(args.requeue_job)))
-    elif args.once:
-        asyncio.run(run_loop(args.interval, once=True))
-    else:
-        try:
-            asyncio.run(run_loop(args.interval))
-        except KeyboardInterrupt:
-            return
+    try:
+        if args.requeue_job is not None:
+            print(asyncio.run(requeue_failed_job(args.requeue_job)))
+        else:
+            asyncio.run(run_loop(args.interval, once=args.once))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        return
 
 
 if __name__ == "__main__":

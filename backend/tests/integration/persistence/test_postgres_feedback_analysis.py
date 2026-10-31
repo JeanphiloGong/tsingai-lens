@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from infra.persistence.postgres.models.feedback import AnalysisJobORM
+from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
 from repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     TOOL_FAILURE_JOB_TYPE,

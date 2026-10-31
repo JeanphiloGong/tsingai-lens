@@ -82,3 +82,9 @@ selector, compatibility wrapper, dual write, schema probe, or fallback store.
 SQLAlchemy table mappings use the `ORM` suffix (for example, `CollectionORM`
 and `ChatModelCallORM`). Domain values and repository results such as
 `Collection` and `StoredCollection` keep their existing names.
+
+Within `postgres/models/`, `chat.py` owns model-call audit mappings,
+`analysis_job.py` owns shared worker scheduling, `finding_review.py` owns expert
+Finding feedback and curation, and `experiment_plan.py` owns experiment plans.
+Feedback outcomes remain in `feedback.py`; evaluation lineage stays in
+`evaluation.py`. Moving a mapping does not change its SQL table.

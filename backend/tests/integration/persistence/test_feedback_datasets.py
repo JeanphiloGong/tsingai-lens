@@ -712,7 +712,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     sample = collected.items[0].sample
     # Keep the recovery scenario focused on this sample's lease.
     async with postgres_session_factory.begin() as session:
-        from infra.persistence.postgres.models.feedback import AnalysisJobORM
+        from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
 
         other_jobs = await session.scalars(
             select(AnalysisJobORM).where(

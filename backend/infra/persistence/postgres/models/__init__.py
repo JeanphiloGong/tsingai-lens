@@ -9,17 +9,9 @@ from infra.persistence.postgres.models.chat import (
     ChatSessionORM,
     ChatToolCallORM,
 )
-from infra.persistence.postgres.models.feedback import (
-    AnalysisJobORM,
-    ChatModelCallORM,
-    FeedbackAnalysisResultORM,
-    FeedbackSignalAnalysisResultORM,
-    ToolFailureAnalysisResultORM,
-    FeedbackAnnotationORM,
-    FeedbackCaseORM,
-    FeedbackReviewDecisionORM,
-    FeedbackDatasetSnapshotORM,
-)
+from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
+from infra.persistence.postgres.models.chat import ChatModelCallORM
+from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackSignalAnalysisResultORM, ToolFailureAnalysisResultORM, FeedbackAnnotationORM, FeedbackCaseORM, FeedbackReviewDecisionORM, FeedbackDatasetSnapshotORM
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetORM,
     FeedbackDatasetSampleORM,
@@ -33,19 +25,14 @@ from infra.persistence.postgres.models.feedback_dataset import (
 from infra.persistence.postgres.models.collection import CollectionORM
 from infra.persistence.postgres.models.document import DocumentORM
 from infra.persistence.postgres.models.document_preparation import DocumentPreparationORM
-from infra.persistence.postgres.models.evaluation import (
-    EvaluationGoldSetORM,
-    EvaluationPredictionSnapshotORM,
-    EvaluationRunORM,
-    FindingCurationORM,
-    FindingFeedbackORM,
-)
+from infra.persistence.postgres.models.evaluation import EvaluationGoldSetORM, EvaluationPredictionSnapshotORM, EvaluationRunORM
+from infra.persistence.postgres.models.finding_review import FindingCurationORM, FindingFeedbackORM
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisLegacyCheckpointORM,
     ObjectiveAnalysisORM,
     ObjectiveResearchORM,
 )
-from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlanORM
+from infra.persistence.postgres.models.experiment_plan import ObjectiveExperimentPlanORM
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentComparisonMeasurementORM,
     ExperimentComparisonORM,

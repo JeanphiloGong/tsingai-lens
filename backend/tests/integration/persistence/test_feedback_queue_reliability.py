@@ -20,11 +20,8 @@ from domain.feedback.sample_revision import (
     SftRevisionContent,
 )
 from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.feedback import (
-    AnalysisJobORM,
-    FeedbackAnalysisResultORM,
-    FeedbackCaseORM,
-)
+from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
+from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackCaseORM
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetORM,
     FeedbackDatasetSampleORM,

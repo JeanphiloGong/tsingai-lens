@@ -204,7 +204,60 @@ class ChatToolCallORM(Base):
     result_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ChatModelCallORM(Base):
+    """One exact request submitted to an LLM provider."""
+
+    __tablename__ = "chat_model_calls"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('decision', 'compaction', 'finalization')",
+            name="chat_model_call_purpose_valid",
+        ),
+        CheckConstraint(
+            "status IN ('recorded', 'provider_succeeded', 'provider_failed', "
+            "'response_invalid', 'cancelled')",
+            name="chat_model_call_status_valid",
+        ),
+        CheckConstraint("length(request_digest) = 64", name="chat_model_call_digest_length"),
+        CheckConstraint(
+            "finished_at IS NULL OR finished_at >= started_at",
+            name="chat_model_call_timestamps_valid",
+        ),
+    )
+
+    call_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    trigger_message_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    response_message_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    request: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_confirmed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 __all__ = [
+    "ChatModelCallORM",
     "ChatMessageFeedbackORM",
     "ChatMessageORM",
     "ChatSessionORM",

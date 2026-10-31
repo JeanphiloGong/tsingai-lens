@@ -35,7 +35,7 @@ from infra.persistence.postgres.models.chat import (
     ChatSessionORM,
     ChatToolCallORM,
 )
-from infra.persistence.postgres.models.feedback import ChatModelCallORM
+from infra.persistence.postgres.models.chat import ChatModelCallORM
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 

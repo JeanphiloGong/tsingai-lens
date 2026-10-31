@@ -10,7 +10,7 @@ from domain.goal import (
 from exceptions import ResourceConflictException
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.chat import ChatMessageORM, ChatSessionORM
-from infra.persistence.postgres.models.objective_workspace import (
+from infra.persistence.postgres.models.experiment_plan import (
     ObjectiveExperimentPlanORM,
 )
 from sqlalchemy import select

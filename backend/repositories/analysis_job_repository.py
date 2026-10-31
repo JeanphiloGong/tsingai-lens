@@ -11,7 +11,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.feedback import AnalysisJobORM
+from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleORM
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select

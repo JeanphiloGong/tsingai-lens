@@ -14,10 +14,7 @@ from domain.core.finding import (
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from domain.evaluation.records import FindingCuration, FindingFeedback
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.evaluation import (
-    FindingCurationORM,
-    FindingFeedbackORM,
-)
+from infra.persistence.postgres.models.finding_review import FindingCurationORM, FindingFeedbackORM
 from infra.persistence.postgres.models.experiment_finding import ExperimentFindingORM
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from sqlalchemy import select

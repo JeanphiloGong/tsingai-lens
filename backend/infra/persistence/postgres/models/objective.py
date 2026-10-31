@@ -59,6 +59,7 @@ class ObjectiveResearchRecord(Base):
 class ObjectiveAnalysisRecord(Base):
     __tablename__ = "objective_analyses"
     __table_args__ = (
+        Index("ix_objective_analyses_worker_claim", "status", "lease_expires_at", "created_at"),
         ForeignKeyConstraint(
             ["collection_id", "objective_id"],
             ["research_objectives.collection_id", "research_objectives.objective_id"],
@@ -66,6 +67,11 @@ class ObjectiveAnalysisRecord(Base):
             ondelete="CASCADE",
         ),
     )
+
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)

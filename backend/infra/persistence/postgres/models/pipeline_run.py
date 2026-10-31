@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,7 @@ _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 class PipelineRunRow(Base):
     __tablename__ = "pipeline_runs"
     __table_args__ = (
+        Index("ix_pipeline_runs_worker_claim", "pipeline_name", "status", "lease_expires_at", "created_at"),
         CheckConstraint(
             "status IN ('queued', 'running', 'completed', 'partial_success', 'failed')",
             name="valid_status",
@@ -36,6 +37,11 @@ class PipelineRunRow(Base):
             sqlite_where=text("status IN ('queued', 'running')"),
         ),
     )
+
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     collection_id: Mapped[str] = mapped_column(

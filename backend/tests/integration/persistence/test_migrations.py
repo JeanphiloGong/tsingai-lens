@@ -28,7 +28,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261025_0089"
+HEAD_REVISION = "20261031_0090"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 
@@ -75,7 +75,8 @@ def test_model_connection_migration_creates_schema_and_protects_history(
             )
         )
         with pytest.raises(RuntimeError, match="history must be exported"):
-            command.downgrade(config, "20261020_0088")
+            with connection.begin_nested():
+                command.downgrade(config, "20261020_0088")
 
         row = connection.execute(select(connections)).mappings().one()
         assert (row["connection_id"], row["revision"]) == ("lab-a", 1)

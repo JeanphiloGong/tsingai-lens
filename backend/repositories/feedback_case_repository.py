@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
+from domain.chat.feedback import ChatMessageFeedback
+from domain.feedback.tool_failure import tool_result_digest
+from infra.persistence.postgres.models.chat import ChatMessageFeedbackRow, ChatMessageRow, ChatToolCallRow
 from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -25,6 +29,7 @@ from infra.persistence.postgres.models.feedback import (
     FeedbackSignalAnalysisResultRow,
     ToolFailureAnalysisResultRow,
 )
+from repositories.analysis_job_repository import AnalysisJob, lock_analysis_job
 from repositories.feedback_dataset_sample_repository import enqueue_case_samples
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +88,7 @@ class FeedbackCaseRepository:
         self,
         result: AnalysisResult,
         *,
+        job: AnalysisJob,
         context_snapshot: dict[str, Any],
         source_signal_ids: tuple[str, ...] = (),
         now: str,
@@ -90,8 +96,22 @@ class FeedbackCaseRepository:
         timestamp = _datetime(now)
         signals = _ordered_unique(source_signal_ids or (result.feedback_id,))
         async with AsyncSessionLocal() as db, db.begin():
+            job_row = await lock_analysis_job(db, job)
+            if result.job_id != job.job_id:
+                raise ValueError("analysis result belongs to another job")
             # Keep this method usable when a caller has not separately persisted
             # the result, while preserving the same result identity and payload.
+            source = await db.get(ChatMessageFeedbackRow, result.feedback_id, with_for_update=True)
+            if source is None:
+                raise FeedbackCaseWriteConflict("feedback_withdrawn")
+            feedback = ChatMessageFeedback(
+                feedback_id=source.feedback_id, session_id=source.session_id,
+                message_id=source.message_id, user_id=source.user_id, rating=source.rating,
+                reason=source.reason, comment=source.comment, response_digest=source.response_digest,
+                created_at=_iso(source.created_at), updated_at=_iso(source.updated_at),
+            )
+            if feedback.analysis_version_key != job.idempotency_key:
+                raise FeedbackCaseWriteConflict("feedback_version_superseded")
             saved_result = await _save_result_row(db, result)
             row = await db.scalar(
                 select(FeedbackCaseRow)
@@ -136,6 +156,14 @@ class FeedbackCaseRepository:
                 row.updated_at = timestamp
             await db.flush()
             await enqueue_case_samples(db, row, now=timestamp)
+            job_row.status = "succeeded"
+            job_row.result_id = saved_result.result_id
+            job_row.finished_at = timestamp
+            job_row.updated_at = timestamp
+            job_row.error_code = None
+            job_row.worker_id = None
+            job_row.lease_expires_at = None
+            job_row.heartbeat_at = None
             return FeedbackCase(
                 case_id=row.case_id,
                 collection_id=row.collection_id,
@@ -200,6 +228,7 @@ class FeedbackCaseRepository:
         self,
         result: CorrectionSignalAnalysisResult,
         *,
+        job: AnalysisJob,
         context_snapshot: dict[str, Any],
         source_signal_ids: tuple[str, ...] = (),
         now: str,
@@ -215,6 +244,14 @@ class FeedbackCaseRepository:
         timestamp = _datetime(now)
         signals = _ordered_unique(source_signal_ids or (result.signal_id,))
         async with AsyncSessionLocal() as db, db.begin():
+            job_row = await lock_analysis_job(db, job)
+            if result.job_id != job.job_id:
+                raise ValueError("analysis result belongs to another job")
+            trigger = await db.get(ChatMessageRow, result.trigger_message_id, with_for_update=True)
+            if trigger is None:
+                raise FeedbackCaseWriteConflict("correction_signal_withdrawn")
+            if sha256(trigger.content.strip().encode("utf-8")).hexdigest() != job.payload["trigger_digest"]:
+                raise FeedbackCaseWriteConflict("correction_signal_superseded")
             saved_result = await _save_correction_result_row(db, result)
             row = await db.scalar(
                 select(FeedbackCaseRow)
@@ -261,6 +298,14 @@ class FeedbackCaseRepository:
                 row.updated_at = timestamp
             await db.flush()
             await enqueue_case_samples(db, row, now=timestamp)
+            job_row.status = "succeeded"
+            job_row.result_id = saved_result.result_id
+            job_row.finished_at = timestamp
+            job_row.updated_at = timestamp
+            job_row.error_code = None
+            job_row.worker_id = None
+            job_row.lease_expires_at = None
+            job_row.heartbeat_at = None
             return FeedbackCase(
                 case_id=row.case_id,
                 collection_id=row.collection_id,
@@ -328,6 +373,7 @@ class FeedbackCaseRepository:
         self,
         result: ToolFailureAnalysisResult,
         *,
+        job: AnalysisJob,
         context_snapshot: dict[str, Any],
         source_signal_ids: tuple[str, ...] = (),
         now: str,
@@ -342,6 +388,20 @@ class FeedbackCaseRepository:
         if not anchor_message_id:
             raise ValueError("tool failure case requires an anchor message")
         async with AsyncSessionLocal() as db, db.begin():
+            job_row = await lock_analysis_job(db, job)
+            if result.job_id != job.job_id:
+                raise ValueError("analysis result belongs to another job")
+            source = await db.get(ChatMessageRow, result.result_message_id, with_for_update=True)
+            call = await db.get(ChatToolCallRow, result.tool_call_id, with_for_update=True)
+            if source is None or call is None:
+                raise FeedbackCaseWriteConflict("tool_failure_withdrawn")
+            if call.status != "failed" or tool_result_digest({
+                "tool_call_id": call.tool_call_id, "status": call.result_status,
+                "data": dict(call.result_data or {}), "resource_refs": call.result_resource_refs or [],
+                "warnings": call.result_warnings or [], "error_code": call.result_error_code,
+                "error_message": call.result_error_message,
+            }) != job.payload["result_digest"]:
+                raise FeedbackCaseWriteConflict("tool_failure_superseded")
             saved_result = await _save_tool_failure_result_row(db, result)
             row = await db.scalar(
                 select(FeedbackCaseRow)
@@ -389,6 +449,14 @@ class FeedbackCaseRepository:
                 row.updated_at = timestamp
             await db.flush()
             await enqueue_case_samples(db, row, now=timestamp)
+            job_row.status = "succeeded"
+            job_row.result_id = saved_result.result_id
+            job_row.finished_at = timestamp
+            job_row.updated_at = timestamp
+            job_row.error_code = None
+            job_row.worker_id = None
+            job_row.lease_expires_at = None
+            job_row.heartbeat_at = None
             return FeedbackCase(
                 case_id=row.case_id,
                 collection_id=row.collection_id,

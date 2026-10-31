@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from application.feedback import analysis_worker, worker_lease
 
 from application.feedback import analysis_handler
@@ -58,14 +59,14 @@ async def _prepare_case(chain) -> object:
         comment="Paper B contains the missing evidence.",
     )
     assert feedback is not None
-    from application.feedback.analysis_handler import FeedbackAnalysisHandler
-    from application.feedback.analysis_worker import FeedbackAnalysisWorker
+    from tests.support.feedback_workers import FeedbackAnalyzerFixture
+    from tests.support.feedback_workers import FeedbackWorkerFixture
 
     analysis_handler.ChatRepo = chain.chat
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
+    worker = FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture())
     terminal_job = await worker.run_once()
     assert terminal_job is not None and terminal_job.result_id is not None
     cases = await chain.cases.list_cases(

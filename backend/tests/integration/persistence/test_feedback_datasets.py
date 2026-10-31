@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests.support.feedback_workers import FeedbackAnalyzerFixture, FeedbackWorkerFixture, SampleWorkerFixture
+
 from application.feedback import analysis_worker, sample_build_worker, worker_lease
 
 from application.feedback import analysis_handler
@@ -18,9 +20,6 @@ from uuid import uuid4
 
 import pytest
 from application.feedback import dataset_export_service, dataset_service
-from application.feedback.analysis_handler import FeedbackAnalysisHandler
-from application.feedback.analysis_worker import FeedbackAnalysisWorker
-from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from domain.feedback.sample_revision import (
     EvaluationRevisionContent,
@@ -96,7 +95,7 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
+    worker = FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture())
 
     terminal = await worker.run_once()
     assert terminal is not None and terminal.status == "succeeded"
@@ -129,7 +128,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
+    await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()
@@ -172,7 +171,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     sample_build_worker.FeedbackDatasetRepo = datasets
     sample_build_worker.FeedbackDatasetSampleRepo = samples
     sample_build_worker.FeedbackCaseRepo = chain.cases
-    build_worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
+    build_worker = SampleWorkerFixture(builder=SftSampleBuilder())
     # The automatic Collection workbenches may have queued their own samples
     # first. Drain the queue until this explicitly created dataset is built.
     for _ in range(4):
@@ -377,7 +376,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
+    await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     await chain.case_service.save_feedback_annotation_for_user(
         case_id=case.case_id,
@@ -417,7 +416,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     sample_build_worker.FeedbackDatasetRepo = datasets
     sample_build_worker.FeedbackDatasetSampleRepo = samples
     sample_build_worker.FeedbackCaseRepo = chain.cases
-    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
+    worker = SampleWorkerFixture(builder=SftSampleBuilder())
     # Drain automatic and superseded jobs before checking the explicitly collected sample.
     while await worker.run_once() is not None:
         pass
@@ -687,7 +686,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
+    await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()

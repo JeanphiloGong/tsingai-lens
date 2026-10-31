@@ -1,62 +1,65 @@
 #!/usr/bin/env python3
-"""Run task-specific dataset sample build jobs explicitly."""
-
+"""Run the concrete dataset_sample_build worker without constructing the web application."""
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from infra.persistence.database import AsyncSessionLocal, DatabaseSettings, build_database_engine
+from repositories.analysis_job_repository import AnalysisJobRepo, LeaseLostError
+from application.feedback.sample_build_worker import execute_dataset_sample_build_job
 
-async def run_once() -> str:
-    from main import build_application_runtime
-    from repositories.feedback_dataset_sample_repository import (
-        FeedbackDatasetSampleRepo,
-    )
+from openai import AsyncOpenAI
+from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
+from application.feedback.sft_sample_builder import SftSampleBuilder
+from application.feedback.preference_sample_builder import PreferenceSampleBuilder
+from application.feedback.evaluation_sample_builder import EvaluationSampleBuilder
+from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
 
-    runtime = await build_application_runtime()
+
+logger = logging.getLogger(__name__)
+
+async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
+    database_engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=database_engine)
     try:
-        await FeedbackDatasetSampleRepo.backfill_existing_cases()
-        worker = runtime.dataset_sample_build_worker
-        result = await worker.run_once()
-        return "idle" if result is None else str(result.status)
+        async with AsyncOpenAI(
+            api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
+            base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
+            timeout=float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "180")),
+            max_retries=0,
+        ) as client:
+            generator = OpenAIFeedbackSampleGenerator(client=client)
+            builders = {"sft": SftSampleBuilder(generator=generator),
+                        "preference": PreferenceSampleBuilder(generator=generator),
+                        "evaluation": EvaluationSampleBuilder(generator=generator)}
+            await FeedbackDatasetSampleRepo.backfill_existing_cases()
+            while True:
+                now = datetime.now(timezone.utc).isoformat()
+                await AnalysisJobRepo.recover_expired_jobs(now=now)
+                job = await AnalysisJobRepo.claim_next_dataset_sample_build_job(now=now)
+                if job is not None:
+                    try:
+                        result = await execute_dataset_sample_build_job(job, builders=builders)
+                        print(result.status, flush=True)
+                    except LeaseLostError:
+                        logger.warning("Worker lease lost job_id=%s", job.job_id)
+                else:
+                    print("idle", flush=True)
+                if once:
+                    return
+                await asyncio.sleep(interval_seconds)
     finally:
-        await runtime.close()
-
-
-async def run_loop(interval_seconds: float) -> None:
-    from main import build_application_runtime
-    from repositories.feedback_dataset_sample_repository import (
-        FeedbackDatasetSampleRepo,
-    )
-
-    runtime = None
-    initialized = False
-    try:
-        while True:
-            try:
-                if runtime is None:
-                    runtime = await build_application_runtime()
-                if not initialized:
-                    await FeedbackDatasetSampleRepo.backfill_existing_cases()
-                    initialized = True
-                result = await runtime.dataset_sample_build_worker.run_once()
-                print("idle" if result is None else str(result.status), flush=True)
-            except Exception:
-                logger.exception("dataset sample worker iteration failed")
-            await asyncio.sleep(interval_seconds)
-    finally:
-        if runtime is not None:
-            await runtime.close()
+        await database_engine.dispose()
 
 
 def main() -> None:
@@ -71,7 +74,7 @@ def main() -> None:
     if args.interval <= 0:
         parser.error("--interval must be positive")
     if args.once:
-        print(asyncio.run(run_once()))
+        asyncio.run(run_loop(args.interval, once=True))
         return
     try:
         asyncio.run(run_loop(args.interval))

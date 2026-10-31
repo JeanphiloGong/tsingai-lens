@@ -1,3 +1,5 @@
+from tests.support.feedback_workers import update_case_source_fixture
+from tests.support.feedback_workers import FeedbackAnalyzerFixture, FeedbackWorkerFixture, SampleWorkerFixture
 """Feedback ingestion, source changes, and selected publication against PostgreSQL."""
 
 
@@ -11,10 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 from application.feedback import dataset_export_service, dataset_service
-from application.feedback.analysis_handler import FeedbackAnalysisHandler
-from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.feedback.dataset_service import FeedbackDatasetConflict
-from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from domain.feedback.sample_revision import (
     SampleRevision,
@@ -75,7 +74,7 @@ async def _analyze(chain, answer=None):
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    terminal = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
+    terminal = await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     assert terminal.status == "succeeded"
     cases = await chain.cases.list_cases(collection_id=COLLECTION_ID)
     return next(case for case in cases if case.anchor_message_id == answer.message_id)
@@ -133,7 +132,7 @@ async def _confirm_all_sft(chain, service):
     sample_build_worker.FeedbackDatasetRepo = service.FeedbackDatasetRepo
     sample_build_worker.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
     sample_build_worker.FeedbackCaseRepo = chain.cases
-    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
+    worker = SampleWorkerFixture(builder=SftSampleBuilder())
     while await worker.run_once() is not None:
         pass
     samples = await service.FeedbackDatasetSampleRepo.list_samples(
@@ -253,7 +252,7 @@ async def test_case_and_all_sample_jobs_roll_back_together(
     analysis_worker.AnalysisJobRepo = chain.jobs
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
-    failed = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
+    failed = await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     assert failed.status == "failed"
     async with postgres_session_factory() as session:
         for model in (
@@ -406,13 +405,9 @@ async def test_source_changed_between_read_and_collect_is_rejected(
     original = service.FeedbackDatasetSampleRepo.collect
 
     async def update_source_before_collect(**kwargs):
-        await chain.cases.upsert_case_from_analysis(
-            result,
-            context_snapshot={
+        await update_case_source_fixture(chain.cases, result, context_snapshot={
                 "additional_evidence": "Source changed after the HTTP read."
-            },
-            now=_now(),
-        )
+            }, now=_now())
         return await original(**kwargs)
 
     monkeypatch.setattr(
@@ -457,13 +452,9 @@ async def test_new_analysis_preserves_human_revision_and_requires_reconfirmation
     dataset, samples = await _confirm_all_sft(chain, service)
     before = samples[0]
     result = (await chain.cases.read_analysis_results(case.analysis_result_ids))[0]
-    await chain.cases.upsert_case_from_analysis(
-        result,
-        context_snapshot={
+    await update_case_source_fixture(chain.cases, result, context_snapshot={
             "additional_evidence": "A newly checked table limits the comparison."
-        },
-        now=_now(),
-    )
+        }, now=_now())
     after = await service.FeedbackDatasetSampleRepo.read_sample(
         dataset_id=dataset.dataset_id, sample_id=before.sample_id
     )
@@ -488,9 +479,7 @@ async def test_source_change_requeues_confirmed_worker_candidate(
     case = await _analyze(chain)
     result = (await chain.cases.read_analysis_results(case.analysis_result_ids))[0]
     caption = chain.question.source_contexts[-1]
-    case = await chain.cases.upsert_case_from_analysis(
-        result,
-        context_snapshot={
+    case = await update_case_source_fixture(chain.cases, result, context_snapshot={
             "inspected_sources": [
                 {
                     "document_id": caption.document_id,
@@ -499,9 +488,7 @@ async def test_source_change_requeues_confirmed_worker_candidate(
                     "quote": caption.quote,
                 }
             ]
-        },
-        now=_now(),
-    )
+        }, now=_now())
     service = _service(chain, postgres_session_factory)
     dataset = next(
         record.dataset
@@ -527,7 +514,7 @@ async def test_source_change_requeues_confirmed_worker_candidate(
     sample_build_worker.FeedbackDatasetRepo = service.FeedbackDatasetRepo
     sample_build_worker.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
     sample_build_worker.FeedbackCaseRepo = chain.cases
-    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder(generator=Generator()))
+    worker = SampleWorkerFixture(builder=SftSampleBuilder(generator=Generator()))
     while await worker.run_once() is not None:
         pass
     candidate = (
@@ -542,13 +529,9 @@ async def test_source_change_requeues_confirmed_worker_candidate(
         sample_id=candidate.sample_id,
         expected_revision_id=candidate.current_revision_id,
     )
-    await chain.cases.upsert_case_from_analysis(
-        result,
-        context_snapshot={
+    await update_case_source_fixture(chain.cases, result, context_snapshot={
             "additional_evidence": "A new measurement limits the earlier comparison."
-        },
-        now=_now(),
-    )
+        }, now=_now())
     after = await service.FeedbackDatasetSampleRepo.read_sample(
         dataset_id=dataset.dataset_id, sample_id=before.sample_id
     )
@@ -579,7 +562,7 @@ async def test_timed_out_build_releases_sample_and_job_lease(
     sample_build_worker.FeedbackDatasetRepo = service.FeedbackDatasetRepo
     sample_build_worker.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
     sample_build_worker.FeedbackCaseRepo = chain.cases
-    worker = DatasetSampleBuildWorker(builders={
+    worker = SampleWorkerFixture(builders={
             task: HangingBuilder() for task in ("sft", "preference", "evaluation")
         }, build_timeout_seconds=0.05)
     result = await worker.run_once()
@@ -632,3 +615,48 @@ async def test_completion_rechecks_case_after_candidate_generation(
     assert completed.status == "needs_input"
     assert completed.current_revision_id is None
     assert await repository.read_revision(revision.revision_id) is None
+
+
+async def test_feedback_publication_rolls_back_results_case_queues_and_success(
+    feedback_chain, postgres_session_factory, monkeypatch,
+):
+    from application.feedback.analysis_handler import analyze_feedback_job, RuleBasedFeedbackAnalysisEngine
+    from repositories import feedback_case_repository as cases_module
+    from repositories.analysis_job_repository import LeaseLostError
+    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
+    chain = feedback_chain
+    await chain.chat_service.set_message_feedback_for_user(
+        SESSION_ID, chain.answer.message_id, USER_ID,
+        rating="not_helpful", reason="incorrect", comment="Check the Methods caption.")
+    job = await chain.jobs.claim_next_feedback_analysis_job(now=_now())
+    result, snapshot, signals = await analyze_feedback_job(
+        job, engine=RuleBasedFeedbackAnalysisEngine(), model_name="rule-based-v1")
+
+    async def fail_after_case(db, row, *, now):
+        raise OSError("controlled queue write failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cases_module, "enqueue_case_samples", fail_after_case)
+        with pytest.raises(OSError, match="queue write failure"):
+            await chain.cases.upsert_case_from_analysis(result, job=job,
+                context_snapshot=snapshot, source_signal_ids=signals, now=_now())
+    async with postgres_session_factory() as db:
+        assert await db.scalar(select(func.count()).select_from(FeedbackAnalysisResultRow)) == 0
+        assert await db.scalar(select(func.count()).select_from(FeedbackCaseRow)) == 0
+        assert await db.scalar(select(func.count()).select_from(FeedbackDatasetSampleRow)) == 0
+    assert (await chain.jobs.read_job(job.job_id)).status == "running"
+
+    from datetime import timedelta
+    from sqlalchemy import update
+    async with postgres_session_factory() as db, db.begin():
+        await db.execute(update(AnalysisJobRow).where(AnalysisJobRow.job_id==job.job_id).values(
+            lease_expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)))
+    replacement = await chain.jobs.claim_next_feedback_analysis_job(now=_now())
+    assert replacement.lease_version > job.lease_version
+    with pytest.raises(LeaseLostError):
+        await chain.cases.upsert_case_from_analysis(result, job=job,
+            context_snapshot=snapshot, source_signal_ids=signals, now=_now())
+    await chain.cases.upsert_case_from_analysis(result, job=replacement,
+        context_snapshot=snapshot, source_signal_ids=signals, now=_now())
+    assert (await chain.jobs.read_job(job.job_id)).status == "succeeded"
+    assert len(await chain.cases.list_cases(collection_id=COLLECTION_ID)) == 1

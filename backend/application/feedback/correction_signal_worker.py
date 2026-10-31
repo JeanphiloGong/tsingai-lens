@@ -4,110 +4,96 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import Any
 
-from repositories.analysis_job_repository import AnalysisJobRepo
-from repositories.feedback_case_repository import FeedbackCaseRepo
+from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo, LeaseLostError
+from repositories.feedback_case_repository import FeedbackCaseRepo, FeedbackCaseWriteConflict
 
 from application.feedback.analysis_handler import AnalysisInputError
-from application.feedback.correction_signal_handler import CorrectionSignalAnalysisHandler
-from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
+from application.feedback.correction_signal_handler import CorrectionSignalAnalysisEngine, analyze_correction_signal_job
 
 
 logger = logging.getLogger(__name__)
 
 
-class CorrectionSignalAnalysisWorker:
-    """Process only ``correction_signal_analysis`` jobs.
-
-    Keeping this worker separate from the frozen P1 feedback worker makes the
-    new source identity and cancellation semantics explicit at the runtime
-    boundary.
-    """
-
-    def __init__(
-        self,
-        *,
-        handler: CorrectionSignalAnalysisHandler,
-    ) -> None:
-        self.handler = handler
-
-    async def run_once(self) -> Any | None:
-        now = datetime.now(timezone.utc).isoformat()
-        await AnalysisJobRepo.recover_expired_jobs(now=now)
-        job = await AnalysisJobRepo.claim_next_correction_signal_analysis_job(now=now)
-        if job is None:
-            return None
-        try:
-            result, context_snapshot, source_signal_ids = await run_with_lease_heartbeat(
-                job,
-                lambda: self.handler.handle(job),
-            )
-        except LeaseLostError:
-            return await AnalysisJobRepo.read_job(job.job_id)
-        except AnalysisInputError as exc:
-            code = str(exc)
-            if code in {
-                "correction_signal_withdrawn",
-                "correction_signal_superseded",
-                "correction_signal_not_candidate",
-            }:
-                return await AnalysisJobRepo.mark_cancelled(
-                    job_id=job.job_id,
-                    error_code=code,
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                    worker_id=job.worker_id,
-                    lease_version=job.lease_version,
-                )
-            logger.warning(
-                "correction signal input rejected job_id=%s code=%s",
-                job.job_id,
-                code,
-            )
-            return await AnalysisJobRepo.mark_failed(
+async def execute_correction_signal_analysis_job(
+    job: AnalysisJob, *, engine: CorrectionSignalAnalysisEngine, model_name: str
+) -> AnalysisJob:
+    try:
+        (
+            result,
+            context_snapshot,
+            source_signal_ids,
+        ) = await analyze_correction_signal_job(
+            job,
+            engine=engine,
+            model_name=model_name,
+        )
+    except AnalysisInputError as exc:
+        code = str(exc)
+        if code in {
+            "correction_signal_withdrawn",
+            "correction_signal_superseded",
+            "correction_signal_not_candidate",
+        }:
+            return await AnalysisJobRepo.mark_cancelled(
                 job_id=job.job_id,
                 error_code=code,
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 worker_id=job.worker_id,
                 lease_version=job.lease_version,
             )
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "correction signal worker failed job_id=%s", job.job_id
-            )
-            return await AnalysisJobRepo.mark_failed(
-                job_id=job.job_id,
-                error_code="correction_signal_analysis_failed",
-                finished_at=datetime.now(timezone.utc).isoformat(),
-                worker_id=job.worker_id,
-                lease_version=job.lease_version,
-            )
-
-        try:
-            await FeedbackCaseRepo.upsert_case_from_correction_signal(
-                result,
-                context_snapshot=context_snapshot,
-                source_signal_ids=source_signal_ids,
-                now=datetime.now(timezone.utc).isoformat(),
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "correction signal persistence failed job_id=%s", job.job_id
-            )
-            return await AnalysisJobRepo.mark_failed(
-                job_id=job.job_id,
-                error_code="correction_signal_persistence_failed",
-                finished_at=datetime.now(timezone.utc).isoformat(),
-                worker_id=job.worker_id,
-                lease_version=job.lease_version,
-            )
-        return await AnalysisJobRepo.mark_succeeded(
+        logger.warning(
+            "correction signal input rejected job_id=%s code=%s",
+            job.job_id,
+            code,
+        )
+        return await AnalysisJobRepo.mark_failed(
             job_id=job.job_id,
-            result_id=result.result_id,
+            error_code=code,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
+        )
+    except LeaseLostError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception("correction signal worker failed job_id=%s", job.job_id)
+        return await AnalysisJobRepo.mark_failed(
+            job_id=job.job_id,
+            error_code="correction_signal_analysis_failed",
             finished_at=datetime.now(timezone.utc).isoformat(),
             worker_id=job.worker_id,
             lease_version=job.lease_version,
         )
 
+    try:
+        await FeedbackCaseRepo.upsert_case_from_correction_signal(
+            result,
+            job=job,
+            context_snapshot=context_snapshot,
+            source_signal_ids=source_signal_ids,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+    except FeedbackCaseWriteConflict as exc:
+        return await AnalysisJobRepo.mark_cancelled(
+            job_id=job.job_id,
+            error_code=exc.reason,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
+        )
+    except LeaseLostError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception("correction signal persistence failed job_id=%s", job.job_id)
+        return await AnalysisJobRepo.mark_failed(
+            job_id=job.job_id,
+            error_code="correction_signal_persistence_failed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
+        )
+    return await AnalysisJobRepo.read_job(job.job_id)
 
-__all__ = ["CorrectionSignalAnalysisWorker"]
+
+__all__ = ["execute_correction_signal_analysis_job"]

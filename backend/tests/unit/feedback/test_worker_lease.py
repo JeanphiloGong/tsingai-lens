@@ -67,3 +67,23 @@ async def test_operation_cannot_publish_after_lease_is_lost() -> None:
             lambda: asyncio.sleep(0.03, result="must-not-publish"),
             interval_seconds=0.005,
         )
+
+
+async def test_outer_cancellation_waits_for_operation_cleanup():
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def operation():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            finished.set()
+
+    task = asyncio.create_task(run_with_lease_heartbeat(_job(), operation))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert finished.is_set()

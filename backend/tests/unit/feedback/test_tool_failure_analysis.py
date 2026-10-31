@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.support.feedback_workers import ToolFailureAnalyzerFixture, ToolFailureWorkerFixture
+
 from application.feedback import tool_failure_worker, worker_lease
 
 from application.feedback import tool_failure_handler
@@ -14,8 +16,6 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
-from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
 from domain.chat import (
     ChatMessage,
     ChatSession,
@@ -101,7 +101,7 @@ class _Cases:
     def __init__(self):
         self.calls = []
 
-    async def upsert_case_from_tool_failure(self, result, *, context_snapshot,
+    async def upsert_case_from_tool_failure(self, result, *, job, context_snapshot,
                                             source_signal_ids, now):
         self.calls.append({
             "result": result,
@@ -110,10 +110,12 @@ class _Cases:
         })
 
 
+
 class _FailingCases(_Cases):
-    async def upsert_case_from_tool_failure(self, result, *, context_snapshot,
+    async def upsert_case_from_tool_failure(self, result, *, job, context_snapshot,
                                             source_signal_ids, now):
         raise RuntimeError("database unavailable")
+
 
 
 def _fixture():
@@ -195,7 +197,7 @@ def _fixture():
 async def test_handler_builds_independent_tool_failure_result():
     session, messages, call, job = _fixture()
     tool_failure_handler.ChatRepo = _Chat(messages, call, session)
-    result, snapshot, source_ids = await ToolFailureAnalysisHandler().handle(job)
+    result, snapshot, source_ids = await ToolFailureAnalyzerFixture().handle(job)
 
     assert result.signal_id == tool_failure_signal_id(call.tool_call_id, "tool-result-1")
     assert result.tool_call_id == call.tool_call_id
@@ -260,7 +262,7 @@ async def test_worker_cancels_when_result_is_no_longer_a_failure():
     tool_failure_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = tool_failure_worker.AnalysisJobRepo
     tool_failure_worker.FeedbackCaseRepo = cases
-    outcome = await ToolFailureAnalysisWorker(handler=ToolFailureAnalysisHandler()).run_once()
+    outcome = await ToolFailureWorkerFixture(handler=ToolFailureAnalyzerFixture()).run_once()
 
     assert outcome.status == "cancelled"
     assert jobs.job.status == "cancelled"
@@ -275,7 +277,7 @@ async def test_worker_marks_persistence_failure_without_claiming_success():
     tool_failure_worker.AnalysisJobRepo = jobs
     worker_lease.AnalysisJobRepo = tool_failure_worker.AnalysisJobRepo
     tool_failure_worker.FeedbackCaseRepo = _FailingCases()
-    outcome = await ToolFailureAnalysisWorker(handler=ToolFailureAnalysisHandler()).run_once()
+    outcome = await ToolFailureWorkerFixture(handler=ToolFailureAnalyzerFixture()).run_once()
 
     assert outcome.status == "failed"
     assert jobs.finished == ("failed", "tool_failure_persistence_failed")
@@ -287,7 +289,7 @@ async def test_handler_rejects_changed_result_digest():
     changed = replace(job, payload={**job.payload, "result_digest": "f" * 64})
     with pytest.raises(ValueError, match="identity_mismatch"):
         tool_failure_handler.ChatRepo = _Chat(messages, call, session)
-        await ToolFailureAnalysisHandler().handle(changed)
+        await ToolFailureAnalyzerFixture().handle(changed)
 
 
 async def test_handler_rejects_tool_result_persisted_before_its_assistant_request():
@@ -296,7 +298,7 @@ async def test_handler_rejects_tool_result_persisted_before_its_assistant_reques
 
     with pytest.raises(ValueError, match="order_invalid"):
         tool_failure_handler.ChatRepo = _Chat(reordered, call, session)
-        await ToolFailureAnalysisHandler().handle(job)
+        await ToolFailureAnalyzerFixture().handle(job)
 
 
 async def test_handler_rejects_a_user_message_between_request_and_tool_result():
@@ -311,7 +313,7 @@ async def test_handler_rejects_a_user_message_between_request_and_tool_result():
 
     with pytest.raises(ValueError, match="order_invalid"):
         tool_failure_handler.ChatRepo = _Chat(interrupted, call, session)
-        await ToolFailureAnalysisHandler().handle(job)
+        await ToolFailureAnalyzerFixture().handle(job)
 
 
 async def test_handler_rejects_a_persisted_call_that_is_missing_from_assistant_requests():
@@ -333,7 +335,7 @@ async def test_handler_rejects_a_persisted_call_that_is_missing_from_assistant_r
 
     with pytest.raises(ValueError, match="identity_mismatch"):
         tool_failure_handler.ChatRepo = _Chat(mismatched, call, session)
-        await ToolFailureAnalysisHandler().handle(job)
+        await ToolFailureAnalyzerFixture().handle(job)
 
 
 async def test_handler_does_not_attach_an_answer_from_a_later_user_turn():
@@ -353,7 +355,7 @@ async def test_handler_does_not_attach_an_answer_from_a_later_user_turn():
     tool_failure_handler.ChatRepo = _Chat(
                 (*messages[:2], later_user, later_answer), call, session
             )
-    result, snapshot, _ = await ToolFailureAnalysisHandler().handle(job)
+    result, snapshot, _ = await ToolFailureAnalyzerFixture().handle(job)
 
     assert result.related_message_ids == (messages[0].message_id, messages[1].message_id)
     assert snapshot["answer_message_id"] == messages[0].message_id

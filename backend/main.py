@@ -39,18 +39,6 @@ from application.chat.capabilities import (
 from application.chat.session_service import ChatSessionService
 from application.core.objectives.objective_discovery_service import ObjectiveDiscoveryService
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.feedback import (
-    CorrectionSignalAnalysisHandler,
-    CorrectionSignalAnalysisWorker,
-    DatasetSampleBuildWorker,
-    EvaluationSampleBuilder,
-    FeedbackAnalysisHandler,
-    FeedbackAnalysisWorker,
-    PreferenceSampleBuilder,
-    SftSampleBuilder,
-    ToolFailureAnalysisHandler,
-    ToolFailureAnalysisWorker,
-)
 from application.source.document_preparation_service import DocumentPreparationService
 from config import DATA_DIR
 from controllers import auth_routes as auth
@@ -77,8 +65,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from infra.llm.chat_model import OpenAIChatModel
-from infra.llm.correction_signal_analysis import OpenAICorrectionSignalAnalysisEngine
-from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
 from infra.persistence.database import (
     AsyncSessionLocal,
     DatabaseSettings,
@@ -162,10 +148,6 @@ class ApplicationRuntime:
     document_preparation_service: DocumentPreparationService
     objective_analysis_service: ObjectiveAnalysisService
     chat_session_service: ChatSessionService
-    feedback_analysis_worker: FeedbackAnalysisWorker
-    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker
-    tool_failure_analysis_worker: ToolFailureAnalysisWorker
-    dataset_sample_build_worker: DatasetSampleBuildWorker
 
     async def close(self) -> None:
         await self.chat_session_service.close()
@@ -226,8 +208,6 @@ async def build_application_runtime() -> ApplicationRuntime:
                 )
             ),
         )
-        correction_engine = OpenAICorrectionSignalAnalysisEngine()
-        sample_generator = OpenAIFeedbackSampleGenerator()
         return ApplicationRuntime(
             database_engine=database_engine,
             collection_workspace=collection_workspace,
@@ -236,25 +216,7 @@ async def build_application_runtime() -> ApplicationRuntime:
             document_preparation_service=preparation,
             objective_analysis_service=analysis,
             chat_session_service=ChatSessionService(runner=runner),
-            feedback_analysis_worker=FeedbackAnalysisWorker(
-                handler=FeedbackAnalysisHandler(),
-            ),
-            correction_signal_analysis_worker=CorrectionSignalAnalysisWorker(
-                handler=CorrectionSignalAnalysisHandler(
-                    engine=correction_engine,
-                    model_name=correction_engine.model_name,
-                ),
-            ),
-            tool_failure_analysis_worker=ToolFailureAnalysisWorker(
-                handler=ToolFailureAnalysisHandler(),
-            ),
-            dataset_sample_build_worker=DatasetSampleBuildWorker(
-                builders={
-                    "sft": SftSampleBuilder(generator=sample_generator),
-                    "preference": PreferenceSampleBuilder(generator=sample_generator),
-                    "evaluation": EvaluationSampleBuilder(generator=sample_generator),
-                },
-            ),
+
         )
     except BaseException:
         await database_engine.dispose()

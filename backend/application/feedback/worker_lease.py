@@ -7,15 +7,11 @@ from datetime import datetime, timezone
 import logging
 from typing import Awaitable, Callable, TypeVar
 
-from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo
+from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo, LeaseLostError
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-class LeaseLostError(RuntimeError):
-    """The worker no longer owns the job lease and must not publish a result."""
 
 
 async def run_with_lease_heartbeat(
@@ -62,6 +58,8 @@ async def run_with_lease_heartbeat(
             {operation_task, heartbeat_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
+        if operation_task in done:
+            return operation_task.result()
         if heartbeat_task in done:
             operation_task.cancel()
             await asyncio.gather(operation_task, return_exceptions=True)
@@ -69,8 +67,10 @@ async def run_with_lease_heartbeat(
         return operation_task.result()
     finally:
         stop.set()
-        heartbeat_task.cancel()
-        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        for task in (operation_task, heartbeat_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(operation_task, heartbeat_task, return_exceptions=True)
 
 
 __all__ = ["LeaseLostError", "run_with_lease_heartbeat"]

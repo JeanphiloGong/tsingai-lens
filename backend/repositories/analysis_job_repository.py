@@ -13,6 +13,7 @@ from uuid import uuid4
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 
@@ -118,6 +119,22 @@ class AnalysisJob:
     @property
     def feedback_id(self) -> str | None:
         return self.payload.get("feedback_id")
+
+
+class LeaseLostError(RuntimeError):
+    """The caller no longer owns this execution and cannot publish."""
+
+
+async def lock_analysis_job(db: AsyncSession, job: AnalysisJob) -> AnalysisJobRow:
+    row = await db.get(AnalysisJobRow, job.job_id, with_for_update=True)
+    if row is None or not _completion_lease_matches(
+        row,
+        worker_id=job.worker_id,
+        lease_version=job.lease_version,
+        timestamp=datetime.now(timezone.utc),
+    ):
+        raise LeaseLostError(f"analysis job lease lost: {job.job_id}")
+    return row
 
 
 class AnalysisJobRepository:

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Mapping
 
-from application.evaluation import finding_feedback_service
+from application.evaluation import finding_snapshot_service
 from application.goal.protocol_contract import (
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
@@ -126,7 +126,7 @@ async def create_agent_plan(
             "research plan is not a complete structured draft",
             data={"code": "experiment_plan_invalid"},
         )
-    validity, reasons = await finding_feedback_service.source_snapshot_validity(
+    validity, reasons = await finding_snapshot_service.source_snapshot_validity(
         collection_id=collection_id,
         objective_id=objective_id,
         source_findings=source_findings,
@@ -262,7 +262,7 @@ async def update_plan(
                 "research plan is not a complete structured draft",
                 data={"code": "experiment_plan_invalid"},
             )
-        validity, reasons = await finding_feedback_service.source_snapshot_validity(
+        validity, reasons = await finding_snapshot_service.source_snapshot_validity(
             collection_id=collection_id,
             objective_id=objective_id,
             source_findings=source_findings,
@@ -340,7 +340,7 @@ async def _with_source_validity(
             for item in plan.metadata.get("source_findings", [])
             if isinstance(item, dict)
         )
-        validity, reasons = await finding_feedback_service.source_snapshot_validity(
+        validity, reasons = await finding_snapshot_service.source_snapshot_validity(
             collection_id=plan.collection_id,
             objective_id=plan.objective_id,
             source_findings=source_findings,

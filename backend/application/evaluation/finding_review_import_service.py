@@ -1,10 +1,42 @@
+"""Parse and apply external human Finding review decisions."""
+
 from __future__ import annotations
+
+import json
+import math
+from datetime import datetime
+from typing import (
+    Any,
+    Mapping,
+)
+
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    FINDING_ASSERTION_STRENGTHS,
+    FINDING_ORIGINS,
+    FINDING_SYNTHESIS_STATUSES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificContext,
+)
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
+
 
 import json
 from pathlib import Path
 from typing import Any
 
-from application.evaluation.finding_feedback_service import parse_curated_finding
 from exceptions import (
     RequestInvalidException,
     ResourceConflictException,
@@ -31,6 +63,7 @@ _ISSUES = frozenset(
 )
 
 
+from application.evaluation import finding_dataset_service
 from application.evaluation import finding_feedback_service
 
 
@@ -116,9 +149,7 @@ async def _decision(
     user_id: str,
 ) -> dict[str, Any]:
     if "expert_action" in row or "expert_note" in row:
-        raise ValueError(
-            "expert_action and expert_note are not review JSONL fields"
-        )
+        raise ValueError("expert_action and expert_note are not review JSONL fields")
     action = row.get("action")
     if not isinstance(action, str):
         raise ValueError("action must be accept, reject, correct, or skip")
@@ -197,7 +228,7 @@ async def _require_dataset_item(
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    dataset = await finding_feedback_service.export_dataset(
+    dataset = await finding_dataset_service.export_dataset(
         collection_id=identity["collection_id"],
         objective_id=identity["objective_id"],
         user_id=user_id,
@@ -288,4 +319,263 @@ def _summary(
     }
 
 
-__all__ = ["import_rows", "import_jsonl_file", "read_review_jsonl"]
+def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
+    """Reject malformed external review JSON, then construct the Finding once."""
+    required = {
+        "collection_id",
+        "objective_id",
+        "analysis_version",
+        "finding_id",
+        "statement",
+        "factors",
+        "outcome",
+        "direction",
+        "assertion_strength",
+        "attribution_scope",
+        "synthesis_status",
+        "certainty",
+        "display_rank",
+        "mechanisms",
+        "scientific_context",
+        "limitations",
+        "paper_contributions",
+        "origin",
+        "source_analysis_version",
+        "parent_finding_id",
+        "created_by_user_id",
+        "created_by_tool_call_id",
+        "created_at",
+    }
+    optional = {"selection_ids", "comparison_group_ids", "warnings"}
+    error = "curated_finding must use the complete canonical Finding contract"
+    if (
+        not isinstance(payload, Mapping)
+        or not required <= payload.keys()
+        or payload.keys() - required - optional
+    ):
+        raise ValueError(error)
+    for name in ("collection_id", "objective_id", "finding_id", "statement", "outcome"):
+        if (
+            not isinstance(payload[name], str)
+            or not payload[name]
+            or payload[name] != payload[name].strip()
+        ):
+            raise ValueError(f"{error}: invalid {name}")
+    for name in ("parent_finding_id", "created_by_user_id", "created_by_tool_call_id"):
+        value = payload[name]
+        if value is not None and (
+            not isinstance(value, str) or not value or value != value.strip()
+        ):
+            raise ValueError(f"{error}: invalid {name}")
+    for name, allowed in (
+        ("direction", SCIENTIFIC_RESULT_DIRECTIONS),
+        ("assertion_strength", FINDING_ASSERTION_STRENGTHS),
+        ("attribution_scope", EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"}),
+        ("synthesis_status", FINDING_SYNTHESIS_STATUSES),
+        ("origin", FINDING_ORIGINS),
+    ):
+        if not isinstance(payload[name], str) or payload[name] not in allowed:
+            raise ValueError(f"{error}: invalid {name}")
+    for name, minimum in (
+        ("analysis_version", 1),
+        ("display_rank", 0),
+        ("source_analysis_version", 1),
+    ):
+        value = payload[name]
+        if name == "source_analysis_version" and value is None:
+            continue
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{error}: invalid {name}")
+    if (
+        type(payload["certainty"]) not in (int, float)
+        or not 0 <= payload["certainty"] <= 1
+    ):
+        raise ValueError(f"{error}: invalid certainty")
+    for name in (
+        "factors",
+        "limitations",
+        "selection_ids",
+        "comparison_group_ids",
+        "warnings",
+    ):
+        values = payload.get(name, [])
+        if not isinstance(values, list) or any(
+            not isinstance(value, str) or not value or value != value.strip()
+            for value in values
+        ):
+            raise ValueError(f"{error}: invalid {name}")
+    if not isinstance(payload["mechanisms"], list) or not isinstance(
+        payload["paper_contributions"], list
+    ):
+        raise ValueError(f"{error}: mechanisms and paper_contributions must be lists")
+    mechanisms = []
+    for item in payload["mechanisms"]:
+        if not isinstance(item, Mapping) or item.keys() != {
+            "source_term",
+            "relation_type",
+            "target_term",
+            "direction",
+            "assertion_strength",
+            "supporting_evidence_ids",
+        }:
+            raise ValueError(f"{error}: invalid mechanism fields")
+        for name in ("source_term", "relation_type", "target_term"):
+            if (
+                not isinstance(item[name], str)
+                or not item[name]
+                or item[name] != item[name].strip()
+            ):
+                raise ValueError(f"{error}: invalid mechanism {name}")
+        if item["direction"] is not None and (
+            not isinstance(item["direction"], str)
+            or item["direction"] not in SCIENTIFIC_RESULT_DIRECTIONS
+        ):
+            raise ValueError(f"{error}: invalid mechanism direction")
+        if (
+            not isinstance(item["assertion_strength"], str)
+            or item["assertion_strength"] not in FINDING_ASSERTION_STRENGTHS
+        ):
+            raise ValueError(f"{error}: invalid mechanism assertion_strength")
+        refs = item["supporting_evidence_ids"]
+        if not isinstance(refs, list) or any(
+            not isinstance(ref, str) or not ref or ref != ref.strip() for ref in refs
+        ):
+            raise ValueError(f"{error}: invalid mechanism evidence")
+        mechanisms.append(
+            FindingMechanismRelation(
+                source_term=item["source_term"],
+                relation_type=item["relation_type"],
+                target_term=item["target_term"],
+                direction=item["direction"],
+                assertion_strength=item["assertion_strength"],
+                supporting_evidence_ids=tuple(refs),
+            )
+        )
+    contributions = []
+    evidence_fields = (
+        "supporting_evidence_ids",
+        "contradicting_evidence_ids",
+        "context_evidence_ids",
+        "condition_boundary_evidence_ids",
+    )
+    for item in payload["paper_contributions"]:
+        if not isinstance(item, Mapping) or item.keys() != {
+            "document_id",
+            "analysis_status",
+            *evidence_fields,
+        }:
+            raise ValueError(f"{error}: invalid paper contribution fields")
+        if (
+            not isinstance(item["document_id"], str)
+            or not item["document_id"]
+            or item["document_id"] != item["document_id"].strip()
+        ):
+            raise ValueError(f"{error}: invalid contribution document_id")
+        if (
+            not isinstance(item["analysis_status"], str)
+            or item["analysis_status"] not in PAPER_CONTRIBUTION_STATUSES
+        ):
+            raise ValueError(f"{error}: invalid contribution analysis_status")
+        for name in evidence_fields:
+            refs = item[name]
+            if not isinstance(refs, list) or any(
+                not isinstance(ref, str) or not ref or ref != ref.strip()
+                for ref in refs
+            ):
+                raise ValueError(f"{error}: invalid {name}")
+        contributions.append(
+            FindingPaperContribution(
+                document_id=item["document_id"],
+                analysis_status=item["analysis_status"],
+                supporting_evidence_ids=tuple(item["supporting_evidence_ids"]),
+                contradicting_evidence_ids=tuple(item["contradicting_evidence_ids"]),
+                context_evidence_ids=tuple(item["context_evidence_ids"]),
+                condition_boundary_evidence_ids=tuple(
+                    item["condition_boundary_evidence_ids"]
+                ),
+            )
+        )
+    context = payload["scientific_context"]
+    if not isinstance(context, Mapping) or context.keys() != {
+        "material",
+        "sample",
+        "process",
+        "test",
+    }:
+        raise ValueError(f"{error}: invalid scientific_context")
+    context_values = {}
+    for name in ("material", "sample", "process", "test"):
+        if not isinstance(context[name], list):
+            raise ValueError(f"{error}: {name} must be a list")
+        attributes = []
+        for item in context[name]:
+            if (
+                not isinstance(item, Mapping)
+                or not {"name", "value", "unit"} <= item.keys()
+                or item.keys()
+                - {"name", "value", "unit", "context_scope", "applies_to_outcomes"}
+            ):
+                raise ValueError(f"{error}: invalid scientific attribute fields")
+            if (
+                not isinstance(item["name"], str)
+                or not item["name"].strip()
+                or type(item["value"]) not in (str, int, float, bool)
+            ):
+                raise ValueError(f"{error}: invalid scientific attribute")
+            if isinstance(item["value"], float) and not math.isfinite(item["value"]):
+                raise ValueError(f"{error}: invalid scientific value")
+            if item["unit"] is not None and not isinstance(item["unit"], str):
+                raise ValueError(f"{error}: invalid scientific unit")
+            if (
+                not isinstance(item.get("context_scope", "unknown"), str)
+                or item.get("context_scope", "unknown") not in SCIENTIFIC_CONTEXT_SCOPES
+            ):
+                raise ValueError(f"{error}: invalid scientific context_scope")
+            outcomes = item.get("applies_to_outcomes", [])
+            if not isinstance(outcomes, list) or any(
+                not isinstance(value, str) for value in outcomes
+            ):
+                raise ValueError(f"{error}: invalid applies_to_outcomes")
+            attributes.append(
+                ScientificAttribute(
+                    name=item["name"],
+                    value=item["value"],
+                    unit=item["unit"],
+                    context_scope=item.get("context_scope", "unknown"),
+                    applies_to_outcomes=tuple(outcomes),
+                )
+            )
+        context_values[name] = tuple(attributes)
+    created_at = payload["created_at"]
+    if created_at is not None:
+        if not isinstance(created_at, str):
+            raise ValueError(f"{error}: invalid created_at")
+        created_at = datetime.fromisoformat(created_at)
+    return Finding(
+        collection_id=payload["collection_id"],
+        objective_id=payload["objective_id"],
+        analysis_version=payload["analysis_version"],
+        finding_id=payload["finding_id"],
+        statement=payload["statement"],
+        factors=tuple(payload["factors"]),
+        outcome=payload["outcome"],
+        direction=payload["direction"],
+        assertion_strength=payload["assertion_strength"],
+        attribution_scope=payload["attribution_scope"],
+        synthesis_status=payload["synthesis_status"],
+        certainty=payload["certainty"],
+        display_rank=payload["display_rank"],
+        mechanisms=tuple(mechanisms),
+        scientific_context=ScientificContext(**context_values),
+        limitations=tuple(payload["limitations"]),
+        paper_contributions=tuple(contributions),
+        origin=payload["origin"],
+        source_analysis_version=payload["source_analysis_version"],
+        parent_finding_id=payload["parent_finding_id"],
+        created_by_user_id=payload["created_by_user_id"],
+        created_by_tool_call_id=payload["created_by_tool_call_id"],
+        created_at=created_at,
+        warnings=tuple(payload.get("warnings", [])),
+        selection_ids=tuple(payload.get("selection_ids", [])),
+        comparison_group_ids=tuple(payload.get("comparison_group_ids", [])),
+    )

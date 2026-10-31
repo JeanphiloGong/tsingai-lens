@@ -41,7 +41,7 @@ def _service(
     experiment_plan_service.ExperimentPlanRepo = (
         repository or ExperimentPlanRepository()
     )
-    experiment_plan_service.finding_feedback_service = _FindingFeedbackService(validity)
+    experiment_plan_service.finding_snapshot_service = _FindingFeedbackService(validity)
     return experiment_plan_service
 
 
@@ -208,7 +208,7 @@ async def test_agent_plan_persists_current_finding_sources_after_approval(
     repository = ExperimentPlanRepository()
     feedback_service = _FindingFeedbackService()
     experiment_plan_service.ExperimentPlanRepo = repository
-    experiment_plan_service.finding_feedback_service = feedback_service
+    experiment_plan_service.finding_snapshot_service = feedback_service
     service = experiment_plan_service
     source_findings = [
         {

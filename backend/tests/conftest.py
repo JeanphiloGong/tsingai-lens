@@ -214,6 +214,8 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.core.objectives.objective_input_service as _test_objective_input_service
     import application.core.objectives.paper_experiment_authoring_service as _test_paper_experiment_authoring_service
     import application.evaluation.finding_feedback_service as _test_finding_feedback_service
+    import application.evaluation.finding_dataset_service as _test_finding_dataset_service
+    import application.evaluation.finding_snapshot_service as _test_finding_snapshot_service
     import application.feedback.dataset_export_service as _test_dataset_export_service
     import application.feedback.dataset_service as _test_dataset_service
     import application.feedback.dataset_snapshot_service as _test_dataset_snapshot_service
@@ -264,7 +266,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (correction_signal_handler, ["ChatRepo"]),
         (tool_failure_handler, ["ChatRepo"]),
         (published_findings, ["collection_service", "ObjectiveRepo", "objective_analysis_service", "finding_feedback_service"]),
-        (research_planning, ["collection_service", "finding_feedback_service", "experiment_plan_service"]),
+        (research_planning, ["collection_service", "finding_dataset_service", "experiment_plan_service"]),
         (finding_authoring, ["finding_authoring_service"]),
         (finding_review, ["collection_service", "finding_feedback_service"]),
         (paper_experiment_authoring, ["paper_experiment_authoring_service", "ChatRepo"]),
@@ -382,15 +384,9 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_paper_experiment_authoring_service,
             ["SourceArtifactRepo", "collection_service", "experiment_analysis_writer"],
         ),
-        (
-            _test_finding_feedback_service,
-            [
-                "collection_service",
-                "FindingReviewRepo",
-                "ObjectiveRepo",
-                "experiment_projection",
-            ],
-        ),
+        (_test_finding_feedback_service, ["collection_service", "FindingReviewRepo"]),
+        (_test_finding_dataset_service, ["collection_service", "ObjectiveRepo"]),
+        (_test_finding_snapshot_service, ["ObjectiveRepo", "FindingReviewRepo", "experiment_projection"]),
         (
             _test_dataset_export_service,
             [
@@ -424,7 +420,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (_test_goal_service, ["collection_service"]),
         (
             _test_experiment_plan_service,
-            ["ExperimentPlanRepo", "finding_feedback_service", "collection_service"],
+            ["ExperimentPlanRepo", "finding_snapshot_service", "collection_service"],
         ),
         (_test_pipeline_run_service, ["PipelineRunRepo", "CollectionRepo"]),
         (
@@ -461,7 +457,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         ),
         (
             finding_review_routes,
-            ["finding_feedback_service", "finding_authoring_service"],
+            ["finding_feedback_service", "finding_dataset_service", "finding_authoring_service"],
         ),
         (paper_experiment_routes, ["experiment_query_service"]),
         (

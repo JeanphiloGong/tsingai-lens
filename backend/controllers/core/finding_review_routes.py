@@ -5,8 +5,9 @@ from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
 from application.core.objectives import finding_authoring_service
+from application.evaluation import finding_dataset_service
 from application.evaluation import finding_feedback_service
-from application.evaluation.finding_feedback_service import finding_training_rows
+from application.evaluation.finding_dataset_service import finding_training_rows
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
@@ -431,7 +432,7 @@ async def export_objective_finding_dataset(
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
-    payload = await finding_feedback_service.export_dataset(
+    payload = await finding_dataset_service.export_dataset(
         collection_id=collection_id,
         objective_id=objective_id,
         label_status=label_status,
@@ -459,7 +460,7 @@ async def export_collection_finding_dataset(
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
-    payload = await finding_feedback_service.export_collection_dataset(
+    payload = await finding_dataset_service.export_collection_dataset(
         collection_id=collection_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
@@ -477,7 +478,7 @@ async def export_finding_gold_draft(
     collection_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    payload = await finding_feedback_service.export_gold_draft(
+    payload = await finding_dataset_service.export_gold_draft(
         collection_id=collection_id, user_id=user_id
     )
     return make_api_response(data=FindingGoldDraftResponse(**payload))

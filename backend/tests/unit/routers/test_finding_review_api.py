@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from application.evaluation.finding_feedback_service import parse_curated_finding
+from application.evaluation.finding_review_import_service import parse_curated_finding
 from controllers.core import finding_review_routes
 from controllers.core.finding_review_routes import finding_review_router as router
 from controllers.dependencies.auth import get_current_user_id
@@ -873,6 +873,7 @@ def _client(service: _Service | None = None) -> TestClient:
     app.add_exception_handler(Exception, general_exception_handler)
     resolved = service or _Service()
     finding_review_routes.finding_feedback_service = resolved
+    finding_review_routes.finding_dataset_service = resolved
     finding_review_routes.finding_authoring_service = resolved
     app.dependency_overrides[get_current_user_id] = lambda: "user-researcher"
     app.include_router(router)

@@ -11,7 +11,7 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from application.evaluation.finding_feedback_service import parse_curated_finding
+from application.evaluation.finding_review_import_service import parse_curated_finding
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from domain.core import Finding
 from domain.core.scientific_fact import SCIENTIFIC_RESULT_DIRECTIONS

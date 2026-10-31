@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from application.source import collection_service
-from application.evaluation import finding_feedback_service
+from application.evaluation import finding_dataset_service
 from application.goal import experiment_plan_service
 
 import json
@@ -262,7 +262,7 @@ class ProposeResearchPlanCapability:
             context.user_id,
         )
         try:
-            dataset = await finding_feedback_service.export_dataset(
+            dataset = await finding_dataset_service.export_dataset(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 user_id=context.user_id,

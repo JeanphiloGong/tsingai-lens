@@ -16,9 +16,10 @@ from application.chat.capabilities.finding_review import (
     CurateFindingCapability,
     CurateFindingToolRequest,
 )
+from application.evaluation import finding_dataset_service, finding_snapshot_service
 from application.evaluation import finding_feedback_service
 from application.evaluation import core_evaluation_service
-from application.evaluation.finding_feedback_service import parse_curated_finding
+from application.evaluation.finding_review_import_service import parse_curated_finding
 from application.evaluation import gold_service
 from application.evaluation import prediction_snapshot_service
 from application.evaluation.prediction_snapshot_service import (
@@ -454,10 +455,12 @@ async def _published_objective_repository(
 
 async def _finding_feedback_service(*, postgres_session_factory) -> ModuleType:
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
-    finding_feedback_service.ObjectiveRepo = await _published_objective_repository(
+    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.ObjectiveRepo = await _published_objective_repository(
         postgres_session_factory=postgres_session_factory
     )
-    analysis_record_source.ObjectiveRepo = finding_feedback_service.ObjectiveRepo
+    analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
     return finding_feedback_service
 
 
@@ -568,16 +571,18 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(
     prediction_snapshot_service.experiment_projection = projection
     snapshot_service = prediction_snapshot_service
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
-    finding_feedback_service.ObjectiveRepo = repository
-    analysis_record_source.ObjectiveRepo = finding_feedback_service.ObjectiveRepo
-    finding_feedback_service.experiment_projection = projection
+    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_snapshot_service.experiment_projection = projection
     feedback_service = finding_feedback_service
 
     snapshot = await snapshot_service.create_core_snapshot(
         collection_id="col-gold",
         snapshot_id="experiment-snapshot",
     )
-    dataset = await feedback_service.export_dataset(
+    dataset = await finding_dataset_service.export_dataset(
         collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
@@ -650,15 +655,17 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     snapshot_service, _ = _prediction_snapshot_service(repository)
     snapshot_service.experiment_projection = RejectingProjection()
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
-    finding_feedback_service.ObjectiveRepo = repository
-    analysis_record_source.ObjectiveRepo = finding_feedback_service.ObjectiveRepo
-    finding_feedback_service.experiment_projection = RejectingProjection()
+    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_snapshot_service.experiment_projection = RejectingProjection()
     feedback_service = finding_feedback_service
 
     snapshot = await snapshot_service.create_core_snapshot(
         collection_id="col-gold", snapshot_id="authored-snapshot"
     )
-    dataset = await feedback_service.export_dataset(
+    dataset = await finding_dataset_service.export_dataset(
         collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
@@ -822,7 +829,7 @@ async def test_finding_curation_rejects_evidence_outside_published_finding(
     service = await _finding_feedback_service(
         postgres_session_factory=postgres_session_factory
     )
-    published = await service.ObjectiveRepo.read_finding(
+    published = await finding_snapshot_service.ObjectiveRepo.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
@@ -982,14 +989,14 @@ async def test_latest_feedback_or_curation_controls_dataset_status(
         postgres_session_factory=postgres_session_factory
     )
     candidate = (
-        await service.export_dataset(
+        await finding_dataset_service.export_dataset(
             collection_id="col-gold", objective_id="obj-1", user_id="user-1"
         )
     )["items"][0]
     assert candidate["dataset_use_status"] == "review_candidate"
     assert candidate["training_messages"] == []
 
-    published = await service.ObjectiveRepo.read_finding(
+    published = await finding_snapshot_service.ObjectiveRepo.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
@@ -1023,7 +1030,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status(
     )
 
     rejected = (
-        await service.export_dataset(
+        await finding_dataset_service.export_dataset(
             collection_id="col-gold", objective_id="obj-1", user_id="user-1"
         )
     )["items"][0]
@@ -1045,7 +1052,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status(
     )
 
     curated = (
-        await service.export_dataset(
+        await finding_dataset_service.export_dataset(
             collection_id="col-gold", objective_id="obj-1", user_id="user-1"
         )
     )["items"][0]
@@ -1205,7 +1212,7 @@ async def test_finding_feedback_export_contains_exact_source_text(
         user_id="user-1",
     )
 
-    dataset = await service.export_dataset(
+    dataset = await finding_dataset_service.export_dataset(
         collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
@@ -1251,7 +1258,7 @@ async def test_finding_source_snapshot_detects_each_stale_dimension(
         user_id="user-1",
     )
     item = (
-        await service.export_dataset(
+        await finding_dataset_service.export_dataset(
             collection_id="col-gold", objective_id="obj-1", user_id="user-1"
         )
     )["items"][0]
@@ -1264,7 +1271,7 @@ async def test_finding_source_snapshot_detects_each_stale_dimension(
         **snapshot_change,
     }
 
-    validity, reasons = await service.source_snapshot_validity(
+    validity, reasons = await finding_snapshot_service.source_snapshot_validity(
         collection_id="col-gold",
         objective_id="obj-1",
         source_findings=[source_finding],
@@ -1281,7 +1288,7 @@ async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable(
         postgres_session_factory=postgres_session_factory
     )
 
-    validity, reasons = await service.source_snapshot_validity(
+    validity, reasons = await finding_snapshot_service.source_snapshot_validity(
         collection_id="missing-collection",
         objective_id="missing-objective",
         source_findings=[{"finding_id": "finding-1"}],
@@ -1298,7 +1305,7 @@ async def test_only_training_ready_samples_include_training_messages(
         postgres_session_factory=postgres_session_factory
     )
     candidate = (
-        await candidate_service.export_dataset(
+        await finding_dataset_service.export_dataset(
             collection_id="col-gold", objective_id="obj-1", user_id="user-1"
         )
     )["items"][0]
@@ -1316,7 +1323,7 @@ async def test_only_training_ready_samples_include_training_messages(
         user_id="user-1",
     )
     rejected = (
-        await rejected_service.export_dataset(
+        await finding_dataset_service.export_dataset(
             collection_id="col-gold", objective_id="obj-1", user_id="user-1"
         )
     )["items"][0]
@@ -1333,7 +1340,7 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
     service = await _finding_feedback_service(
         postgres_session_factory=postgres_session_factory
     )
-    published = await service.ObjectiveRepo.read_finding(
+    published = await finding_snapshot_service.ObjectiveRepo.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
@@ -1677,12 +1684,12 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
             "col-gold", "obj-1", 1, "finding-1"
         )
         assert curation.curated_finding == arguments._parsed_finding
-    dataset = await service.export_dataset(
+    dataset = await finding_dataset_service.export_dataset(
         collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
     assert (
-        await service.ObjectiveRepo.read_finding("col-gold", "obj-1", 1, "finding-1")
+        await finding_snapshot_service.ObjectiveRepo.read_finding("col-gold", "obj-1", 1, "finding-1")
         == published
     )
     assert dataset["items"][0]["expert_target"] == {
@@ -1982,3 +1989,34 @@ async def research_records(postgres_session_factory, anyio_backend):
             ),
         ),
     )
+
+
+async def test_plan_snapshot_check_reads_only_referenced_finding_without_training(
+    monkeypatch, *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
+    await service.record_feedback(
+        collection_id="col-gold", objective_id="obj-1", analysis_version=1,
+        finding_id="finding-1", review_status="correct", issue_type="none", user_id="user-1",
+    )
+    dataset = await finding_dataset_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+    )
+    item = dataset["items"][0]
+    snapshot = {
+        key: item[key] for key in (
+            "finding_id", "analysis_version", "finding_fingerprint", "evidence_fingerprint"
+        )
+    }
+    snapshot["evidence_ids"] = [entry["evidence_id"] for entry in item["evidence"]]
+    def unexpected_export(*args, **kwargs):
+        raise AssertionError("Plan source validation must not enumerate or format a training dataset")
+    monkeypatch.setattr(finding_snapshot_service, "_all_findings", unexpected_export)
+    monkeypatch.setattr(finding_dataset_service, "_training_messages", unexpected_export)
+    read = AsyncMock(wraps=finding_snapshot_service.ObjectiveRepo.read_finding)
+    monkeypatch.setattr(finding_snapshot_service.ObjectiveRepo, "read_finding", read)
+
+    assert await finding_snapshot_service.source_snapshot_validity(
+        collection_id="col-gold", objective_id="obj-1", source_findings=[snapshot, snapshot]
+    ) == ("current", [])
+    read.assert_awaited_once_with("col-gold", "obj-1", 1, "finding-1")

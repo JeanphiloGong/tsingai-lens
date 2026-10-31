@@ -891,6 +891,7 @@ async def _local_objective_bundle(
 ) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
 
+        from application.evaluation import finding_dataset_service
         from application.evaluation import finding_feedback_service  # noqa: PLC0415
         from infra.persistence.database import (  # noqa: PLC0415
             AsyncSessionLocal,
@@ -1320,7 +1321,7 @@ async def _local_objective_bundle(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
-            dataset = await feedback_service.export_dataset(
+            dataset = await finding_dataset_service.export_dataset(
                 collection_id=collection_id,
                 objective_id=objective_id,
                 user_id=user_id,

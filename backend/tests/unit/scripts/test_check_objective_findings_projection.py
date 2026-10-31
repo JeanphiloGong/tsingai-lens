@@ -351,7 +351,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
         "repositories.finding_review_repository",
         fromlist=["finding_review_repository"],
     )
-    from application.evaluation import finding_feedback_service
+    from application.evaluation import finding_dataset_service
 
     engine = SimpleNamespace(dispose=AsyncMock())
     monkeypatch.setattr(database, "build_database_engine", lambda _settings: engine)
@@ -367,7 +367,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
         lambda: ReviewRepository(),
     )
     monkeypatch.setattr(
-        finding_feedback_service,
+        finding_dataset_service,
         "export_dataset",
         AsyncMock(return_value={"items": []}),
     )

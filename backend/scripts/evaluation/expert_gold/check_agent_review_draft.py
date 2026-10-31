@@ -12,7 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from application.evaluation.finding_feedback_service import parse_curated_finding
+from application.evaluation.finding_review_import_service import parse_curated_finding
 
 
 AGENT_RECOMMENDATIONS = ("accept", "reject", "correct", "unclear", "skip")

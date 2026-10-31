@@ -60,7 +60,7 @@ from domain.core.scientific_fact import (
 from domain.evaluation import EvaluationGoldItem, FindingCuration, FindingFeedback
 from domain.source import SourceBlock, SourceDocument
 from exceptions import RequestInvalidException, ResourceConflictException
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.evaluation_repository import EvaluationRepository
 from repositories.finding_review_repository import FindingReviewRepository
 from repositories.objective_repository import ObjectiveRepository
@@ -532,10 +532,10 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(
     assert analysis is not None
     async with postgres_session_factory.begin() as session:
         row = await session.scalar(
-            select(ObjectiveAnalysisRecord).where(
-                ObjectiveAnalysisRecord.collection_id == "col-gold",
-                ObjectiveAnalysisRecord.objective_id == "obj-1",
-                ObjectiveAnalysisRecord.analysis_version == 1,
+            select(ObjectiveAnalysisORM).where(
+                ObjectiveAnalysisORM.collection_id == "col-gold",
+                ObjectiveAnalysisORM.objective_id == "obj-1",
+                ObjectiveAnalysisORM.analysis_version == 1,
             )
         )
         row.payload = {

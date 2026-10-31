@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import select
 from infra.persistence.database import AsyncSessionLocal
 
-from infra.persistence.postgres.models.model_connection import ModelConnectionRow
+from infra.persistence.postgres.models.model_connection import ModelConnectionORM
 
 
 @dataclass(frozen=True)
@@ -29,9 +29,9 @@ class ModelConnectionRepository:
     async def list_enabled(self) -> tuple[ModelConnectionRecord, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(ModelConnectionRow)
-                .where(ModelConnectionRow.enabled.is_(True))
-                .order_by(ModelConnectionRow.display_name, ModelConnectionRow.connection_id)
+                select(ModelConnectionORM)
+                .where(ModelConnectionORM.enabled.is_(True))
+                .order_by(ModelConnectionORM.display_name, ModelConnectionORM.connection_id)
             )
             return tuple(
                 ModelConnectionRecord(
@@ -53,9 +53,9 @@ class ModelConnectionRepository:
     async def read_enabled(self, connection_id: str) -> ModelConnectionRecord | None:
         async with AsyncSessionLocal() as db:
             row = await db.scalar(
-                select(ModelConnectionRow).where(
-                    ModelConnectionRow.connection_id == connection_id,
-                    ModelConnectionRow.enabled.is_(True),
+                select(ModelConnectionORM).where(
+                    ModelConnectionORM.connection_id == connection_id,
+                    ModelConnectionORM.enabled.is_(True),
                 )
             )
             if row is None:
@@ -76,7 +76,7 @@ class ModelConnectionRepository:
 
     async def read(self, connection_id: str) -> ModelConnectionRecord | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ModelConnectionRow, connection_id)
+            row = await db.get(ModelConnectionORM, connection_id)
             if row is None:
                 return None
             return ModelConnectionRecord(

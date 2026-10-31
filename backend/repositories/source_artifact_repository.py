@@ -32,9 +32,9 @@ from domain.source import (
     render_plain_table_text,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.document import Document as DocumentRow
+from infra.persistence.postgres.models.document import DocumentORM
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from sqlalchemy import select
 
@@ -173,12 +173,12 @@ class SourceArtifactRepository:
         )
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            owner = await db.get(DocumentRow, document.document_id)
+            owner = await db.get(DocumentORM, document.document_id)
             if owner is None or owner.collection_id != collection_id:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{document.document_id}"
                 )
-            row = await db.get(DocumentPreparationRow, document.document_id)
+            row = await db.get(DocumentPreparationORM, document.document_id)
             values = {
                 "document_id": document.document_id,
                 "source_format": str(
@@ -199,7 +199,7 @@ class SourceArtifactRepository:
                 "updated_at": now,
             }
             if row is None:
-                db.add(DocumentPreparationRow(created_at=now, **values))
+                db.add(DocumentPreparationORM(created_at=now, **values))
             else:
                 for key, value in values.items():
                     setattr(row, key, value)
@@ -222,14 +222,14 @@ class SourceArtifactRepository:
     async def has_documents(self, collection_id: str) -> bool:
         async with AsyncSessionLocal() as db:
             document_id = await db.scalar(
-                select(DocumentPreparationRow.document_id)
+                select(DocumentPreparationORM.document_id)
                 .join(
-                    DocumentRow,
-                    DocumentRow.document_id == DocumentPreparationRow.document_id,
+                    DocumentORM,
+                    DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
                 .where(
-                    DocumentRow.collection_id == collection_id,
-                    DocumentPreparationRow.artifact_json["document"]["document_id"]
+                    DocumentORM.collection_id == collection_id,
+                    DocumentPreparationORM.artifact_json["document"]["document_id"]
                     .as_string()
                     .is_not(None),
                 )
@@ -262,21 +262,21 @@ class SourceArtifactRepository:
     ) -> tuple[SourceDocument, ...]:
         async with AsyncSessionLocal() as db:
             statement = (
-                select(DocumentPreparationRow)
+                select(DocumentPreparationORM)
                 .join(
-                    DocumentRow,
-                    DocumentRow.document_id == DocumentPreparationRow.document_id,
+                    DocumentORM,
+                    DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
                 .where(
-                    DocumentRow.collection_id == collection_id,
+                    DocumentORM.collection_id == collection_id,
                 )
                 .order_by(
-                    DocumentRow.document_order, DocumentPreparationRow.document_id
+                    DocumentORM.document_order, DocumentPreparationORM.document_id
                 )
             )
             if document_ids is not None:
                 statement = statement.where(
-                    DocumentPreparationRow.document_id.in_(document_ids)
+                    DocumentPreparationORM.document_id.in_(document_ids)
                 )
             rows = tuple(await db.scalars(statement))
         documents = []
@@ -540,7 +540,7 @@ class SourceArtifactRepository:
     ) -> None:
         self._validate_references(document_id, references)
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            row = await db.get(DocumentPreparationRow, document_id)
+            row = await db.get(DocumentPreparationORM, document_id)
             if row is None or not row.artifact_json:
                 raise FileNotFoundError(f"source document not found: {document_id}")
             artifact = dict(row.artifact_json or {})
@@ -632,7 +632,7 @@ class SourceArtifactRepository:
         self, document_id: str
     ) -> SourceReferenceSet:
         async with AsyncSessionLocal() as db:
-            row = await db.get(DocumentPreparationRow, document_id)
+            row = await db.get(DocumentPreparationORM, document_id)
         if row is None:
             return SourceReferenceSet()
         payload = row.artifact_json.get("references", {}) if row.artifact_json else {}

@@ -36,15 +36,15 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.document import DocumentORM
 from exceptions import ResourceConflictException, ResourceNotFoundException
-from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.collection import CollectionORM
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from infra.persistence.postgres.models.objective import (
-    ObjectiveAnalysisRecord,
-    ObjectiveResearchRecord,
+    ObjectiveAnalysisORM,
+    ObjectiveResearchORM,
 )
 from repositories.pipeline_run_repository import (
     ExecutionStats,
@@ -312,7 +312,7 @@ class ObjectiveRepository:
         now = datetime.now(timezone.utc)
         objective_ids = [item.objective_id for item in facts.research_objectives]
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            collection = await db.get(Collection, collection_id, with_for_update=True)
+            collection = await db.get(CollectionORM, collection_id, with_for_update=True)
             if collection is None:
                 raise FileNotFoundError(f"collection not found: {collection_id}")
             collection.discovery_ready = facts.research_objectives_ready
@@ -339,9 +339,9 @@ class ObjectiveRepository:
 
             existing_system_rows = tuple(
                 await db.scalars(
-                    select(ObjectiveResearchRecord).where(
-                        ObjectiveResearchRecord.collection_id == collection_id,
-                        ObjectiveResearchRecord.origin == "system_discovered",
+                    select(ObjectiveResearchORM).where(
+                        ObjectiveResearchORM.collection_id == collection_id,
+                        ObjectiveResearchORM.origin == "system_discovered",
                     )
                 )
             )
@@ -355,7 +355,7 @@ class ObjectiveRepository:
 
             for objective in facts.research_objectives:
                 row = await db.get(
-                    ObjectiveResearchRecord,
+                    ObjectiveResearchORM,
                     (collection_id, objective.objective_id),
                 )
                 if row is not None:
@@ -378,7 +378,7 @@ class ObjectiveRepository:
                     row.updated_at = now
                     continue
                 db.add(
-                    ObjectiveResearchRecord(
+                    ObjectiveResearchORM(
                         collection_id=objective.collection_id,
                         objective_id=objective.objective_id,
                         rank=objective.rank or 1,
@@ -393,14 +393,14 @@ class ObjectiveRepository:
 
     async def read(self, collection_id: str) -> ObjectiveFactSet:
         async with AsyncSessionLocal() as db:
-            collection = await db.get(Collection, collection_id)
+            collection = await db.get(CollectionORM, collection_id)
             if collection is None or not collection.discovery_objective_ids:
                 return ObjectiveFactSet()
             rows = tuple(
                 await db.scalars(
-                    select(ObjectiveResearchRecord).where(
-                        ObjectiveResearchRecord.collection_id == collection_id,
-                        ObjectiveResearchRecord.objective_id.in_(
+                    select(ObjectiveResearchORM).where(
+                        ObjectiveResearchORM.collection_id == collection_id,
+                        ObjectiveResearchORM.objective_id.in_(
                             collection.discovery_objective_ids or [""]
                         ),
                     )
@@ -475,12 +475,12 @@ class ObjectiveRepository:
         async with AsyncSessionLocal() as db:
             rows = tuple(
                 await db.scalars(
-                    select(ObjectiveResearchRecord)
-                    .where(ObjectiveResearchRecord.collection_id == collection_id)
+                    select(ObjectiveResearchORM)
+                    .where(ObjectiveResearchORM.collection_id == collection_id)
                     .order_by(
-                        ObjectiveResearchRecord.rank,
-                        ObjectiveResearchRecord.created_at,
-                        ObjectiveResearchRecord.objective_id,
+                        ObjectiveResearchORM.rank,
+                        ObjectiveResearchORM.created_at,
+                        ObjectiveResearchORM.objective_id,
                     )
                 )
             )
@@ -527,12 +527,12 @@ class ObjectiveRepository:
         async with AsyncSessionLocal() as db:
             rows = tuple(
                 await db.scalars(
-                    select(ObjectiveResearchRecord)
-                    .where(ObjectiveResearchRecord.collection_id == collection_id)
+                    select(ObjectiveResearchORM)
+                    .where(ObjectiveResearchORM.collection_id == collection_id)
                     .order_by(
-                        ObjectiveResearchRecord.rank,
-                        ObjectiveResearchRecord.created_at,
-                        ObjectiveResearchRecord.objective_id,
+                        ObjectiveResearchORM.rank,
+                        ObjectiveResearchORM.created_at,
+                        ObjectiveResearchORM.objective_id,
                     )
                 )
             )
@@ -600,8 +600,8 @@ class ObjectiveRepository:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db, db.begin():
             prior = await db.scalar(
-                select(ObjectiveResearchRecord).where(
-                    ObjectiveResearchRecord.created_by_tool_call_id
+                select(ObjectiveResearchORM).where(
+                    ObjectiveResearchORM.created_by_tool_call_id
                     == created_by_tool_call_id
                 )
             )
@@ -656,7 +656,7 @@ class ObjectiveRepository:
                     )
                 return existing
             collision = await db.get(
-                ObjectiveResearchRecord,
+                ObjectiveResearchORM,
                 (objective.collection_id, objective.objective_id),
             )
             if collision is not None:
@@ -665,8 +665,8 @@ class ObjectiveRepository:
                     data={"code": "objective_candidate_identity_conflict", "objective_id": objective.objective_id},
                 )
             maximum_rank = await db.scalar(
-                select(func.max(ObjectiveResearchRecord.rank)).where(
-                    ObjectiveResearchRecord.collection_id == objective.collection_id
+                select(func.max(ObjectiveResearchORM.rank)).where(
+                    ObjectiveResearchORM.collection_id == objective.collection_id
                 )
             )
             created = replace(
@@ -674,7 +674,7 @@ class ObjectiveRepository:
                 rank=int(maximum_rank or 0) + 1,
             )
             db.add(
-                ObjectiveResearchRecord(
+                ObjectiveResearchORM(
                     collection_id=created.collection_id,
                     objective_id=created.objective_id,
                     rank=created.rank or 1,
@@ -694,7 +694,7 @@ class ObjectiveRepository:
     ) -> ResearchObjective | None:
         async with AsyncSessionLocal() as db:
             row = await db.get(
-                ObjectiveResearchRecord,
+                ObjectiveResearchORM,
                 (collection_id, objective_id),
             )
             return (
@@ -741,7 +741,7 @@ class ObjectiveRepository:
     ) -> StoredObjective | None:
         async with AsyncSessionLocal() as db:
             row = await db.get(
-                ObjectiveResearchRecord,
+                ObjectiveResearchORM,
                 (collection_id, objective_id),
             )
             return (
@@ -896,13 +896,13 @@ class ObjectiveRepository:
             if objective.confirmation_status == "candidate":
                 objective = objective.confirm()
             active_row = await db.scalar(
-                select(ObjectiveAnalysisRecord)
+                select(ObjectiveAnalysisORM)
                 .where(
-                    ObjectiveAnalysisRecord.collection_id == collection_id,
-                    ObjectiveAnalysisRecord.objective_id == objective_id,
-                    ObjectiveAnalysisRecord.status.in_(("queued", "running")),
+                    ObjectiveAnalysisORM.collection_id == collection_id,
+                    ObjectiveAnalysisORM.objective_id == objective_id,
+                    ObjectiveAnalysisORM.status.in_(("queued", "running")),
                 )
-                .order_by(ObjectiveAnalysisRecord.analysis_version.desc())
+                .order_by(ObjectiveAnalysisORM.analysis_version.desc())
                 .with_for_update()
             )
             if active_row is not None:
@@ -1003,9 +1003,9 @@ class ObjectiveRepository:
                 row.updated_at = now
                 return objective, active
             maximum_version = await db.scalar(
-                select(func.max(ObjectiveAnalysisRecord.analysis_version)).where(
-                    ObjectiveAnalysisRecord.collection_id == collection_id,
-                    ObjectiveAnalysisRecord.objective_id == objective_id,
+                select(func.max(ObjectiveAnalysisORM.analysis_version)).where(
+                    ObjectiveAnalysisORM.collection_id == collection_id,
+                    ObjectiveAnalysisORM.objective_id == objective_id,
                 )
             )
             version = int(maximum_version or 0) + 1
@@ -1094,7 +1094,7 @@ class ObjectiveRepository:
             }
             next_analysis_payload["diagnostics"] = analysis.diagnostics
             db.add(
-                ObjectiveAnalysisRecord(
+                ObjectiveAnalysisORM(
                     collection_id=analysis.collection_id,
                     objective_id=analysis.objective_id,
                     analysis_version=analysis.analysis_version,
@@ -1152,33 +1152,33 @@ class ObjectiveRepository:
     ) -> ObjectiveAnalysisJobSnapshot | None:
         now = datetime.now(timezone.utc)
         claimable = or_(
-            ObjectiveAnalysisRecord.status == "queued",
-            (ObjectiveAnalysisRecord.status == "running")
-            & (ObjectiveAnalysisRecord.lease_expires_at <= now),
+            ObjectiveAnalysisORM.status == "queued",
+            (ObjectiveAnalysisORM.status == "running")
+            & (ObjectiveAnalysisORM.lease_expires_at <= now),
         )
         async with AsyncSessionLocal() as db, db.begin():
             # All multi-record analysis transactions lock Objective before Analysis.
             objective = await db.scalar(
-                select(ObjectiveResearchRecord)
+                select(ObjectiveResearchORM)
                 .where(
                     exists(
-                        select(ObjectiveAnalysisRecord.analysis_version).where(
-                            ObjectiveAnalysisRecord.collection_id
-                            == ObjectiveResearchRecord.collection_id,
-                            ObjectiveAnalysisRecord.objective_id
-                            == ObjectiveResearchRecord.objective_id,
-                            ObjectiveAnalysisRecord.analysis_version
-                            == ObjectiveResearchRecord.payload[
+                        select(ObjectiveAnalysisORM.analysis_version).where(
+                            ObjectiveAnalysisORM.collection_id
+                            == ObjectiveResearchORM.collection_id,
+                            ObjectiveAnalysisORM.objective_id
+                            == ObjectiveResearchORM.objective_id,
+                            ObjectiveAnalysisORM.analysis_version
+                            == ObjectiveResearchORM.payload[
                                 "active_analysis_version"
                             ].as_integer(),
-                            ObjectiveAnalysisRecord.payload["origin"].as_string()
+                            ObjectiveAnalysisORM.payload["origin"].as_string()
                             == "system_generated",
                             claimable,
                         )
                     )
                 )
                 .order_by(
-                    ObjectiveResearchRecord.created_at, ObjectiveResearchRecord.objective_id
+                    ObjectiveResearchORM.created_at, ObjectiveResearchORM.objective_id
                 )
                 .with_for_update(skip_locked=True)
                 .limit(1)
@@ -1186,11 +1186,11 @@ class ObjectiveRepository:
             if objective is None:
                 return None
             row = await db.scalar(
-                select(ObjectiveAnalysisRecord)
+                select(ObjectiveAnalysisORM)
                 .where(
-                    ObjectiveAnalysisRecord.collection_id == objective.collection_id,
-                    ObjectiveAnalysisRecord.objective_id == objective.objective_id,
-                    ObjectiveAnalysisRecord.analysis_version
+                    ObjectiveAnalysisORM.collection_id == objective.collection_id,
+                    ObjectiveAnalysisORM.objective_id == objective.objective_id,
+                    ObjectiveAnalysisORM.analysis_version
                     == objective.payload["active_analysis_version"],
                     claimable,
                 )
@@ -1352,16 +1352,16 @@ class ObjectiveRepository:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db, db.begin():
             changed = await db.execute(
-                update(ObjectiveAnalysisRecord)
+                update(ObjectiveAnalysisORM)
                 .where(
-                    ObjectiveAnalysisRecord.collection_id == job.analysis.collection_id,
-                    ObjectiveAnalysisRecord.objective_id == job.analysis.objective_id,
-                    ObjectiveAnalysisRecord.analysis_version
+                    ObjectiveAnalysisORM.collection_id == job.analysis.collection_id,
+                    ObjectiveAnalysisORM.objective_id == job.analysis.objective_id,
+                    ObjectiveAnalysisORM.analysis_version
                     == job.analysis.analysis_version,
-                    ObjectiveAnalysisRecord.status == "running",
-                    ObjectiveAnalysisRecord.worker_id == job.worker_id,
-                    ObjectiveAnalysisRecord.lease_version == job.lease_version,
-                    ObjectiveAnalysisRecord.lease_expires_at > now,
+                    ObjectiveAnalysisORM.status == "running",
+                    ObjectiveAnalysisORM.worker_id == job.worker_id,
+                    ObjectiveAnalysisORM.lease_version == job.lease_version,
+                    ObjectiveAnalysisORM.lease_expires_at > now,
                 )
                 .values(heartbeat_at=now, lease_expires_at=now + lease_duration)
             )
@@ -1391,9 +1391,9 @@ class ObjectiveRepository:
         self, db: AsyncSession, analysis: ObjectiveAnalysis
     ) -> None:
         for item in sorted(analysis.document_inputs, key=lambda item: item.document_id):
-            document = await db.get(Document, item.document_id, with_for_update=True)
+            document = await db.get(DocumentORM, item.document_id, with_for_update=True)
             preparation = await db.get(
-                DocumentPreparationRow, item.document_id, with_for_update=True
+                DocumentPreparationORM, item.document_id, with_for_update=True
             )
             if (
                 document is None
@@ -2514,7 +2514,7 @@ class ObjectiveRepository:
                 "abstention_note": analysis.abstention_note,
             }
             next_analysis_payload["diagnostics"] = analysis.diagnostics
-            analysis_row = ObjectiveAnalysisRecord(
+            analysis_row = ObjectiveAnalysisORM(
                 collection_id=analysis.collection_id,
                 objective_id=analysis.objective_id,
                 analysis_version=analysis.analysis_version,
@@ -2549,7 +2549,7 @@ class ObjectiveRepository:
         async with AsyncSessionLocal() as db:
             if analysis_version is None:
                 objective_row = await db.get(
-                    ObjectiveResearchRecord,
+                    ObjectiveResearchORM,
                     (collection_id, objective_id),
                 )
                 if objective_row is None:
@@ -2558,7 +2558,7 @@ class ObjectiveRepository:
             if analysis_version is None:
                 return None
             row = await db.get(
-                ObjectiveAnalysisRecord,
+                ObjectiveAnalysisORM,
                 (collection_id, objective_id, analysis_version),
             )
             return (
@@ -2650,7 +2650,7 @@ class ObjectiveRepository:
     ) -> ObjectiveAnalysis | None:
         async with AsyncSessionLocal() as db:
             objective_row = await db.get(
-                ObjectiveResearchRecord,
+                ObjectiveResearchORM,
                 (collection_id, objective_id),
             )
             if objective_row is None:
@@ -2659,7 +2659,7 @@ class ObjectiveRepository:
             if version is None:
                 return None
             row = await db.get(
-                ObjectiveAnalysisRecord,
+                ObjectiveAnalysisORM,
                 (collection_id, objective_id, version),
             )
             return (
@@ -2752,7 +2752,7 @@ class ObjectiveRepository:
     ) -> tuple[PaperContribution, ...]:
         async with AsyncSessionLocal() as db:
             row = await db.get(
-                ObjectiveAnalysisRecord,
+                ObjectiveAnalysisORM,
                 (collection_id, objective_id, analysis_version),
             )
             if row is None:
@@ -2813,7 +2813,7 @@ class ObjectiveRepository:
     ) -> tuple[tuple[Finding, ...], int]:
         async with AsyncSessionLocal() as db:
             row = await db.get(
-                ObjectiveAnalysisRecord,
+                ObjectiveAnalysisORM,
                 (collection_id, objective_id, analysis_version),
             )
             if row is None:
@@ -2975,7 +2975,7 @@ class ObjectiveRepository:
     ) -> Finding | None:
         async with AsyncSessionLocal() as db:
             row = await db.get(
-                ObjectiveAnalysisRecord,
+                ObjectiveAnalysisORM,
                 (collection_id, objective_id, analysis_version),
             )
             if row is None:
@@ -3135,7 +3135,7 @@ class ObjectiveRepository:
         async with AsyncSessionLocal() as db:
             evidence_ids: set[str] | None = None
             row = await db.get(
-                ObjectiveAnalysisRecord,
+                ObjectiveAnalysisORM,
                 (collection_id, objective_id, analysis_version),
             )
             if row is None:
@@ -3282,7 +3282,7 @@ class ObjectiveRepository:
 
     @staticmethod
     def _write_contributions(
-        row: ObjectiveAnalysisRecord,
+        row: ObjectiveAnalysisORM,
         contributions: tuple[PaperContribution, ...],
     ) -> None:
         payload = dict(row.payload or {})
@@ -3328,7 +3328,7 @@ class ObjectiveRepository:
 
     @staticmethod
     def _write_result_records(
-        row: ObjectiveAnalysisRecord,
+        row: ObjectiveAnalysisORM,
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],
     ) -> None:
@@ -3665,12 +3665,12 @@ class ObjectiveRepository:
         db: AsyncSession,
         collection_id: str,
         objective_id: str,
-    ) -> ObjectiveResearchRecord:
+    ) -> ObjectiveResearchORM:
         row = await db.scalar(
-            select(ObjectiveResearchRecord)
+            select(ObjectiveResearchORM)
             .where(
-                ObjectiveResearchRecord.collection_id == collection_id,
-                ObjectiveResearchRecord.objective_id == objective_id,
+                ObjectiveResearchORM.collection_id == collection_id,
+                ObjectiveResearchORM.objective_id == objective_id,
             )
             .with_for_update()
         )
@@ -3687,13 +3687,13 @@ class ObjectiveRepository:
         collection_id: str,
         objective_id: str,
         analysis_version: int,
-    ) -> ObjectiveAnalysisRecord:
+    ) -> ObjectiveAnalysisORM:
         row = await db.scalar(
-            select(ObjectiveAnalysisRecord)
+            select(ObjectiveAnalysisORM)
             .where(
-                ObjectiveAnalysisRecord.collection_id == collection_id,
-                ObjectiveAnalysisRecord.objective_id == objective_id,
-                ObjectiveAnalysisRecord.analysis_version == analysis_version,
+                ObjectiveAnalysisORM.collection_id == collection_id,
+                ObjectiveAnalysisORM.objective_id == objective_id,
+                ObjectiveAnalysisORM.analysis_version == analysis_version,
             )
             .with_for_update()
         )
@@ -3711,8 +3711,8 @@ class ObjectiveRepository:
         evidence: ObjectiveEvidence,
     ) -> None:
         row = await db.scalar(
-            select(DocumentPreparationRow).where(
-                DocumentPreparationRow.document_id == evidence.document_id,
+            select(DocumentPreparationORM).where(
+                DocumentPreparationORM.document_id == evidence.document_id,
             )
         )
         if row is None:

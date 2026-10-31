@@ -19,15 +19,15 @@ from domain.feedback.sample_revision import (
     SampleRevision,
     SftRevisionContent,
 )
-from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.collection import CollectionORM
 from infra.persistence.postgres.models.feedback import (
-    AnalysisJobRow,
-    FeedbackAnalysisResultRow,
-    FeedbackCaseRow,
+    AnalysisJobORM,
+    FeedbackAnalysisResultORM,
+    FeedbackCaseORM,
 )
 from infra.persistence.postgres.models.feedback_dataset import (
-    FeedbackDatasetRow,
-    FeedbackDatasetSampleRow,
+    FeedbackDatasetORM,
+    FeedbackDatasetSampleORM,
 )
 from repositories import feedback_dataset_sample_repository as sample_module
 from repositories.feedback_dataset_export_repository import (
@@ -166,7 +166,7 @@ async def test_list_is_read_only_and_withdrawn_case_does_not_hide_normal_case(
     healthy = await _analyze(chain)
     withdrawn = await _second_case(chain)
     async with postgres_session_factory.begin() as session:
-        row = await session.get(FeedbackCaseRow, withdrawn.case_id)
+        row = await session.get(FeedbackCaseORM, withdrawn.case_id)
         row.status = "withdrawn"
     service = _service(chain, postgres_session_factory)
     before = tuple(job.job_id for job in await chain.jobs.list_jobs())
@@ -201,10 +201,10 @@ async def test_selected_publication_ignores_unselected_bad_source(
     )
     async with postgres_session_factory.begin() as session:
         if bad_source == "stale":
-            row = await session.get(FeedbackDatasetSampleRow, unselected.sample_id)
+            row = await session.get(FeedbackDatasetSampleORM, unselected.sample_id)
             row.source_digest = "0" * 64
         else:
-            row = await session.get(FeedbackCaseRow, bad.case_id)
+            row = await session.get(FeedbackCaseORM, bad.case_id)
             row.status = "withdrawn"
     dataset_export_service.dataset_service = service
     dataset_export_service.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
@@ -256,17 +256,17 @@ async def test_case_and_all_sample_jobs_roll_back_together(
     assert failed.status == "failed"
     async with postgres_session_factory() as session:
         for model in (
-            FeedbackCaseRow,
-            FeedbackAnalysisResultRow,
-            FeedbackDatasetSampleRow,
+            FeedbackCaseORM,
+            FeedbackAnalysisResultORM,
+            FeedbackDatasetSampleORM,
         ):
             assert await session.scalar(select(func.count()).select_from(model)) == 0
         assert (
             await session.scalar(
                 select(func.count())
-                .select_from(AnalysisJobRow)
+                .select_from(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == "dataset_sample_build",
+                    AnalysisJobORM.job_type == "dataset_sample_build",
                 )
             )
             == 0
@@ -280,28 +280,28 @@ async def test_background_backfill_skips_withdrawn_cases_and_is_idempotent(
     healthy = await _analyze(chain)
     withdrawn = await _second_case(chain)
     async with postgres_session_factory.begin() as session:
-        row = await session.get(FeedbackCaseRow, withdrawn.case_id)
+        row = await session.get(FeedbackCaseORM, withdrawn.case_id)
         row.status = "withdrawn"
-        await session.execute(delete(FeedbackDatasetSampleRow))
+        await session.execute(delete(FeedbackDatasetSampleORM))
         await session.execute(
-            delete(AnalysisJobRow).where(
-                AnalysisJobRow.job_type == "dataset_sample_build"
+            delete(AnalysisJobORM).where(
+                AnalysisJobORM.job_type == "dataset_sample_build"
             )
         )
     repository = FeedbackDatasetSampleRepository()
     assert await repository.backfill_existing_cases() == 1
     assert await repository.backfill_existing_cases() == 1
     async with postgres_session_factory() as session:
-        samples = list(await session.scalars(select(FeedbackDatasetSampleRow)))
+        samples = list(await session.scalars(select(FeedbackDatasetSampleORM)))
         assert len(samples) == 3 and all(
             sample.source_case_id == healthy.case_id for sample in samples
         )
         assert (
             await session.scalar(
                 select(func.count())
-                .select_from(AnalysisJobRow)
+                .select_from(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == "dataset_sample_build",
+                    AnalysisJobORM.job_type == "dataset_sample_build",
                 )
             )
             == 3
@@ -330,7 +330,7 @@ async def test_historical_backfill_crosses_a_full_batch(
     async with postgres_session_factory.begin() as session:
         session.add_all(
             [
-                FeedbackCaseRow(
+                FeedbackCaseORM(
                     case_id=f"historical-case-{index:03d}",
                     collection_id=COLLECTION_ID,
                     session_id=SESSION_ID,
@@ -353,7 +353,7 @@ async def test_historical_backfill_crosses_a_full_batch(
     async with postgres_session_factory() as session:
         assert (
             await session.scalar(
-                select(func.count()).select_from(FeedbackDatasetSampleRow)
+                select(func.count()).select_from(FeedbackDatasetSampleORM)
             )
             == 603
         )
@@ -366,7 +366,7 @@ async def test_empty_historical_collections_cross_a_full_batch(
     async with postgres_session_factory.begin() as session:
         session.add_all(
             [
-                Collection(
+                CollectionORM(
                     collection_id=f"historical-collection-{index:03d}",
                     owner_user_id=USER_ID,
                     name=f"Historical paper collection {index}",
@@ -381,7 +381,7 @@ async def test_empty_historical_collections_cross_a_full_batch(
     assert await repository.backfill_existing_cases() == 0
     async with postgres_session_factory() as session:
         assert (
-            await session.scalar(select(func.count()).select_from(FeedbackDatasetRow))
+            await session.scalar(select(func.count()).select_from(FeedbackDatasetORM))
             == 606
         )
 
@@ -588,7 +588,7 @@ async def test_completion_rechecks_case_after_candidate_generation(
     dataset_id, sample_id = job.payload["dataset_id"], job.payload["sample_id"]
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
     async with postgres_session_factory.begin() as session:
-        row = await session.get(FeedbackCaseRow, case.case_id)
+        row = await session.get(FeedbackCaseORM, case.case_id)
         row.context_snapshot = {
             **row.context_snapshot,
             "additional_evidence": "New evidence arrived during generation.",
@@ -623,7 +623,7 @@ async def test_feedback_publication_rolls_back_results_case_queues_and_success(
     from application.feedback.analysis_handler import analyze_feedback_job, RuleBasedFeedbackAnalysisEngine
     from repositories import feedback_case_repository as cases_module
     from repositories.analysis_job_repository import LeaseLostError
-    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
+    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleORM
     chain = feedback_chain
     await chain.chat_service.set_message_feedback_for_user(
         SESSION_ID, chain.answer.message_id, USER_ID,
@@ -641,15 +641,15 @@ async def test_feedback_publication_rolls_back_results_case_queues_and_success(
             await chain.cases.upsert_case_from_analysis(result, job=job,
                 context_snapshot=snapshot, source_signal_ids=signals, now=_now())
     async with postgres_session_factory() as db:
-        assert await db.scalar(select(func.count()).select_from(FeedbackAnalysisResultRow)) == 0
-        assert await db.scalar(select(func.count()).select_from(FeedbackCaseRow)) == 0
-        assert await db.scalar(select(func.count()).select_from(FeedbackDatasetSampleRow)) == 0
+        assert await db.scalar(select(func.count()).select_from(FeedbackAnalysisResultORM)) == 0
+        assert await db.scalar(select(func.count()).select_from(FeedbackCaseORM)) == 0
+        assert await db.scalar(select(func.count()).select_from(FeedbackDatasetSampleORM)) == 0
     assert (await chain.jobs.read_job(job.job_id)).status == "running"
 
     from datetime import timedelta
     from sqlalchemy import update
     async with postgres_session_factory() as db, db.begin():
-        await db.execute(update(AnalysisJobRow).where(AnalysisJobRow.job_id==job.job_id).values(
+        await db.execute(update(AnalysisJobORM).where(AnalysisJobORM.job_id==job.job_id).values(
             lease_expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)))
     replacement = await chain.jobs.claim_next_feedback_analysis_job(now=_now())
     assert replacement.lease_version > job.lease_version

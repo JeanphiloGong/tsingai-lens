@@ -28,13 +28,13 @@ from domain.feedback.sample_revision import (
     content_digest_for,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import Collection
-from infra.persistence.postgres.models.feedback import AnalysisJobRow, FeedbackCaseRow
+from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.feedback import AnalysisJobORM, FeedbackCaseORM
 from infra.persistence.postgres.models.feedback_dataset import (
-    FeedbackDatasetRow,
-    FeedbackDatasetSampleRow,
-    FeedbackSampleActionRow,
-    FeedbackSampleRevisionRow,
+    FeedbackDatasetORM,
+    FeedbackDatasetSampleORM,
+    FeedbackSampleActionORM,
+    FeedbackSampleRevisionORM,
 )
 from repositories.analysis_job_repository import (
     DATASET_SAMPLE_BUILD_JOB_TYPE,
@@ -58,7 +58,7 @@ def sample_action_digest(
     return sha256(encoded).hexdigest()
 
 
-def source_digest_for_case(case: FeedbackCase | FeedbackCaseRow) -> str:
+def source_digest_for_case(case: FeedbackCase | FeedbackCaseORM) -> str:
     """Hash sample source content, excluding workflow status and timestamps."""
     canonical = {
         "case_id": case.case_id,
@@ -134,9 +134,9 @@ class FeedbackDatasetSampleRepository:
             async with AsyncSessionLocal() as db, db.begin():
                 collections = list(
                     await db.scalars(
-                        select(Collection)
-                        .where(Collection.collection_id > cursor)
-                        .order_by(Collection.collection_id)
+                        select(CollectionORM)
+                        .where(CollectionORM.collection_id > cursor)
+                        .order_by(CollectionORM.collection_id)
                         .limit(200)
                     )
                 )
@@ -158,12 +158,12 @@ class FeedbackDatasetSampleRepository:
             async with AsyncSessionLocal() as db, db.begin():
                 cases = list(
                     await db.scalars(
-                        select(FeedbackCaseRow)
+                        select(FeedbackCaseORM)
                         .where(
-                            FeedbackCaseRow.case_id > cursor,
-                            FeedbackCaseRow.status != "withdrawn",
+                            FeedbackCaseORM.case_id > cursor,
+                            FeedbackCaseORM.status != "withdrawn",
                         )
-                        .order_by(FeedbackCaseRow.case_id)
+                        .order_by(FeedbackCaseORM.case_id)
                         .limit(200)
                         .with_for_update()
                     )
@@ -189,13 +189,13 @@ class FeedbackDatasetSampleRepository:
             cases = {
                 case.case_id: case
                 for case in await db.scalars(
-                    select(FeedbackCaseRow)
+                    select(FeedbackCaseORM)
                     .where(
-                        FeedbackCaseRow.case_id.in_(
+                        FeedbackCaseORM.case_id.in_(
                             tuple(sample.source_case_id for sample in samples)
                         )
                     )
-                    .order_by(FeedbackCaseRow.case_id)
+                    .order_by(FeedbackCaseORM.case_id)
                     .with_for_update()
                 )
             }
@@ -215,9 +215,9 @@ class FeedbackDatasetSampleRepository:
     ) -> DatasetSample | None:
         async with AsyncSessionLocal() as db:
             row = await db.scalar(
-                select(FeedbackDatasetSampleRow).where(
-                    FeedbackDatasetSampleRow.dataset_id == dataset_id,
-                    FeedbackDatasetSampleRow.sample_id == sample_id,
+                select(FeedbackDatasetSampleORM).where(
+                    FeedbackDatasetSampleORM.dataset_id == dataset_id,
+                    FeedbackDatasetSampleORM.sample_id == sample_id,
                 )
             )
             return (
@@ -252,18 +252,18 @@ class FeedbackDatasetSampleRepository:
         if limit < 0 or offset < 0:
             raise ValueError("limit and offset must be non-negative")
         statement = (
-            select(FeedbackDatasetSampleRow)
-            .join(FeedbackCaseRow)
+            select(FeedbackDatasetSampleORM)
+            .join(FeedbackCaseORM)
             .where(
-                FeedbackDatasetSampleRow.dataset_id == dataset_id,
-                FeedbackCaseRow.status != "withdrawn",
+                FeedbackDatasetSampleORM.dataset_id == dataset_id,
+                FeedbackCaseORM.status != "withdrawn",
             )
         )
         if status is not None:
-            statement = statement.where(FeedbackDatasetSampleRow.status == status)
+            statement = statement.where(FeedbackDatasetSampleORM.status == status)
         statement = statement.order_by(
-            FeedbackDatasetSampleRow.created_at,
-            FeedbackDatasetSampleRow.sample_id,
+            FeedbackDatasetSampleORM.created_at,
+            FeedbackDatasetSampleORM.sample_id,
         )
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
@@ -293,7 +293,7 @@ class FeedbackDatasetSampleRepository:
 
     async def read_revision(self, revision_id: str) -> SampleRevision | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackSampleRevisionRow, revision_id)
+            row = await db.get(FeedbackSampleRevisionORM, revision_id)
             if row is None:
                 return None
             content_value = row.content
@@ -349,13 +349,13 @@ class FeedbackDatasetSampleRepository:
 
         statement = (
             select(func.count())
-            .select_from(FeedbackDatasetSampleRow)
-            .where(FeedbackDatasetSampleRow.dataset_id == dataset_id)
-            .join(FeedbackCaseRow)
-            .where(FeedbackCaseRow.status != "withdrawn")
+            .select_from(FeedbackDatasetSampleORM)
+            .where(FeedbackDatasetSampleORM.dataset_id == dataset_id)
+            .join(FeedbackCaseORM)
+            .where(FeedbackCaseORM.status != "withdrawn")
         )
         if status is not None:
-            statement = statement.where(FeedbackDatasetSampleRow.status == status)
+            statement = statement.where(FeedbackDatasetSampleORM.status == status)
         async with AsyncSessionLocal() as db:
             return int((await db.scalar(statement)) or 0)
 
@@ -363,30 +363,30 @@ class FeedbackDatasetSampleRepository:
         self, *, dataset_id: str, sample_ids: tuple[str, ...] | None = None
     ) -> tuple[ConfirmedDatasetMember, ...]:
         statement = (
-            select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
+            select(FeedbackDatasetSampleORM, FeedbackSampleRevisionORM, FeedbackCaseORM)
             .join(
-                FeedbackSampleRevisionRow,
-                FeedbackDatasetSampleRow.confirmed_revision_id
-                == FeedbackSampleRevisionRow.revision_id,
+                FeedbackSampleRevisionORM,
+                FeedbackDatasetSampleORM.confirmed_revision_id
+                == FeedbackSampleRevisionORM.revision_id,
             )
             .join(
-                FeedbackCaseRow,
-                FeedbackCaseRow.case_id == FeedbackDatasetSampleRow.source_case_id,
+                FeedbackCaseORM,
+                FeedbackCaseORM.case_id == FeedbackDatasetSampleORM.source_case_id,
             )
             .where(
-                FeedbackDatasetSampleRow.dataset_id == dataset_id,
-                FeedbackDatasetSampleRow.status == "confirmed",
-                FeedbackDatasetSampleRow.current_revision_id
-                == FeedbackDatasetSampleRow.confirmed_revision_id,
+                FeedbackDatasetSampleORM.dataset_id == dataset_id,
+                FeedbackDatasetSampleORM.status == "confirmed",
+                FeedbackDatasetSampleORM.current_revision_id
+                == FeedbackDatasetSampleORM.confirmed_revision_id,
             )
             .order_by(
-                FeedbackDatasetSampleRow.created_at,
-                FeedbackDatasetSampleRow.sample_id,
+                FeedbackDatasetSampleORM.created_at,
+                FeedbackDatasetSampleORM.sample_id,
             )
         )
         if sample_ids is not None:
             statement = statement.where(
-                FeedbackDatasetSampleRow.sample_id.in_(sample_ids)
+                FeedbackDatasetSampleORM.sample_id.in_(sample_ids)
             )
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(statement)).all()
@@ -536,7 +536,7 @@ class FeedbackDatasetSampleRepository:
                     "evaluation_mode": content_value.evaluation_mode,
                 }
             db.add(
-                FeedbackSampleRevisionRow(
+                FeedbackSampleRevisionORM(
                     revision_id=revision.revision_id,
                     sample_id=revision.sample_id,
                     revision_no=revision.revision_no,
@@ -604,7 +604,7 @@ class FeedbackDatasetSampleRepository:
             if row.status != "needs_confirmation" and not already_confirmed:
                 raise ValueError("sample_not_confirmable")
             revision = await db.get(
-                FeedbackSampleRevisionRow, expected_revision_id, with_for_update=True
+                FeedbackSampleRevisionORM, expected_revision_id, with_for_update=True
             )
             if revision is None or revision.sample_id != sample_id:
                 raise ValueError("sample_revision_missing")
@@ -661,19 +661,19 @@ class FeedbackDatasetSampleRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(FeedbackDatasetSampleRow)
+                select(FeedbackDatasetSampleORM)
                 .where(
-                    FeedbackDatasetSampleRow.dataset_id == dataset_id,
-                    FeedbackDatasetSampleRow.sample_id == sample_id,
+                    FeedbackDatasetSampleORM.dataset_id == dataset_id,
+                    FeedbackDatasetSampleORM.sample_id == sample_id,
                 )
                 .with_for_update()
             )
             if row is None:
                 raise FileNotFoundError("dataset sample not found")
             previous_action = await db.scalar(
-                select(FeedbackSampleActionRow).where(
-                    FeedbackSampleActionRow.sample_id == sample_id,
-                    FeedbackSampleActionRow.idempotency_key == idempotency_key,
+                select(FeedbackSampleActionORM).where(
+                    FeedbackSampleActionORM.sample_id == sample_id,
+                    FeedbackSampleActionORM.idempotency_key == idempotency_key,
                 )
             )
             if previous_action is not None:
@@ -713,7 +713,7 @@ class FeedbackDatasetSampleRepository:
                 ):
                     raise ValueError("sample build action job identity is invalid")
                 db.add(
-                    AnalysisJobRow(
+                    AnalysisJobORM(
                         job_id=job.job_id,
                         job_type=job.job_type,
                         payload_version=job.payload_version,
@@ -758,7 +758,7 @@ class FeedbackDatasetSampleRepository:
                         "restore requires current source identity and no job"
                     )
                 current = (
-                    await db.get(FeedbackSampleRevisionRow, row.current_revision_id)
+                    await db.get(FeedbackSampleRevisionORM, row.current_revision_id)
                     if row.current_revision_id
                     else None
                 )
@@ -798,7 +798,7 @@ class FeedbackDatasetSampleRepository:
                 confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
             )
             db.add(
-                FeedbackSampleActionRow(
+                FeedbackSampleActionORM(
                     action_id=f"action_{uuid4().hex[:32]}",
                     sample_id=sample_id,
                     actor_id=actor_id,
@@ -853,14 +853,14 @@ class FeedbackDatasetSampleRepository:
             raise ValueError("non-candidate build cannot persist a revision")
         timestamp = _datetime(finished_at)
         async with AsyncSessionLocal() as db, db.begin():
-            identity = await db.get(FeedbackDatasetSampleRow, sample_id)
+            identity = await db.get(FeedbackDatasetSampleORM, sample_id)
             if identity is None:
                 raise FileNotFoundError("sample build identity not found")
             # Keep source -> job -> sample ordering compatible with case writes and claims.
             case = await db.get(
-                FeedbackCaseRow, identity.source_case_id, with_for_update=True
+                FeedbackCaseORM, identity.source_case_id, with_for_update=True
             )
-            job_row = await db.get(AnalysisJobRow, job.job_id, with_for_update=True)
+            job_row = await db.get(AnalysisJobORM, job.job_id, with_for_update=True)
             if job_row is None:
                 raise FileNotFoundError("sample build identity not found")
             if job_row.status in {"succeeded", "failed", "cancelled"}:
@@ -869,8 +869,8 @@ class FeedbackDatasetSampleRepository:
             elif not _lease_matches(job_row, job, timestamp):
                 return None
             row = await db.scalar(
-                select(FeedbackDatasetSampleRow)
-                .where(FeedbackDatasetSampleRow.sample_id == sample_id)
+                select(FeedbackDatasetSampleORM)
+                .where(FeedbackDatasetSampleORM.sample_id == sample_id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
@@ -987,7 +987,7 @@ class FeedbackDatasetSampleRepository:
                         "evaluation_mode": content_value.evaluation_mode,
                     }
                 db.add(
-                    FeedbackSampleRevisionRow(
+                    FeedbackSampleRevisionORM(
                         revision_id=revision.revision_id,
                         sample_id=revision.sample_id,
                         revision_no=revision.revision_no,
@@ -1072,14 +1072,14 @@ class FeedbackDatasetSampleRepository:
 async def _lock_sample_source(
     db: AsyncSession,
     sample_id: str,
-) -> tuple[FeedbackDatasetSampleRow, FeedbackCaseRow | None]:
-    identity = await db.get(FeedbackDatasetSampleRow, sample_id)
+) -> tuple[FeedbackDatasetSampleORM, FeedbackCaseORM | None]:
+    identity = await db.get(FeedbackDatasetSampleORM, sample_id)
     if identity is None:
         raise FileNotFoundError("dataset sample not found")
-    case = await db.get(FeedbackCaseRow, identity.source_case_id, with_for_update=True)
+    case = await db.get(FeedbackCaseORM, identity.source_case_id, with_for_update=True)
     sample = await db.scalar(
-        select(FeedbackDatasetSampleRow)
-        .where(FeedbackDatasetSampleRow.sample_id == sample_id)
+        select(FeedbackDatasetSampleORM)
+        .where(FeedbackDatasetSampleORM.sample_id == sample_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
@@ -1089,12 +1089,12 @@ async def _lock_sample_source(
 
 
 async def enqueue_case_samples(
-    db: AsyncSession, case: FeedbackCaseRow, *, now: datetime
+    db: AsyncSession, case: FeedbackCaseORM, *, now: datetime
 ) -> None:
     """Persist all three sample queues in the same transaction as the case."""
     if case.status == "withdrawn":
         return
-    collection = await db.get(Collection, case.collection_id)
+    collection = await db.get(CollectionORM, case.collection_id)
     if collection is None:
         raise FileNotFoundError("feedback case collection not found")
     datasets = await ensure_system_datasets(
@@ -1105,20 +1105,20 @@ async def enqueue_case_samples(
     )
     # Existing explicitly collected samples also need invalidation when their source changes.
     additional = await db.scalars(
-        select(FeedbackDatasetRow)
+        select(FeedbackDatasetORM)
         .where(
-            FeedbackDatasetRow.collection_id == case.collection_id,
-            FeedbackDatasetRow.dataset_id.not_in(
+            FeedbackDatasetORM.collection_id == case.collection_id,
+            FeedbackDatasetORM.dataset_id.not_in(
                 tuple(dataset.dataset_id for dataset in datasets)
             ),
-            select(FeedbackDatasetSampleRow.sample_id)
+            select(FeedbackDatasetSampleORM.sample_id)
             .where(
-                FeedbackDatasetSampleRow.dataset_id == FeedbackDatasetRow.dataset_id,
-                FeedbackDatasetSampleRow.source_case_id == case.case_id,
+                FeedbackDatasetSampleORM.dataset_id == FeedbackDatasetORM.dataset_id,
+                FeedbackDatasetSampleORM.source_case_id == case.case_id,
             )
             .exists(),
         )
-        .order_by(FeedbackDatasetRow.dataset_id)
+        .order_by(FeedbackDatasetORM.dataset_id)
     )
     datasets = (*datasets, *additional)
     source_digest = source_digest_for_case(case)
@@ -1162,10 +1162,10 @@ async def _collect_sample(
     db: AsyncSession, sample: DatasetSample, job: AnalysisJob
 ) -> CollectedDatasetSample:
     existing = await db.scalar(
-        select(FeedbackDatasetSampleRow)
+        select(FeedbackDatasetSampleORM)
         .where(
-            FeedbackDatasetSampleRow.dataset_id == sample.dataset_id,
-            FeedbackDatasetSampleRow.source_case_id == sample.source_case_id,
+            FeedbackDatasetSampleORM.dataset_id == sample.dataset_id,
+            FeedbackDatasetSampleORM.source_case_id == sample.source_case_id,
         )
         .with_for_update()
     )
@@ -1202,7 +1202,7 @@ async def _collect_sample(
         existing.confirmed_at = None
         existing.updated_at = _datetime(sample.updated_at)
         revision = (
-            await db.get(FeedbackSampleRevisionRow, existing.current_revision_id)
+            await db.get(FeedbackSampleRevisionORM, existing.current_revision_id)
             if existing.current_revision_id
             else None
         )
@@ -1247,7 +1247,7 @@ async def _collect_sample(
             ),
         )
         db.add(
-            AnalysisJobRow(
+            AnalysisJobORM(
                 job_id=job.job_id,
                 job_type=job.job_type,
                 payload_version=job.payload_version,
@@ -1297,7 +1297,7 @@ async def _collect_sample(
         )
 
     db.add(
-        AnalysisJobRow(
+        AnalysisJobORM(
             job_id=job.job_id,
             job_type=job.job_type,
             payload_version=job.payload_version,
@@ -1320,7 +1320,7 @@ async def _collect_sample(
         )
     )
     await db.flush()
-    row = FeedbackDatasetSampleRow(
+    row = FeedbackDatasetSampleORM(
         sample_id=sample.sample_id,
         dataset_id=sample.dataset_id,
         source_case_id=sample.source_case_id,
@@ -1356,7 +1356,7 @@ async def _collect_sample(
 
 
 def _finish_job(
-    row: AnalysisJobRow,
+    row: AnalysisJobORM,
     *,
     status: str,
     finished_at: datetime,
@@ -1371,13 +1371,13 @@ def _finish_job(
     _clear_lease(row)
 
 
-def _clear_lease(row: AnalysisJobRow) -> None:
+def _clear_lease(row: AnalysisJobORM) -> None:
     row.worker_id = None
     row.lease_expires_at = None
     row.heartbeat_at = None
 
 
-def _lease_matches(row: AnalysisJobRow, job: AnalysisJob, timestamp: datetime) -> bool:
+def _lease_matches(row: AnalysisJobORM, job: AnalysisJob, timestamp: datetime) -> bool:
     return bool(job.worker_id) and (
         row.status == "running"
         and row.worker_id == job.worker_id

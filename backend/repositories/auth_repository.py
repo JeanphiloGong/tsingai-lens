@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.auth import AuthSession, AuthUser
+from infra.persistence.postgres.models.auth import AuthSessionORM, AuthUserORM
 from sqlalchemy import select, update
 
 
@@ -35,7 +35,7 @@ class AuthRepository:
     async def read_user_by_email(self, email: str) -> AuthUserRecord | None:
         async with AsyncSessionLocal() as db:
             user = await db.scalar(
-                select(AuthUser).where(AuthUser.email == email.strip().lower())
+                select(AuthUserORM).where(AuthUserORM.email == email.strip().lower())
             )
             if user is None:
                 return None
@@ -49,7 +49,7 @@ class AuthRepository:
 
     async def read_user(self, user_id: str) -> AuthUserRecord | None:
         async with AsyncSessionLocal() as db:
-            user = await db.get(AuthUser, user_id)
+            user = await db.get(AuthUserORM, user_id)
             if user is None:
                 return None
             return AuthUserRecord(
@@ -63,7 +63,7 @@ class AuthRepository:
     async def add_user(self, user: AuthUserRecord) -> None:
         async with AsyncSessionLocal() as db, db.begin():
             db.add(
-                AuthUser(
+                AuthUserORM(
                     user_id=user.user_id,
                     email=user.email,
                     display_name=(
@@ -82,7 +82,7 @@ class AuthRepository:
     ) -> AuthSessionRecord | None:
         async with AsyncSessionLocal() as db:
             auth_session = await db.scalar(
-                select(AuthSession).where(AuthSession.token_hash == token_hash)
+                select(AuthSessionORM).where(AuthSessionORM.token_hash == token_hash)
             )
             if auth_session is None:
                 return None
@@ -97,7 +97,7 @@ class AuthRepository:
     async def add_session(self, session: AuthSessionRecord, *, token_hash: str) -> None:
         async with AsyncSessionLocal() as db, db.begin():
             db.add(
-                AuthSession(
+                AuthSessionORM(
                     session_id=session.session_id,
                     user_id=session.user_id,
                     token_hash=token_hash,
@@ -112,8 +112,8 @@ class AuthRepository:
     ) -> None:
         async with AsyncSessionLocal() as db, db.begin():
             await db.execute(
-                update(AuthSession)
-                .where(AuthSession.token_hash == token_hash)
+                update(AuthSessionORM)
+                .where(AuthSessionORM.token_hash == token_hash)
                 .values(revoked_at=_datetime(revoked_at))
             )
 

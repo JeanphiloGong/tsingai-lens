@@ -28,7 +28,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class PaperExperimentRow(Base):
+class PaperExperimentORM(Base):
     """One immutable version of a reusable paper experiment."""
 
     __tablename__ = "paper_experiment"
@@ -82,7 +82,7 @@ class PaperExperimentRow(Base):
     )
 
 
-class ExperimentalVariantRow(Base):
+class ExperimentalVariantORM(Base):
     __tablename__ = "experimental_variant"
     __table_args__ = (
         CheckConstraint(
@@ -142,7 +142,7 @@ class ExperimentalVariantRow(Base):
     )
 
 
-class ExperimentTestConditionRow(Base):
+class ExperimentTestConditionORM(Base):
     __tablename__ = "test_condition"
     __table_args__ = (
         CheckConstraint(
@@ -207,7 +207,7 @@ class ExperimentTestConditionRow(Base):
     )
 
 
-class ExperimentMeasurementResultRow(Base):
+class ExperimentMeasurementResultORM(Base):
     __tablename__ = "measurement_result"
     __table_args__ = (
         CheckConstraint(
@@ -284,7 +284,7 @@ class ExperimentMeasurementResultRow(Base):
     notes_json: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 
 
-class ExperimentComparisonRow(Base):
+class ExperimentComparisonORM(Base):
     __tablename__ = "experiment_comparison"
     __table_args__ = (
         CheckConstraint("basis IN ('reported', 'derived')", name="basis_valid"),
@@ -363,7 +363,7 @@ class ExperimentComparisonRow(Base):
     relation_status: Mapped[str] = mapped_column(String(20), nullable=False)
 
 
-class ExperimentComparisonMeasurementRow(Base):
+class ExperimentComparisonMeasurementORM(Base):
     __tablename__ = "experiment_comparison_measurement"
     __table_args__ = (
         CheckConstraint("side IN ('baseline', 'target')", name="side_valid"),
@@ -418,7 +418,7 @@ class ExperimentComparisonMeasurementRow(Base):
     measurement_key: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
-class ReportedInterpretationRow(Base):
+class ReportedInterpretationORM(Base):
     __tablename__ = "reported_interpretation"
     __table_args__ = (
         CheckConstraint(
@@ -454,11 +454,11 @@ class ReportedInterpretationRow(Base):
 
 
 __all__ = [
-    "ExperimentComparisonMeasurementRow",
-    "ExperimentComparisonRow",
-    "ExperimentMeasurementResultRow",
-    "ExperimentTestConditionRow",
-    "ExperimentalVariantRow",
-    "PaperExperimentRow",
-    "ReportedInterpretationRow",
+    "ExperimentComparisonMeasurementORM",
+    "ExperimentComparisonORM",
+    "ExperimentMeasurementResultORM",
+    "ExperimentTestConditionORM",
+    "ExperimentalVariantORM",
+    "PaperExperimentORM",
+    "ReportedInterpretationORM",
 ]

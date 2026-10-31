@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from infra.persistence.postgres.models.feedback import AnalysisJobRow
+from infra.persistence.postgres.models.feedback import AnalysisJobORM
 from repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     TOOL_FAILURE_JOB_TYPE,
@@ -37,7 +37,7 @@ async def _insert_job(
     )
     async with session_factory.begin() as session:
         session.add(
-            AnalysisJobRow(
+            AnalysisJobORM(
                 job_id=job_id,
                 job_type=job_type,
                 payload_version=1,

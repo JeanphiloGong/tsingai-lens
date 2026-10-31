@@ -410,26 +410,26 @@ async def build_migration_plan(
     """Read the legacy tables without exposing them through product APIs."""
 
     from infra.persistence.postgres.models.feedback import (
-        FeedbackAnnotationRow,
-        FeedbackCaseRow,
-        FeedbackDatasetSnapshotRow,
-        FeedbackReviewDecisionRow,
+        FeedbackAnnotationORM,
+        FeedbackCaseORM,
+        FeedbackDatasetSnapshotORM,
+        FeedbackReviewDecisionORM,
     )
 
     snapshots = await db.scalars(
-        select(FeedbackDatasetSnapshotRow).order_by(FeedbackDatasetSnapshotRow.dataset_id)
+        select(FeedbackDatasetSnapshotORM).order_by(FeedbackDatasetSnapshotORM.dataset_id)
     )
-    cases = await db.scalars(select(FeedbackCaseRow).order_by(FeedbackCaseRow.case_id))
+    cases = await db.scalars(select(FeedbackCaseORM).order_by(FeedbackCaseORM.case_id))
     annotations = await db.scalars(
-        select(FeedbackAnnotationRow).order_by(
-            FeedbackAnnotationRow.case_id,
-            FeedbackAnnotationRow.version,
+        select(FeedbackAnnotationORM).order_by(
+            FeedbackAnnotationORM.case_id,
+            FeedbackAnnotationORM.version,
         )
     )
     reviews = await db.scalars(
-        select(FeedbackReviewDecisionRow).order_by(
-            FeedbackReviewDecisionRow.case_id,
-            FeedbackReviewDecisionRow.seq,
+        select(FeedbackReviewDecisionORM).order_by(
+            FeedbackReviewDecisionORM.case_id,
+            FeedbackReviewDecisionORM.seq,
         )
     )
     return build_plan_from_records(
@@ -448,9 +448,9 @@ async def apply_plan(
     """Insert the plan idempotently in the caller's transaction."""
 
     from infra.persistence.postgres.models.feedback_dataset import (
-        FeedbackDatasetRow,
-        FeedbackDatasetSampleRow,
-        FeedbackSampleRevisionRow,
+        FeedbackDatasetORM,
+        FeedbackDatasetSampleORM,
+        FeedbackSampleRevisionORM,
     )
 
     counts = {
@@ -462,10 +462,10 @@ async def apply_plan(
     }
     datasets_by_id = {item.dataset_id: item for item in plan.datasets}
     for spec in datasets_by_id.values():
-        row = await db.get(FeedbackDatasetRow, spec.dataset_id, with_for_update=True)
+        row = await db.get(FeedbackDatasetORM, spec.dataset_id, with_for_update=True)
         if row is None:
             db.add(
-                FeedbackDatasetRow(
+                FeedbackDatasetORM(
                     dataset_id=spec.dataset_id,
                     collection_id=spec.collection_id,
                     name=spec.name,
@@ -485,15 +485,15 @@ async def apply_plan(
 
     for item in plan.items:
         row = await db.scalar(
-            select(FeedbackDatasetSampleRow)
+            select(FeedbackDatasetSampleORM)
             .where(
-                FeedbackDatasetSampleRow.dataset_id == item.dataset_id,
-                FeedbackDatasetSampleRow.source_case_id == item.source_case_id,
+                FeedbackDatasetSampleORM.dataset_id == item.dataset_id,
+                FeedbackDatasetSampleORM.source_case_id == item.source_case_id,
             )
             .with_for_update()
         )
         if row is None:
-            row = FeedbackDatasetSampleRow(
+            row = FeedbackDatasetSampleORM(
                 sample_id=item.sample_id,
                 dataset_id=item.dataset_id,
                 source_case_id=item.source_case_id,
@@ -514,7 +514,7 @@ async def apply_plan(
             counts["created_samples"] += 1
             if item.content is not None and item.revision_id is not None:
                 db.add(
-                    FeedbackSampleRevisionRow(
+                    FeedbackSampleRevisionORM(
                         revision_id=item.revision_id,
                         sample_id=item.sample_id,
                         revision_no=1,
@@ -545,13 +545,13 @@ async def apply_plan(
             and item.revision_id is not None
         ):
             revision = await db.get(
-                FeedbackSampleRevisionRow,
+                FeedbackSampleRevisionORM,
                 item.revision_id,
                 with_for_update=True,
             )
             if revision is None:
                 db.add(
-                    FeedbackSampleRevisionRow(
+                    FeedbackSampleRevisionORM(
                         revision_id=item.revision_id,
                         sample_id=row.sample_id,
                         revision_no=1,
@@ -583,7 +583,7 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
         build_database_engine,
         AsyncSessionLocal,
     )
-    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetMigrationRunRow
+    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetMigrationRunORM
 
     del ENV_FILE_PATH  # Settings resolves the configured env file itself.
     engine = build_database_engine(DatabaseSettings())
@@ -597,7 +597,7 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
             if apply:
                 summary.update(await apply_plan(db, plan))
             db.add(
-                FeedbackDatasetMigrationRunRow(
+                FeedbackDatasetMigrationRunORM(
                     run_id=plan.run_id,
                     migration_version=MIGRATION_VERSION,
                     mode=mode,
@@ -634,7 +634,7 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
             try:
                 async with AsyncSessionLocal() as db, db.begin():
                     db.add(
-                        FeedbackDatasetMigrationRunRow(
+                        FeedbackDatasetMigrationRunORM(
                             run_id=plan.run_id,
                             migration_version=MIGRATION_VERSION,
                             mode=mode,

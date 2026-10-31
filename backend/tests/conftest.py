@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from infra.persistence.postgres.models.auth import AuthUser
+from infra.persistence.postgres.models.auth import AuthUserORM
 from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
@@ -54,7 +54,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
     engine = create_async_engine(postgres_sync_engine.url, poolclass=NullPool)
     with postgres_sync_engine.begin() as connection:
         connection.execute(
-            insert(AuthUser).values(
+            insert(AuthUserORM).values(
                 user_id="local-user",
                 email="local-fixture@example.com",
                 password_hash="!",

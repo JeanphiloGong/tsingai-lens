@@ -28,7 +28,7 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
-from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
+from infra.persistence.postgres.models.experiment_finding import ExperimentFindingORM
 from repositories.finding_review_repository import (
     FindingReviewRepository,
 )
@@ -271,7 +271,7 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
     finding = _finding(analysis.analysis_version)
     async with database.AsyncSessionLocal.begin() as session:
         session.add(
-            ExperimentFindingRow(
+            ExperimentFindingORM(
                 finding_id=finding.finding_id,
                 collection_id=COLLECTION_ID,
                 objective_id=OBJECTIVE_ID,

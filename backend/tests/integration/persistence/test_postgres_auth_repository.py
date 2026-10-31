@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from infra.persistence.postgres.models.auth import AuthSession
+from infra.persistence.postgres.models.auth import AuthSessionORM
 from repositories.auth_repository import (
     AuthRepository,
     AuthSessionRecord,
@@ -144,8 +144,8 @@ async def test_postgresql_enforces_auth_contract(
 
     async with postgres_session_factory() as database_session:
         stored = await database_session.scalar(
-            select(AuthSession).where(
-                AuthSession.token_hash
+            select(AuthSessionORM).where(
+                AuthSessionORM.token_hash
                 == sha256(bearer_token.encode("utf-8")).hexdigest()
             )
         )

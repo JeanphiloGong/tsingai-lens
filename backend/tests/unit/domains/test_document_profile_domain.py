@@ -7,7 +7,7 @@ import pytest
 
 from repositories.document_profile_repository import DocumentProfileRepository
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from domain.core.document_profile import (
     DocumentProfile,
@@ -33,7 +33,7 @@ def profile_repository(monkeypatch):
 
 def test_stored_document_profile_reads_canonical_fields(profile_repository) -> None:
     repository, session = profile_repository
-    session.scalar.return_value = DocumentPreparationRow(
+    session.scalar.return_value = DocumentPreparationORM(
         document_id="doc-exp",
         profile_json={
             "document_id": "doc-exp",
@@ -66,7 +66,7 @@ def test_stored_document_profile_reads_canonical_fields(profile_repository) -> N
 
 def test_profile_read_requires_current_storage_contract(profile_repository) -> None:
     repository, session = profile_repository
-    session.scalar.return_value = DocumentPreparationRow(
+    session.scalar.return_value = DocumentPreparationORM(
         document_id="doc",
         profile_json={
             "document_id": "doc",

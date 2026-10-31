@@ -24,13 +24,13 @@ from domain.core.scientific_fact import (
 )
 from exceptions import ResourceConflictException
 from infra.persistence.postgres.models.paper_experiment import (
-    ExperimentalVariantRow,
-    ExperimentComparisonMeasurementRow,
-    ExperimentComparisonRow,
-    ExperimentMeasurementResultRow,
-    ExperimentTestConditionRow,
-    PaperExperimentRow,
-    ReportedInterpretationRow,
+    ExperimentalVariantORM,
+    ExperimentComparisonMeasurementORM,
+    ExperimentComparisonORM,
+    ExperimentMeasurementResultORM,
+    ExperimentTestConditionORM,
+    PaperExperimentORM,
+    ReportedInterpretationORM,
 )
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -94,9 +94,9 @@ class PaperExperimentRepository:
         experiment_version: int,
     ) -> StoredPaperExperimentRevision | None:
         row = await db.scalar(
-            select(PaperExperimentRow).where(
-                PaperExperimentRow.experiment_id == experiment_id,
-                PaperExperimentRow.experiment_version == experiment_version,
+            select(PaperExperimentORM).where(
+                PaperExperimentORM.experiment_id == experiment_id,
+                PaperExperimentORM.experiment_version == experiment_version,
             )
         )
         return await load_experiment_revision(db, row) if row is not None else None
@@ -106,7 +106,7 @@ class PaperExperimentRepository:
         db: AsyncSession,
         revision_id: int,
     ) -> StoredPaperExperimentRevision | None:
-        row = await db.get(PaperExperimentRow, revision_id)
+        row = await db.get(PaperExperimentORM, revision_id)
         return await load_experiment_revision(db, row) if row is not None else None
 
     async def read_latest_revision(
@@ -118,9 +118,9 @@ class PaperExperimentRepository:
             select(func.pg_advisory_xact_lock(func.hashtextextended(experiment_id, 0)))
         )
         row = await db.scalar(
-            select(PaperExperimentRow)
-            .where(PaperExperimentRow.experiment_id == experiment_id)
-            .order_by(PaperExperimentRow.experiment_version.desc())
+            select(PaperExperimentORM)
+            .where(PaperExperimentORM.experiment_id == experiment_id)
+            .order_by(PaperExperimentORM.experiment_version.desc())
             .limit(1)
         )
         return await load_experiment_revision(db, row) if row is not None else None
@@ -132,15 +132,15 @@ class PaperExperimentRepository:
     ) -> tuple[StoredPaperExperimentRevision, ...]:
         rows = tuple(
             await db.scalars(
-                select(PaperExperimentRow)
-                .where(PaperExperimentRow.document_id == document_id)
+                select(PaperExperimentORM)
+                .where(PaperExperimentORM.document_id == document_id)
                 .order_by(
-                    PaperExperimentRow.experiment_id,
-                    PaperExperimentRow.experiment_version.desc(),
+                    PaperExperimentORM.experiment_id,
+                    PaperExperimentORM.experiment_version.desc(),
                 )
             )
         )
-        latest_rows: list[PaperExperimentRow] = []
+        latest_rows: list[PaperExperimentORM] = []
         seen: set[str] = set()
         for row in rows:
             if row.experiment_id in seen:
@@ -163,9 +163,9 @@ async def _add_revision(
         timestamp = timestamp.replace(tzinfo=timezone.utc)
 
     existing = await db.scalar(
-        select(PaperExperimentRow).where(
-            PaperExperimentRow.experiment_id == validated.experiment_id,
-            PaperExperimentRow.experiment_version == validated.experiment_version,
+        select(PaperExperimentORM).where(
+            PaperExperimentORM.experiment_id == validated.experiment_id,
+            PaperExperimentORM.experiment_version == validated.experiment_version,
         )
     )
     if existing is not None:
@@ -181,7 +181,7 @@ async def _add_revision(
             },
         )
 
-    row = PaperExperimentRow(
+    row = PaperExperimentORM(
         experiment_id=validated.experiment_id,
         experiment_version=validated.experiment_version,
         document_id=validated.document_id,
@@ -232,7 +232,7 @@ async def _add_components(
 ) -> None:
     db.add_all(
         [
-            ExperimentalVariantRow(
+            ExperimentalVariantORM(
                 paper_experiment_id=paper_experiment_id,
                 position=position,
                 variant_key=item.variant_key,
@@ -327,7 +327,7 @@ async def _add_components(
     )
     db.add_all(
         [
-            ExperimentTestConditionRow(
+            ExperimentTestConditionORM(
                 paper_experiment_id=paper_experiment_id,
                 position=position,
                 test_key=item.test_key,
@@ -391,11 +391,11 @@ async def _add_components(
     )
     await db.flush()
 
-    measurement_rows: list[ExperimentMeasurementResultRow] = []
+    measurement_rows: list[ExperimentMeasurementResultORM] = []
     for position, item in enumerate(revision.measurements):
         value_numeric, value_text = _stored_value(item.value)
         measurement_rows.append(
-            ExperimentMeasurementResultRow(
+            ExperimentMeasurementResultORM(
                 paper_experiment_id=paper_experiment_id,
                 position=position,
                 measurement_key=item.measurement_key,
@@ -436,7 +436,7 @@ async def _add_components(
     db.add_all(measurement_rows)
 
     comparison_rows = [
-        ExperimentComparisonRow(
+        ExperimentComparisonORM(
             paper_experiment_id=paper_experiment_id,
             position=position,
             comparison_key=item.comparison_key,
@@ -503,14 +503,14 @@ async def _add_components(
     db.add_all(comparison_rows)
     await db.flush()
 
-    links: list[ExperimentComparisonMeasurementRow] = []
+    links: list[ExperimentComparisonMeasurementORM] = []
     for comparison in revision.comparisons:
         for side, measurement_keys in (
             ("baseline", comparison.baseline_measurement_keys),
             ("target", comparison.target_measurement_keys),
         ):
             links.extend(
-                ExperimentComparisonMeasurementRow(
+                ExperimentComparisonMeasurementORM(
                     paper_experiment_id=paper_experiment_id,
                     comparison_key=comparison.comparison_key,
                     side=side,
@@ -522,7 +522,7 @@ async def _add_components(
     db.add_all(links)
     db.add_all(
         [
-            ReportedInterpretationRow(
+            ReportedInterpretationORM(
                 paper_experiment_id=paper_experiment_id,
                 position=position,
                 statement=item.statement,
@@ -547,55 +547,55 @@ async def _add_components(
 
 async def load_experiment_revision(
     db: AsyncSession,
-    row: PaperExperimentRow,
+    row: PaperExperimentORM,
 ) -> StoredPaperExperimentRevision:
     revision_id = row.id
     variants = tuple(
         await db.scalars(
-            select(ExperimentalVariantRow)
-            .where(ExperimentalVariantRow.paper_experiment_id == revision_id)
-            .order_by(ExperimentalVariantRow.position)
+            select(ExperimentalVariantORM)
+            .where(ExperimentalVariantORM.paper_experiment_id == revision_id)
+            .order_by(ExperimentalVariantORM.position)
         )
     )
     tests = tuple(
         await db.scalars(
-            select(ExperimentTestConditionRow)
-            .where(ExperimentTestConditionRow.paper_experiment_id == revision_id)
-            .order_by(ExperimentTestConditionRow.position)
+            select(ExperimentTestConditionORM)
+            .where(ExperimentTestConditionORM.paper_experiment_id == revision_id)
+            .order_by(ExperimentTestConditionORM.position)
         )
     )
     measurements = tuple(
         await db.scalars(
-            select(ExperimentMeasurementResultRow)
-            .where(ExperimentMeasurementResultRow.paper_experiment_id == revision_id)
-            .order_by(ExperimentMeasurementResultRow.position)
+            select(ExperimentMeasurementResultORM)
+            .where(ExperimentMeasurementResultORM.paper_experiment_id == revision_id)
+            .order_by(ExperimentMeasurementResultORM.position)
         )
     )
     comparisons = tuple(
         await db.scalars(
-            select(ExperimentComparisonRow)
-            .where(ExperimentComparisonRow.paper_experiment_id == revision_id)
-            .order_by(ExperimentComparisonRow.position)
+            select(ExperimentComparisonORM)
+            .where(ExperimentComparisonORM.paper_experiment_id == revision_id)
+            .order_by(ExperimentComparisonORM.position)
         )
     )
     links = tuple(
         await db.scalars(
-            select(ExperimentComparisonMeasurementRow)
+            select(ExperimentComparisonMeasurementORM)
             .where(
-                ExperimentComparisonMeasurementRow.paper_experiment_id == revision_id
+                ExperimentComparisonMeasurementORM.paper_experiment_id == revision_id
             )
             .order_by(
-                ExperimentComparisonMeasurementRow.comparison_key,
-                ExperimentComparisonMeasurementRow.side,
-                ExperimentComparisonMeasurementRow.position,
+                ExperimentComparisonMeasurementORM.comparison_key,
+                ExperimentComparisonMeasurementORM.side,
+                ExperimentComparisonMeasurementORM.position,
             )
         )
     )
     interpretations = tuple(
         await db.scalars(
-            select(ReportedInterpretationRow)
-            .where(ReportedInterpretationRow.paper_experiment_id == revision_id)
-            .order_by(ReportedInterpretationRow.position)
+            select(ReportedInterpretationORM)
+            .where(ReportedInterpretationORM.paper_experiment_id == revision_id)
+            .order_by(ReportedInterpretationORM.position)
         )
     )
 

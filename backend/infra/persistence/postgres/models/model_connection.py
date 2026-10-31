@@ -5,7 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from infra.persistence.postgres.base import Base
 
 
-class ModelConnectionRow(Base):
+class ModelConnectionORM(Base):
     __tablename__ = "model_connections"
 
     connection_id: Mapped[str] = mapped_column(String(64), primary_key=True)

@@ -24,7 +24,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ObjectiveExperimentPlan(Base):
+class ObjectiveExperimentPlanORM(Base):
     __tablename__ = "objective_experiment_plans"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -96,4 +96,4 @@ class ObjectiveExperimentPlan(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-__all__ = ["ObjectiveExperimentPlan"]
+__all__ = ["ObjectiveExperimentPlanORM"]

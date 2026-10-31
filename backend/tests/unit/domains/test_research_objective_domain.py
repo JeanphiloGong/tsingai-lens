@@ -58,7 +58,7 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
@@ -588,7 +588,7 @@ async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping(m
 
     from unittest.mock import AsyncMock, MagicMock
     session = AsyncMock()
-    session.get.return_value = ObjectiveAnalysisRecord(payload=payload)
+    session.get.return_value = ObjectiveAnalysisORM(payload=payload)
     factory = MagicMock()
     factory.return_value.__aenter__.return_value = session
     monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)

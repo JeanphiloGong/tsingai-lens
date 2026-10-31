@@ -9,9 +9,9 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from domain.source import Collection, Document
-from infra.persistence.postgres.models.document import Document as DocumentRow
+from infra.persistence.postgres.models.document import DocumentORM
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
@@ -146,7 +146,7 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
     )
     async with postgres_session_factory.begin() as session:
         session.add(
-            DocumentPreparationRow(
+            DocumentPreparationORM(
                 document_id=document.document.document_id,
                 source_format="pdf",
                 parser_name="test-parser",
@@ -247,7 +247,7 @@ async def test_collection_delete_removes_its_current_documents(
         is None
     )
     async with postgres_session_factory() as session:
-        assert await session.get(DocumentRow, document.document.document_id) is None
+        assert await session.get(DocumentORM, document.document.document_id) is None
 
 
 async def test_collection_repository_rejects_unknown_owner(collection_repository) -> None:

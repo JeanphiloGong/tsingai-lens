@@ -23,7 +23,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ObjectiveExperimentSelectionRow(Base):
+class ObjectiveExperimentSelectionORM(Base):
     __tablename__ = "objective_experiment_selection"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -60,7 +60,7 @@ class ObjectiveExperimentSelectionRow(Base):
     reasons_json: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 
 
-class SelectionMeasurementRow(Base):
+class SelectionMeasurementORM(Base):
     __tablename__ = "selection_measurement"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -92,7 +92,7 @@ class SelectionMeasurementRow(Base):
     measurement_key: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
-class SelectionComparisonRow(Base):
+class SelectionComparisonORM(Base):
     __tablename__ = "selection_comparison"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -125,7 +125,7 @@ class SelectionComparisonRow(Base):
 
 
 __all__ = [
-    "ObjectiveExperimentSelectionRow",
-    "SelectionComparisonRow",
-    "SelectionMeasurementRow",
+    "ObjectiveExperimentSelectionORM",
+    "SelectionComparisonORM",
+    "SelectionMeasurementORM",
 ]

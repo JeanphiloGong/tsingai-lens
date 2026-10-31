@@ -10,8 +10,8 @@ from application.pipeline import pipeline_run_service
 from application.source import collection_service
 from domain.core import PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
-from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.objective_repository import ObjectiveRepo, AnalysisLeaseLostError
 from repositories.pipeline_run_repository import PipelineRunRepo, PipelineLeaseLostError
@@ -55,8 +55,8 @@ async def test_two_pipeline_workers_claim_once_and_expired_worker_cannot_write(
     await PipelineRunRepo.renew_lease(first, lease_duration=timedelta(seconds=60))
     async with factory() as db, db.begin():
         await db.execute(
-            update(PipelineRunRow)
-            .where(PipelineRunRow.run_id == run.run_id)
+            update(PipelineRunORM)
+            .where(PipelineRunORM.run_id == run.run_id)
             .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
         )
     second = await claim(
@@ -119,7 +119,7 @@ async def test_analysis_takeover_fences_all_worker_writes(postgres_session_facto
     (first,) = [job for job in results if job is not None]
     async with factory() as db, db.begin():
         await db.execute(
-            update(ObjectiveAnalysisRecord).values(
+            update(ObjectiveAnalysisORM).values(
                 lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
             )
         )

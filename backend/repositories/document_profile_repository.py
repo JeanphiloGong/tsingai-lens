@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 
 from domain.core.document_profile import DocumentProfile
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.document import DocumentORM
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from sqlalchemy import select
 
@@ -37,16 +37,16 @@ class DocumentProfileRepository:
             "generated_at": profile.generated_at,
         }
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            document = await db.get(Document, profile.document_id)
+            document = await db.get(DocumentORM, profile.document_id)
             if document is None or document.collection_id != collection_id:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{profile.document_id}"
                 )
-            row = await db.get(DocumentPreparationRow, profile.document_id)
+            row = await db.get(DocumentPreparationORM, profile.document_id)
             if row is None:
                 now = datetime.now(timezone.utc)
                 db.add(
-                    DocumentPreparationRow(
+                    DocumentPreparationORM(
                         document_id=profile.document_id,
                         profile_json=next_profile,
                         created_at=now,
@@ -65,14 +65,14 @@ class DocumentProfileRepository:
     ) -> DocumentProfile | None:
         async with AsyncSessionLocal() as db:
             row = await db.scalar(
-                select(DocumentPreparationRow)
+                select(DocumentPreparationORM)
                 .join(
-                    Document,
-                    Document.document_id == DocumentPreparationRow.document_id,
+                    DocumentORM,
+                    DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
                 .where(
-                    DocumentPreparationRow.document_id == document_id,
-                    Document.collection_id == collection_id,
+                    DocumentPreparationORM.document_id == document_id,
+                    DocumentORM.collection_id == collection_id,
                 )
             )
             if row is None or not row.profile_json:
@@ -101,19 +101,19 @@ class DocumentProfileRepository:
             return ()
         async with AsyncSessionLocal() as db:
             statement = (
-                select(DocumentPreparationRow)
+                select(DocumentPreparationORM)
                 .join(
-                    Document,
-                    Document.document_id == DocumentPreparationRow.document_id,
+                    DocumentORM,
+                    DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
-                .where(Document.collection_id == collection_id)
+                .where(DocumentORM.collection_id == collection_id)
             )
             if document_ids is not None:
                 statement = statement.where(
-                    DocumentPreparationRow.document_id.in_(document_ids)
+                    DocumentPreparationORM.document_id.in_(document_ids)
                 )
             rows = await db.scalars(
-                statement.order_by(DocumentPreparationRow.document_id)
+                statement.order_by(DocumentPreparationORM.document_id)
             )
             profiles = []
             for row in rows:

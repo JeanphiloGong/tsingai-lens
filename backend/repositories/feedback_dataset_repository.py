@@ -9,7 +9,7 @@ from typing import Any
 
 from domain.feedback.dataset import Dataset, DatasetTaskType
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetORM
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,7 @@ class FeedbackDatasetRepository:
     async def create(self, dataset: Dataset) -> StoredDataset:
         async with AsyncSessionLocal() as db, db.begin():
             now = datetime.now(timezone.utc)
-            row = FeedbackDatasetRow(
+            row = FeedbackDatasetORM(
                 dataset_id=dataset.dataset_id,
                 collection_id=dataset.collection_id,
                 name=dataset.name,
@@ -57,7 +57,7 @@ class FeedbackDatasetRepository:
 
     async def read(self, dataset_id: str) -> Dataset | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackDatasetRow, dataset_id)
+            row = await db.get(FeedbackDatasetORM, dataset_id)
             if row is None:
                 return None
             return Dataset(
@@ -72,7 +72,7 @@ class FeedbackDatasetRepository:
 
     async def read_record(self, dataset_id: str) -> StoredDataset | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackDatasetRow, dataset_id)
+            row = await db.get(FeedbackDatasetORM, dataset_id)
             if row is None:
                 return None
             return StoredDataset(
@@ -97,10 +97,10 @@ class FeedbackDatasetRepository:
         offset: int,
     ) -> tuple[StoredDataset, ...]:
         statement = (
-            select(FeedbackDatasetRow)
-            .where(FeedbackDatasetRow.collection_id == collection_id)
+            select(FeedbackDatasetORM)
+            .where(FeedbackDatasetORM.collection_id == collection_id)
             .order_by(
-                FeedbackDatasetRow.created_at.desc(), FeedbackDatasetRow.dataset_id
+                FeedbackDatasetORM.created_at.desc(), FeedbackDatasetORM.dataset_id
             )
             .offset(offset)
             .limit(limit)
@@ -135,7 +135,7 @@ async def ensure_system_datasets(
     records: list[Dataset] = []
     for task_type, name in _SYSTEM_TASKS:
         dataset_id = system_dataset_id(collection_id, task_type)
-        row = await db.get(FeedbackDatasetRow, dataset_id)
+        row = await db.get(FeedbackDatasetORM, dataset_id)
         if row is None:
             dataset = Dataset(
                 dataset_id=dataset_id,
@@ -152,7 +152,7 @@ async def ensure_system_datasets(
             try:
                 async with db.begin_nested():
                     db.add(
-                        FeedbackDatasetRow(
+                        FeedbackDatasetORM(
                             dataset_id=dataset.dataset_id,
                             collection_id=dataset.collection_id,
                             name=dataset.name,
@@ -166,7 +166,7 @@ async def ensure_system_datasets(
                     )
                     await db.flush()
             except IntegrityError:
-                row = await db.get(FeedbackDatasetRow, dataset_id)
+                row = await db.get(FeedbackDatasetORM, dataset_id)
             else:
                 records.append(dataset)
                 continue

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from infra.persistence.postgres.models.model_connection import ModelConnectionRow
+from infra.persistence.postgres.models.model_connection import ModelConnectionORM
 from repositories.model_connection_repository import (
     ModelConnectionRepository,
 )
@@ -17,7 +17,7 @@ async def _insert(session_factory, *, connection_id: str, enabled: bool):
     now = datetime.now(timezone.utc)
     async with session_factory.begin() as database:
         database.add(
-            ModelConnectionRow(
+            ModelConnectionORM(
                 connection_id=connection_id,
                 display_name=connection_id,
                 base_url="https://model.example.invalid/v1",

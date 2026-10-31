@@ -9,9 +9,9 @@ from domain.goal import (
 )
 from exceptions import ResourceConflictException
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.chat import ChatMessageRow, ChatSessionRow
+from infra.persistence.postgres.models.chat import ChatMessageORM, ChatSessionORM
 from infra.persistence.postgres.models.objective_workspace import (
-    ObjectiveExperimentPlan,
+    ObjectiveExperimentPlanORM,
 )
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +26,7 @@ class ExperimentPlanRepository:
             raise ValueError("use append_plan_revision for a successor revision")
         async with AsyncSessionLocal() as db, db.begin():
             await _validate_source_message(db, plan)
-            row = await db.get(ObjectiveExperimentPlan, plan.plan_id)
+            row = await db.get(ObjectiveExperimentPlanORM, plan.plan_id)
             if row is not None:
                 existing = ExperimentPlanRecord(
                     plan_id=row.plan_id,
@@ -56,7 +56,7 @@ class ExperimentPlanRepository:
                         "plan_version": plan.plan_version,
                     },
                 )
-            row = ObjectiveExperimentPlan(
+            row = ObjectiveExperimentPlanORM(
                 plan_id=plan.plan_id,
                 collection_id=plan.collection_id,
                 objective_id=plan.objective_id,
@@ -103,14 +103,14 @@ class ExperimentPlanRepository:
             raise ValueError("successor revision requires parent_plan_id")
         async with AsyncSessionLocal() as db, db.begin():
             parent_row = await db.scalar(
-                select(ObjectiveExperimentPlan)
-                .where(ObjectiveExperimentPlan.plan_id == parent_plan_id)
+                select(ObjectiveExperimentPlanORM)
+                .where(ObjectiveExperimentPlanORM.plan_id == parent_plan_id)
                 .with_for_update()
             )
             if parent_row is None:
                 raise ValueError("experiment plan parent revision was not found")
             _validate_successor(parent_row, plan)
-            if await db.get(ObjectiveExperimentPlan, plan.plan_id) is not None:
+            if await db.get(ObjectiveExperimentPlanORM, plan.plan_id) is not None:
                 raise ResourceConflictException(
                     "experiment plan revision identity already exists",
                     data={
@@ -121,8 +121,8 @@ class ExperimentPlanRepository:
                     },
                 )
             existing_child = await db.scalar(
-                select(ObjectiveExperimentPlan.plan_id).where(
-                    ObjectiveExperimentPlan.parent_plan_id == parent_row.plan_id
+                select(ObjectiveExperimentPlanORM.plan_id).where(
+                    ObjectiveExperimentPlanORM.parent_plan_id == parent_row.plan_id
                 )
             )
             if existing_child is not None:
@@ -135,7 +135,7 @@ class ExperimentPlanRepository:
                     },
                 )
             await _validate_source_message(db, plan)
-            row = ObjectiveExperimentPlan(
+            row = ObjectiveExperimentPlanORM(
                 plan_id=plan.plan_id,
                 collection_id=plan.collection_id,
                 objective_id=plan.objective_id,
@@ -196,10 +196,10 @@ class ExperimentPlanRepository:
     ) -> ExperimentPlanRecord | None:
         async with AsyncSessionLocal() as db:
             row = await db.scalar(
-                select(ObjectiveExperimentPlan).where(
-                    ObjectiveExperimentPlan.plan_id == plan_id,
-                    ObjectiveExperimentPlan.collection_id == collection_id,
-                    ObjectiveExperimentPlan.objective_id == objective_id,
+                select(ObjectiveExperimentPlanORM).where(
+                    ObjectiveExperimentPlanORM.plan_id == plan_id,
+                    ObjectiveExperimentPlanORM.collection_id == collection_id,
+                    ObjectiveExperimentPlanORM.objective_id == objective_id,
                 )
             )
             if row is None:
@@ -230,15 +230,15 @@ class ExperimentPlanRepository:
     ) -> tuple[ExperimentPlanRecord, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(ObjectiveExperimentPlan)
+                select(ObjectiveExperimentPlanORM)
                 .where(
-                    ObjectiveExperimentPlan.collection_id == collection_id,
-                    ObjectiveExperimentPlan.objective_id == objective_id,
+                    ObjectiveExperimentPlanORM.collection_id == collection_id,
+                    ObjectiveExperimentPlanORM.objective_id == objective_id,
                 )
                 .order_by(
-                    ObjectiveExperimentPlan.updated_at.desc(),
-                    ObjectiveExperimentPlan.created_at.desc(),
-                    ObjectiveExperimentPlan.plan_id,
+                    ObjectiveExperimentPlanORM.updated_at.desc(),
+                    ObjectiveExperimentPlanORM.created_at.desc(),
+                    ObjectiveExperimentPlanORM.plan_id,
                 )
             )
             records = tuple(
@@ -278,9 +278,9 @@ async def _validate_source_message(
 ) -> None:
     if plan.source_message_id is None:
         return
-    message = await db.get(ChatMessageRow, plan.source_message_id)
+    message = await db.get(ChatMessageORM, plan.source_message_id)
     chat = (
-        await db.get(ChatSessionRow, message.session_id)
+        await db.get(ChatSessionORM, message.session_id)
         if message is not None
         else None
     )
@@ -289,7 +289,7 @@ async def _validate_source_message(
 
 
 def _validate_successor(
-    parent: ObjectiveExperimentPlan,
+    parent: ObjectiveExperimentPlanORM,
     successor: ExperimentPlanRecord,
 ) -> None:
     if (

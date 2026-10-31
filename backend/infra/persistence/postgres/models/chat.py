@@ -26,7 +26,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ChatSessionRow(Base):
+class ChatSessionORM(Base):
     __tablename__ = "chat_sessions"
     __table_args__ = (
         CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
@@ -64,7 +64,7 @@ class ChatSessionRow(Base):
     operation_permission: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
 
 
-class ChatMessageRow(Base):
+class ChatMessageORM(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (
         CheckConstraint("position >= 0", name="position_non_negative"),
@@ -96,7 +96,7 @@ class ChatMessageRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ChatMessageFeedbackRow(Base):
+class ChatMessageFeedbackORM(Base):
     __tablename__ = "chat_message_feedback"
     __table_args__ = (
         UniqueConstraint("user_id", "message_id", name="uq_chat_message_feedback_user_message"),
@@ -131,7 +131,7 @@ class ChatMessageFeedbackRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ChatToolCallRow(Base):
+class ChatToolCallORM(Base):
     __tablename__ = "chat_tool_calls"
     __table_args__ = (
         CheckConstraint(
@@ -205,8 +205,8 @@ class ChatToolCallRow(Base):
 
 
 __all__ = [
-    "ChatMessageFeedbackRow",
-    "ChatMessageRow",
-    "ChatSessionRow",
-    "ChatToolCallRow",
+    "ChatMessageFeedbackORM",
+    "ChatMessageORM",
+    "ChatSessionORM",
+    "ChatToolCallORM",
 ]

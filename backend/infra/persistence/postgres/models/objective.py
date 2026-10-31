@@ -26,7 +26,7 @@ _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 _AUTOINCREMENT_ID = BigInteger().with_variant(Integer(), "sqlite")
 
 
-class ObjectiveResearchRecord(Base):
+class ObjectiveResearchORM(Base):
     """One current ResearchObjective aggregate."""
 
     __tablename__ = "research_objectives"
@@ -56,7 +56,7 @@ class ObjectiveResearchRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ObjectiveAnalysisRecord(Base):
+class ObjectiveAnalysisORM(Base):
     __tablename__ = "objective_analyses"
     __table_args__ = (
         Index("ix_objective_analyses_worker_claim", "status", "lease_expires_at", "created_at"),
@@ -82,7 +82,7 @@ class ObjectiveAnalysisRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ObjectiveAnalysisLegacyCheckpointRecord(Base):
+class ObjectiveAnalysisLegacyCheckpointORM(Base):
     """Audit-only classification of retired per-document checkpoints."""
 
     __tablename__ = "objective_analysis_legacy_checkpoints"
@@ -121,7 +121,7 @@ class ObjectiveAnalysisLegacyCheckpointRecord(Base):
 
 
 __all__ = [
-    "ObjectiveAnalysisRecord",
-    "ObjectiveAnalysisLegacyCheckpointRecord",
-    "ObjectiveResearchRecord",
+    "ObjectiveAnalysisORM",
+    "ObjectiveAnalysisLegacyCheckpointORM",
+    "ObjectiveResearchORM",
 ]

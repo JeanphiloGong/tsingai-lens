@@ -108,3 +108,7 @@ merely to mark a layer.
 
 See [backend architecture](../docs/architecture/overview.md) and
 [research-flow verification](../tests/objective-analysis-verification.md).
+
+SQLAlchemy table mappings use the `ORM` suffix (for example, `CollectionORM`
+and `ChatModelCallORM`). Domain values and repository results such as
+`Collection` and `StoredCollection` keep their existing names.

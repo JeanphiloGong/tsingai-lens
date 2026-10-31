@@ -15,7 +15,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class Collection(Base):
+class CollectionORM(Base):
     __tablename__ = "collections"
     __table_args__ = (
         CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
@@ -51,4 +51,4 @@ class Collection(Base):
     )
 
 
-__all__ = ["Collection"]
+__all__ = ["CollectionORM"]

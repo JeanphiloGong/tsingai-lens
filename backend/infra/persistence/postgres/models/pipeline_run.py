@@ -15,7 +15,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class PipelineRunRow(Base):
+class PipelineRunORM(Base):
     __tablename__ = "pipeline_runs"
     __table_args__ = (
         Index("ix_pipeline_runs_worker_claim", "pipeline_name", "status", "lease_expires_at", "created_at"),
@@ -61,4 +61,4 @@ class PipelineRunRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-__all__ = ["PipelineRunRow"]
+__all__ = ["PipelineRunORM"]

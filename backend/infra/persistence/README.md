@@ -78,3 +78,7 @@ mappings and dedicated query results live together in
 Repositories return those results or domain objects, never ORM rows or HTTP
 response models. Do not add a generic repository, storage
 selector, compatibility wrapper, dual write, schema probe, or fallback store.
+
+SQLAlchemy table mappings use the `ORM` suffix (for example, `CollectionORM`
+and `ChatModelCallORM`). Domain values and repository results such as
+`Collection` and `StoredCollection` keep their existing names.

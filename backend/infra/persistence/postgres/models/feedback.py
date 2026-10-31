@@ -26,7 +26,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ChatModelCallRow(Base):
+class ChatModelCallORM(Base):
     """One exact request submitted to an LLM provider."""
 
     __tablename__ = "chat_model_calls"
@@ -78,7 +78,7 @@ class ChatModelCallRow(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class AnalysisJobRow(Base):
+class AnalysisJobORM(Base):
     """Versioned scheduling envelope shared by analysis workers."""
 
     __tablename__ = "analysis_jobs"
@@ -128,7 +128,7 @@ class AnalysisJobRow(Base):
     lease_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
-class FeedbackAnalysisResultRow(Base):
+class FeedbackAnalysisResultORM(Base):
     """AI candidate analysis and its user-readable evidence coverage."""
 
     __tablename__ = "feedback_analysis_results"
@@ -185,7 +185,7 @@ class FeedbackAnalysisResultRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackSignalAnalysisResultRow(Base):
+class FeedbackSignalAnalysisResultORM(Base):
     """Candidate analysis for a non-rating feedback signal.
 
     Natural-language correction candidates have a different source identity
@@ -260,7 +260,7 @@ class FeedbackSignalAnalysisResultRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ToolFailureAnalysisResultRow(Base):
+class ToolFailureAnalysisResultORM(Base):
     """Candidate analysis tied to one durable failed Chat tool result."""
 
     __tablename__ = "tool_failure_analysis_results"
@@ -329,7 +329,7 @@ class ToolFailureAnalysisResultRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackCaseRow(Base):
+class FeedbackCaseORM(Base):
     """Human-facing case assembled from one or more analysis signals."""
 
     __tablename__ = "feedback_cases"
@@ -388,7 +388,7 @@ class FeedbackCaseRow(Base):
     annotation_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
-class FeedbackAnnotationRow(Base):
+class FeedbackAnnotationORM(Base):
     """Immutable versions of a user's confirmation for one feedback case."""
 
     __tablename__ = "feedback_annotations"
@@ -438,7 +438,7 @@ class FeedbackAnnotationRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackReviewDecisionRow(Base):
+class FeedbackReviewDecisionORM(Base):
     """Append-only review history tied to one annotation digest."""
 
     __tablename__ = "feedback_review_decisions"
@@ -473,7 +473,7 @@ class FeedbackReviewDecisionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackDatasetSnapshotRow(Base):
+class FeedbackDatasetSnapshotORM(Base):
     """Immutable manifest and rows exported from reviewed feedback cases."""
 
     __tablename__ = "feedback_dataset_snapshots"
@@ -538,12 +538,12 @@ class FeedbackDatasetSnapshotRow(Base):
 
 
 __all__ = [
-    "AnalysisJobRow",
-    "ChatModelCallRow",
-    "FeedbackAnalysisResultRow",
-    "ToolFailureAnalysisResultRow",
-    "FeedbackCaseRow",
-    "FeedbackAnnotationRow",
-    "FeedbackReviewDecisionRow",
-    "FeedbackDatasetSnapshotRow",
+    "AnalysisJobORM",
+    "ChatModelCallORM",
+    "FeedbackAnalysisResultORM",
+    "ToolFailureAnalysisResultORM",
+    "FeedbackCaseORM",
+    "FeedbackAnnotationORM",
+    "FeedbackReviewDecisionORM",
+    "FeedbackDatasetSnapshotORM",
 ]

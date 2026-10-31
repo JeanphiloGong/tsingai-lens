@@ -19,9 +19,9 @@ from domain.evaluation.records import (
     EvaluationScore,
 )
 from infra.persistence.postgres.models.evaluation import (
-    EvaluationGoldSetRecord,
-    EvaluationPredictionSnapshotRecord,
-    EvaluationRunRecord,
+    EvaluationGoldSetORM,
+    EvaluationPredictionSnapshotORM,
+    EvaluationRunORM,
 )
 
 
@@ -49,11 +49,11 @@ class EvaluationRepository:
             for item in gold_items
         ]
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(EvaluationGoldSetRecord, gold_set.gold_id)
+            row = await db.get(EvaluationGoldSetORM, gold_set.gold_id)
             if row is not None and row.collection_id != gold_set.collection_id:
                 raise ValueError("gold set identity cannot be reassigned")
             if row is None:
-                row = EvaluationGoldSetRecord(
+                row = EvaluationGoldSetORM(
                     gold_id=gold_set.gold_id,
                     collection_id=gold_set.collection_id,
                     version=gold_set.version,
@@ -76,7 +76,7 @@ class EvaluationRepository:
 
     async def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(EvaluationGoldSetRecord, gold_id)
+            row = await db.get(EvaluationGoldSetORM, gold_id)
             if row is None:
                 return None
             return EvaluationGoldSet(
@@ -91,7 +91,7 @@ class EvaluationRepository:
 
     async def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]:
         async with AsyncSessionLocal() as db:
-            row = await db.get(EvaluationGoldSetRecord, gold_id)
+            row = await db.get(EvaluationGoldSetORM, gold_id)
             if row is None:
                 return ()
             return tuple(
@@ -127,11 +127,11 @@ class EvaluationRepository:
             for item in snapshot.items
         ]
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(EvaluationPredictionSnapshotRecord, snapshot.snapshot_id)
+            row = await db.get(EvaluationPredictionSnapshotORM, snapshot.snapshot_id)
             if row is not None and row.collection_id != snapshot.collection_id:
                 raise ValueError("prediction snapshot identity cannot be reassigned")
             if row is None:
-                row = EvaluationPredictionSnapshotRecord(
+                row = EvaluationPredictionSnapshotORM(
                     snapshot_id=snapshot.snapshot_id,
                     collection_id=snapshot.collection_id,
                     target_layer=snapshot.target_layer,
@@ -154,7 +154,7 @@ class EvaluationRepository:
         snapshot_id: str,
     ) -> EvaluationPredictionSnapshot | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(EvaluationPredictionSnapshotRecord, snapshot_id)
+            row = await db.get(EvaluationPredictionSnapshotORM, snapshot_id)
             if row is None:
                 return None
             return EvaluationPredictionSnapshot(
@@ -224,9 +224,9 @@ class EvaluationRepository:
             for failure in run.failures
         ]
         async with AsyncSessionLocal() as db, db.begin():
-            gold = await db.get(EvaluationGoldSetRecord, run.gold_id)
+            gold = await db.get(EvaluationGoldSetORM, run.gold_id)
             snapshot = await db.get(
-                EvaluationPredictionSnapshotRecord, run.prediction_snapshot_id
+                EvaluationPredictionSnapshotORM, run.prediction_snapshot_id
             )
             if gold is None or snapshot is None:
                 raise ValueError("evaluation parents do not exist")
@@ -235,11 +235,11 @@ class EvaluationRepository:
                 or snapshot.collection_id != run.collection_id
             ):
                 raise ValueError("evaluation parents must share collection")
-            row = await db.get(EvaluationRunRecord, run.evaluation_run_id)
+            row = await db.get(EvaluationRunORM, run.evaluation_run_id)
             if row is not None and row.collection_id != run.collection_id:
                 raise ValueError("evaluation run identity cannot be reassigned")
             if row is None:
-                row = EvaluationRunRecord(
+                row = EvaluationRunORM(
                     evaluation_run_id=run.evaluation_run_id,
                     collection_id=run.collection_id,
                     gold_id=run.gold_id,
@@ -267,7 +267,7 @@ class EvaluationRepository:
 
     async def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(EvaluationRunRecord, evaluation_run_id)
+            row = await db.get(EvaluationRunORM, evaluation_run_id)
             if row is None:
                 return None
             return EvaluationRun(
@@ -321,11 +321,11 @@ class EvaluationRepository:
     async def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(EvaluationRunRecord)
-                .where(EvaluationRunRecord.collection_id == collection_id)
+                select(EvaluationRunORM)
+                .where(EvaluationRunORM.collection_id == collection_id)
                 .order_by(
-                    EvaluationRunRecord.created_at.desc(),
-                    EvaluationRunRecord.evaluation_run_id.desc(),
+                    EvaluationRunORM.created_at.desc(),
+                    EvaluationRunORM.evaluation_run_id.desc(),
                 )
             )
             return tuple(

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from infra.persistence.postgres.base import Base
 
 
-class AuthUser(Base):
+class AuthUserORM(Base):
     __tablename__ = "auth_users"
     __table_args__ = (CheckConstraint("email = lower(email)", name="email_normalized"),)
 
@@ -24,7 +24,7 @@ class AuthUser(Base):
     )
 
 
-class AuthSession(Base):
+class AuthSessionORM(Base):
     __tablename__ = "auth_sessions"
     __table_args__ = (
         CheckConstraint("length(token_hash) = 64", name="token_hash_length"),

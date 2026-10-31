@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from infra.persistence.postgres.models.comparison_group import (
-    ComparisonGroupMemberRow,
-    ComparisonGroupRow,
+    ComparisonGroupMemberORM,
+    ComparisonGroupORM,
 )
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from infra.persistence.postgres.models.objective_experiment_selection import (
-    ObjectiveExperimentSelectionRow,
+    ObjectiveExperimentSelectionORM,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,9 +25,9 @@ class ComparisonGroupRepository:
         group: ComparisonGroup,
     ) -> ComparisonGroup:
         existing = await db.scalar(
-            select(ComparisonGroupRow).where(
-                ComparisonGroupRow.group_id == group.group_id,
-                ComparisonGroupRow.collection_id == collection_id,
+            select(ComparisonGroupORM).where(
+                ComparisonGroupORM.group_id == group.group_id,
+                ComparisonGroupORM.collection_id == collection_id,
             )
         )
         if existing is not None:
@@ -36,7 +36,7 @@ class ComparisonGroupRepository:
                 return restored
             raise ValueError("comparison group identity already exists")
         await _validate_group_context(db, collection_id, group)
-        row = ComparisonGroupRow(
+        row = ComparisonGroupORM(
             group_id=group.group_id,
             collection_id=collection_id,
             objective_id=group.objective_id,
@@ -51,7 +51,7 @@ class ComparisonGroupRepository:
         db.add(row)
         await db.flush()
         db.add_all(
-            ComparisonGroupMemberRow(
+            ComparisonGroupMemberORM(
                 group_id=group.group_id,
                 selection_id=item.selection_id,
                 role=item.role,
@@ -70,9 +70,9 @@ class ComparisonGroupRepository:
         group_id: str,
     ) -> ComparisonGroup | None:
         row = await db.scalar(
-            select(ComparisonGroupRow).where(
-                ComparisonGroupRow.collection_id == collection_id,
-                ComparisonGroupRow.group_id == group_id,
+            select(ComparisonGroupORM).where(
+                ComparisonGroupORM.collection_id == collection_id,
+                ComparisonGroupORM.group_id == group_id,
             )
         )
         return await load_comparison_group(db, row) if row is not None else None
@@ -86,13 +86,13 @@ class ComparisonGroupRepository:
     ) -> tuple[ComparisonGroup, ...]:
         rows = tuple(
             await db.scalars(
-                select(ComparisonGroupRow)
+                select(ComparisonGroupORM)
                 .where(
-                    ComparisonGroupRow.collection_id == collection_id,
-                    ComparisonGroupRow.objective_id == objective_id,
-                    ComparisonGroupRow.analysis_version == analysis_version,
+                    ComparisonGroupORM.collection_id == collection_id,
+                    ComparisonGroupORM.objective_id == objective_id,
+                    ComparisonGroupORM.analysis_version == analysis_version,
                 )
-                .order_by(ComparisonGroupRow.group_id)
+                .order_by(ComparisonGroupORM.group_id)
             )
         )
         return tuple([await load_comparison_group(db, row) for row in rows])
@@ -104,19 +104,19 @@ async def _validate_group_context(
     group: ComparisonGroup,
 ) -> None:
     analysis = await db.scalar(
-        select(ObjectiveAnalysisRecord).where(
-            ObjectiveAnalysisRecord.collection_id == collection_id,
-            ObjectiveAnalysisRecord.objective_id == group.objective_id,
-            ObjectiveAnalysisRecord.analysis_version == group.analysis_version,
+        select(ObjectiveAnalysisORM).where(
+            ObjectiveAnalysisORM.collection_id == collection_id,
+            ObjectiveAnalysisORM.objective_id == group.objective_id,
+            ObjectiveAnalysisORM.analysis_version == group.analysis_version,
         )
     )
     if analysis is None:
         raise ValueError("comparison group analysis snapshot was not found")
     selection_rows = tuple(
         await db.scalars(
-            select(ObjectiveExperimentSelectionRow).where(
-                ObjectiveExperimentSelectionRow.collection_id == collection_id,
-                ObjectiveExperimentSelectionRow.selection_id.in_(
+            select(ObjectiveExperimentSelectionORM).where(
+                ObjectiveExperimentSelectionORM.collection_id == collection_id,
+                ObjectiveExperimentSelectionORM.selection_id.in_(
                     item.selection_id for item in group.members
                 ),
             )
@@ -139,13 +139,13 @@ async def _validate_group_context(
 
 async def load_comparison_group(
     db: AsyncSession,
-    row: ComparisonGroupRow,
+    row: ComparisonGroupORM,
 ) -> ComparisonGroup:
     members = tuple(
         await db.scalars(
-            select(ComparisonGroupMemberRow)
-            .where(ComparisonGroupMemberRow.group_id == row.group_id)
-            .order_by(ComparisonGroupMemberRow.id)
+            select(ComparisonGroupMemberORM)
+            .where(ComparisonGroupMemberORM.group_id == row.group_id)
+            .order_by(ComparisonGroupMemberORM.id)
         )
     )
     return ComparisonGroup(

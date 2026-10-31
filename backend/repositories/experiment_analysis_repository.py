@@ -8,7 +8,7 @@ from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import PaperExperimentRevision
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import _add_finding
 from repositories.objective_experiment_selection_repository import _add_selection
@@ -102,11 +102,11 @@ class ExperimentAnalysisRepository:
         graph: ExperimentAnalysisWrite,
     ) -> StoredExperimentAnalysis:
         analysis = await db.scalar(
-            select(ObjectiveAnalysisRecord)
+            select(ObjectiveAnalysisORM)
             .where(
-                ObjectiveAnalysisRecord.collection_id == graph.collection_id,
-                ObjectiveAnalysisRecord.objective_id == graph.objective_id,
-                ObjectiveAnalysisRecord.analysis_version == graph.analysis_version,
+                ObjectiveAnalysisORM.collection_id == graph.collection_id,
+                ObjectiveAnalysisORM.objective_id == graph.objective_id,
+                ObjectiveAnalysisORM.analysis_version == graph.analysis_version,
             )
             .with_for_update()
         )

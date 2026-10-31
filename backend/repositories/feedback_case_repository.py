@@ -6,7 +6,7 @@ import json
 from hashlib import sha256
 from domain.chat.feedback import ChatMessageFeedback
 from domain.feedback.tool_failure import tool_result_digest
-from infra.persistence.postgres.models.chat import ChatMessageFeedbackRow, ChatMessageRow, ChatToolCallRow
+from infra.persistence.postgres.models.chat import ChatMessageFeedbackORM, ChatMessageORM, ChatToolCallORM
 from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -22,12 +22,12 @@ from domain.feedback.review_decision import ReviewDecision
 from domain.feedback.tool_failure import ToolFailureAnalysisResult
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.feedback import (
-    FeedbackAnalysisResultRow,
-    FeedbackAnnotationRow,
-    FeedbackCaseRow,
-    FeedbackReviewDecisionRow,
-    FeedbackSignalAnalysisResultRow,
-    ToolFailureAnalysisResultRow,
+    FeedbackAnalysisResultORM,
+    FeedbackAnnotationORM,
+    FeedbackCaseORM,
+    FeedbackReviewDecisionORM,
+    FeedbackSignalAnalysisResultORM,
+    ToolFailureAnalysisResultORM,
 )
 from repositories.analysis_job_repository import AnalysisJob, lock_analysis_job
 from repositories.feedback_dataset_sample_repository import enqueue_case_samples
@@ -101,7 +101,7 @@ class FeedbackCaseRepository:
                 raise ValueError("analysis result belongs to another job")
             # Keep this method usable when a caller has not separately persisted
             # the result, while preserving the same result identity and payload.
-            source = await db.get(ChatMessageFeedbackRow, result.feedback_id, with_for_update=True)
+            source = await db.get(ChatMessageFeedbackORM, result.feedback_id, with_for_update=True)
             if source is None:
                 raise FeedbackCaseWriteConflict("feedback_withdrawn")
             feedback = ChatMessageFeedback(
@@ -114,15 +114,15 @@ class FeedbackCaseRepository:
                 raise FeedbackCaseWriteConflict("feedback_version_superseded")
             saved_result = await _save_result_row(db, result)
             row = await db.scalar(
-                select(FeedbackCaseRow)
+                select(FeedbackCaseORM)
                 .where(
-                    FeedbackCaseRow.session_id == result.session_id,
-                    FeedbackCaseRow.anchor_message_id == result.anchor_message_id,
+                    FeedbackCaseORM.session_id == result.session_id,
+                    FeedbackCaseORM.anchor_message_id == result.anchor_message_id,
                 )
                 .with_for_update()
             )
             if row is None:
-                row = FeedbackCaseRow(
+                row = FeedbackCaseORM(
                     case_id=f"case_{uuid4().hex[:32]}",
                     collection_id=result.collection_id,
                     session_id=result.session_id,
@@ -247,22 +247,22 @@ class FeedbackCaseRepository:
             job_row = await lock_analysis_job(db, job)
             if result.job_id != job.job_id:
                 raise ValueError("analysis result belongs to another job")
-            trigger = await db.get(ChatMessageRow, result.trigger_message_id, with_for_update=True)
+            trigger = await db.get(ChatMessageORM, result.trigger_message_id, with_for_update=True)
             if trigger is None:
                 raise FeedbackCaseWriteConflict("correction_signal_withdrawn")
             if sha256(trigger.content.strip().encode("utf-8")).hexdigest() != job.payload["trigger_digest"]:
                 raise FeedbackCaseWriteConflict("correction_signal_superseded")
             saved_result = await _save_correction_result_row(db, result)
             row = await db.scalar(
-                select(FeedbackCaseRow)
+                select(FeedbackCaseORM)
                 .where(
-                    FeedbackCaseRow.session_id == result.session_id,
-                    FeedbackCaseRow.anchor_message_id == result.anchor_message_id,
+                    FeedbackCaseORM.session_id == result.session_id,
+                    FeedbackCaseORM.anchor_message_id == result.anchor_message_id,
                 )
                 .with_for_update()
             )
             if row is None:
-                row = FeedbackCaseRow(
+                row = FeedbackCaseORM(
                     case_id=f"case_{uuid4().hex[:32]}",
                     collection_id=result.collection_id,
                     session_id=result.session_id,
@@ -391,8 +391,8 @@ class FeedbackCaseRepository:
             job_row = await lock_analysis_job(db, job)
             if result.job_id != job.job_id:
                 raise ValueError("analysis result belongs to another job")
-            source = await db.get(ChatMessageRow, result.result_message_id, with_for_update=True)
-            call = await db.get(ChatToolCallRow, result.tool_call_id, with_for_update=True)
+            source = await db.get(ChatMessageORM, result.result_message_id, with_for_update=True)
+            call = await db.get(ChatToolCallORM, result.tool_call_id, with_for_update=True)
             if source is None or call is None:
                 raise FeedbackCaseWriteConflict("tool_failure_withdrawn")
             if call.status != "failed" or tool_result_digest({
@@ -404,15 +404,15 @@ class FeedbackCaseRepository:
                 raise FeedbackCaseWriteConflict("tool_failure_superseded")
             saved_result = await _save_tool_failure_result_row(db, result)
             row = await db.scalar(
-                select(FeedbackCaseRow)
+                select(FeedbackCaseORM)
                 .where(
-                    FeedbackCaseRow.session_id == result.session_id,
-                    FeedbackCaseRow.anchor_message_id == anchor_message_id,
+                    FeedbackCaseORM.session_id == result.session_id,
+                    FeedbackCaseORM.anchor_message_id == anchor_message_id,
                 )
                 .with_for_update()
             )
             if row is None:
-                row = FeedbackCaseRow(
+                row = FeedbackCaseORM(
                     case_id=f"case_{uuid4().hex[:32]}",
                     collection_id=result.collection_id,
                     session_id=result.session_id,
@@ -477,7 +477,7 @@ class FeedbackCaseRepository:
 
     async def read_case(self, case_id: str) -> FeedbackCase | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackCaseRow, case_id)
+            row = await db.get(FeedbackCaseORM, case_id)
             return (
                 FeedbackCase(
                     case_id=row.case_id,
@@ -510,8 +510,8 @@ class FeedbackCaseRepository:
             return ()
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(FeedbackAnalysisResultRow).where(
-                    FeedbackAnalysisResultRow.result_id.in_(ids)
+                select(FeedbackAnalysisResultORM).where(
+                    FeedbackAnalysisResultORM.result_id.in_(ids)
                 )
             )
             by_id = {
@@ -563,8 +563,8 @@ class FeedbackCaseRepository:
             return ()
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(FeedbackSignalAnalysisResultRow).where(
-                    FeedbackSignalAnalysisResultRow.result_id.in_(ids)
+                select(FeedbackSignalAnalysisResultORM).where(
+                    FeedbackSignalAnalysisResultORM.result_id.in_(ids)
                 )
             )
             by_id = {
@@ -618,8 +618,8 @@ class FeedbackCaseRepository:
             return ()
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(ToolFailureAnalysisResultRow).where(
-                    ToolFailureAnalysisResultRow.result_id.in_(ids)
+                select(ToolFailureAnalysisResultORM).where(
+                    ToolFailureAnalysisResultORM.result_id.in_(ids)
                 )
             )
             by_id = {
@@ -680,20 +680,20 @@ class FeedbackCaseRepository:
     ) -> tuple[FeedbackCase, ...]:
         if limit is not None and limit < 0 or offset < 0:
             raise ValueError("limit and offset must be non-negative")
-        statement = select(FeedbackCaseRow)
+        statement = select(FeedbackCaseORM)
         if collection_id is not None:
-            statement = statement.where(FeedbackCaseRow.collection_id == collection_id)
+            statement = statement.where(FeedbackCaseORM.collection_id == collection_id)
         elif collection_ids is not None:
             if not collection_ids:
                 return ()
             statement = statement.where(
-                FeedbackCaseRow.collection_id.in_(collection_ids)
+                FeedbackCaseORM.collection_id.in_(collection_ids)
             )
         if status is not None:
-            statement = statement.where(FeedbackCaseRow.status == status)
+            statement = statement.where(FeedbackCaseORM.status == status)
         statement = statement.order_by(
-            FeedbackCaseRow.created_at,
-            FeedbackCaseRow.case_id,
+            FeedbackCaseORM.created_at,
+            FeedbackCaseORM.case_id,
         )
         async with AsyncSessionLocal() as db:
             rows = list(await db.scalars(statement))
@@ -719,8 +719,8 @@ class FeedbackCaseRepository:
                 if analysis_result_ids:
                     analysis_rows = tuple(
                         await db.scalars(
-                            select(FeedbackAnalysisResultRow).where(
-                                FeedbackAnalysisResultRow.result_id.in_(
+                            select(FeedbackAnalysisResultORM).where(
+                                FeedbackAnalysisResultORM.result_id.in_(
                                     analysis_result_ids
                                 ),
                             )
@@ -729,8 +729,8 @@ class FeedbackCaseRepository:
                 if signal_result_ids:
                     signal_rows = tuple(
                         await db.scalars(
-                            select(FeedbackSignalAnalysisResultRow).where(
-                                FeedbackSignalAnalysisResultRow.result_id.in_(
+                            select(FeedbackSignalAnalysisResultORM).where(
+                                FeedbackSignalAnalysisResultORM.result_id.in_(
                                     signal_result_ids
                                 ),
                             )
@@ -739,8 +739,8 @@ class FeedbackCaseRepository:
                 if tool_failure_result_ids:
                     tool_failure_rows = tuple(
                         await db.scalars(
-                            select(ToolFailureAnalysisResultRow).where(
-                                ToolFailureAnalysisResultRow.result_id.in_(
+                            select(ToolFailureAnalysisResultORM).where(
+                                ToolFailureAnalysisResultORM.result_id.in_(
                                     tool_failure_result_ids
                                 ),
                             )
@@ -800,9 +800,9 @@ class FeedbackCaseRepository:
     async def read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
         async with AsyncSessionLocal() as db:
             row = await db.scalar(
-                select(FeedbackAnnotationRow)
-                .where(FeedbackAnnotationRow.case_id == case_id)
-                .order_by(FeedbackAnnotationRow.version.desc())
+                select(FeedbackAnnotationORM)
+                .where(FeedbackAnnotationORM.case_id == case_id)
+                .order_by(FeedbackAnnotationORM.version.desc())
                 .limit(1)
             )
             return (
@@ -835,8 +835,8 @@ class FeedbackCaseRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             case = await db.scalar(
-                select(FeedbackCaseRow)
-                .where(FeedbackCaseRow.case_id == annotation.case_id)
+                select(FeedbackCaseORM)
+                .where(FeedbackCaseORM.case_id == annotation.case_id)
                 .with_for_update()
             )
             if case is None:
@@ -851,9 +851,9 @@ class FeedbackCaseRepository:
             }:
                 raise FeedbackCaseWriteConflict("feedback_case_not_annotatable")
             current = await db.scalar(
-                select(FeedbackAnnotationRow)
-                .where(FeedbackAnnotationRow.case_id == annotation.case_id)
-                .order_by(FeedbackAnnotationRow.version.desc())
+                select(FeedbackAnnotationORM)
+                .where(FeedbackAnnotationORM.case_id == annotation.case_id)
+                .order_by(FeedbackAnnotationORM.version.desc())
                 .limit(1)
             )
             if (
@@ -878,7 +878,7 @@ class FeedbackCaseRepository:
             expected_version = (current.version + 1) if current is not None else 1
             if annotation.version != expected_version:
                 raise FeedbackCaseWriteConflict("annotation_version_conflict")
-            row = FeedbackAnnotationRow(
+            row = FeedbackAnnotationORM(
                 annotation_id=annotation.annotation_id,
                 case_id=annotation.case_id,
                 version=annotation.version,
@@ -918,9 +918,9 @@ class FeedbackCaseRepository:
     async def read_review_decisions(self, case_id: str) -> tuple[ReviewDecision, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(FeedbackReviewDecisionRow)
-                .where(FeedbackReviewDecisionRow.case_id == case_id)
-                .order_by(FeedbackReviewDecisionRow.seq)
+                select(FeedbackReviewDecisionORM)
+                .where(FeedbackReviewDecisionORM.case_id == case_id)
+                .order_by(FeedbackReviewDecisionORM.seq)
             )
             return tuple(
                 ReviewDecision(
@@ -946,8 +946,8 @@ class FeedbackCaseRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             case = await db.scalar(
-                select(FeedbackCaseRow)
-                .where(FeedbackCaseRow.case_id == decision.case_id)
+                select(FeedbackCaseORM)
+                .where(FeedbackCaseORM.case_id == decision.case_id)
                 .with_for_update()
             )
             if case is None:
@@ -957,7 +957,7 @@ class FeedbackCaseRepository:
             if case.annotation_digest != decision.annotation_digest:
                 raise FeedbackCaseWriteConflict("feedback_case_stale")
             existing_decision = await db.get(
-                FeedbackReviewDecisionRow,
+                FeedbackReviewDecisionORM,
                 decision.decision_id,
                 with_for_update=True,
             )
@@ -983,10 +983,10 @@ class FeedbackCaseRepository:
                     created_at=_iso(existing_decision.created_at),
                 )
             annotation = await db.scalar(
-                select(FeedbackAnnotationRow)
+                select(FeedbackAnnotationORM)
                 .where(
-                    FeedbackAnnotationRow.case_id == decision.case_id,
-                    FeedbackAnnotationRow.annotation_digest
+                    FeedbackAnnotationORM.case_id == decision.case_id,
+                    FeedbackAnnotationORM.annotation_digest
                     == decision.annotation_digest,
                 )
                 .limit(1)
@@ -999,14 +999,14 @@ class FeedbackCaseRepository:
             elif case.status != "ready_for_review":
                 raise FeedbackCaseWriteConflict("feedback_case_not_reviewable")
             max_seq = await db.scalar(
-                select(func.max(FeedbackReviewDecisionRow.seq)).where(
-                    FeedbackReviewDecisionRow.case_id == decision.case_id
+                select(func.max(FeedbackReviewDecisionORM.seq)).where(
+                    FeedbackReviewDecisionORM.case_id == decision.case_id
                 )
             )
             actual_seq = int(max_seq or 0) + 1
             if decision.seq != actual_seq:
                 decision = replace(decision, seq=actual_seq)
-            row = FeedbackReviewDecisionRow(
+            row = FeedbackReviewDecisionORM(
                 decision_id=decision.decision_id,
                 case_id=decision.case_id,
                 annotation_digest=decision.annotation_digest,
@@ -1039,11 +1039,11 @@ class FeedbackCaseRepository:
 
 async def _save_result_row(
     db: AsyncSession, result: AnalysisResult
-) -> FeedbackAnalysisResultRow:
-    row = await db.get(FeedbackAnalysisResultRow, result.result_id)
+) -> FeedbackAnalysisResultORM:
+    row = await db.get(FeedbackAnalysisResultORM, result.result_id)
     by_job = await db.scalar(
-        select(FeedbackAnalysisResultRow).where(
-            FeedbackAnalysisResultRow.job_id == result.job_id
+        select(FeedbackAnalysisResultORM).where(
+            FeedbackAnalysisResultORM.job_id == result.job_id
         )
     )
     if row is not None and row.job_id != result.job_id:
@@ -1088,7 +1088,7 @@ async def _save_result_row(
         if identity != requested_identity:
             raise ValueError("analysis result identity cannot be reassigned")
     if row is None:
-        row = by_job or FeedbackAnalysisResultRow(result_id=result.result_id)
+        row = by_job or FeedbackAnalysisResultORM(result_id=result.result_id)
         if by_job is None:
             db.add(row)
     row.job_id = result.job_id
@@ -1110,11 +1110,11 @@ async def _save_result_row(
 
 async def _save_correction_result_row(
     db: AsyncSession, result: CorrectionSignalAnalysisResult
-) -> FeedbackSignalAnalysisResultRow:
-    row = await db.get(FeedbackSignalAnalysisResultRow, result.result_id)
+) -> FeedbackSignalAnalysisResultORM:
+    row = await db.get(FeedbackSignalAnalysisResultORM, result.result_id)
     by_job = await db.scalar(
-        select(FeedbackSignalAnalysisResultRow).where(
-            FeedbackSignalAnalysisResultRow.job_id == result.job_id
+        select(FeedbackSignalAnalysisResultORM).where(
+            FeedbackSignalAnalysisResultORM.job_id == result.job_id
         )
     )
     if row is not None and row.job_id != result.job_id:
@@ -1164,7 +1164,7 @@ async def _save_correction_result_row(
         if identity != requested_identity:
             raise ValueError("correction analysis result identity cannot be reassigned")
     if row is None:
-        row = by_job or FeedbackSignalAnalysisResultRow(result_id=result.result_id)
+        row = by_job or FeedbackSignalAnalysisResultORM(result_id=result.result_id)
         if by_job is None:
             db.add(row)
     row.job_id = result.job_id
@@ -1188,11 +1188,11 @@ async def _save_correction_result_row(
 
 async def _save_tool_failure_result_row(
     db: AsyncSession, result: ToolFailureAnalysisResult
-) -> ToolFailureAnalysisResultRow:
-    row = await db.get(ToolFailureAnalysisResultRow, result.result_id)
+) -> ToolFailureAnalysisResultORM:
+    row = await db.get(ToolFailureAnalysisResultORM, result.result_id)
     by_job = await db.scalar(
-        select(ToolFailureAnalysisResultRow).where(
-            ToolFailureAnalysisResultRow.job_id == result.job_id
+        select(ToolFailureAnalysisResultORM).where(
+            ToolFailureAnalysisResultORM.job_id == result.job_id
         )
     )
     if row is not None and row.job_id != result.job_id:
@@ -1244,7 +1244,7 @@ async def _save_tool_failure_result_row(
                 "tool failure analysis result identity cannot be reassigned"
             )
     if row is None:
-        row = by_job or ToolFailureAnalysisResultRow(result_id=result.result_id)
+        row = by_job or ToolFailureAnalysisResultORM(result_id=result.result_id)
         if by_job is None:
             db.add(row)
     row.job_id = result.job_id

@@ -149,17 +149,17 @@ async def update_case_source_fixture(
     """Change the upstream Case source to exercise sample invalidation, not replay a completed worker."""
     from sqlalchemy import select
     from infra.persistence import database
-    from infra.persistence.postgres.models.feedback import FeedbackCaseRow
+    from infra.persistence.postgres.models.feedback import FeedbackCaseORM
     from repositories.feedback_case_repository import _merge_context_snapshot
     from repositories.feedback_dataset_sample_repository import enqueue_case_samples
     from datetime import datetime
 
     async with database.AsyncSessionLocal() as db, db.begin():
         row = await db.scalar(
-            select(FeedbackCaseRow)
+            select(FeedbackCaseORM)
             .where(
-                FeedbackCaseRow.session_id == result.session_id,
-                FeedbackCaseRow.anchor_message_id == result.anchor_message_id,
+                FeedbackCaseORM.session_id == result.session_id,
+                FeedbackCaseORM.anchor_message_id == result.anchor_message_id,
             )
             .with_for_update()
         )

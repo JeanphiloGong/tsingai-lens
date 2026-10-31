@@ -11,10 +11,10 @@ from typing import Any
 from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import Collection
-from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.document import DocumentORM
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from repositories.feedback_dataset_repository import ensure_system_datasets
 from sqlalchemy import func, select
@@ -72,7 +72,7 @@ class CollectionRepository:
     async def add_collection(self, record: StoredCollection) -> None:
         async with AsyncSessionLocal() as db, db.begin():
             db.add(
-                Collection(
+                CollectionORM(
                     collection_id=record.collection.collection_id,
                     owner_user_id=record.collection.owner_user_id,
                     name=record.collection.name,
@@ -95,15 +95,15 @@ class CollectionRepository:
         owner_user_id: str | None = None,
     ) -> tuple[CollectionSummary, ...]:
         statement = select(
-            Collection.collection_id,
-            Collection.name,
-            Collection.description,
-            Collection.status,
-            Collection.created_at,
-            Collection.updated_at,
-        ).order_by(Collection.created_at)
+            CollectionORM.collection_id,
+            CollectionORM.name,
+            CollectionORM.description,
+            CollectionORM.status,
+            CollectionORM.created_at,
+            CollectionORM.updated_at,
+        ).order_by(CollectionORM.created_at)
         if owner_user_id is not None:
-            statement = statement.where(Collection.owner_user_id == owner_user_id)
+            statement = statement.where(CollectionORM.owner_user_id == owner_user_id)
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(statement)).all()
             if not rows:
@@ -113,17 +113,17 @@ class CollectionRepository:
             }
             documents = await db.execute(
                 select(
-                    Document.collection_id,
-                    Document.document_id,
-                    Document.original_filename,
-                    Document.media_type,
-                    Document.status,
-                    Document.size_bytes,
-                    Document.created_at,
-                    Document.updated_at,
+                    DocumentORM.collection_id,
+                    DocumentORM.document_id,
+                    DocumentORM.original_filename,
+                    DocumentORM.media_type,
+                    DocumentORM.status,
+                    DocumentORM.size_bytes,
+                    DocumentORM.created_at,
+                    DocumentORM.updated_at,
                 )
-                .where(Document.collection_id.in_(documents_by_collection))
-                .order_by(Document.document_order)
+                .where(DocumentORM.collection_id.in_(documents_by_collection))
+                .order_by(DocumentORM.document_order)
             )
             for document in documents:
                 documents_by_collection[document.collection_id].append(
@@ -155,7 +155,7 @@ class CollectionRepository:
         collection_id: str,
     ) -> StoredCollection | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(Collection, collection_id)
+            row = await db.get(CollectionORM, collection_id)
             if row is None:
                 return None
             return StoredCollection(
@@ -174,9 +174,9 @@ class CollectionRepository:
     async def collection_belongs_to_user(
         self, collection_id: str, owner_user_id: str
     ) -> bool:
-        statement = select(Collection.collection_id).where(
-            Collection.collection_id == collection_id,
-            Collection.owner_user_id == owner_user_id,
+        statement = select(CollectionORM.collection_id).where(
+            CollectionORM.collection_id == collection_id,
+            CollectionORM.owner_user_id == owner_user_id,
         )
         async with AsyncSessionLocal() as db:
             return await db.scalar(statement) is not None
@@ -191,14 +191,14 @@ class CollectionRepository:
         async with AsyncSessionLocal() if db is None else nullcontext(db) as db:
             row = (
                 await db.execute(
-                    select(Document, DocumentPreparationRow)
+                    select(DocumentORM, DocumentPreparationORM)
                     .outerjoin(
-                        DocumentPreparationRow,
-                        DocumentPreparationRow.document_id == Document.document_id,
+                        DocumentPreparationORM,
+                        DocumentPreparationORM.document_id == DocumentORM.document_id,
                     )
                     .where(
-                        Document.collection_id == collection_id,
-                        Document.document_id == document_id,
+                        DocumentORM.collection_id == collection_id,
+                        DocumentORM.document_id == document_id,
                     )
                 )
             ).one_or_none()
@@ -231,7 +231,7 @@ class CollectionRepository:
 
     async def update_collection(self, record: StoredCollection) -> bool:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(Collection, record.collection.collection_id)
+            row = await db.get(CollectionORM, record.collection.collection_id)
             if row is None:
                 return False
             row.owner_user_id = record.collection.owner_user_id
@@ -245,7 +245,7 @@ class CollectionRepository:
         self, collection_id: str
     ) -> dict[str, Any] | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(Collection, collection_id)
+            row = await db.get(CollectionORM, collection_id)
             if row is None:
                 return None
             return dict(row.agent_default_permission or {}) or None
@@ -258,7 +258,7 @@ class CollectionRepository:
         expected_revision: int,
     ) -> bool:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(Collection, collection_id, with_for_update=True)
+            row = await db.get(CollectionORM, collection_id, with_for_update=True)
             if row is None:
                 return False
             current_revision = (row.agent_default_permission or {}).get("revision", 0)
@@ -278,7 +278,7 @@ class CollectionRepository:
             raise ValueError("at least one document is required")
         async with AsyncSessionLocal() as db, db.begin():
             collection = await db.get(
-                Collection,
+                CollectionORM,
                 collection_id,
                 with_for_update=True,
             )
@@ -286,15 +286,15 @@ class CollectionRepository:
                 raise FileNotFoundError(f"collection not found: {collection_id}")
             existing_ids = set(
                 await db.scalars(
-                    select(Document.document_id).where(
-                        Document.collection_id == collection_id
+                    select(DocumentORM.document_id).where(
+                        DocumentORM.collection_id == collection_id
                     )
                 )
             )
             existing_hashes = set(
                 await db.scalars(
-                    select(Document.sha256).where(
-                        Document.collection_id == collection_id
+                    select(DocumentORM.sha256).where(
+                        DocumentORM.collection_id == collection_id
                     )
                 )
             )
@@ -312,14 +312,14 @@ class CollectionRepository:
                 int(
                     await db.scalar(
                         select(
-                            func.coalesce(func.max(Document.document_order), -1)
-                        ).where(Document.collection_id == collection_id)
+                            func.coalesce(func.max(DocumentORM.document_order), -1)
+                        ).where(DocumentORM.collection_id == collection_id)
                     )
                 )
                 + 1
             )
             db.add_all(
-                Document(
+                DocumentORM(
                     document_id=item.document.document_id,
                     collection_id=collection_id,
                     original_filename=item.document.original_filename,
@@ -343,7 +343,7 @@ class CollectionRepository:
     ) -> bool:
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             document = record.document
-            row = await db.get(Document, document.document_id)
+            row = await db.get(DocumentORM, document.document_id)
             if row is None:
                 return False
             row.original_filename = document.original_filename
@@ -359,7 +359,7 @@ class CollectionRepository:
 
     async def delete_collection(self, collection_id: str) -> bool:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(Collection, collection_id)
+            row = await db.get(CollectionORM, collection_id)
             if row is None:
                 return False
             await db.delete(row)
@@ -371,13 +371,13 @@ async def load_collection_documents(
     collection_id: str,
 ) -> tuple[StoredDocument, ...]:
     rows = await db.execute(
-        select(Document, DocumentPreparationRow)
+        select(DocumentORM, DocumentPreparationORM)
         .outerjoin(
-            DocumentPreparationRow,
-            DocumentPreparationRow.document_id == Document.document_id,
+            DocumentPreparationORM,
+            DocumentPreparationORM.document_id == DocumentORM.document_id,
         )
-        .where(Document.collection_id == collection_id)
-        .order_by(Document.document_order)
+        .where(DocumentORM.collection_id == collection_id)
+        .order_by(DocumentORM.document_order)
     )
     documents = []
     for document, preparation in rows:

@@ -10,9 +10,9 @@ from enum import StrEnum
 from typing import Any
 
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import Collection
-from infra.persistence.postgres.models.document import Document
-from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
+from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.document import DocumentORM
+from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -250,7 +250,7 @@ class PipelineRunRepository:
             if created_at is None:
                 raise ValueError("persisted pipeline run requires created_at")
             db.add(
-                PipelineRunRow(
+                PipelineRunORM(
                     run_id=run.run_id,
                     collection_id=run.collection_id,
                     pipeline_name=run.pipeline_name,
@@ -326,8 +326,8 @@ class PipelineRunRepository:
             raise ValueError("collection run must use its collection as scope")
         async with AsyncSessionLocal() as db, db.begin():
             collection = await db.scalar(
-                select(Collection)
-                .where(Collection.collection_id == run.collection_id)
+                select(CollectionORM)
+                .where(CollectionORM.collection_id == run.collection_id)
                 .with_for_update()
             )
             if collection is None:
@@ -429,7 +429,7 @@ class PipelineRunRepository:
             if created_at is None:
                 raise ValueError("persisted pipeline run requires created_at")
             db.add(
-                PipelineRunRow(
+                PipelineRunORM(
                     run_id=run.run_id,
                     collection_id=run.collection_id,
                     pipeline_name=run.pipeline_name,
@@ -509,10 +509,10 @@ class PipelineRunRepository:
             )
         async with AsyncSessionLocal() as db, db.begin():
             document = await db.scalar(
-                select(Document)
+                select(DocumentORM)
                 .where(
-                    Document.collection_id == run.collection_id,
-                    Document.document_id == run.scope_id,
+                    DocumentORM.collection_id == run.collection_id,
+                    DocumentORM.document_id == run.scope_id,
                 )
                 .with_for_update()
             )
@@ -523,16 +523,16 @@ class PipelineRunRepository:
             existing = await self._active_run(db, run)
             if existing is None and reuse_completed:
                 existing = await db.scalar(
-                    select(PipelineRunRow)
+                    select(PipelineRunORM)
                     .where(
-                        PipelineRunRow.pipeline_name == run.pipeline_name,
-                        PipelineRunRow.scope_type == run.scope_type,
-                        PipelineRunRow.scope_id == run.scope_id,
-                        PipelineRunRow.input_fingerprint == run.input_fingerprint,
-                        PipelineRunRow.status.in_(_SUCCESS_STATUSES),
+                        PipelineRunORM.pipeline_name == run.pipeline_name,
+                        PipelineRunORM.scope_type == run.scope_type,
+                        PipelineRunORM.scope_id == run.scope_id,
+                        PipelineRunORM.input_fingerprint == run.input_fingerprint,
+                        PipelineRunORM.status.in_(_SUCCESS_STATUSES),
                     )
                     .order_by(
-                        PipelineRunRow.updated_at.desc(), PipelineRunRow.run_id.desc()
+                        PipelineRunORM.updated_at.desc(), PipelineRunORM.run_id.desc()
                     )
                     .limit(1)
                 )
@@ -632,7 +632,7 @@ class PipelineRunRepository:
             if created_at is None:
                 raise ValueError("persisted pipeline run requires created_at")
             db.add(
-                PipelineRunRow(
+                PipelineRunORM(
                     run_id=run.run_id,
                     collection_id=run.collection_id,
                     pipeline_name=run.pipeline_name,
@@ -704,7 +704,7 @@ class PipelineRunRepository:
         self, run_id: str, *, db: AsyncSession | None = None
     ) -> PipelineRun | None:
         async with AsyncSessionLocal() if db is None else nullcontext(db) as db:
-            row = await db.get(PipelineRunRow, run_id)
+            row = await db.get(PipelineRunORM, run_id)
             if row is None:
                 return None
             payload = row.record_json
@@ -793,30 +793,30 @@ class PipelineRunRepository:
         offset: int = 0,
     ) -> tuple[PipelineRunSummary, ...]:
         statement = select(
-            PipelineRunRow.run_id,
-            PipelineRunRow.collection_id,
-            PipelineRunRow.pipeline_name,
-            PipelineRunRow.scope_type,
-            PipelineRunRow.scope_id,
-            PipelineRunRow.status,
-            PipelineRunRow.updated_at,
-            PipelineRunRow.record_json["current_node"]
+            PipelineRunORM.run_id,
+            PipelineRunORM.collection_id,
+            PipelineRunORM.pipeline_name,
+            PipelineRunORM.scope_type,
+            PipelineRunORM.scope_id,
+            PipelineRunORM.status,
+            PipelineRunORM.updated_at,
+            PipelineRunORM.record_json["current_node"]
             .as_string()
             .label("current_node"),
-            PipelineRunRow.record_json["progress_percent"]
+            PipelineRunORM.record_json["progress_percent"]
             .as_integer()
             .label("progress_percent"),
-            PipelineRunRow.record_json["progress_detail"].label("progress_detail"),
-            PipelineRunRow.record_json["errors"].label("errors"),
-            PipelineRunRow.record_json["warnings"].label("warnings"),
+            PipelineRunORM.record_json["progress_detail"].label("progress_detail"),
+            PipelineRunORM.record_json["errors"].label("errors"),
+            PipelineRunORM.record_json["warnings"].label("warnings"),
         )
         if collection_id is not None:
-            statement = statement.where(PipelineRunRow.collection_id == collection_id)
+            statement = statement.where(PipelineRunORM.collection_id == collection_id)
         if status is not None:
-            statement = statement.where(PipelineRunRow.status == status)
+            statement = statement.where(PipelineRunORM.status == status)
         statement = statement.order_by(
-            PipelineRunRow.updated_at.desc(),
-            PipelineRunRow.run_id.desc(),
+            PipelineRunORM.updated_at.desc(),
+            PipelineRunORM.run_id.desc(),
         )
         if offset:
             statement = statement.offset(offset)
@@ -848,16 +848,16 @@ class PipelineRunRepository:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(PipelineRunRow)
+                select(PipelineRunORM)
                 .where(
-                    PipelineRunRow.pipeline_name == "document_preparation",
+                    PipelineRunORM.pipeline_name == "document_preparation",
                     or_(
-                        PipelineRunRow.status == "queued",
-                        (PipelineRunRow.status == "running")
-                        & (PipelineRunRow.lease_expires_at <= now),
+                        PipelineRunORM.status == "queued",
+                        (PipelineRunORM.status == "running")
+                        & (PipelineRunORM.lease_expires_at <= now),
                     ),
                 )
-                .order_by(PipelineRunRow.created_at, PipelineRunRow.run_id)
+                .order_by(PipelineRunORM.created_at, PipelineRunORM.run_id)
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
@@ -882,16 +882,16 @@ class PipelineRunRepository:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(PipelineRunRow)
+                select(PipelineRunORM)
                 .where(
-                    PipelineRunRow.pipeline_name == "objective_discovery",
+                    PipelineRunORM.pipeline_name == "objective_discovery",
                     or_(
-                        PipelineRunRow.status == "queued",
-                        (PipelineRunRow.status == "running")
-                        & (PipelineRunRow.lease_expires_at <= now),
+                        PipelineRunORM.status == "queued",
+                        (PipelineRunORM.status == "running")
+                        & (PipelineRunORM.lease_expires_at <= now),
                     ),
                 )
-                .order_by(PipelineRunRow.created_at, PipelineRunRow.run_id)
+                .order_by(PipelineRunORM.created_at, PipelineRunORM.run_id)
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
@@ -916,13 +916,13 @@ class PipelineRunRepository:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal() as db, db.begin():
             changed = await db.execute(
-                update(PipelineRunRow)
+                update(PipelineRunORM)
                 .where(
-                    PipelineRunRow.run_id == job.run.run_id,
-                    PipelineRunRow.status == "running",
-                    PipelineRunRow.worker_id == job.worker_id,
-                    PipelineRunRow.lease_version == job.lease_version,
-                    PipelineRunRow.lease_expires_at > now,
+                    PipelineRunORM.run_id == job.run.run_id,
+                    PipelineRunORM.status == "running",
+                    PipelineRunORM.worker_id == job.worker_id,
+                    PipelineRunORM.lease_version == job.lease_version,
+                    PipelineRunORM.lease_expires_at > now,
                 )
                 .values(heartbeat_at=now, lease_expires_at=now + lease_duration)
             )
@@ -931,10 +931,10 @@ class PipelineRunRepository:
 
     async def lock_job(self, db: AsyncSession, job: PipelineRunJobSnapshot) -> None:
         # Enqueue locks the collection before looking up its active run.
-        await db.get(Collection, job.run.collection_id, with_for_update=True)
+        await db.get(CollectionORM, job.run.collection_id, with_for_update=True)
         if job.run.scope_type == "document":
-            await db.get(Document, job.run.scope_id, with_for_update=True)
-        row = await db.get(PipelineRunRow, job.run.run_id, with_for_update=True)
+            await db.get(DocumentORM, job.run.scope_id, with_for_update=True)
+        row = await db.get(PipelineRunORM, job.run.run_id, with_for_update=True)
         now = datetime.now(timezone.utc)
         if (
             row is None
@@ -950,7 +950,7 @@ class PipelineRunRepository:
         self, run: PipelineRun, *, job: PipelineRunJobSnapshot, db: AsyncSession
     ) -> None:
         await self.lock_job(db, job)
-        row = await db.get(PipelineRunRow, job.run.run_id)
+        row = await db.get(PipelineRunORM, job.run.run_id)
         if run.run_id != job.run.run_id:
             raise ValueError("pipeline result belongs to another run")
         row.collection_id = run.collection_id
@@ -1013,16 +1013,16 @@ class PipelineRunRepository:
     async def _active_run(
         db: AsyncSession,
         run: PipelineRun,
-    ) -> PipelineRunRow | None:
+    ) -> PipelineRunORM | None:
         return await db.scalar(
-            select(PipelineRunRow)
+            select(PipelineRunORM)
             .where(
-                PipelineRunRow.pipeline_name == run.pipeline_name,
-                PipelineRunRow.scope_type == run.scope_type,
-                PipelineRunRow.scope_id == run.scope_id,
-                PipelineRunRow.status.in_(_ACTIVE_STATUSES),
+                PipelineRunORM.pipeline_name == run.pipeline_name,
+                PipelineRunORM.scope_type == run.scope_type,
+                PipelineRunORM.scope_id == run.scope_id,
+                PipelineRunORM.status.in_(_ACTIVE_STATUSES),
             )
-            .order_by(PipelineRunRow.updated_at.desc(), PipelineRunRow.run_id.desc())
+            .order_by(PipelineRunORM.updated_at.desc(), PipelineRunORM.run_id.desc())
             .limit(1)
         )
 

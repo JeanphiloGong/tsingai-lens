@@ -32,7 +32,7 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from repositories.objective_repository import ObjectiveRepository
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 
 
 def _evidence(
@@ -201,7 +201,7 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monke
         selection_ids=("selection-1",),
     )
 
-    row = ObjectiveAnalysisRecord(payload={})
+    row = ObjectiveAnalysisORM(payload={})
     ObjectiveRepository._write_result_records(row, (), (finding,))
     session = MagicMock()
     session.get = AsyncMock(return_value=row)

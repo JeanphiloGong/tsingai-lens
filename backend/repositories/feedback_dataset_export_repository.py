@@ -26,14 +26,14 @@ from domain.feedback.sample_revision import (
     SftRevisionContent,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.feedback import FeedbackCaseRow
+from infra.persistence.postgres.models.feedback import FeedbackCaseORM
 from infra.persistence.postgres.models.feedback_dataset import (
-    FeedbackDatasetExportMemberRow,
-    FeedbackDatasetExportPreviewRow,
-    FeedbackDatasetExportRow,
-    FeedbackDatasetRow,
-    FeedbackDatasetSampleRow,
-    FeedbackSampleRevisionRow,
+    FeedbackDatasetExportMemberORM,
+    FeedbackDatasetExportPreviewORM,
+    FeedbackDatasetExportORM,
+    FeedbackDatasetORM,
+    FeedbackDatasetSampleORM,
+    FeedbackSampleRevisionORM,
 )
 from repositories.feedback_dataset_sample_repository import source_digest_for_case
 from sqlalchemy import func, select
@@ -131,7 +131,7 @@ class FeedbackDatasetExportRepository:
                     }
                 )
             db.add(
-                FeedbackDatasetExportPreviewRow(
+                FeedbackDatasetExportPreviewORM(
                     preview_id=preview.preview_id,
                     dataset_id=preview.dataset_id,
                     members=member_values,
@@ -157,7 +157,7 @@ class FeedbackDatasetExportRepository:
 
     async def read_preview(self, preview_id: str) -> ExportPreview | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackDatasetExportPreviewRow, preview_id)
+            row = await db.get(FeedbackDatasetExportPreviewORM, preview_id)
             if row is None:
                 return None
             member_values = []
@@ -232,11 +232,11 @@ class FeedbackDatasetExportRepository:
         self, *, dataset_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[DatasetExportSummary, ...]:
         statement = (
-            select(FeedbackDatasetExportRow)
-            .where(FeedbackDatasetExportRow.dataset_id == dataset_id)
+            select(FeedbackDatasetExportORM)
+            .where(FeedbackDatasetExportORM.dataset_id == dataset_id)
             .order_by(
-                FeedbackDatasetExportRow.created_at.desc(),
-                FeedbackDatasetExportRow.export_no.desc(),
+                FeedbackDatasetExportORM.created_at.desc(),
+                FeedbackDatasetExportORM.export_no.desc(),
             )
             .offset(offset)
             .limit(limit)
@@ -261,10 +261,10 @@ class FeedbackDatasetExportRepository:
     async def publish_if_current(self, *, draft: DatasetExportDraft) -> DatasetExport:
         async with AsyncSessionLocal() as db, db.begin():
             existing = await db.scalar(
-                select(FeedbackDatasetExportRow)
+                select(FeedbackDatasetExportORM)
                 .where(
-                    FeedbackDatasetExportRow.dataset_id == draft.dataset_id,
-                    FeedbackDatasetExportRow.idempotency_key == draft.idempotency_key,
+                    FeedbackDatasetExportORM.dataset_id == draft.dataset_id,
+                    FeedbackDatasetExportORM.idempotency_key == draft.idempotency_key,
                 )
                 .with_for_update()
             )
@@ -276,10 +276,10 @@ class FeedbackDatasetExportRepository:
                 return await _read_export_locked(db, existing)
 
             preview = await db.scalar(
-                select(FeedbackDatasetExportPreviewRow)
+                select(FeedbackDatasetExportPreviewORM)
                 .where(
-                    FeedbackDatasetExportPreviewRow.preview_id == draft.preview_id,
-                    FeedbackDatasetExportPreviewRow.dataset_id == draft.dataset_id,
+                    FeedbackDatasetExportPreviewORM.preview_id == draft.preview_id,
+                    FeedbackDatasetExportPreviewORM.dataset_id == draft.dataset_id,
                 )
                 .with_for_update()
             )
@@ -347,13 +347,13 @@ class FeedbackDatasetExportRepository:
                 raise DatasetExportConflict("export_preview_stale")
 
             await db.execute(
-                select(FeedbackDatasetRow)
-                .where(FeedbackDatasetRow.dataset_id == draft.dataset_id)
+                select(FeedbackDatasetORM)
+                .where(FeedbackDatasetORM.dataset_id == draft.dataset_id)
                 .with_for_update()
             )
             max_no = await db.scalar(
-                select(func.max(FeedbackDatasetExportRow.export_no)).where(
-                    FeedbackDatasetExportRow.dataset_id == draft.dataset_id
+                select(func.max(FeedbackDatasetExportORM.export_no)).where(
+                    FeedbackDatasetExportORM.dataset_id == draft.dataset_id
                 )
             )
             export_no = int(max_no or 0) + 1
@@ -366,7 +366,7 @@ class FeedbackDatasetExportRepository:
                 "row_count": len(draft.rows),
             }
             manifest_digest = _digest(manifest)
-            row = FeedbackDatasetExportRow(
+            row = FeedbackDatasetExportORM(
                 export_id=export_id,
                 dataset_id=draft.dataset_id,
                 export_no=export_no,
@@ -394,7 +394,7 @@ class FeedbackDatasetExportRepository:
             await db.flush()
             for member in draft.members:
                 db.add(
-                    FeedbackDatasetExportMemberRow(
+                    FeedbackDatasetExportMemberORM(
                         export_id=export_id,
                         row_key=member.row_key,
                         sample_id=member.sample_id,
@@ -409,7 +409,7 @@ class FeedbackDatasetExportRepository:
 
     async def read_export(self, export_id: str) -> DatasetExport | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackDatasetExportRow, export_id)
+            row = await db.get(FeedbackDatasetExportORM, export_id)
             return await _read_export_locked(db, row) if row is not None else None
 
 
@@ -417,29 +417,29 @@ async def _read_current_members(
     db: AsyncSession, dataset_id: str, *, sample_ids: tuple[str, ...]
 ) -> tuple[ExportMember, ...]:
     statement = (
-        select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
+        select(FeedbackDatasetSampleORM, FeedbackSampleRevisionORM, FeedbackCaseORM)
         .join(
-            FeedbackSampleRevisionRow,
-            FeedbackDatasetSampleRow.confirmed_revision_id
-            == FeedbackSampleRevisionRow.revision_id,
+            FeedbackSampleRevisionORM,
+            FeedbackDatasetSampleORM.confirmed_revision_id
+            == FeedbackSampleRevisionORM.revision_id,
         )
         .join(
-            FeedbackCaseRow,
-            FeedbackCaseRow.case_id == FeedbackDatasetSampleRow.source_case_id,
+            FeedbackCaseORM,
+            FeedbackCaseORM.case_id == FeedbackDatasetSampleORM.source_case_id,
         )
         .where(
-            FeedbackDatasetSampleRow.dataset_id == dataset_id,
-            FeedbackDatasetSampleRow.sample_id.in_(sample_ids),
-            FeedbackDatasetSampleRow.status == "confirmed",
-            FeedbackDatasetSampleRow.current_revision_id
-            == FeedbackDatasetSampleRow.confirmed_revision_id,
+            FeedbackDatasetSampleORM.dataset_id == dataset_id,
+            FeedbackDatasetSampleORM.sample_id.in_(sample_ids),
+            FeedbackDatasetSampleORM.status == "confirmed",
+            FeedbackDatasetSampleORM.current_revision_id
+            == FeedbackDatasetSampleORM.confirmed_revision_id,
         )
-        .order_by(FeedbackCaseRow.case_id, FeedbackDatasetSampleRow.sample_id)
+        .order_by(FeedbackCaseORM.case_id, FeedbackDatasetSampleORM.sample_id)
     )
     # Case writers lock the source before its samples; publication uses the same order.
-    await db.execute(statement.with_for_update(of=FeedbackCaseRow))
+    await db.execute(statement.with_for_update(of=FeedbackCaseORM))
     statement = statement.with_for_update(
-        of=(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow)
+        of=(FeedbackDatasetSampleORM, FeedbackSampleRevisionORM)
     )
     rows = (await db.execute(statement)).all()
     for sample, _revision_row, case in rows:
@@ -498,30 +498,30 @@ async def _read_current_members(
 
 
 async def _read_export_locked(
-    db: AsyncSession, row: FeedbackDatasetExportRow
+    db: AsyncSession, row: FeedbackDatasetExportORM
 ) -> DatasetExport:
     if row.schema_version not in EXPORT_SCHEMA_VERSIONS:
         raise ValueError("unsupported export schema")
     member_rows = list(
         await db.scalars(
-            select(FeedbackDatasetExportMemberRow)
-            .where(FeedbackDatasetExportMemberRow.export_id == row.export_id)
-            .order_by(FeedbackDatasetExportMemberRow.row_key)
+            select(FeedbackDatasetExportMemberORM)
+            .where(FeedbackDatasetExportMemberORM.export_id == row.export_id)
+            .order_by(FeedbackDatasetExportMemberORM.row_key)
         )
     )
     revisions = {}
     if member_rows:
         revision_ids = [member.revision_id for member in member_rows]
         revision_rows = await db.scalars(
-            select(FeedbackSampleRevisionRow).where(
-                FeedbackSampleRevisionRow.revision_id.in_(revision_ids)
+            select(FeedbackSampleRevisionORM).where(
+                FeedbackSampleRevisionORM.revision_id.in_(revision_ids)
             )
         )
         revisions = {revision.revision_id: revision for revision in revision_rows}
         sample_ids = [member.sample_id for member in member_rows]
         sample_rows = await db.scalars(
-            select(FeedbackDatasetSampleRow).where(
-                FeedbackDatasetSampleRow.sample_id.in_(sample_ids)
+            select(FeedbackDatasetSampleORM).where(
+                FeedbackDatasetSampleORM.sample_id.in_(sample_ids)
             )
         )
         samples = {sample.sample_id: sample for sample in sample_rows}
@@ -596,7 +596,7 @@ async def _read_export_locked(
     )
 
 
-def _same_publication(row: FeedbackDatasetExportRow, draft: DatasetExportDraft) -> bool:
+def _same_publication(row: FeedbackDatasetExportORM, draft: DatasetExportDraft) -> bool:
     return (
         row.preview_id == draft.preview_id
         and row.preview_digest == draft.preview_digest

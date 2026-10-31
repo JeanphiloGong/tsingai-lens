@@ -15,7 +15,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class DocumentPreparationRow(Base):
+class DocumentPreparationORM(Base):
     """One current preparation result, with named Source/Profile sections.
 
     The file identity remains on ``documents``.  This row owns generated
@@ -48,4 +48,4 @@ class DocumentPreparationRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-__all__ = ["DocumentPreparationRow"]
+__all__ = ["DocumentPreparationORM"]

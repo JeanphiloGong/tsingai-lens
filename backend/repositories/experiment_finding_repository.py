@@ -8,17 +8,17 @@ from domain.core.scientific_fact import (
     ScientificContext,
 )
 from infra.persistence.postgres.models.comparison_group import (
-    ComparisonGroupMemberRow,
-    ComparisonGroupRow,
+    ComparisonGroupMemberORM,
+    ComparisonGroupORM,
 )
 from infra.persistence.postgres.models.experiment_finding import (
-    ExperimentFindingRow,
-    FindingComparisonGroupRow,
-    FindingSelectionRow,
+    ExperimentFindingORM,
+    FindingComparisonGroupORM,
+    FindingSelectionORM,
 )
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from infra.persistence.postgres.models.objective_experiment_selection import (
-    ObjectiveExperimentSelectionRow,
+    ObjectiveExperimentSelectionORM,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,9 +43,9 @@ class ExperimentFindingRepository:
         finding_id: str,
     ) -> Finding | None:
         row = await db.scalar(
-            select(ExperimentFindingRow).where(
-                ExperimentFindingRow.collection_id == collection_id,
-                ExperimentFindingRow.finding_id == finding_id,
+            select(ExperimentFindingORM).where(
+                ExperimentFindingORM.collection_id == collection_id,
+                ExperimentFindingORM.finding_id == finding_id,
             )
         )
         return await load_experiment_finding(db, row) if row is not None else None
@@ -59,14 +59,14 @@ class ExperimentFindingRepository:
     ) -> tuple[Finding, ...]:
         rows = tuple(
             await db.scalars(
-                select(ExperimentFindingRow)
+                select(ExperimentFindingORM)
                 .where(
-                    ExperimentFindingRow.collection_id == collection_id,
-                    ExperimentFindingRow.objective_id == objective_id,
-                    ExperimentFindingRow.analysis_version == analysis_version,
+                    ExperimentFindingORM.collection_id == collection_id,
+                    ExperimentFindingORM.objective_id == objective_id,
+                    ExperimentFindingORM.analysis_version == analysis_version,
                 )
                 .order_by(
-                    ExperimentFindingRow.display_rank, ExperimentFindingRow.finding_id
+                    ExperimentFindingORM.display_rank, ExperimentFindingORM.finding_id
                 )
             )
         )
@@ -86,8 +86,8 @@ async def _add_finding(
         raise ValueError("experiment-backed Finding cannot copy legacy evidence")
 
     existing = await db.scalar(
-        select(ExperimentFindingRow).where(
-            ExperimentFindingRow.finding_id == finding.finding_id
+        select(ExperimentFindingORM).where(
+            ExperimentFindingORM.finding_id == finding.finding_id
         )
     )
     if existing is not None:
@@ -97,7 +97,7 @@ async def _add_finding(
         raise ValueError("finding identity already exists")
 
     selections, groups = await _validate_context(db, finding)
-    row = ExperimentFindingRow(
+    row = ExperimentFindingORM(
         finding_id=finding.finding_id,
         collection_id=finding.collection_id,
         objective_id=finding.objective_id,
@@ -207,14 +207,14 @@ async def _add_finding(
     )
     db.add(row)
     db.add_all(
-        FindingSelectionRow(
+        FindingSelectionORM(
             finding_id=finding.finding_id,
             selection_id=selection.selection_id,
         )
         for selection in selections
     )
     db.add_all(
-        FindingComparisonGroupRow(
+        FindingComparisonGroupORM(
             finding_id=finding.finding_id,
             group_id=group.group_id,
         )
@@ -227,12 +227,12 @@ async def _add_finding(
 async def _validate_context(
     db: AsyncSession,
     finding: Finding,
-) -> tuple[tuple[ObjectiveExperimentSelectionRow, ...], tuple[ComparisonGroupRow, ...]]:
+) -> tuple[tuple[ObjectiveExperimentSelectionORM, ...], tuple[ComparisonGroupORM, ...]]:
     analysis = await db.scalar(
-        select(ObjectiveAnalysisRecord).where(
-            ObjectiveAnalysisRecord.collection_id == finding.collection_id,
-            ObjectiveAnalysisRecord.objective_id == finding.objective_id,
-            ObjectiveAnalysisRecord.analysis_version == finding.analysis_version,
+        select(ObjectiveAnalysisORM).where(
+            ObjectiveAnalysisORM.collection_id == finding.collection_id,
+            ObjectiveAnalysisORM.objective_id == finding.objective_id,
+            ObjectiveAnalysisORM.analysis_version == finding.analysis_version,
         )
     )
     if analysis is None:
@@ -240,9 +240,9 @@ async def _validate_context(
 
     selection_rows = tuple(
         await db.scalars(
-            select(ObjectiveExperimentSelectionRow).where(
-                ObjectiveExperimentSelectionRow.collection_id == finding.collection_id,
-                ObjectiveExperimentSelectionRow.selection_id.in_(finding.selection_ids),
+            select(ObjectiveExperimentSelectionORM).where(
+                ObjectiveExperimentSelectionORM.collection_id == finding.collection_id,
+                ObjectiveExperimentSelectionORM.selection_id.in_(finding.selection_ids),
             )
         )
     )
@@ -257,13 +257,13 @@ async def _validate_context(
     ):
         raise ValueError("finding selections do not share analysis and outcome")
 
-    group_rows: tuple[ComparisonGroupRow, ...] = ()
+    group_rows: tuple[ComparisonGroupORM, ...] = ()
     if finding.comparison_group_ids:
         group_rows = tuple(
             await db.scalars(
-                select(ComparisonGroupRow).where(
-                    ComparisonGroupRow.collection_id == finding.collection_id,
-                    ComparisonGroupRow.group_id.in_(finding.comparison_group_ids),
+                select(ComparisonGroupORM).where(
+                    ComparisonGroupORM.collection_id == finding.collection_id,
+                    ComparisonGroupORM.group_id.in_(finding.comparison_group_ids),
                 )
             )
         )
@@ -285,8 +285,8 @@ async def _validate_context(
     if group_rows:
         group_members = tuple(
             await db.scalars(
-                select(ComparisonGroupMemberRow).where(
-                    ComparisonGroupMemberRow.group_id.in_(finding.comparison_group_ids)
+                select(ComparisonGroupMemberORM).where(
+                    ComparisonGroupMemberORM.group_id.in_(finding.comparison_group_ids)
                 )
             )
         )
@@ -301,20 +301,20 @@ async def _validate_context(
 
 async def load_experiment_finding(
     db: AsyncSession,
-    row: ExperimentFindingRow,
+    row: ExperimentFindingORM,
 ) -> Finding:
     selection_rows = tuple(
         await db.scalars(
-            select(FindingSelectionRow)
-            .where(FindingSelectionRow.finding_id == row.finding_id)
-            .order_by(FindingSelectionRow.selection_id)
+            select(FindingSelectionORM)
+            .where(FindingSelectionORM.finding_id == row.finding_id)
+            .order_by(FindingSelectionORM.selection_id)
         )
     )
     group_rows = tuple(
         await db.scalars(
-            select(FindingComparisonGroupRow)
-            .where(FindingComparisonGroupRow.finding_id == row.finding_id)
-            .order_by(FindingComparisonGroupRow.group_id)
+            select(FindingComparisonGroupORM)
+            .where(FindingComparisonGroupORM.finding_id == row.finding_id)
+            .order_by(FindingComparisonGroupORM.group_id)
         )
     )
     return Finding(

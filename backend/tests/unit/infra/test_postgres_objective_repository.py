@@ -9,7 +9,7 @@ import pytest
 
 from domain.core import PreparedDocumentInput, ResearchObjective
 from domain.core.research_objective import ResearchObjective
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord, ObjectiveResearchRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM, ObjectiveResearchORM
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 
@@ -44,7 +44,7 @@ async def test_objective_record_keeps_timestamps_out_of_scientific_payload(monke
     created_at = datetime(2026, 9, 2, 1, 2, 3, tzinfo=UTC)
     updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     objective = _objective()
-    row = ObjectiveResearchRecord(
+    row = ObjectiveResearchORM(
         collection_id=objective.collection_id,
         objective_id=objective.objective_id,
         rank=objective.rank,
@@ -71,7 +71,7 @@ async def test_objective_record_columns_override_legacy_payload_timestamps(monke
     column_updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     legacy_created_at = datetime(2020, 1, 1, tzinfo=UTC)
     legacy_updated_at = datetime(2020, 1, 2, tzinfo=UTC)
-    row = ObjectiveResearchRecord(
+    row = ObjectiveResearchORM(
         collection_id="collection-1",
         objective_id="objective-1",
         rank=1,
@@ -116,7 +116,7 @@ async def test_analysis_row_persists_private_diagnostics_without_public_exposure
         ),
     )
 
-    row = ObjectiveAnalysisRecord(
+    row = ObjectiveAnalysisORM(
         collection_id=analysis.collection_id,
         objective_id=analysis.objective_id,
         analysis_version=analysis.analysis_version,
@@ -222,7 +222,7 @@ async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confide
         "collection_id": "collection-1", "objective_id": "objective-1",
         "analysis_version": 1, "document_id": "paper-1", "confidence": confidence,
     }
-    row = ObjectiveAnalysisRecord(
+    row = ObjectiveAnalysisORM(
         collection_id="collection-1", objective_id="objective-1", analysis_version=1,
         payload={
             "paper_contributions": [{

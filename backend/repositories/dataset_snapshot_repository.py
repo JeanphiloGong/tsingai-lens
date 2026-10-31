@@ -7,7 +7,7 @@ from typing import Any
 
 from domain.feedback.dataset_snapshot import DatasetSnapshot
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.feedback import FeedbackDatasetSnapshotRow
+from infra.persistence.postgres.models.feedback import FeedbackDatasetSnapshotORM
 from sqlalchemy import select
 
 
@@ -17,9 +17,9 @@ class DatasetSnapshotRepository:
     async def save(self, snapshot: DatasetSnapshot) -> DatasetSnapshot:
         async with AsyncSessionLocal() as db, db.begin():
             existing = await db.scalar(
-                select(FeedbackDatasetSnapshotRow).where(
-                    FeedbackDatasetSnapshotRow.owner_id == snapshot.owner_id,
-                    FeedbackDatasetSnapshotRow.manifest_digest
+                select(FeedbackDatasetSnapshotORM).where(
+                    FeedbackDatasetSnapshotORM.owner_id == snapshot.owner_id,
+                    FeedbackDatasetSnapshotORM.manifest_digest
                     == snapshot.manifest_digest,
                 )
             )
@@ -38,7 +38,7 @@ class DatasetSnapshotRepository:
                     content_digest=existing.content_digest,
                     created_at=_iso(existing.created_at),
                 )
-            row = FeedbackDatasetSnapshotRow(
+            row = FeedbackDatasetSnapshotORM(
                 dataset_id=snapshot.dataset_id,
                 owner_id=snapshot.owner_id,
                 collection_id=snapshot.collection_id,
@@ -73,7 +73,7 @@ class DatasetSnapshotRepository:
 
     async def read(self, dataset_id: str) -> DatasetSnapshot | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(FeedbackDatasetSnapshotRow, dataset_id)
+            row = await db.get(FeedbackDatasetSnapshotORM, dataset_id)
             return (
                 DatasetSnapshot(
                     dataset_id=row.dataset_id,
@@ -103,22 +103,22 @@ class DatasetSnapshotRepository:
         offset: int = 0,
     ) -> tuple[DatasetSnapshot, ...]:
         statement = (
-            select(FeedbackDatasetSnapshotRow)
-            .where(FeedbackDatasetSnapshotRow.owner_id == owner_id)
+            select(FeedbackDatasetSnapshotORM)
+            .where(FeedbackDatasetSnapshotORM.owner_id == owner_id)
             .order_by(
-                FeedbackDatasetSnapshotRow.created_at.desc(),
-                FeedbackDatasetSnapshotRow.dataset_id,
+                FeedbackDatasetSnapshotORM.created_at.desc(),
+                FeedbackDatasetSnapshotORM.dataset_id,
             )
             .offset(offset)
             .limit(limit)
         )
         if collection_id is not None:
             statement = statement.where(
-                FeedbackDatasetSnapshotRow.collection_id == collection_id
+                FeedbackDatasetSnapshotORM.collection_id == collection_id
             )
         if dataset_type is not None:
             statement = statement.where(
-                FeedbackDatasetSnapshotRow.dataset_type == dataset_type
+                FeedbackDatasetSnapshotORM.dataset_type == dataset_type
             )
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(statement)

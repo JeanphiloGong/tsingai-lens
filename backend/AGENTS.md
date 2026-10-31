@@ -167,6 +167,8 @@ for every layer.
   directly from the owning repository file. Do not maintain separate database
   repository Protocols, alternative runtime stores, or compatibility imports.
   Existing isolated test doubles belong only under `tests/`.
+- SQLAlchemy mapped classes use the `ORM` suffix. Domain objects and repository
+  query results keep their own names; `Base` remains the declarative base.
 - Repositories may depend on domain objects and persistence infrastructure;
   they must not import application services or controllers. Domain objects must
   not depend on repositories. Connections, ORM records, migrations, shared

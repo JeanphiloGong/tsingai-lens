@@ -15,11 +15,11 @@ from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from domain.evaluation.records import FindingCuration, FindingFeedback
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.evaluation import (
-    FindingCurationRecord,
-    FindingFeedbackRecord,
+    FindingCurationORM,
+    FindingFeedbackORM,
 )
-from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.experiment_finding import ExperimentFindingORM
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,12 +30,12 @@ class FindingReviewRepository:
     async def upsert_feedback(self, feedback: FindingFeedback) -> FindingFeedback:
         async with AsyncSessionLocal() as db, db.begin():
             await _require_finding(db, feedback)
-            existing = await db.get(FindingFeedbackRecord, feedback.feedback_id)
+            existing = await db.get(FindingFeedbackORM, feedback.feedback_id)
             if existing is not None and _feedback_key(existing) != _feedback_key(
                 feedback
             ):
                 raise ValueError("feedback identity cannot be reassigned")
-            row = existing or FindingFeedbackRecord(feedback_id=feedback.feedback_id)
+            row = existing or FindingFeedbackORM(feedback_id=feedback.feedback_id)
             row.collection_id = feedback.collection_id
             row.objective_id = feedback.objective_id
             row.analysis_version = feedback.analysis_version
@@ -63,25 +63,25 @@ class FindingReviewRepository:
         finding_id: str | None = None,
     ) -> tuple[FindingFeedback, ...]:
         async with AsyncSessionLocal() as db:
-            statement = select(FindingFeedbackRecord).where(
-                FindingFeedbackRecord.collection_id == collection_id
+            statement = select(FindingFeedbackORM).where(
+                FindingFeedbackORM.collection_id == collection_id
             )
             if objective_id is not None:
                 statement = statement.where(
-                    FindingFeedbackRecord.objective_id == objective_id
+                    FindingFeedbackORM.objective_id == objective_id
                 )
             if analysis_version is not None:
                 statement = statement.where(
-                    FindingFeedbackRecord.analysis_version == analysis_version
+                    FindingFeedbackORM.analysis_version == analysis_version
                 )
             if finding_id is not None:
                 statement = statement.where(
-                    FindingFeedbackRecord.finding_id == finding_id
+                    FindingFeedbackORM.finding_id == finding_id
                 )
             rows = await db.scalars(
                 statement.order_by(
-                    FindingFeedbackRecord.created_at,
-                    FindingFeedbackRecord.feedback_id,
+                    FindingFeedbackORM.created_at,
+                    FindingFeedbackORM.feedback_id,
                 )
             )
             return tuple(
@@ -103,12 +103,12 @@ class FindingReviewRepository:
     async def upsert_curation(self, curation: FindingCuration) -> FindingCuration:
         async with AsyncSessionLocal() as db, db.begin():
             await _require_finding(db, curation)
-            existing = await db.get(FindingCurationRecord, curation.curation_id)
+            existing = await db.get(FindingCurationORM, curation.curation_id)
             if existing is not None and _curation_key(existing) != _curation_key(
                 curation
             ):
                 raise ValueError("curation identity cannot be reassigned")
-            row = existing or FindingCurationRecord(curation_id=curation.curation_id)
+            row = existing or FindingCurationORM(curation_id=curation.curation_id)
             row.collection_id = curation.collection_id
             row.objective_id = curation.objective_id
             row.analysis_version = curation.analysis_version
@@ -228,25 +228,25 @@ class FindingReviewRepository:
         finding_id: str | None = None,
     ) -> tuple[FindingCuration, ...]:
         async with AsyncSessionLocal() as db:
-            statement = select(FindingCurationRecord).where(
-                FindingCurationRecord.collection_id == collection_id
+            statement = select(FindingCurationORM).where(
+                FindingCurationORM.collection_id == collection_id
             )
             if objective_id is not None:
                 statement = statement.where(
-                    FindingCurationRecord.objective_id == objective_id
+                    FindingCurationORM.objective_id == objective_id
                 )
             if analysis_version is not None:
                 statement = statement.where(
-                    FindingCurationRecord.analysis_version == analysis_version
+                    FindingCurationORM.analysis_version == analysis_version
                 )
             if finding_id is not None:
                 statement = statement.where(
-                    FindingCurationRecord.finding_id == finding_id
+                    FindingCurationORM.finding_id == finding_id
                 )
             rows = await db.scalars(
                 statement.order_by(
-                    FindingCurationRecord.updated_at,
-                    FindingCurationRecord.curation_id,
+                    FindingCurationORM.updated_at,
+                    FindingCurationORM.curation_id,
                 )
             )
             records = []
@@ -377,7 +377,7 @@ def _isoformat(value: datetime) -> str:
 
 async def _require_finding(db: AsyncSession, value: object) -> None:
     row = await db.get(
-        ObjectiveAnalysisRecord,
+        ObjectiveAnalysisORM,
         (
             value.collection_id,
             value.objective_id,
@@ -389,11 +389,11 @@ async def _require_finding(db: AsyncSession, value: object) -> None:
         for item in (row.payload or {}).get("findings", ())
     )
     experiment_finding = await db.scalar(
-        select(ExperimentFindingRow).where(
-            ExperimentFindingRow.collection_id == value.collection_id,
-            ExperimentFindingRow.objective_id == value.objective_id,
-            ExperimentFindingRow.analysis_version == value.analysis_version,
-            ExperimentFindingRow.finding_id == value.finding_id,
+        select(ExperimentFindingORM).where(
+            ExperimentFindingORM.collection_id == value.collection_id,
+            ExperimentFindingORM.objective_id == value.objective_id,
+            ExperimentFindingORM.analysis_version == value.analysis_version,
+            ExperimentFindingORM.finding_id == value.finding_id,
         )
     )
     if row is None or (not authored_finding and experiment_finding is None):

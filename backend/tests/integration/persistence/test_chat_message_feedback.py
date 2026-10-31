@@ -41,13 +41,13 @@ from httpx import ASGITransport, AsyncClient
 
 
 from infra.persistence.postgres.models import (
-    AuthUser,
-    ChatMessageFeedbackRow,
-    ChatMessageRow,
-    ChatSessionRow,
+    AuthUserORM,
+    ChatMessageFeedbackORM,
+    ChatMessageORM,
+    ChatSessionORM,
 )
-from infra.persistence.postgres.models.collection import Collection as CollectionRow
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
+from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetORM
 from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
@@ -280,7 +280,7 @@ async def test_feedback_permissions_and_input_boundaries(feedback_app):
     assert await app.repository.read_feedback("chat-1", app.users[0]["user_id"]) == ()
     async with app.sessions.begin() as database:
         await database.execute(
-            update(CollectionRow).values(owner_user_id=app.users[1]["user_id"])
+            update(CollectionORM).values(owner_user_id=app.users[1]["user_id"])
         )
     rejection = await app.client.put(PATH, json={"rating": "helpful"})
     assert rejection.status_code == 200
@@ -301,35 +301,35 @@ async def test_concurrent_feedback_upserts_keep_one_identity(feedback_app):
     async with app.sessions() as database:
         assert (
             await database.scalar(
-                select(func.count()).select_from(ChatMessageFeedbackRow)
+                select(func.count()).select_from(ChatMessageFeedbackORM)
             )
             == 1
         )
 
 
 @pytest.mark.parametrize(
-    "parent", [ChatMessageRow, ChatSessionRow, AuthUser, CollectionRow]
+    "parent", [ChatMessageORM, ChatSessionORM, AuthUserORM, CollectionORM]
 )
 async def test_parent_deletion_cascades_feedback(feedback_app, parent):
     app = feedback_app
     assert (await app.client.put(PATH, json={"rating": "helpful"})).status_code == 200
     async with app.sessions.begin() as database:
-        if parent is AuthUser:
+        if parent is AuthUserORM:
             await database.execute(
-                update(CollectionRow).values(owner_user_id=app.users[1]["user_id"])
+                update(CollectionORM).values(owner_user_id=app.users[1]["user_id"])
             )
             await database.execute(
-                update(FeedbackDatasetRow).values(created_by=app.users[1]["user_id"])
+                update(FeedbackDatasetORM).values(created_by=app.users[1]["user_id"])
             )
             await database.execute(
-                delete(AuthUser).where(AuthUser.user_id == app.users[0]["user_id"])
+                delete(AuthUserORM).where(AuthUserORM.user_id == app.users[0]["user_id"])
             )
         else:
             await database.execute(delete(parent))
     async with app.sessions() as database:
         assert (
             await database.scalar(
-                select(func.count()).select_from(ChatMessageFeedbackRow)
+                select(func.count()).select_from(ChatMessageFeedbackORM)
             )
             == 0
         )

@@ -28,16 +28,16 @@ from domain.feedback.sample_revision import (
     SftRevisionContent,
 )
 from infra.persistence.postgres.models.feedback import (
-    FeedbackAnnotationRow,
-    FeedbackCaseRow,
-    FeedbackDatasetSnapshotRow,
-    FeedbackReviewDecisionRow,
+    FeedbackAnnotationORM,
+    FeedbackCaseORM,
+    FeedbackDatasetSnapshotORM,
+    FeedbackReviewDecisionORM,
 )
 from infra.persistence.postgres.models.feedback_dataset import (
-    FeedbackDatasetMigrationRunRow,
-    FeedbackDatasetRow,
-    FeedbackDatasetSampleRow,
-    FeedbackSampleRevisionRow,
+    FeedbackDatasetMigrationRunORM,
+    FeedbackDatasetORM,
+    FeedbackDatasetSampleORM,
+    FeedbackSampleRevisionORM,
 )
 from repositories.analysis_job_repository import (
     AnalysisJobRepository,
@@ -246,7 +246,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     # while the original digest and revision identity remain unchanged.
     async with postgres_session_factory.begin() as session:
         revision_row = await session.get(
-            FeedbackSampleRevisionRow, saved.current_revision_id
+            FeedbackSampleRevisionORM, saved.current_revision_id
         )
         original_content = revision_row.content
         original_digest = revision_row.content_digest
@@ -284,7 +284,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     )
     async with postgres_session_factory.begin() as session:
         revision_row = await session.get(
-            FeedbackSampleRevisionRow, saved.current_revision_id
+            FeedbackSampleRevisionORM, saved.current_revision_id
         )
         assert revision_row.content_digest == original_digest
         revision_row.content = original_content
@@ -306,7 +306,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     # Repeated confirmation must also check integrity before its idempotent return.
     async with postgres_session_factory.begin() as session:
         revision_row = await session.get(
-            FeedbackSampleRevisionRow, saved.current_revision_id
+            FeedbackSampleRevisionORM, saved.current_revision_id
         )
         revision_row.content = changed_content
     with pytest.raises(FeedbackDatasetConflict, match="sample_content_digest_mismatch"):
@@ -322,7 +322,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     )
     async with postgres_session_factory.begin() as session:
         revision_row = await session.get(
-            FeedbackSampleRevisionRow, saved.current_revision_id
+            FeedbackSampleRevisionORM, saved.current_revision_id
         )
         revision_row.content = original_content
 
@@ -354,7 +354,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     # A withdrawn source invalidates this member only; it must not make the
     # confirmed-member query fail for the whole workbench.
     async with postgres_session_factory.begin() as session:
-        source_row = await session.get(FeedbackCaseRow, case.case_id)
+        source_row = await session.get(FeedbackCaseORM, case.case_id)
         assert source_row is not None
         source_row.status = "withdrawn"
     assert await samples.read_confirmed_members(dataset_id=dataset.dataset_id) == ()
@@ -712,12 +712,12 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     sample = collected.items[0].sample
     # Keep the recovery scenario focused on this sample's lease.
     async with postgres_session_factory.begin() as session:
-        from infra.persistence.postgres.models.feedback import AnalysisJobRow
+        from infra.persistence.postgres.models.feedback import AnalysisJobORM
 
         other_jobs = await session.scalars(
-            select(AnalysisJobRow).where(
-                AnalysisJobRow.job_type == "dataset_sample_build",
-                AnalysisJobRow.job_id != collected.items[0].job.job_id,
+            select(AnalysisJobORM).where(
+                AnalysisJobORM.job_type == "dataset_sample_build",
+                AnalysisJobORM.job_id != collected.items[0].job.job_id,
             )
         )
         for job in other_jobs:
@@ -855,7 +855,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
     }
     async with postgres_session_factory() as session:
         session.add(
-            FeedbackCaseRow(
+            FeedbackCaseORM(
                 case_id=case_id,
                 collection_id=COLLECTION_ID,
                 session_id=SESSION_ID,
@@ -876,7 +876,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
         )
         await session.flush()
         session.add(
-            FeedbackAnnotationRow(
+            FeedbackAnnotationORM(
                 annotation_id=annotation_id,
                 case_id=case_id,
                 version=1,
@@ -893,7 +893,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
             )
         )
         session.add(
-            FeedbackReviewDecisionRow(
+            FeedbackReviewDecisionORM(
                 decision_id=review_id,
                 case_id=case_id,
                 annotation_digest=annotation_digest,
@@ -905,7 +905,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
             )
         )
         session.add(
-            FeedbackDatasetSnapshotRow(
+            FeedbackDatasetSnapshotORM(
                 dataset_id=legacy_snapshot_id,
                 owner_id=USER_ID,
                 collection_id=COLLECTION_ID,
@@ -955,11 +955,11 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
 
     migrated_dataset_id = stable_id("fdset_mig", legacy_snapshot_id)
     async with postgres_session_factory() as session:
-        dataset = await session.get(FeedbackDatasetRow, migrated_dataset_id)
+        dataset = await session.get(FeedbackDatasetORM, migrated_dataset_id)
         sample = await session.scalar(
-            select(FeedbackDatasetSampleRow).where(
-                FeedbackDatasetSampleRow.dataset_id == migrated_dataset_id,
-                FeedbackDatasetSampleRow.source_case_id == case_id,
+            select(FeedbackDatasetSampleORM).where(
+                FeedbackDatasetSampleORM.dataset_id == migrated_dataset_id,
+                FeedbackDatasetSampleORM.source_case_id == case_id,
             )
         )
         assert dataset is not None
@@ -968,7 +968,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
         assert sample.status == "needs_confirmation"
         assert sample.current_revision_id is not None
         original_revision_id = sample.current_revision_id
-        revision = await session.get(FeedbackSampleRevisionRow, original_revision_id)
+        revision = await session.get(FeedbackSampleRevisionORM, original_revision_id)
         assert revision is not None
         assert revision.content["target"] == row["target"]
 
@@ -982,9 +982,9 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
 
     async with postgres_session_factory() as session:
         sample = await session.scalar(
-            select(FeedbackDatasetSampleRow).where(
-                FeedbackDatasetSampleRow.dataset_id == migrated_dataset_id,
-                FeedbackDatasetSampleRow.source_case_id == case_id,
+            select(FeedbackDatasetSampleORM).where(
+                FeedbackDatasetSampleORM.dataset_id == migrated_dataset_id,
+                FeedbackDatasetSampleORM.source_case_id == case_id,
             )
         )
         assert sample is not None
@@ -992,8 +992,8 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
         runs = list(
             (
                 await session.scalars(
-                    select(FeedbackDatasetMigrationRunRow).order_by(
-                        FeedbackDatasetMigrationRunRow.created_at
+                    select(FeedbackDatasetMigrationRunORM).order_by(
+                        FeedbackDatasetMigrationRunORM.created_at
                     )
                 )
             ).all()

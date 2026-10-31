@@ -11,8 +11,8 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.feedback import AnalysisJobRow
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
+from infra.persistence.postgres.models.feedback import AnalysisJobORM
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleORM
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -125,8 +125,8 @@ class LeaseLostError(RuntimeError):
     """The caller no longer owns this execution and cannot publish."""
 
 
-async def lock_analysis_job(db: AsyncSession, job: AnalysisJob) -> AnalysisJobRow:
-    row = await db.get(AnalysisJobRow, job.job_id, with_for_update=True)
+async def lock_analysis_job(db: AsyncSession, job: AnalysisJob) -> AnalysisJobORM:
+    row = await db.get(AnalysisJobORM, job.job_id, with_for_update=True)
     if row is None or not _completion_lease_matches(
         row,
         worker_id=job.worker_id,
@@ -164,8 +164,8 @@ class AnalysisJobRepository:
         try:
             async with AsyncSessionLocal() as db, db.begin():
                 existing = await db.scalar(
-                    select(AnalysisJobRow).where(
-                        AnalysisJobRow.idempotency_key == idempotency_key
+                    select(AnalysisJobORM).where(
+                        AnalysisJobORM.idempotency_key == idempotency_key
                     )
                 )
                 if existing is not None:
@@ -189,7 +189,7 @@ class AnalysisJobRepository:
                         heartbeat_at=_optional_iso(existing.heartbeat_at),
                         lease_version=existing.lease_version,
                     )
-                row = AnalysisJobRow(
+                row = AnalysisJobORM(
                     job_id=f"job_{uuid4().hex[:32]}",
                     job_type="feedback_analysis",
                     payload_version=1,
@@ -229,8 +229,8 @@ class AnalysisJobRepository:
             # A concurrent producer may have won the unique idempotency key.
             async with AsyncSessionLocal() as db:
                 existing = await db.scalar(
-                    select(AnalysisJobRow).where(
-                        AnalysisJobRow.idempotency_key == idempotency_key
+                    select(AnalysisJobORM).where(
+                        AnalysisJobORM.idempotency_key == idempotency_key
                     )
                 )
                 if existing is None:
@@ -298,8 +298,8 @@ class AnalysisJobRepository:
         try:
             async with AsyncSessionLocal() as db, db.begin():
                 existing = await db.scalar(
-                    select(AnalysisJobRow).where(
-                        AnalysisJobRow.idempotency_key == idempotency_key
+                    select(AnalysisJobORM).where(
+                        AnalysisJobORM.idempotency_key == idempotency_key
                     )
                 )
                 if existing is not None:
@@ -323,7 +323,7 @@ class AnalysisJobRepository:
                         heartbeat_at=_optional_iso(existing.heartbeat_at),
                         lease_version=existing.lease_version,
                     )
-                row = AnalysisJobRow(
+                row = AnalysisJobORM(
                     job_id=f"job_{uuid4().hex[:32]}",
                     job_type=CORRECTION_SIGNAL_JOB_TYPE,
                     payload_version=CORRECTION_SIGNAL_PAYLOAD_VERSION,
@@ -362,8 +362,8 @@ class AnalysisJobRepository:
         except IntegrityError:
             async with AsyncSessionLocal() as db:
                 existing = await db.scalar(
-                    select(AnalysisJobRow).where(
-                        AnalysisJobRow.idempotency_key == idempotency_key
+                    select(AnalysisJobORM).where(
+                        AnalysisJobORM.idempotency_key == idempotency_key
                     )
                 )
                 if existing is None:
@@ -435,8 +435,8 @@ class AnalysisJobRepository:
         try:
             async with AsyncSessionLocal() as db, db.begin():
                 existing = await db.scalar(
-                    select(AnalysisJobRow).where(
-                        AnalysisJobRow.idempotency_key == idempotency_key
+                    select(AnalysisJobORM).where(
+                        AnalysisJobORM.idempotency_key == idempotency_key
                     )
                 )
                 if existing is not None:
@@ -460,7 +460,7 @@ class AnalysisJobRepository:
                         heartbeat_at=_optional_iso(existing.heartbeat_at),
                         lease_version=existing.lease_version,
                     )
-                row = AnalysisJobRow(
+                row = AnalysisJobORM(
                     job_id=f"job_{uuid4().hex[:32]}",
                     job_type=TOOL_FAILURE_JOB_TYPE,
                     payload_version=TOOL_FAILURE_PAYLOAD_VERSION,
@@ -499,8 +499,8 @@ class AnalysisJobRepository:
         except IntegrityError:
             async with AsyncSessionLocal() as db:
                 existing = await db.scalar(
-                    select(AnalysisJobRow).where(
-                        AnalysisJobRow.idempotency_key == idempotency_key
+                    select(AnalysisJobORM).where(
+                        AnalysisJobORM.idempotency_key == idempotency_key
                     )
                 )
                 if existing is None:
@@ -530,16 +530,16 @@ class AnalysisJobRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == "feedback_analysis",
+                    AnalysisJobORM.job_type == "feedback_analysis",
                     _claimable_job_filter(timestamp),
-                    AnalysisJobRow.available_at <= timestamp,
+                    AnalysisJobORM.available_at <= timestamp,
                 )
                 .order_by(
-                    AnalysisJobRow.available_at,
-                    AnalysisJobRow.created_at,
-                    AnalysisJobRow.job_id,
+                    AnalysisJobORM.available_at,
+                    AnalysisJobORM.created_at,
+                    AnalysisJobORM.job_id,
                 )
                 .with_for_update(skip_locked=True)
                 .limit(1)
@@ -577,16 +577,16 @@ class AnalysisJobRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == CORRECTION_SIGNAL_JOB_TYPE,
+                    AnalysisJobORM.job_type == CORRECTION_SIGNAL_JOB_TYPE,
                     _claimable_job_filter(timestamp),
-                    AnalysisJobRow.available_at <= timestamp,
+                    AnalysisJobORM.available_at <= timestamp,
                 )
                 .order_by(
-                    AnalysisJobRow.available_at,
-                    AnalysisJobRow.created_at,
-                    AnalysisJobRow.job_id,
+                    AnalysisJobORM.available_at,
+                    AnalysisJobORM.created_at,
+                    AnalysisJobORM.job_id,
                 )
                 .with_for_update(skip_locked=True)
                 .limit(1)
@@ -624,16 +624,16 @@ class AnalysisJobRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == TOOL_FAILURE_JOB_TYPE,
+                    AnalysisJobORM.job_type == TOOL_FAILURE_JOB_TYPE,
                     _claimable_job_filter(timestamp),
-                    AnalysisJobRow.available_at <= timestamp,
+                    AnalysisJobORM.available_at <= timestamp,
                 )
                 .order_by(
-                    AnalysisJobRow.available_at,
-                    AnalysisJobRow.created_at,
-                    AnalysisJobRow.job_id,
+                    AnalysisJobORM.available_at,
+                    AnalysisJobORM.created_at,
+                    AnalysisJobORM.job_id,
                 )
                 .with_for_update(skip_locked=True)
                 .limit(1)
@@ -675,16 +675,16 @@ class AnalysisJobRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE,
+                    AnalysisJobORM.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE,
                     _claimable_job_filter(timestamp),
-                    AnalysisJobRow.available_at <= timestamp,
+                    AnalysisJobORM.available_at <= timestamp,
                 )
                 .order_by(
-                    AnalysisJobRow.available_at,
-                    AnalysisJobRow.created_at,
-                    AnalysisJobRow.job_id,
+                    AnalysisJobORM.available_at,
+                    AnalysisJobORM.created_at,
+                    AnalysisJobORM.job_id,
                 )
                 .with_for_update(skip_locked=True)
                 .limit(1)
@@ -720,8 +720,8 @@ class AnalysisJobRepository:
                     lease_version=row.lease_version,
                 )
             sample = await db.scalar(
-                select(FeedbackDatasetSampleRow)
-                .where(FeedbackDatasetSampleRow.sample_id == sample_id)
+                select(FeedbackDatasetSampleORM)
+                .where(FeedbackDatasetSampleORM.sample_id == sample_id)
                 .with_for_update()
             )
             if (
@@ -853,7 +853,7 @@ class AnalysisJobRepository:
             raise ValueError("job_id is required")
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(AnalysisJobRow, job_id, with_for_update=True)
+            row = await db.get(AnalysisJobORM, job_id, with_for_update=True)
             if row is None:
                 raise FileNotFoundError(f"analysis job not found: {job_id}")
             if row.job_type != "feedback_analysis":
@@ -899,11 +899,11 @@ class AnalysisJobRepository:
         recovered = 0
         async with AsyncSessionLocal() as db, db.begin():
             rows = await db.scalars(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.status == "running",
-                    AnalysisJobRow.lease_expires_at.is_not(None),
-                    AnalysisJobRow.lease_expires_at <= timestamp,
+                    AnalysisJobORM.status == "running",
+                    AnalysisJobORM.lease_expires_at.is_not(None),
+                    AnalysisJobORM.lease_expires_at <= timestamp,
                 )
                 .with_for_update(skip_locked=True)
             )
@@ -920,11 +920,11 @@ class AnalysisJobRepository:
                     sample_id = str((row.payload or {}).get("sample_id") or "").strip()
                     if sample_id:
                         sample = await db.scalar(
-                            select(FeedbackDatasetSampleRow)
+                            select(FeedbackDatasetSampleORM)
                             .where(
-                                FeedbackDatasetSampleRow.sample_id == sample_id,
-                                FeedbackDatasetSampleRow.active_job_id == row.job_id,
-                                FeedbackDatasetSampleRow.status == "building",
+                                FeedbackDatasetSampleORM.sample_id == sample_id,
+                                FeedbackDatasetSampleORM.active_job_id == row.job_id,
+                                FeedbackDatasetSampleORM.status == "building",
                             )
                             .with_for_update()
                         )
@@ -949,8 +949,8 @@ class AnalysisJobRepository:
         timestamp = _datetime(now)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.scalar(
-                select(AnalysisJobRow)
-                .where(AnalysisJobRow.job_id == job_id)
+                select(AnalysisJobORM)
+                .where(AnalysisJobORM.job_id == job_id)
                 .with_for_update()
             )
             if row is None or not _completion_lease_matches(
@@ -1003,10 +1003,10 @@ class AnalysisJobRepository:
         cancelled = 0
         async with AsyncSessionLocal() as db, db.begin():
             rows = await db.scalars(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == "feedback_analysis",
-                    AnalysisJobRow.status == "pending",
+                    AnalysisJobORM.job_type == "feedback_analysis",
+                    AnalysisJobORM.status == "pending",
                 )
                 .with_for_update()
             )
@@ -1034,10 +1034,10 @@ class AnalysisJobRepository:
         cancelled = 0
         async with AsyncSessionLocal() as db, db.begin():
             rows = await db.scalars(
-                select(AnalysisJobRow)
+                select(AnalysisJobORM)
                 .where(
-                    AnalysisJobRow.job_type == CORRECTION_SIGNAL_JOB_TYPE,
-                    AnalysisJobRow.status == "pending",
+                    AnalysisJobORM.job_type == CORRECTION_SIGNAL_JOB_TYPE,
+                    AnalysisJobORM.status == "pending",
                 )
                 .with_for_update()
             )
@@ -1065,7 +1065,7 @@ class AnalysisJobRepository:
     ) -> AnalysisJob:
         timestamp = _datetime(finished_at)
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(AnalysisJobRow, job_id, with_for_update=True)
+            row = await db.get(AnalysisJobORM, job_id, with_for_update=True)
             if row is None:
                 raise FileNotFoundError(f"analysis job not found: {job_id}")
             if worker_id is not None or lease_version is not None:
@@ -1155,7 +1155,7 @@ class AnalysisJobRepository:
 
     async def read_job(self, job_id: str) -> AnalysisJob | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(AnalysisJobRow, job_id)
+            row = await db.get(AnalysisJobORM, job_id)
             return (
                 AnalysisJob(
                     job_id=row.job_id,
@@ -1190,15 +1190,15 @@ class AnalysisJobRepository:
     ) -> tuple[AnalysisJob, ...]:
         if limit < 0 or offset < 0:
             raise ValueError("limit and offset must be non-negative")
-        statement = select(AnalysisJobRow)
+        statement = select(AnalysisJobORM)
         if job_type is not None:
-            statement = statement.where(AnalysisJobRow.job_type == job_type)
+            statement = statement.where(AnalysisJobORM.job_type == job_type)
         if status is not None:
-            statement = statement.where(AnalysisJobRow.status == status)
+            statement = statement.where(AnalysisJobORM.status == status)
         statement = (
             statement.order_by(
-                AnalysisJobRow.created_at,
-                AnalysisJobRow.job_id,
+                AnalysisJobORM.created_at,
+                AnalysisJobORM.job_id,
             )
             .offset(offset)
             .limit(limit)
@@ -1229,7 +1229,7 @@ class AnalysisJobRepository:
             )
 
 
-def _ensure_feedback_identity(row: AnalysisJobRow, feedback_id: str) -> None:
+def _ensure_feedback_identity(row: AnalysisJobORM, feedback_id: str) -> None:
     payload = row.payload or {}
     if row.job_type != "feedback_analysis" or payload.get("feedback_id") != feedback_id:
         raise ValueError("idempotency key is already bound to another analysis input")
@@ -1237,17 +1237,17 @@ def _ensure_feedback_identity(row: AnalysisJobRow, feedback_id: str) -> None:
 
 def _claimable_job_filter(timestamp: datetime):
     return or_(
-        AnalysisJobRow.status == "pending",
+        AnalysisJobORM.status == "pending",
         and_(
-            AnalysisJobRow.status == "running",
-            AnalysisJobRow.lease_expires_at.is_not(None),
-            AnalysisJobRow.lease_expires_at <= timestamp,
+            AnalysisJobORM.status == "running",
+            AnalysisJobORM.lease_expires_at.is_not(None),
+            AnalysisJobORM.lease_expires_at <= timestamp,
         ),
     )
 
 
 def _completion_lease_matches(
-    row: AnalysisJobRow,
+    row: AnalysisJobORM,
     *,
     worker_id: str | None,
     lease_version: int | None,
@@ -1267,7 +1267,7 @@ def _completion_lease_matches(
 
 
 def _assign_lease(
-    row: AnalysisJobRow,
+    row: AnalysisJobORM,
     timestamp: datetime,
     worker_id: str,
     lease_seconds: int,
@@ -1279,18 +1279,18 @@ def _assign_lease(
     row.error_code = None
 
 
-def _clear_lease(row: AnalysisJobRow) -> None:
+def _clear_lease(row: AnalysisJobORM) -> None:
     row.worker_id = None
     row.lease_expires_at = None
     row.heartbeat_at = None
 
 
-def _ensure_correction_identity(row: AnalysisJobRow, payload: dict[str, str]) -> None:
+def _ensure_correction_identity(row: AnalysisJobORM, payload: dict[str, str]) -> None:
     if row.job_type != CORRECTION_SIGNAL_JOB_TYPE or row.payload != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
 
 
-def _ensure_tool_failure_identity(row: AnalysisJobRow, payload: dict[str, str]) -> None:
+def _ensure_tool_failure_identity(row: AnalysisJobORM, payload: dict[str, str]) -> None:
     if row.job_type != TOOL_FAILURE_JOB_TYPE or row.payload != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
 

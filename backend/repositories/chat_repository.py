@@ -30,12 +30,12 @@ from domain.chat.permissions import (
 )
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.chat import (
-    ChatMessageFeedbackRow,
-    ChatMessageRow,
-    ChatSessionRow,
-    ChatToolCallRow,
+    ChatMessageFeedbackORM,
+    ChatMessageORM,
+    ChatSessionORM,
+    ChatToolCallORM,
 )
-from infra.persistence.postgres.models.feedback import ChatModelCallRow
+from infra.persistence.postgres.models.feedback import ChatModelCallORM
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
@@ -153,7 +153,7 @@ class ChatSessionSummary:
 class ChatRepository:
     async def read_permission(self, session_id, user_id):
         async with AsyncSessionLocal() as db:
-            row = await db.get(ChatSessionRow, session_id)
+            row = await db.get(ChatSessionORM, session_id)
             if row is None or row.user_id != user_id:
                 raise ChatRecordNotFound("chat session not found")
             permission = {
@@ -168,7 +168,7 @@ class ChatRepository:
 
     async def set_permission(self, session_id, user_id, **changes):
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise ChatRecordNotFound("chat session not found")
             row.operation_permission = change_permission(
@@ -180,10 +180,10 @@ class ChatRepository:
         self, *, session_id, tool_call_id, user_id, started_at
     ):
         async with AsyncSessionLocal() as db, db.begin():
-            session_row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            session_row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if session_row is None or session_row.user_id != user_id:
                 raise ChatRecordNotFound("chat session not found")
-            row = await db.get(ChatToolCallRow, tool_call_id, with_for_update=True)
+            row = await db.get(ChatToolCallORM, tool_call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise ChatRecordNotFound("chat tool call not found")
             permission = {
@@ -273,8 +273,8 @@ class ChatRepository:
     ) -> ChatResponseSnapshot | None:
         async with AsyncSessionLocal() as db:
             payload = await db.scalar(
-                select(ChatSessionRow.response_snapshot).where(
-                    ChatSessionRow.session_id == session_id,
+                select(ChatSessionORM.response_snapshot).where(
+                    ChatSessionORM.session_id == session_id,
                 )
             )
             if payload is None:
@@ -292,9 +292,9 @@ class ChatRepository:
         payload = asdict(snapshot)
         async with AsyncSessionLocal() as db, db.begin():
             await db.execute(
-                update(ChatSessionRow)
+                update(ChatSessionORM)
                 .where(
-                    ChatSessionRow.session_id == session_id,
+                    ChatSessionORM.session_id == session_id,
                 )
                 .values(response_snapshot=payload)
             )
@@ -305,16 +305,16 @@ class ChatRepository:
         root_id = chat_session.root_session_id or chat_session.session_id
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(ChatSessionRow)
+                select(ChatSessionORM)
                 .where(
-                    ChatSessionRow.user_id == chat_session.user_id,
-                    ChatSessionRow.collection_id == chat_session.collection_id,
+                    ChatSessionORM.user_id == chat_session.user_id,
+                    ChatSessionORM.collection_id == chat_session.collection_id,
                     or_(
-                        ChatSessionRow.session_id == root_id,
-                        ChatSessionRow.root_session_id == root_id,
+                        ChatSessionORM.session_id == root_id,
+                        ChatSessionORM.root_session_id == root_id,
                     ),
                 )
-                .order_by(ChatSessionRow.created_at, ChatSessionRow.session_id)
+                .order_by(ChatSessionORM.created_at, ChatSessionORM.session_id)
             )
             return tuple(
                 ChatSession(
@@ -357,7 +357,7 @@ class ChatRepository:
                 )
             )
             source = await db.get(
-                ChatSessionRow, source_session_id, with_for_update=True
+                ChatSessionORM, source_session_id, with_for_update=True
             )
             if source is None or (source.user_id, source.collection_id) != (
                 chat_session.user_id,
@@ -366,7 +366,7 @@ class ChatRepository:
                 raise ChatWriteConflict(
                     "chat_branch_invalid", "branch source must be an owned conversation"
                 )
-            existing = await db.get(ChatSessionRow, chat_session.session_id)
+            existing = await db.get(ChatSessionORM, chat_session.session_id)
             if existing is not None:
                 saved = ChatSession(
                     session_id=existing.session_id,
@@ -407,12 +407,12 @@ class ChatRepository:
                 return saved
             rows = tuple(
                 await db.scalars(
-                    select(ChatMessageRow)
+                    select(ChatMessageORM)
                     .where(
-                        ChatMessageRow.session_id == source_session_id,
-                        ChatMessageRow.position < before_position,
+                        ChatMessageORM.session_id == source_session_id,
+                        ChatMessageORM.position < before_position,
                     )
-                    .order_by(ChatMessageRow.position)
+                    .order_by(ChatMessageORM.position)
                 )
             )
             if len(rows) != before_position:
@@ -422,8 +422,8 @@ class ChatRepository:
                 )
             calls = tuple(
                 await db.scalars(
-                    select(ChatToolCallRow).where(
-                        ChatToolCallRow.session_id == source_session_id,
+                    select(ChatToolCallORM).where(
+                        ChatToolCallORM.session_id == source_session_id,
                     )
                 )
             )
@@ -444,7 +444,7 @@ class ChatRepository:
                     "chat_branch_invalid", "branch history has unresolved tool results"
                 )
             db.add(
-                ChatSessionRow(
+                ChatSessionORM(
                     session_id=chat_session.session_id,
                     user_id=chat_session.user_id,
                     collection_id=chat_session.collection_id,
@@ -465,7 +465,7 @@ class ChatRepository:
                     payload["tool_call_id"] = call_ids[row.tool_call_id]
                     content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 db.add(
-                    ChatMessageRow(
+                    ChatMessageORM(
                         message_id=message_ids[row.message_id],
                         session_id=chat_session.session_id,
                         position=row.position,
@@ -480,7 +480,7 @@ class ChatRepository:
             for call in copied_calls:
                 values = {
                     column.name: getattr(call, column.name)
-                    for column in ChatToolCallRow.__table__.columns
+                    for column in ChatToolCallORM.__table__.columns
                 }
                 values.update(
                     tool_call_id=call_ids[call.tool_call_id],
@@ -488,13 +488,13 @@ class ChatRepository:
                     assistant_message_id=message_ids[call.assistant_message_id],
                 )
                 # Historical decisions describe completed work; only fresh calls can be approved.
-                db.add(ChatToolCallRow(**values))
+                db.add(ChatToolCallORM(**values))
             return chat_session
 
     async def add_session(self, record: ChatSession) -> None:
         async with AsyncSessionLocal() as db, db.begin():
             db.add(
-                ChatSessionRow(
+                ChatSessionORM(
                     session_id=record.session_id,
                     user_id=record.user_id,
                     collection_id=record.collection_id,
@@ -507,7 +507,7 @@ class ChatRepository:
 
     async def read_session(self, session_id: str) -> ChatSession | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ChatSessionRow, session_id)
+            row = await db.get(ChatSessionORM, session_id)
             return (
                 ChatSession(
                     session_id=row.session_id,
@@ -543,17 +543,17 @@ class ChatRepository:
             )
             if not acquired:
                 raise ChatSessionBusyError()
-            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise ChatRecordNotFound("chat session not found")
             dependent = await db.scalar(
-                select(ChatSessionRow.session_id)
+                select(ChatSessionORM.session_id)
                 .where(
-                    ChatSessionRow.user_id == user_id,
-                    ChatSessionRow.collection_id == row.collection_id,
+                    ChatSessionORM.user_id == user_id,
+                    ChatSessionORM.collection_id == row.collection_id,
                     or_(
-                        ChatSessionRow.parent_session_id == session_id,
-                        ChatSessionRow.root_session_id == session_id,
+                        ChatSessionORM.parent_session_id == session_id,
+                        ChatSessionORM.root_session_id == session_id,
                     ),
                 )
                 .limit(1)
@@ -570,7 +570,7 @@ class ChatRepository:
         is_pinned: bool,
     ) -> ChatSession:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise ChatRecordNotFound("chat session not found")
             row.is_pinned = is_pinned
@@ -602,7 +602,7 @@ class ChatRepository:
         title: str,
     ) -> ChatSession:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise ChatRecordNotFound("chat session not found")
             row.title = title
@@ -631,25 +631,25 @@ class ChatRepository:
     ) -> tuple[ChatSessionSummary, ...]:
         async with AsyncSessionLocal() as db:
             first_user_message = (
-                select(ChatMessageRow.content)
+                select(ChatMessageORM.content)
                 .where(
-                    ChatMessageRow.session_id == ChatSessionRow.session_id,
-                    ChatMessageRow.role == "user",
+                    ChatMessageORM.session_id == ChatSessionORM.session_id,
+                    ChatMessageORM.role == "user",
                 )
-                .order_by(ChatMessageRow.position)
+                .order_by(ChatMessageORM.position)
                 .limit(1)
                 .scalar_subquery()
             )
             rows = await db.execute(
-                select(ChatSessionRow, first_user_message.label("first_message_title"))
+                select(ChatSessionORM, first_user_message.label("first_message_title"))
                 .where(
-                    ChatSessionRow.user_id == user_id,
-                    ChatSessionRow.collection_id == collection_id,
+                    ChatSessionORM.user_id == user_id,
+                    ChatSessionORM.collection_id == collection_id,
                 )
                 .order_by(
-                    ChatSessionRow.is_pinned.desc(),
-                    ChatSessionRow.updated_at.desc(),
-                    ChatSessionRow.session_id.desc(),
+                    ChatSessionORM.is_pinned.desc(),
+                    ChatSessionORM.updated_at.desc(),
+                    ChatSessionORM.session_id.desc(),
                 )
                 .limit(limit)
                 .offset(offset)
@@ -688,17 +688,17 @@ class ChatRepository:
         async with AsyncSessionLocal() as db:
             rows = tuple(
                 await db.scalars(
-                    select(ChatMessageRow)
-                    .where(ChatMessageRow.session_id == session_id)
-                    .order_by(ChatMessageRow.position)
+                    select(ChatMessageORM)
+                    .where(ChatMessageORM.session_id == session_id)
+                    .order_by(ChatMessageORM.position)
                 )
             )
             call_rows = tuple(
                 await db.scalars(
-                    select(ChatToolCallRow)
-                    .where(ChatToolCallRow.session_id == session_id)
+                    select(ChatToolCallORM)
+                    .where(ChatToolCallORM.session_id == session_id)
                     .order_by(
-                        ChatToolCallRow.assistant_message_id, ChatToolCallRow.position
+                        ChatToolCallORM.assistant_message_id, ChatToolCallORM.position
                     )
                 )
             )
@@ -778,7 +778,7 @@ class ChatRepository:
 
     async def read_message(self, message_id: str) -> ChatMessage | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ChatMessageRow, message_id)
+            row = await db.get(ChatMessageORM, message_id)
             if row is None:
                 return None
             requests = tuple(
@@ -794,13 +794,13 @@ class ChatRepository:
                     authorization_revision=call.authorization_revision,
                 )
                 for call in await db.scalars(
-                    select(ChatToolCallRow)
-                    .where(ChatToolCallRow.assistant_message_id == message_id)
-                    .order_by(ChatToolCallRow.position)
+                    select(ChatToolCallORM)
+                    .where(ChatToolCallORM.assistant_message_id == message_id)
+                    .order_by(ChatToolCallORM.position)
                 )
             )
             result_row = (
-                await db.get(ChatToolCallRow, row.tool_call_id)
+                await db.get(ChatToolCallORM, row.tool_call_id)
                 if row.role == "tool"
                 else None
             )
@@ -859,14 +859,14 @@ class ChatRepository:
     ) -> tuple[ChatMessageFeedback, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(ChatMessageFeedbackRow)
+                select(ChatMessageFeedbackORM)
                 .where(
-                    ChatMessageFeedbackRow.session_id == session_id,
-                    ChatMessageFeedbackRow.user_id == user_id,
+                    ChatMessageFeedbackORM.session_id == session_id,
+                    ChatMessageFeedbackORM.user_id == user_id,
                 )
                 .order_by(
-                    ChatMessageFeedbackRow.created_at,
-                    ChatMessageFeedbackRow.feedback_id,
+                    ChatMessageFeedbackORM.created_at,
+                    ChatMessageFeedbackORM.feedback_id,
                 )
             )
             return tuple(
@@ -887,7 +887,7 @@ class ChatRepository:
 
     async def read_feedback_by_id(self, feedback_id: str) -> ChatMessageFeedback | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ChatMessageFeedbackRow, feedback_id)
+            row = await db.get(ChatMessageFeedbackORM, feedback_id)
             return (
                 ChatMessageFeedback(
                     feedback_id=row.feedback_id,
@@ -907,10 +907,10 @@ class ChatRepository:
 
     async def start_model_call(self, call: ChatModelCall) -> ChatModelCall:
         async with AsyncSessionLocal() as db, db.begin():
-            if await db.get(ChatSessionRow, call.session_id) is None:
+            if await db.get(ChatSessionORM, call.session_id) is None:
                 raise ChatRecordNotFound(f"chat session not found: {call.session_id}")
             existing = await db.get(
-                ChatModelCallRow, call.call_id, with_for_update=True
+                ChatModelCallORM, call.call_id, with_for_update=True
             )
             if existing is not None:
                 if (
@@ -936,7 +936,7 @@ class ChatRepository:
                     completion_tokens=existing.completion_tokens,
                     total_tokens=existing.total_tokens,
                 )
-            row = ChatModelCallRow(
+            row = ChatModelCallORM(
                 call_id=call.call_id,
                 session_id=call.session_id,
                 trigger_message_id=call.trigger_message_id,
@@ -979,7 +979,7 @@ class ChatRepository:
         self, *, session_id: str, call_id: str, outcome: ModelCallOutcome
     ) -> ChatModelCall:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(ChatModelCallRow, call_id, with_for_update=True)
+            row = await db.get(ChatModelCallORM, call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise ChatRecordNotFound(f"chat model call not found: {call_id}")
             if row.finished_at is not None:
@@ -1037,9 +1037,9 @@ class ChatRepository:
         offset = max(0, int(offset))
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
-                select(ChatModelCallRow)
-                .where(ChatModelCallRow.session_id == session_id)
-                .order_by(ChatModelCallRow.started_at, ChatModelCallRow.call_id)
+                select(ChatModelCallORM)
+                .where(ChatModelCallORM.session_id == session_id)
+                .order_by(ChatModelCallORM.started_at, ChatModelCallORM.call_id)
                 .offset(offset)
                 .limit(limit)
             )
@@ -1069,7 +1069,7 @@ class ChatRepository:
         self, session_id: str, call_id: str
     ) -> ChatModelCall | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ChatModelCallRow, call_id)
+            row = await db.get(ChatModelCallORM, call_id)
             if row is None or row.session_id != session_id:
                 return None
             return ChatModelCall(
@@ -1092,7 +1092,7 @@ class ChatRepository:
             )
 
     async def save_feedback(self, feedback: ChatMessageFeedback) -> ChatMessageFeedback:
-        row = ChatMessageFeedbackRow
+        row = ChatMessageFeedbackORM
         statement = insert(row).values(
             feedback_id=feedback.feedback_id,
             session_id=feedback.session_id,
@@ -1153,16 +1153,16 @@ class ChatRepository:
     ) -> None:
         async with AsyncSessionLocal() as db, db.begin():
             await db.execute(
-                delete(ChatMessageFeedbackRow).where(
-                    ChatMessageFeedbackRow.session_id == session_id,
-                    ChatMessageFeedbackRow.message_id == message_id,
-                    ChatMessageFeedbackRow.user_id == user_id,
+                delete(ChatMessageFeedbackORM).where(
+                    ChatMessageFeedbackORM.session_id == session_id,
+                    ChatMessageFeedbackORM.message_id == message_id,
+                    ChatMessageFeedbackORM.user_id == user_id,
                 )
             )
 
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         async with AsyncSessionLocal() as db:
-            row = await db.get(ChatToolCallRow, tool_call_id)
+            row = await db.get(ChatToolCallORM, tool_call_id)
             return (
                 ChatToolCall(
                     tool_call_id=row.tool_call_id,
@@ -1193,10 +1193,10 @@ class ChatRepository:
         async with AsyncSessionLocal() as db, db.begin():
             rows = tuple(
                 await db.scalars(
-                    select(ChatToolCallRow)
+                    select(ChatToolCallORM)
                     .where(
-                        ChatToolCallRow.session_id == session_id,
-                        ChatToolCallRow.status == ToolCallStatus.RUNNING.value,
+                        ChatToolCallORM.session_id == session_id,
+                        ChatToolCallORM.status == ToolCallStatus.RUNNING.value,
                     )
                     .with_for_update()
                 )
@@ -1248,7 +1248,7 @@ class ChatRepository:
             raise ValueError("chat tool call belongs to another session")
         async with AsyncSessionLocal() as db, db.begin():
             session_row = await db.get(
-                ChatSessionRow, chat_session.session_id, with_for_update=True
+                ChatSessionORM, chat_session.session_id, with_for_update=True
             )
             if session_row is None:
                 raise ValueError(f"chat session not found: {chat_session.session_id}")
@@ -1260,9 +1260,9 @@ class ChatRepository:
 
             existing_messages = tuple(
                 await db.scalars(
-                    select(ChatMessageRow)
-                    .where(ChatMessageRow.session_id == chat_session.session_id)
-                    .order_by(ChatMessageRow.position)
+                    select(ChatMessageORM)
+                    .where(ChatMessageORM.session_id == chat_session.session_id)
+                    .order_by(ChatMessageORM.position)
                 )
             )
             existing_ids = tuple(row.message_id for row in existing_messages)
@@ -1274,10 +1274,10 @@ class ChatRepository:
             for position, message in enumerate(
                 messages[len(existing_ids) :], len(existing_ids)
             ):
-                if await db.get(ChatMessageRow, message.message_id) is not None:
+                if await db.get(ChatMessageORM, message.message_id) is not None:
                     raise ValueError("message identity cannot be reassigned")
                 db.add(
-                    ChatMessageRow(
+                    ChatMessageORM(
                         message_id=message.message_id,
                         session_id=message.session_id,
                         position=position,
@@ -1334,9 +1334,9 @@ class ChatRepository:
                     not in assistant.tool_calls
                 ):
                     raise ValueError("tool call must match its assistant request")
-                row = await db.get(ChatToolCallRow, call.tool_call_id)
+                row = await db.get(ChatToolCallORM, call.tool_call_id)
                 if row is None:
-                    row = ChatToolCallRow(
+                    row = ChatToolCallORM(
                         tool_call_id=call.tool_call_id,
                         session_id=call.session_id,
                         assistant_message_id=call.assistant_message_id,
@@ -1382,7 +1382,7 @@ class ChatRepository:
 
             for message in messages:
                 for request in message.tool_calls:
-                    call_row = await db.get(ChatToolCallRow, request.tool_call_id)
+                    call_row = await db.get(ChatToolCallORM, request.tool_call_id)
                     if (
                         call_row is None
                         or call_row.session_id != chat_session.session_id
@@ -1405,7 +1405,7 @@ class ChatRepository:
                         )
 
             for result in tool_results:
-                call_row = await db.get(ChatToolCallRow, result.tool_call_id)
+                call_row = await db.get(ChatToolCallORM, result.tool_call_id)
                 if call_row is None or call_row.session_id != chat_session.session_id:
                     raise ValueError("tool result belongs to an unknown call")
                 call_row.result_status = result.status.value
@@ -1430,7 +1430,7 @@ class ChatRepository:
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be approved or rejected")
         async with AsyncSessionLocal() as db, db.begin():
-            session_row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            session_row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if session_row is None or session_row.user_id != user_id:
                 raise ChatRecordNotFound(f"chat session not found: {session_id}")
             permission = {
@@ -1445,7 +1445,7 @@ class ChatRepository:
                 raise ChatWriteConflict(
                     "permission_read_only", "This conversation is read-only."
                 )
-            row = await db.get(ChatToolCallRow, tool_call_id, with_for_update=True)
+            row = await db.get(ChatToolCallORM, tool_call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise ChatRecordNotFound(f"chat tool call not found: {tool_call_id}")
             call = ChatToolCall(
@@ -1543,10 +1543,10 @@ class ChatRepository:
         started_at: str,
     ) -> ChatToolCall | None:
         async with AsyncSessionLocal() as db, db.begin():
-            session_row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            session_row = await db.get(ChatSessionORM, session_id, with_for_update=True)
             if session_row is None or session_row.user_id != user_id:
                 raise ChatRecordNotFound(f"chat session not found: {session_id}")
-            row = await db.get(ChatToolCallRow, tool_call_id, with_for_update=True)
+            row = await db.get(ChatToolCallORM, tool_call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise ChatRecordNotFound(f"chat tool call not found: {tool_call_id}")
             call = ChatToolCall(

@@ -22,7 +22,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ComparisonGroupRow(Base):
+class ComparisonGroupORM(Base):
     __tablename__ = "comparison_group"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -55,7 +55,7 @@ class ComparisonGroupRow(Base):
     limitations_json: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 
 
-class ComparisonGroupMemberRow(Base):
+class ComparisonGroupMemberORM(Base):
     __tablename__ = "comparison_group_member"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -85,4 +85,4 @@ class ComparisonGroupMemberRow(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-__all__ = ["ComparisonGroupMemberRow", "ComparisonGroupRow"]
+__all__ = ["ComparisonGroupMemberORM", "ComparisonGroupORM"]

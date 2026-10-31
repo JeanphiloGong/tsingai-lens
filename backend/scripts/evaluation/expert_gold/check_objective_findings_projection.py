@@ -1938,10 +1938,10 @@ async def _resolve_manifest_document_ids(
             build_database_engine,
         )
         from infra.persistence.postgres.models.document import (  # noqa: PLC0415
-            Document,
+            DocumentORM,
         )
         from infra.persistence.postgres.models.document_preparation import (  # noqa: PLC0415
-            DocumentPreparationRow,
+            DocumentPreparationORM,
         )
         from sqlalchemy import select  # noqa: PLC0415
 
@@ -1951,14 +1951,14 @@ async def _resolve_manifest_document_ids(
             async with AsyncSessionLocal() as db:
                 rows = (
                     await db.execute(
-                        select(DocumentPreparationRow.document_id, Document.sha256)
+                        select(DocumentPreparationORM.document_id, DocumentORM.sha256)
                         .join(
-                            Document,
-                            Document.document_id == DocumentPreparationRow.document_id,
+                            DocumentORM,
+                            DocumentORM.document_id == DocumentPreparationORM.document_id,
                         )
                         .where(
-                            Document.collection_id == collection_id,
-                            Document.sha256.in_(expected_hashes),
+                            DocumentORM.collection_id == collection_id,
+                            DocumentORM.sha256.in_(expected_hashes),
                         )
                     )
                 ).all()

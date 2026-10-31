@@ -10,7 +10,7 @@ from infra.persistence import database
 
 
 from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
+    DocumentPreparationORM,
 )
 from repositories.collection_repository import (
     CollectionRepository,
@@ -89,8 +89,8 @@ async def test_profiles_and_paper_maps_are_current_per_document(
     )
     async with database.AsyncSessionLocal() as session:
         stored_map = await session.scalar(
-            select(DocumentPreparationRow).where(
-                DocumentPreparationRow.document_id == "doc_a"
+            select(DocumentPreparationORM).where(
+                DocumentPreparationORM.document_id == "doc_a"
             )
         )
     assert (
@@ -112,7 +112,7 @@ async def test_profile_replacement_does_not_relabel_current_source(
     )
     await source_repository.replace_document(COLLECTION_ID, source)
     async with database.AsyncSessionLocal() as session:
-        row = await session.get(DocumentPreparationRow, "doc_a")
+        row = await session.get(DocumentPreparationORM, "doc_a")
         current_fingerprint = row.source_fingerprint
     stale_profile = replace(
         _profile("doc_a", "Previous profile"), source_fingerprint="old-source"
@@ -125,7 +125,7 @@ async def test_profile_replacement_does_not_relabel_current_source(
         replace(document, document=replace(document.document, status="processing"))
     )
     async with database.AsyncSessionLocal() as session:
-        row = await session.get(DocumentPreparationRow, "doc_a")
+        row = await session.get(DocumentPreparationORM, "doc_a")
         assert row.source_fingerprint == current_fingerprint
         assert row.profile_json["source_fingerprint"] == "old-source"
     assert await profiles.read(COLLECTION_ID, "doc_a") == stale_profile
@@ -160,7 +160,7 @@ async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_read
 ) -> None:
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import update
-    from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
+    from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
     from repositories.pipeline_run_repository import PipelineLeaseLostError
 
     runs = PipelineRunRepository()
@@ -182,8 +182,8 @@ async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_read
     )
     async with postgres_session_factory() as db, db.begin():
         await db.execute(
-            update(PipelineRunRow)
-            .where(PipelineRunRow.run_id == run.run_id)
+            update(PipelineRunORM)
+            .where(PipelineRunORM.run_id == run.run_id)
             .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
         )
     replacement = await runs.claim_next_document_preparation_job(

@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from infra.persistence.postgres.models.objective_experiment_selection import (
-    ObjectiveExperimentSelectionRow,
-    SelectionComparisonRow,
-    SelectionMeasurementRow,
+    ObjectiveExperimentSelectionORM,
+    SelectionComparisonORM,
+    SelectionMeasurementORM,
 )
 from infra.persistence.postgres.models.paper_experiment import (
-    ExperimentComparisonRow,
-    ExperimentMeasurementResultRow,
-    PaperExperimentRow,
+    ExperimentComparisonORM,
+    ExperimentMeasurementResultORM,
+    PaperExperimentORM,
 )
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -44,9 +44,9 @@ class ObjectiveExperimentSelectionRepository:
         selection_id: str,
     ) -> ObjectiveExperimentSelection | None:
         row = await db.scalar(
-            select(ObjectiveExperimentSelectionRow).where(
-                ObjectiveExperimentSelectionRow.collection_id == collection_id,
-                ObjectiveExperimentSelectionRow.selection_id == selection_id,
+            select(ObjectiveExperimentSelectionORM).where(
+                ObjectiveExperimentSelectionORM.collection_id == collection_id,
+                ObjectiveExperimentSelectionORM.selection_id == selection_id,
             )
         )
         return await load_experiment_selection(db, row) if row is not None else None
@@ -60,14 +60,14 @@ class ObjectiveExperimentSelectionRepository:
     ) -> tuple[ObjectiveExperimentSelection, ...]:
         rows = tuple(
             await db.scalars(
-                select(ObjectiveExperimentSelectionRow)
+                select(ObjectiveExperimentSelectionORM)
                 .where(
-                    ObjectiveExperimentSelectionRow.collection_id == collection_id,
-                    ObjectiveExperimentSelectionRow.objective_id == objective_id,
-                    ObjectiveExperimentSelectionRow.analysis_version
+                    ObjectiveExperimentSelectionORM.collection_id == collection_id,
+                    ObjectiveExperimentSelectionORM.objective_id == objective_id,
+                    ObjectiveExperimentSelectionORM.analysis_version
                     == analysis_version,
                 )
-                .order_by(ObjectiveExperimentSelectionRow.selection_id)
+                .order_by(ObjectiveExperimentSelectionORM.selection_id)
             )
         )
         return tuple([await load_experiment_selection(db, row) for row in rows])
@@ -85,9 +85,9 @@ async def _add_selection(
     if selection.objective_id == "":
         raise ValueError("selection requires objective")
     existing = await db.scalar(
-        select(ObjectiveExperimentSelectionRow).where(
-            ObjectiveExperimentSelectionRow.selection_id == selection.selection_id,
-            ObjectiveExperimentSelectionRow.collection_id == collection_id,
+        select(ObjectiveExperimentSelectionORM).where(
+            ObjectiveExperimentSelectionORM.selection_id == selection.selection_id,
+            ObjectiveExperimentSelectionORM.collection_id == collection_id,
         )
     )
     if existing is not None:
@@ -97,7 +97,7 @@ async def _add_selection(
         raise ValueError("selection identity already belongs to another record")
 
     await _validate_analysis(db, collection_id, selection)
-    revision = await db.get(PaperExperimentRow, revision_id)
+    revision = await db.get(PaperExperimentORM, revision_id)
     if revision is None:
         raise ValueError("selection experiment revision was not found")
     if (
@@ -108,9 +108,9 @@ async def _add_selection(
 
     measurements = tuple(
         await db.scalars(
-            select(ExperimentMeasurementResultRow).where(
-                ExperimentMeasurementResultRow.paper_experiment_id == revision_id,
-                ExperimentMeasurementResultRow.measurement_key.in_(
+            select(ExperimentMeasurementResultORM).where(
+                ExperimentMeasurementResultORM.paper_experiment_id == revision_id,
+                ExperimentMeasurementResultORM.measurement_key.in_(
                     selection.measurement_keys
                 ),
             )
@@ -118,9 +118,9 @@ async def _add_selection(
     )
     comparisons = tuple(
         await db.scalars(
-            select(ExperimentComparisonRow).where(
-                ExperimentComparisonRow.paper_experiment_id == revision_id,
-                ExperimentComparisonRow.comparison_key.in_(selection.comparison_keys),
+            select(ExperimentComparisonORM).where(
+                ExperimentComparisonORM.paper_experiment_id == revision_id,
+                ExperimentComparisonORM.comparison_key.in_(selection.comparison_keys),
             )
         )
     )
@@ -135,7 +135,7 @@ async def _add_selection(
     measurements_by_key = {item.measurement_key: item for item in measurements}
     comparisons_by_key = {item.comparison_key: item for item in comparisons}
 
-    row = ObjectiveExperimentSelectionRow(
+    row = ObjectiveExperimentSelectionORM(
         selection_id=selection.selection_id,
         collection_id=collection_id,
         objective_id=selection.objective_id,
@@ -149,7 +149,7 @@ async def _add_selection(
     )
     db.add(row)
     db.add_all(
-        SelectionMeasurementRow(
+        SelectionMeasurementORM(
             selection_id=selection.selection_id,
             revision_id=revision_id,
             measurement_id=measurements_by_key[key].id,
@@ -158,7 +158,7 @@ async def _add_selection(
         for key in selection.measurement_keys
     )
     db.add_all(
-        SelectionComparisonRow(
+        SelectionComparisonORM(
             selection_id=selection.selection_id,
             revision_id=revision_id,
             comparison_id=comparisons_by_key[key].id,
@@ -179,10 +179,10 @@ async def _validate_analysis(
     selection: ObjectiveExperimentSelection,
 ) -> None:
     row = await db.scalar(
-        select(ObjectiveAnalysisRecord).where(
-            ObjectiveAnalysisRecord.collection_id == collection_id,
-            ObjectiveAnalysisRecord.objective_id == selection.objective_id,
-            ObjectiveAnalysisRecord.analysis_version == selection.analysis_version,
+        select(ObjectiveAnalysisORM).where(
+            ObjectiveAnalysisORM.collection_id == collection_id,
+            ObjectiveAnalysisORM.objective_id == selection.objective_id,
+            ObjectiveAnalysisORM.analysis_version == selection.analysis_version,
         )
     )
     if row is None:
@@ -191,20 +191,20 @@ async def _validate_analysis(
 
 async def load_experiment_selection(
     db: AsyncSession,
-    row: ObjectiveExperimentSelectionRow,
+    row: ObjectiveExperimentSelectionORM,
 ) -> ObjectiveExperimentSelection:
     measurement_keys = tuple(
         await db.scalars(
-            select(SelectionMeasurementRow.measurement_key)
-            .where(SelectionMeasurementRow.selection_id == row.selection_id)
-            .order_by(SelectionMeasurementRow.id)
+            select(SelectionMeasurementORM.measurement_key)
+            .where(SelectionMeasurementORM.selection_id == row.selection_id)
+            .order_by(SelectionMeasurementORM.id)
         )
     )
     comparison_keys = tuple(
         await db.scalars(
-            select(SelectionComparisonRow.comparison_key)
-            .where(SelectionComparisonRow.selection_id == row.selection_id)
-            .order_by(SelectionComparisonRow.id)
+            select(SelectionComparisonORM.comparison_key)
+            .where(SelectionComparisonORM.selection_id == row.selection_id)
+            .order_by(SelectionComparisonORM.id)
         )
     )
     return ObjectiveExperimentSelection(

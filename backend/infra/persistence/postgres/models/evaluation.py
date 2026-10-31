@@ -24,7 +24,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class EvaluationGoldSetRecord(Base):
+class EvaluationGoldSetORM(Base):
     __tablename__ = "evaluation_gold_sets"
 
     gold_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -49,7 +49,7 @@ class EvaluationGoldSetRecord(Base):
     )
 
 
-class EvaluationPredictionSnapshotRecord(Base):
+class EvaluationPredictionSnapshotORM(Base):
     __tablename__ = "evaluation_prediction_snapshots"
     __table_args__ = (
         Index("ix_evaluation_snapshots_collection", "collection_id", "fact_source"),
@@ -77,7 +77,7 @@ class EvaluationPredictionSnapshotRecord(Base):
     )
 
 
-class EvaluationRunRecord(Base):
+class EvaluationRunORM(Base):
     __tablename__ = "evaluation_runs"
     __table_args__ = (
         Index("ix_evaluation_runs_collection", "collection_id", "created_at"),
@@ -115,7 +115,7 @@ class EvaluationRunRecord(Base):
     )
 
 
-class FindingFeedbackRecord(Base):
+class FindingFeedbackORM(Base):
     __tablename__ = "finding_feedback_records"
     __table_args__ = (
         # Finding identity is validated against the JSON result payload by
@@ -136,7 +136,7 @@ class FindingFeedbackRecord(Base):
     )
 
 
-class FindingCurationRecord(Base):
+class FindingCurationORM(Base):
     __tablename__ = "finding_curation_records"
     __table_args__ = (
         # Finding identity is validated against the JSON result payload by
@@ -160,9 +160,9 @@ class FindingCurationRecord(Base):
 
 
 __all__ = [
-    "EvaluationGoldSetRecord",
-    "EvaluationPredictionSnapshotRecord",
-    "EvaluationRunRecord",
-    "FindingCurationRecord",
-    "FindingFeedbackRecord",
+    "EvaluationGoldSetORM",
+    "EvaluationPredictionSnapshotORM",
+    "EvaluationRunORM",
+    "FindingCurationORM",
+    "FindingFeedbackORM",
 ]

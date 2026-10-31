@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 import asyncio
 from hashlib import sha256
 
@@ -89,20 +91,20 @@ class _ImmediateDocumentPreparationService:
             parser_version="test-parser",
             document_analysis_version="test-analysis",
         )
-        return await self.pipeline_run_service.finish_run(
-            run.run_id,
-            job=job,
-            status="completed",
-            current_node="ready",
-            progress_percent=100,
-            progress_detail={
-                "phase": "ready",
-                "unit": "document",
-                "message": "The document is ready.",
-            },
-        )
-
-
+        async with database.AsyncSessionLocal() as db, db.begin():
+            return await self.pipeline_run_service.finish_run(
+                run.run_id,
+                job=job,
+                status="completed",
+                current_node="ready",
+                progress_percent=100,
+                progress_detail={
+                    "phase": "ready",
+                    "unit": "document",
+                    "message": "The document is ready.",
+                },
+                db=db,
+            )
 @pytest.fixture()
 def app_client(
     monkeypatch,

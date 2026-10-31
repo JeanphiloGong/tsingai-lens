@@ -1,3 +1,5 @@
+
+from infra.persistence import database
 """Preparation keeps traceable Source on Profile failure and reuses it on retry."""
 
 from datetime import timedelta
@@ -233,7 +235,8 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     assert await DocumentProfileRepo.read("prepare-papers", "paper-a") is None
     source = await SourceArtifactRepo.read_document("prepare-papers", "paper-a")
     assert (source is not None) == (stage == "profile")
-    assert (await PipelineRunRepo.read_run(run.run_id)).status == "running"
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert (await PipelineRunRepo.read_run(run.run_id, db=db)).status == "running"
     assert replacements[0].lease_version > original.lease_version
 
     result = await preparation.execute_document_preparation_job(

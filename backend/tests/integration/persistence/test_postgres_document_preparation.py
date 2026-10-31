@@ -191,10 +191,12 @@ async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_read
     )
     assert replacement.lease_version == original.lease_version + 1
     with pytest.raises(PipelineLeaseLostError):
-        await pipeline_run_service.finish_run(run.run_id, job=original, status="failed")
-    finished = await pipeline_run_service.finish_run(
-        run.run_id, job=replacement, status="failed", current_node="source_parsing"
-    )
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await pipeline_run_service.finish_run(run.run_id, job=original, status="failed", db=db)
+    async with database.AsyncSessionLocal() as db, db.begin():
+        finished = await pipeline_run_service.finish_run(
+            run.run_id, job=replacement, status="failed", current_node="source_parsing"
+        , db=db)
     from controllers.schemas.source.pipeline_run import pipeline_run_response
 
     assert PipelineRunResponse(**pipeline_run_response(finished)).status == "failed"

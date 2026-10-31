@@ -1,3 +1,5 @@
+
+from infra.persistence import database
 from tests.support.research_jobs import pipeline_job_fixture, update_pipeline_fixture
 from dataclasses import replace
 
@@ -87,9 +89,10 @@ async def test_start_reuses_active_preparation_with_complete_safe_run_observatio
     assert observation["finished_at"] is None
     assert result.resource_refs[0].resource_id == run.run_id
     assert raw_error not in str(result)
-    assert (await pipeline_run_service.PipelineRunRepo.read_run(run.run_id)).errors == (
-        raw_error,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert (await pipeline_run_service.PipelineRunRepo.read_run(run.run_id, db=db)).errors == (
+            raw_error,
+        )
 
 
 async def test_inspect_reports_historical_failure_without_exposing_provider_details(
@@ -105,15 +108,17 @@ async def test_inspect_reports_historical_failure_without_exposing_provider_deta
         scope_id="doc_a",
     )
     raw_error = "provider failed at /private/provider/config"
-    await pipeline_run_service.finish_run(
-        run.run_id,
-        status="failed",
-        current_node="document_profile",
-        errors=[raw_error],
-        job=await pipeline_job_fixture(
-            pipeline_run_service.PipelineRunRepo, run.run_id
-        ),
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await pipeline_run_service.finish_run(
+            run.run_id,
+            status="failed",
+            current_node="document_profile",
+            errors=[raw_error],
+            job=await pipeline_job_fixture(
+                pipeline_run_service.PipelineRunRepo, run.run_id
+            ),
+            db=db,
+        )
     result = await InspectResearchProcessCapability().execute(
         CapabilityExecutionContext(
             "session-1", "user-1", "col_process", "call-inspect"
@@ -130,6 +135,7 @@ async def test_inspect_reports_historical_failure_without_exposing_provider_deta
         pipeline_run_service.document_preparation_error_message("document_profile")
     ]
     assert raw_error not in str(result)
-    assert (await pipeline_run_service.PipelineRunRepo.read_run(run.run_id)).errors == (
-        raw_error,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert (await pipeline_run_service.PipelineRunRepo.read_run(run.run_id, db=db)).errors == (
+            raw_error,
+        )

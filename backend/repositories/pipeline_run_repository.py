@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from contextlib import nullcontext
 from enum import StrEnum
 from typing import Any
 
@@ -607,88 +606,87 @@ class PipelineRunRepository:
             return run, True
 
     async def read_run(
-        self, run_id: str, *, db: AsyncSession | None = None
+        self, run_id: str, *, db: AsyncSession
     ) -> PipelineRun | None:
-        async with AsyncSessionLocal() if db is None else nullcontext(db) as db:
-            row = await db.get(PipelineRunORM, run_id)
-            if row is None:
-                return None
-            payload = row.record_json
-            return PipelineRun(
-                pipeline_name=row.pipeline_name,
-                mode=row.mode,
-                run_id=row.run_id,
-                collection_id=row.collection_id,
-                scope_type=row.scope_type,
-                scope_id=row.scope_id,
-                status=PipelineRunStatus(row.status),
-                nodes=tuple(
-                    PipelineNodeRun(
-                        name=name,
-                        dependencies=tuple(node.get("dependencies", ())),
-                        status=PipelineNodeStatus(node["status"]),
-                        errors=tuple(node.get("errors", ())),
-                        warnings=tuple(node.get("warnings", ())),
-                        stats=ExecutionStats(
-                            duration_ms=(node.get("stats") or {}).get("duration_ms"),
-                            model_usage=tuple(
-                                ModelUsage(
-                                    model_name=item["model_name"],
-                                    request_count=item["request_count"],
-                                    token_usage=(
-                                        TokenUsage(**item["token_usage"])
-                                        if item.get("token_usage") is not None
-                                        else None
-                                    ),
-                                    unreported_request_count=item.get(
-                                        "unreported_request_count", 0
-                                    ),
-                                )
-                                for item in (node.get("stats") or {}).get("model_usage", ())
-                            ),
-                            prompt_versions=(node.get("stats") or {}).get(
-                                "prompt_versions", {}
-                            ),
+        row = await db.get(PipelineRunORM, run_id)
+        if row is None:
+            return None
+        payload = row.record_json
+        return PipelineRun(
+            pipeline_name=row.pipeline_name,
+            mode=row.mode,
+            run_id=row.run_id,
+            collection_id=row.collection_id,
+            scope_type=row.scope_type,
+            scope_id=row.scope_id,
+            status=PipelineRunStatus(row.status),
+            nodes=tuple(
+                PipelineNodeRun(
+                    name=name,
+                    dependencies=tuple(node.get("dependencies", ())),
+                    status=PipelineNodeStatus(node["status"]),
+                    errors=tuple(node.get("errors", ())),
+                    warnings=tuple(node.get("warnings", ())),
+                    stats=ExecutionStats(
+                        duration_ms=(node.get("stats") or {}).get("duration_ms"),
+                        model_usage=tuple(
+                            ModelUsage(
+                                model_name=item["model_name"],
+                                request_count=item["request_count"],
+                                token_usage=(
+                                    TokenUsage(**item["token_usage"])
+                                    if item.get("token_usage") is not None
+                                    else None
+                                ),
+                                unreported_request_count=item.get(
+                                    "unreported_request_count", 0
+                                ),
+                            )
+                            for item in (node.get("stats") or {}).get("model_usage", ())
                         ),
-                        timestamps=ExecutionTimestamps(**node.get("timestamps", {})),
-                        output_summary=node.get("output_summary", {}),
-                    )
-                    for name, node in payload.get("nodes", {}).items()
-                ),
-                errors=tuple(payload.get("errors", ())),
-                warnings=tuple(payload.get("warnings", ())),
-                stats=ExecutionStats(
-                    duration_ms=(payload.get("stats") or {}).get("duration_ms"),
-                    model_usage=tuple(
-                        ModelUsage(
-                            model_name=item["model_name"],
-                            request_count=item["request_count"],
-                            token_usage=(
-                                TokenUsage(**item["token_usage"])
-                                if item.get("token_usage") is not None
-                                else None
-                            ),
-                            unreported_request_count=item.get(
-                                "unreported_request_count", 0
-                            ),
-                        )
-                        for item in (payload.get("stats") or {}).get("model_usage", ())
+                        prompt_versions=(node.get("stats") or {}).get(
+                            "prompt_versions", {}
+                        ),
                     ),
-                    prompt_versions=(payload.get("stats") or {}).get("prompt_versions", {}),
+                    timestamps=ExecutionTimestamps(**node.get("timestamps", {})),
+                    output_summary=node.get("output_summary", {}),
+                )
+                for name, node in payload.get("nodes", {}).items()
+            ),
+            errors=tuple(payload.get("errors", ())),
+            warnings=tuple(payload.get("warnings", ())),
+            stats=ExecutionStats(
+                duration_ms=(payload.get("stats") or {}).get("duration_ms"),
+                model_usage=tuple(
+                    ModelUsage(
+                        model_name=item["model_name"],
+                        request_count=item["request_count"],
+                        token_usage=(
+                            TokenUsage(**item["token_usage"])
+                            if item.get("token_usage") is not None
+                            else None
+                        ),
+                        unreported_request_count=item.get(
+                            "unreported_request_count", 0
+                        ),
+                    )
+                    for item in (payload.get("stats") or {}).get("model_usage", ())
                 ),
-                timestamps=ExecutionTimestamps(
-                    created_at=_iso(row.created_at),
-                    updated_at=_iso(row.updated_at),
-                    started_at=payload.get("timestamps", {}).get("started_at"),
-                    finished_at=payload.get("timestamps", {}).get("finished_at"),
-                ),
-                input_fingerprint=row.input_fingerprint,
-                current_node=payload.get("current_node"),
-                progress_percent=payload.get("progress_percent", 0),
-                progress_detail=payload.get("progress_detail"),
-                context=payload.get("context", {}),
-                resumed_from_run_id=payload.get("resumed_from_run_id"),
-            )
+                prompt_versions=(payload.get("stats") or {}).get("prompt_versions", {}),
+            ),
+            timestamps=ExecutionTimestamps(
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=payload.get("timestamps", {}).get("started_at"),
+                finished_at=payload.get("timestamps", {}).get("finished_at"),
+            ),
+            input_fingerprint=row.input_fingerprint,
+            current_node=payload.get("current_node"),
+            progress_percent=payload.get("progress_percent", 0),
+            progress_detail=payload.get("progress_detail"),
+            context=payload.get("context", {}),
+            resumed_from_run_id=payload.get("resumed_from_run_id"),
+        )
 
     async def list_runs(
         self,

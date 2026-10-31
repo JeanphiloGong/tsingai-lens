@@ -24,3 +24,9 @@ rerun graph validation or advance nodes. They do not define a
 collection snapshot, select Source
 versions, or carry scientific results. Scientific ordering and result writes
 remain in the owning application service and artifact repository.
+
+Progress and completion writes require the caller's `db` session. Preparation
+and discovery own short transactions around these writes, including failure
+and asynchronous progress callbacks; model requests run outside them. An
+independent `get_run()` opens a read session before authorization. The repository
+reader uses the supplied session and never starts a second read implicitly.

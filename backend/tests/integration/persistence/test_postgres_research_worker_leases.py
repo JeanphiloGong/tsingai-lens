@@ -1,3 +1,5 @@
+
+from infra.persistence import database
 """Real competing workers, expiry, fencing and published-result continuity."""
 
 import asyncio
@@ -64,17 +66,20 @@ async def test_two_pipeline_workers_claim_once_and_expired_worker_cannot_write(
     )
     assert second.lease_version == first.lease_version + 1
     with pytest.raises(PipelineLeaseLostError):
-        await pipeline_run_service.finish_run(run.run_id, job=first, status="failed")
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await pipeline_run_service.finish_run(run.run_id, job=first, status="failed", db=db)
     with pytest.raises(PipelineLeaseLostError):
         await PipelineRunRepo.renew_lease(first, lease_duration=timedelta(seconds=60))
-    completed = await pipeline_run_service.finish_run(
-        run.run_id, job=second, status="completed"
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        completed = await pipeline_run_service.finish_run(
+            run.run_id, job=second, status="completed"
+        , db=db)
     assert completed.status == "completed"
     with pytest.raises(PipelineLeaseLostError):
-        await pipeline_run_service.update_run(
-            run.run_id, job=second, current_node="late-progress"
-        )
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await pipeline_run_service.update_run(
+                run.run_id, job=second, current_node="late-progress"
+            , db=db)
 
 
 async def _queue_analysis(factory):

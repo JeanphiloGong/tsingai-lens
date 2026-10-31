@@ -167,18 +167,20 @@ async def execute_objective_discovery_job(
     except Exception as exc:
         logger.exception("Objective discovery failed run_id=%s", run_id)
         await _flush_progress_updates(pending_progress_updates)
-        return await pipeline_run_service.finish_run(
-            run_id,
-            job=job,
-            status="failed",
-            current_node="failed",
-            errors=[str(exc)],
-            progress_detail={
-                "phase": "failed",
-                "unit": "documents",
-                "message": "Research question formation failed. Retry it.",
-            },
-        )
+        async with AsyncSessionLocal() as db, db.begin():
+            return await pipeline_run_service.finish_run(
+                run_id,
+                job=job,
+                db=db,
+                status="failed",
+                current_node="failed",
+                errors=[str(exc)],
+                progress_detail={
+                    "phase": "failed",
+                    "unit": "documents",
+                    "message": "Research question formation failed. Retry it.",
+                },
+            )
     finally:
         await _flush_progress_updates(pending_progress_updates)
 
@@ -190,6 +192,19 @@ def _build_discovery_progress_callback(
     loop = get_running_loop()
     progress_lock = Lock()
     last_percent = 5
+
+    async def persist_progress(
+        phase: str, percent: int, detail: dict[str, Any]
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            await pipeline_run_service.update_run(
+                job.run.run_id,
+                job=job,
+                db=db,
+                current_node=phase,
+                progress_percent=percent,
+                progress_detail=detail,
+            )
 
     def update(progress: dict[str, Any]) -> None:
         nonlocal last_percent
@@ -211,14 +226,7 @@ def _build_discovery_progress_callback(
             last_percent = max(last_percent, min(95, percent))
             pending_updates.append(
                 run_coroutine_threadsafe(
-                    pipeline_run_service.update_run(
-                        job.run.run_id,
-                        job=job,
-                        current_node=phase,
-                        progress_percent=last_percent,
-                        progress_detail=dict(progress),
-                    ),
-                    loop,
+                    persist_progress(phase, last_percent, dict(progress)), loop
                 )
             )
 

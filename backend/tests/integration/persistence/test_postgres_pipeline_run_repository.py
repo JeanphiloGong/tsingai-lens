@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from tests.support.research_jobs import update_pipeline_fixture
 
 from dataclasses import replace
@@ -158,7 +160,8 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
     )
 
     await update_pipeline_fixture(runs, running)
-    assert await runs.read_run(running.run_id) == running
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await runs.read_run(running.run_id, db=db) == running
     (summary,) = await runs.list_runs(collection_id=COLLECTION_ID)
     assert summary.run_id == running.run_id
     assert summary.progress_percent == 45

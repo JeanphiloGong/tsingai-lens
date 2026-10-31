@@ -52,7 +52,8 @@ async def pipeline_job_fixture(repository, run_id):
     jobs = getattr(repository, "_fixture_pipeline_jobs", {})
     if run_id in jobs:
         return jobs[run_id]
-    run = await repository.read_run(run_id)
+    async with database.AsyncSessionLocal() as db, db.begin():
+        run = await repository.read_run(run_id, db=db)
     claim = (
         repository.claim_next_document_preparation_job
         if run.pipeline_name == "document_preparation"

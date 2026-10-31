@@ -344,9 +344,10 @@ async def execute_document_preparation_job(
                     exc_info=True,
                 )
         stage = "document_profile"
-        await pipeline_run_service.update_run(
-            run_id, job=job, current_node=stage, progress_percent=45
-        )
+        async with AsyncSessionLocal() as db, db.begin():
+            await pipeline_run_service.update_run(
+                run_id, job=job, db=db, current_node=stage, progress_percent=45
+            )
         profile = await DocumentProfileRepo.read(collection_id, document_id)
         if (
             profile is None

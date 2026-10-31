@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
@@ -127,7 +126,8 @@ async def get_or_create_collection_run(
 
 
 async def get_run(run_id: str, *, user_id: str) -> PipelineRun:
-    run = await PipelineRunRepo.read_run(run_id)
+    async with AsyncSessionLocal() as db:
+        run = await PipelineRunRepo.read_run(run_id, db=db)
     if run is None:
         raise ResourceNotFoundException(
             "Pipeline run not found.",
@@ -163,7 +163,7 @@ async def update_run(
     run_id: str,
     *,
     job: PipelineRunJobSnapshot,
-    db: AsyncSession | None = None,
+    db: AsyncSession,
     status: str | None = None,
     current_node: str | None = None,
     progress_percent: int | None = None,
@@ -173,71 +173,70 @@ async def update_run(
 ) -> PipelineRun:
     if progress_percent is not None and not 0 <= progress_percent <= 100:
         raise ValueError("progress_percent must be between zero and 100")
-    async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-        await PipelineRunRepo.lock_job(db, job)
-        stored = await PipelineRunRepo.read_run(run_id, db=db)
-        if stored is None:
-            raise ResourceNotFoundException(
-                "Pipeline run not found.",
-                data={"code": "pipeline_run_not_found", "run_id": run_id},
-            )
-        now = _now_iso()
-        resolved_status = PipelineRunStatus(status or stored.status)
-        updated = stored
-        if (
-            resolved_status is PipelineRunStatus.RUNNING
-            and stored.timestamps.started_at is None
-        ):
-            updated = replace(
-                updated,
-                status=PipelineRunStatus.RUNNING,
-                timestamps=replace(updated.timestamps, started_at=now, updated_at=now),
-            )
-        updated = _transition_nodes(
-            updated,
-            current_node=current_node or stored.current_node,
-            status=resolved_status,
-            errors=tuple(errors or ()),
-            now=now,
+    await PipelineRunRepo.lock_job(db, job)
+    stored = await PipelineRunRepo.read_run(run_id, db=db)
+    if stored is None:
+        raise ResourceNotFoundException(
+            "Pipeline run not found.",
+            data={"code": "pipeline_run_not_found", "run_id": run_id},
         )
-        if resolved_status.is_terminal:
-            timestamps = replace(updated.timestamps, finished_at=now, updated_at=now)
-            updated = replace(
-                updated,
-                status=resolved_status,
-                timestamps=timestamps,
-                stats=replace(updated.stats, duration_ms=timestamps.duration_ms()),
-            )
-        else:
-            updated = replace(updated, status=resolved_status)
+    now = _now_iso()
+    resolved_status = PipelineRunStatus(status or stored.status)
+    updated = stored
+    if (
+        resolved_status is PipelineRunStatus.RUNNING
+        and stored.timestamps.started_at is None
+    ):
         updated = replace(
             updated,
-            current_node=current_node
-            if current_node is not None
-            else stored.current_node,
-            progress_percent=(
-                progress_percent
-                if progress_percent is not None
-                else stored.progress_percent
-            ),
-            progress_detail=(
-                progress_detail
-                if progress_detail is not None
-                else stored.progress_detail
-            ),
-            errors=(tuple(errors) if errors is not None else updated.errors),
-            warnings=(tuple(warnings) if warnings is not None else updated.warnings),
-            timestamps=replace(updated.timestamps, updated_at=now),
+            status=PipelineRunStatus.RUNNING,
+            timestamps=replace(updated.timestamps, started_at=now, updated_at=now),
         )
-        await PipelineRunRepo.update_run(updated, job=job, db=db)
-        return updated
+    updated = _transition_nodes(
+        updated,
+        current_node=current_node or stored.current_node,
+        status=resolved_status,
+        errors=tuple(errors or ()),
+        now=now,
+    )
+    if resolved_status.is_terminal:
+        timestamps = replace(updated.timestamps, finished_at=now, updated_at=now)
+        updated = replace(
+            updated,
+            status=resolved_status,
+            timestamps=timestamps,
+            stats=replace(updated.stats, duration_ms=timestamps.duration_ms()),
+        )
+    else:
+        updated = replace(updated, status=resolved_status)
+    updated = replace(
+        updated,
+        current_node=current_node
+        if current_node is not None
+        else stored.current_node,
+        progress_percent=(
+            progress_percent
+            if progress_percent is not None
+            else stored.progress_percent
+        ),
+        progress_detail=(
+            progress_detail
+            if progress_detail is not None
+            else stored.progress_detail
+        ),
+        errors=(tuple(errors) if errors is not None else updated.errors),
+        warnings=(tuple(warnings) if warnings is not None else updated.warnings),
+        timestamps=replace(updated.timestamps, updated_at=now),
+    )
+    await PipelineRunRepo.update_run(updated, job=job, db=db)
+    return updated
 
 
 async def finish_run(
     run_id: str,
     *,
     job: PipelineRunJobSnapshot,
-    db: AsyncSession | None = None,
+    db: AsyncSession,
     status: str,
     current_node: str | None = None,
     progress_percent: int = 100,

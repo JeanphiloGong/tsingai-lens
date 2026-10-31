@@ -182,7 +182,7 @@ async def _load_artifacts(
                 continue
             analysis = await objective_repository.read_analysis(
                 collection_id, objective.objective_id, version
-            ) if hasattr(objective_repository, "read_analysis") else None
+            )
             if is_experiment_backed_analysis(analysis):
                 objective_findings, objective_evidence, _ = (
                     await experiment_projection.read_analysis_records(

@@ -45,6 +45,11 @@ class _PublishedObjectiveRepository:
     def __init__(self, *, published: bool = True) -> None:
         self.published = published
 
+    async def read_analysis(self, *args):
+        return SimpleNamespace(
+            status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot"
+        )
+
     async def list_objectives(self, collection_id: str):
         if not self.published:
             return ()

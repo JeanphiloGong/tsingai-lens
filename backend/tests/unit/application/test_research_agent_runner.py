@@ -2501,6 +2501,10 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                     arguments={"question": "Test the supported preheating effect."},
                 ),),
             ),
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the reviewed research plan", "status": "completed"}],
+                "status": "completed", "explanation": "The exact approved write succeeded.",
+            }),)),
             ModelTurn(content="The approved plan draft has been saved."),
             discover=(
                 "inspect_published_finding",
@@ -3130,7 +3134,10 @@ async def test_plan_version_stays_on_model_updates_after_approved_write(write_st
     ).start("2026-10-10T00:00:01Z")
     events = []
     resumed = await ResearchAgentRunner(
-        model=_Model(ModelTurn(content="The save operation returned; its recorded status is authoritative.")),
+        model=_Model(
+            ModelTurn(content="The save operation returned; its recorded status is authoritative."),
+            ModelTurn(content="The research disposition is still unreported."),
+            ModelTurn(content="The save result is retained; the research plan is still incomplete.")),
         capabilities=capabilities,
     ).resume_claimed_call(
         context=_context(), previous_messages=proposed.messages, claimed_call=claimed,
@@ -3245,7 +3252,7 @@ async def test_model_authored_execution_plan_is_loaded_and_revised(monkeypatch) 
 
 
 @pytest.mark.parametrize("model_status, expected", [
-    ("in_progress", "completed"),
+    ("in_progress", "stalled"),
     ("completed", "completed"),
     ("waiting_for_clarification", "waiting_for_clarification"),
     ("scientific_refusal", "scientific_refusal"),
@@ -3263,6 +3270,9 @@ async def test_streamed_and_final_plan_preserve_the_same_research_outcome(model_
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan),)),
         ModelTurn(content="The available comparison is complete."),
+        *([ModelTurn(content="The conditions are still unchecked."),
+           ModelTurn(content="Partial result; continue the unchecked conditions.")]
+          if model_status == "in_progress" else []),
         discover=("update_execution_plan",),
     )
 

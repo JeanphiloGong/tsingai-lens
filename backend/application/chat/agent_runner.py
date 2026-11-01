@@ -159,8 +159,6 @@ def _research_plan_status(
         if completion_reason is AgentCompletionReason.NO_PROGRESS:
             return ResearchExecutionStatus.STALLED
         return ResearchExecutionStatus.RESOURCE_LIMITED
-    if completion_reason is AgentCompletionReason.MODEL_ANSWER and model_status is ResearchExecutionStatus.IN_PROGRESS:
-        return ResearchExecutionStatus.COMPLETED
     return model_status
 
 
@@ -934,6 +932,7 @@ class ResearchAgentRunner:
         permission_mode: ToolPermissionMode | str,
         progress: _RunProgress,
     ) -> AgentRunResult:
+        disposition_retries = 0
         while True:
             stop_reason = progress.stop_before_model()
             if stop_reason is not None:
@@ -1012,9 +1011,19 @@ class ResearchAgentRunner:
                                 budget_exhausted=False,
                             ),
                         )
+                    active_plan = (progress.execution_plan is not None
+                                   and progress.execution_plan.model_status is ResearchExecutionStatus.IN_PROGRESS)
+                    if active_plan:
+                        decision_messages = (*decision_messages, ChatMessage.user(
+                            message_id=self._message_id(), session_id=context.session_id,
+                            content=("The current execution plan is still in progress. Continue the available "
+                                     "checks, or update_execution_plan to completed, waiting_for_clarification, "
+                                     "or scientific_refusal before a final answer. Do not only announce a "
+                                     "future read. Unknown evidence may justify a limited answer; a tool "
+                                     "failure is not scientific absence."), created_at=_now_iso()))
                     turn = await self._model_turn(
                         decision_messages, tool_specs, progress,
-                        None if non_streaming_retry else text_delta_callback,
+                        None if non_streaming_retry or active_plan else text_delta_callback,
                         active_user_message_id=next(
                             message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                         ),
@@ -1164,6 +1173,16 @@ class ResearchAgentRunner:
                 break
 
             if not turn.tool_calls:
+                if (progress.execution_plan is not None
+                        and progress.execution_plan.model_status is ResearchExecutionStatus.IN_PROGRESS
+                        and progress.stop_before_model() is None):
+                    if disposition_retries == 0:
+                        disposition_retries += 1
+                        progress.trace(context, phase="plan_disposition_required")
+                        continue
+                    return await self._finalize_with_current_evidence(
+                        AgentCompletionReason.NO_PROGRESS, progress, context, messages, calls, results,
+                        checkpoint=checkpoint, text_delta_callback=text_delta_callback)
                 progress.trace(context, phase="model", capability_names=tool_names)
                 reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
                 messages.append(

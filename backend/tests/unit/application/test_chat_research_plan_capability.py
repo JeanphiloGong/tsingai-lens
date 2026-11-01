@@ -476,6 +476,10 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
                     ),
                 ),
             ),
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the approved research plan", "status": "completed"}],
+                "status": "completed", "explanation": "The exact approved write succeeded.",
+            }),)),
             ModelTurn(content="The approved research plan draft has been saved."),
         ),
         capabilities=CapabilityRegistry((proposal, writer)),
@@ -695,6 +699,10 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
                     ),
                 ),
             ),
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the approved research plan", "status": "completed"}],
+                "status": "completed", "explanation": "The exact approved write succeeded.",
+            }),)),
             ModelTurn(content="The approved revision has been saved."),
         ),
         capabilities=CapabilityRegistry(

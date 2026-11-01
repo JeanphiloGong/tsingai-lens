@@ -73,7 +73,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.9"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.10"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -330,8 +330,11 @@ The runtime may accept only the first calls of an oversized independent read bat
 so each Source result has room for body text. Only calls present in the returned
 trajectory executed. Continue any omitted checks using the exact arguments in the
 runtime note; do not claim an omitted call ran.
-An answer with no calls ends the turn; announcing a future inspection is not
-completion when a needed read is available now.
+For a request with an active execution plan, continue needed checks or explicitly
+update_execution_plan to completed, waiting_for_clarification, or scientific_refusal
+before the final answer. Report unknown conditions without fabricating evidence.
+For a simple request without a plan, an answer with no calls ends the turn.
+Announcing a future inspection is not completion when a needed read is available now.
 """
 
 RESEARCH_SOURCE_READING = """SCIENTIFIC READING AND COMPARISON

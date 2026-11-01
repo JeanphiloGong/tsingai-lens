@@ -365,7 +365,11 @@ for researcher review. This remains a transient conversation draft,
 not published Evidence or a saved scientific correction.
 
 Answer-only finalization cannot restart tool work. Its response must distinguish
-completed observations from unresolved checks. Tool activity remains visible
+completed observations from unresolved checks. The research phase reserves 20% of
+the same total deadline, capped by the existing finalization allowance. Normal
+model calls, retries, compaction and reads use the research remainder; finalization
+uses the total remainder. This does not extend the deadline or guarantee provider
+availability. The answer is buffered and validated before emitting it. Tool activity remains visible
 separately. Explicit evidence, evaluation against real research scenarios and
 researcher review remain necessary to assess scientific correctness.
 
@@ -415,7 +419,11 @@ replayed. Output truncation, authentication failures and rate limits retain
 their separate handling.
 
 Section inspection packs complete Sources into the available result allowance
-and exposes canonical lengths and estimated tokens in the outline. It defaults
+and exposes canonical lengths and estimated tokens in the outline. One complete
+tool-envelope size check includes warnings and continuation metadata; selected
+section reads repeat only that section's outline. Context-sized independent read
+batches retain deferred names and arguments as explicitly unexecuted runtime notes
+in the existing assistant trajectory. It defaults
 to at most 200 records, rather than eight truncated previews; token capacity
 usually determines the batch size. Oversized Sources remain explicitly unread
 and provide their exact reference for individual paginated reading. Independent
@@ -445,13 +453,20 @@ full scientific payloads remain in durable tool results. Identical, current,
 unexpired experiment drafts reuse their stored reference after Source validation.
 Unknown document identities return `document_not_found` with navigation advice;
 only known papers without Source content return `document_sources_not_ready`.
-Recent user requests receive a reserved share of the context before tool
-outputs. Adding one paper or deferring a review preserves other paper choices;
+All researcher input messages are pinned verbatim before tool outputs. If the
+inputs cannot fit, selection fails explicitly rather than summarizing parameter
+numbers. Ordinary new requests may inherit validated notes from the previous
+terminal snapshot and unfinished plan actions as historical runtime work. They
+receive fresh counters and plan scope; earlier approval is never inherited.
+Same-request approval continuations retain their existing consumed budgets. Adding one paper or deferring a review preserves other paper choices;
 compaction retains those choices separately from Agent recommendations.
 The active request is also identified after historical records and runtime hints,
 including during compaction. Its token cost is reserved in context selection.
 A later request for detailed results supersedes an earlier identification-only
-request while preserving the selected paper.
+request while preserving the selected paper. An ordinary model answer does not
+complete an active execution plan: the model must continue or explicitly report
+completed, waiting_for_clarification, or scientific_refusal. One corrective
+opportunity precedes a stalled finalization; technical stops retain their reason.
 Across user requests, a bounded reading summary is rebuilt from successful
 historical Source results, including versioned references, verbatim excerpts
 and explicit omissions. A new empty search cannot erase an earlier abstract

@@ -279,7 +279,7 @@ class AgentRunLimits:
     emergency_max_model_cycles: int | None = 64
     max_model_retries: int = 5
     max_request_seconds: float = 180.0
-    max_context_tokens: int = 65_536
+    max_context_tokens: int = 200_000
     max_parallel_reads: int = 4
     max_model_output_tokens: int = 16_384
     max_finalization_seconds: float = 300.0

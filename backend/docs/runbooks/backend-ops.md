@@ -62,7 +62,7 @@ export LENS_AGENT_NO_PROGRESS_LIMIT=2
 export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
 export LENS_AGENT_MAX_MODEL_RETRIES=5
 export LENS_AGENT_MAX_REQUEST_SECONDS=180
-export LENS_AGENT_CONTEXT_TOKENS=65536
+export LENS_AGENT_CONTEXT_TOKENS=200000
 export LENS_AGENT_MAX_PARALLEL_READS=4
 export LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS=16384
 export LENS_AGENT_MAX_FINALIZATION_SECONDS=300
@@ -428,7 +428,7 @@ bodies must remain outside browser errors and audit request JSON.
 ### Per-Connection Request Limits
 
 The three nullable limit fields use NULL to mean no connection-specific value,
-not unlimited. Agent defaults come from `LENS_AGENT_CONTEXT_TOKENS` (65536),
+not unlimited. Agent defaults come from `LENS_AGENT_CONTEXT_TOKENS` (200000),
 `LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS` (16384),
 `LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS` (8192), and
 `LENS_AGENT_MAX_REQUEST_SECONDS` (180 seconds); parentheses give built-in values

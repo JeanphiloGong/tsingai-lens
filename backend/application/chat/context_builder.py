@@ -24,7 +24,7 @@ class ChatModelContext:
     active_user_message_id: str | None = None
     working_summary: str = ""
     compacting: bool = False
-    max_context_tokens: int = 65_536
+    max_context_tokens: int = 200_000
     prior_reading_summary: str = ""
     execution_plan: Mapping[str, Any] | None = None
     # Runtime-only audit metadata. These fields never enter provider_messages.
@@ -188,6 +188,8 @@ class ChatContextBuilder:
                 char_count += size
                 message_count += len(units[i])
                 token_count += tokens
+            else:
+                break
         selected_messages = tuple(message for i in sorted(selected) for message in units[i])
         selected_ids = {message.message_id for message in selected_messages}
         omitted = tuple(
@@ -208,15 +210,12 @@ class ChatContextBuilder:
         self, *, context_limit: int, output_limit: int, system_prompt: str,
         tool_schemas: list[dict[str, Any]], execution_plan: Mapping[str, Any] | None,
     ) -> int:
-        """Reserve fixed instructions, output, framing and room for the next read."""
+        """Reserve fixed instructions, output, and protocol framing."""
         overhead = self.estimate_tokens({
             "messages": ChatModelContext((), execution_plan=execution_plan).provider_messages(system_prompt),
             "tools": tool_schemas,
         })
-        budget = context_limit - output_limit - overhead - 2048
-        if tool_schemas:
-            budget -= min(16_000, max(0, budget // 3))
-        return budget
+        return context_limit - output_limit - overhead - 2048
 
     def compaction_batch(
         self, active: ChatMessage, units: list[tuple[ChatMessage, ...]], *,

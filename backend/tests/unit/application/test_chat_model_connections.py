@@ -370,7 +370,7 @@ async def test_unbound_old_approval_refuses_to_guess_the_enabled_default(postgre
 @pytest.mark.parametrize(
     "row_limits, global_values, expected",
     [
-        ((None, None, None), {}, (65536, 16384, 8192, 180.0, 180.0)),
+        ((None, None, None), {}, (200000, 16384, 8192, 180.0, 180.0)),
         ((32768, 65536, 30.0), {}, (32768, 16384, 8192, 30.0, 30.0)),
         ((None, None, None), {
             "LENS_AGENT_CONTEXT_TOKENS": "98304",

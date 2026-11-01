@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Lens: from a research question to a supported decision</title>
+  <desc id="desc">An illustrative materials research question connects the intended decision to source inspection, experimental conditions, cross-paper comparison, and a judgment that preserves uncertainty. The researcher reviews what is supported and decides what to investigate next. The reasoning remains traceable and reusable. This is a research-process diagram, not an interface screenshot.</desc>
+  <defs>
+    <style>
+      text { font-family: 'Noto Sans', 'DejaVu Sans', sans-serif; fill: #171717; }
+      .heading { font-size: 29px; font-weight: 600; }
+      .body { font-size: 24px; }
+      .small { font-size: 22px; }
+      .muted { fill: #646464; }
+      .blue { fill: #2d56c7; }
+      .rule { stroke: #dedede; stroke-width: 1.5; }
+      .flow { fill: none; stroke: #2d56c7; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M1 1 L6 4 L1 7" fill="none" stroke="#2d56c7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="1" y="1" width="1598" height="1078" rx="16" fill="#ffffff" stroke="#dedede"/>
+  <text x="64" y="84" font-size="44" font-weight="600">Turn a research question into a supported decision.</text>
+  <text x="64" y="134" class="body muted">Use evidence and comparison to reduce uncertainty and choose the next investigation.</text>
+
+  <rect x="64" y="180" width="1472" height="118" rx="12" fill="#f4f4f4"/>
+  <text x="96" y="228" font-size="28" font-weight="600">Example question: Does laser power affect porosity in LPBF 316L?</text>
+  <text x="96" y="270" class="body muted">What does the literature support, and what should we test next?</text>
+
+  <text x="64" y="372" class="heading">Define the decision</text>
+  <path d="M409 361 H469" class="flow"/>
+  <text x="510" y="372" class="heading">Investigate the knowledge</text>
+  <path d="M985 361 H1045" class="flow"/>
+  <text x="1086" y="372" class="heading">Judge what holds</text>
+  <path d="M477 410 V716 M1053 410 V716" class="rule"/>
+
+  <text x="64" y="442" class="body">What needs to be understood?</text>
+  <text x="64" y="490" class="body muted">Specify the material, process,</text>
+  <text x="64" y="526" class="body muted">outcome and constraints.</text>
+  <text x="64" y="594" class="body">What would change our decision?</text>
+  <text x="64" y="642" class="body muted">Identify useful evidence and</text>
+  <text x="64" y="678" class="body muted">the uncertainty that matters.</text>
+
+  <text x="510" y="442" class="body">Inspect the original sources.</text>
+  <text x="510" y="486" class="small muted">Methods, results, tables and figures.</text>
+  <text x="510" y="548" class="body">Reconstruct the reported experiments.</text>
+  <text x="510" y="592" class="small muted">Variables, controls, conditions and measurements.</text>
+  <text x="510" y="654" class="body">Compare what the evidence supports.</text>
+  <text x="510" y="698" class="small muted">Retain differences, conflicts and missing facts.</text>
+
+  <text x="1086" y="442" class="body">What is supported, and why?</text>
+  <text x="1086" y="490" class="body muted">Review the reasoning and</text>
+  <text x="1086" y="526" class="body muted">the conditions where it holds.</text>
+  <text x="1086" y="594" class="body">What remains unresolved?</text>
+  <text x="1086" y="642" class="body muted">Decide what to inspect,</text>
+  <text x="1086" y="678" class="body muted">compare or investigate next.</text>
+
+  <path d="M64 768 H1536" class="rule"/>
+  <text x="64" y="826" class="heading">Keep the reasoning inspectable and reusable.</text>
+  <text x="64" y="900" font-size="26" font-weight="500">Original sources</text>
+  <path d="M300 891 H356" class="flow"/>
+  <text x="390" y="900" font-size="26" font-weight="500">Facts + conditions</text>
+  <path d="M653 891 H709" class="flow"/>
+  <text x="743" y="900" font-size="26" font-weight="500">Comparison</text>
+  <path d="M939 891 H995" class="flow"/>
+  <text x="1029" y="900" font-size="26" font-weight="500">Reviewable judgment</text>
+  <text x="64" y="942" class="small muted">Exact passages and locations</text>
+  <text x="390" y="942" class="small muted">What was actually measured</text>
+  <text x="743" y="942" class="small muted">Support and limitations</text>
+  <text x="1029" y="942" class="small muted">A basis for the next decision</text>
+  <text x="64" y="1030" class="body blue">Current v1 focus: traceable cross-paper comparison, reviewed by the researcher.</text>
+</svg>

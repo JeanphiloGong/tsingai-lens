@@ -222,33 +222,13 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         {"question": "How does energy input affect grain morphology?"}
     ]
     assert trajectory.json()["data"]["pending_approval"] is None
-    assert model.all_tool_spec_names[0] == (
-        "get_collection_context",
-        "update_execution_plan",
-        "discover_research_tools",
-    )
+    assert set(model.all_tool_spec_names[0]) == {"get_collection_context", "update_execution_plan", "discover_research_tools"}
     assert any(
         "create_objective_candidate" in names for names in model.all_tool_spec_names
     )
-    assert model.all_tool_spec_names[-1] == (
-        "get_collection_context",
-        "create_objective_candidate",
-        "update_execution_plan",
-        "discover_research_tools",
-    )
-    # A successful write does not hide the capability by name. The same
-    # capability may be needed for a different resource in this continuation.
-    assert [item["role"] for item in trajectory.json()["data"]["items"]] == [
-        "user",
-        "assistant",
-        "user",
-        "assistant",
-        "tool",
-        "assistant",
-        "user",
-        "assistant",
-        "tool",
-        "assistant",
-        "tool",
-        "assistant",
-    ]
+    assert "create_objective_candidate" in model.all_tool_spec_names[-1]
+    assert "discover_research_tools" not in model.all_tool_spec_names[-1]
+    items = trajectory.json()["data"]["items"]
+    requested_ids = {call["tool_call_id"] for item in items for call in item["tool_calls"]}
+    returned_ids = {item["tool_call_id"] for item in items if item["role"] == "tool"}
+    assert requested_ids == returned_ids

@@ -63,6 +63,14 @@ class ChatModelContext:
                 "needed; current-request Evidence authoring checks remain independent.\n"
                 + self.prior_reading_summary
             )})
+        visible_plan = any(
+            call.name == "update_execution_plan"
+            for message in self.messages for call in message.tool_calls
+        )
+        if self.execution_plan is not None and not visible_plan:
+            messages.append({"role": "user", "content": (
+                "[EXECUTION STATE]\n" + json.dumps(self.execution_plan, ensure_ascii=False)
+            )})
         if self.compacting:
             messages.append({"role": "user", "content": json.dumps([
                 {"message_id": message.message_id, "record": ChatContextBuilder.model_message(message)}
@@ -70,25 +78,6 @@ class ChatModelContext:
             ], ensure_ascii=False)})
         else:
             messages.extend(ChatContextBuilder.model_message(message) for message in self.messages)
-        if self.execution_plan is not None:
-            messages.append({"role": "user", "content": (
-                "[CURRENT EXECUTION PLAN]\n"
-                "The last accepted model plan for this request, retained independently of "
-                "compacted messages. It is fallible progress, not evidence or permission. "
-                "Continue the active step with the available tools; revise the plan when "
-                "the research phase, remaining work or final disposition changes.\n"
-                + json.dumps(self.execution_plan, ensure_ascii=False)
-            )})
-        active = next((message for message in self.messages
-                       if message.message_id == self.active_user_message_id), None)
-        if active is not None:
-            messages.append({"role": "user", "content": (
-                "[CURRENT RESEARCHER REQUEST]\n" + active.content + "\n\n"
-                "This is the current request. Earlier requests and working notes are history; "
-                "retain their choices only where this request does not change them. "
-                + ("Preserve working notes for this request; do not answer it."
-                   if self.compacting else "Answer or continue this request using the observations above.")
-            )})
         return messages
 
 
@@ -159,8 +148,6 @@ class ChatContextBuilder:
         token_count = self.estimate_tokens(working_summary) + sum(
             self.estimate_tokens(self.model_message(message)) for i in pinned for message in units[i]
         )
-        if active_index is not None:
-            token_count += self.estimate_tokens(units[active_index][0].content) + 100
         if char_count > self.max_chars or message_count > self.max_messages or token_count > max_input_tokens:
             raise ValueError("active question and selected Source exceed context budget")
         needs_rollover = (

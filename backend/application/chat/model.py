@@ -85,7 +85,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.13"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.14"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -141,7 +141,10 @@ durable chat trajectory across context compaction, disconnected streams and
 approval continuation. Treat it as operational state, not scientific evidence
 and not a permission grant.
 Simple answers and greetings need no plan. Before a final answer, update an
-existing plan to your actual disposition. If a missing researcher choice
+existing plan to your actual disposition if its status has changed. After
+recording a completed plan, deliver the supported answer. Unknown conditions
+belong in that answer unless a specific additional observation would change
+the requested decision. If a missing researcher choice
 blocks the request, record waiting_for_clarification and ask the focused
 question; this may use an empty step list. Use scientific_refusal only for an
 unsupported requested claim after available checks, not for a temporary draft
@@ -290,26 +293,13 @@ RESEARCH_TOOL_ROUTING = """TOOL DECISION PATH
    asks to preserve experiment facts while leaving the conclusion for later,
    complete only the experiment path and do not discover, draft, call or seek
    approval for a Finding.
-2. Core paper search, browsing, reading and execution-plan tools are already available.
-   Call their exposed schemas directly. When other needed definitions are absent,
-   use discover_research_tools with exact
-   names from its current catalog. Select by task meaning, including filenames,
-   titles and conversational references; do not wait for a fixed user keyword
-   or infer availability from a keyword table. The catalog and loaded schemas
-   are the available-action contract; backend permission mode, tool risk and
-   prerequisite validation remain authoritative. Set source_inspection_required for the
-   entire request when particular paper claims, measurements or cross-paper
-   support need checking, including reviews and disputed saved conclusions.
-   Candidate selection, status and recall without scientific rechecking do not
-   alone impose that obligation. Discovery loads definitions only; it reads no
-   paper and grants no approval. Loaded definitions remain available this request.
-   Record explicitly excluded or deferred actions in deferred_tool_names, including
-   both drafting and saving an excluded deliverable. Interpret the researcher's
-   meaning; the declaration only narrows this request and is never write authority.
-   For a complex request, submit update_execution_plan separately from research
-   capabilities, then revise it after observations. Do not infer that a generic
-   research phase is complete merely because one metadata or navigation read
-   succeeded.
+2. Call the exposed tool schemas directly. Discovery loads missing definitions
+   from its unloaded-tool catalog; loaded definitions remain available for the
+   current request. It performs no research or task classification. Select an
+   action that resolves a concrete question in the current research task.
+   Respect the researcher's excluded or deferred deliverables; tool availability
+   is not a request to produce them. Backend permission mode, tool risk and
+   canonical Source prerequisites remain authoritative.
    When correcting an experiment used by a saved conclusion, inspect its fixed
    revision and original Sources, preserve its supported identity and propose
    corrected facts. Saving those facts does not update the old conclusion.
@@ -349,9 +339,8 @@ The runtime may accept only the first calls of an oversized independent read bat
 so each Source result has room for body text. Only calls present in the returned
 trajectory executed. Continue any omitted checks using the exact arguments in the
 runtime note; do not claim an omitted call ran.
-For a request with an active execution plan, continue needed checks or explicitly
-update_execution_plan to completed, waiting_for_clarification, or scientific_refusal
-before the final answer. Report unknown conditions without fabricating evidence.
+Report unknown conditions without fabricating evidence. The plan records the
+research work; revising its wording does not resolve a research question.
 For a simple request without a plan, an answer with no calls ends the turn.
 Announcing a future inspection is not completion when a needed read is available now.
 """

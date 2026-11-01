@@ -47,6 +47,8 @@ class UpdateExecutionPlanCapability:
         name="update_execution_plan",
         description=(
             "Replace the current request's execution plan with your complete updated steps. "
+            "Update for a step-state transition, a changed research route, or final disposition. "
+            "Several reads within the same step can proceed without another plan update. "
             "Use short researcher-facing actions and stable step IDs; retain completed work "
             "when revising the remaining steps. Set status to in_progress while continuing, "
             "completed when the requested work is supported, waiting_for_clarification when "

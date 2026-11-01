@@ -70,65 +70,21 @@ def test_search_sources_is_declared_as_a_parallel_safe_read():
 
 
 @pytest.mark.anyio
-async def test_model_declared_deferral_blocks_draft_and_write_without_phrase_matching():
-    draft = _Capability("create_finding_draft", ToolRisk.DRAFT)
+async def test_discovery_loads_a_write_definition_without_authorizing_it():
     write = _Capability("create_finding_version", ToolRisk.WRITE)
-    turns = iter(
-        (
-            ModelTurn(
-                tool_calls=(
-                    ModelToolCall(
-                        "discover_research_tools",
-                        {
-                            "tool_names": [draft.spec.name, write.spec.name],
-                            "source_inspection_required": False,
-                            "deferred_tool_names": [draft.spec.name, write.spec.name],
-                        },
-                    ),
-                )
-            ),
-            ModelTurn(tool_calls=(ModelToolCall(draft.spec.name, {}),)),
-            ModelTurn(tool_calls=(ModelToolCall(write.spec.name, {}),)),
-            ModelTurn(content="Only experiment facts will be retained for now."),
-        )
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(write.spec.name, {}),)),
     )
-
-    class Model:
-        async def respond(self, **kwargs):
-            return next(turns)
-
-    registry = CapabilityRegistry((draft, write))
-    result = await ResearchAgentRunner(model=Model(), capabilities=registry).run_turn(
-        context=_context(),
-        previous_messages=(),
-        user_message="Leave the interpretation for our next meeting.",
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed Finding.",
     )
-    assert not draft.executed_arguments and not write.executed_arguments
-    assert result.pending_approval is None
-    assert [item.error_code for item in result.tool_results if item.error_code] == [
-        "action_deferred_for_request",
-        "action_deferred_for_request",
-    ]
-    next_request = ChatMessage.user(
-        message_id="next",
-        session_id="chat-1",
-        content="Now interpret the results.",
-        created_at="2026-10-10T00:00:00Z",
-    )
-    call = ChatToolCall.requested(
-        tool_call_id="new",
-        session_id="chat-1",
-        assistant_message_id="next-a",
-        name=write.spec.name,
-        risk=ToolRisk.WRITE,
-        arguments={},
-    )
-    error, _ = validate_batch(
-        registry, ((call, write),), [*result.messages, next_request]
-    )
-    assert (
-        error is None
-    )  # Next user request can expand scope; normal approval still applies.
+    assert result.status == "approval_required"
+    assert result.pending_approval.name == write.spec.name
+    assert not write.executed_arguments
+    discovery = result.tool_results[0]
+    assert discovery.data["loaded_tool_names"] == [write.spec.name]
+    assert "deferred_tool_names" not in discovery.data
+    assert "source_inspection_required" not in discovery.data
 
 
 @pytest.mark.anyio
@@ -203,7 +159,7 @@ async def test_discovery_loads_more_than_six_registered_tools():
     result = await registry.discovery.execute(
         CapabilityExecutionContext.for_call(_context(), "discover"),
         DiscoverResearchToolsToolRequest(
-            tool_names=[f"read_{n}" for n in range(8)], source_inspection_required=False
+            tool_names=[f"read_{n}" for n in range(8)]
         ),
     )
     assert len(result.data["loaded_tool_names"]) == 8
@@ -627,7 +583,7 @@ async def test_discovered_paper_claim_may_finish_without_a_backend_read_mandate(
                     name="discover_research_tools",
                     arguments={
                         "tool_names": ["browse_collection_papers"],
-                        "source_inspection_required": True,
+
                     },
                 ),
             )
@@ -728,7 +684,7 @@ async def test_existing_conclusion_is_located_before_rechecking_paper_sources():
                             "query_published_findings",
                             "inspect_published_finding",
                         ],
-                        "source_inspection_required": True,
+
                     },
                 ),
             )
@@ -884,7 +840,7 @@ async def test_discovered_read_runs_and_does_not_carry_into_next_request():
                     name="discover_research_tools",
                     arguments={
                         "tool_names": ["search_sources"],
-                        "source_inspection_required": True,
+
                     },
                 ),
             )
@@ -925,7 +881,7 @@ async def test_catalog_can_load_a_write_without_executing_or_approving_it():
                     name="discover_research_tools",
                     arguments={
                         "tool_names": ["create_paper_experiment_revision"],
-                        "source_inspection_required": False,
+
                     },
                 ),
             )
@@ -1131,7 +1087,7 @@ def test_completed_write_does_not_hide_same_capability_for_another_resource():
         name="discover_research_tools",
         arguments={
             "tool_names": ["create_objective_candidate"],
-            "source_inspection_required": False,
+
         },
         position=0,
     )
@@ -1208,7 +1164,7 @@ async def test_provider_error_during_finalization_does_not_log_details(caplog):
                     name="discover_research_tools",
                     arguments={
                         "tool_names": ["search_sources"],
-                        "source_inspection_required": True,
+
                     },
                 ),
             )

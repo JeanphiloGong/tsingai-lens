@@ -353,6 +353,7 @@ class _RunProgress:
     execution_plan: ResearchExecutionPlan | None = None
     plan_update_available: bool = True
     active_user_message_id: str | None = None
+    available_tool_names: set[str] = field(default_factory=set)
 
     def refresh_execution_plan(
         self,
@@ -367,7 +368,8 @@ class _RunProgress:
         candidate_steps = tuple(dict(step) for step in result.data["steps"])
         model_status = ResearchExecutionStatus(result.data["status"])
         changed = self.execution_plan is None or (
-            self.execution_plan.steps != candidate_steps
+            tuple((step["step_id"], step["status"]) for step in self.execution_plan.steps)
+            != tuple((step["step_id"], step["status"]) for step in candidate_steps)
             or self.execution_plan.model_status is not model_status
         )
         self.execution_plan = ResearchExecutionPlan(
@@ -511,10 +513,9 @@ class _RunProgress:
                 data.pop(key, None)
         successful_discovery = call.name == "discover_research_tools" and result.status is ToolResultStatus.SUCCEEDED
         if successful_discovery:
-            # Reordering the same definitions does not advance the investigation.
-            for key in ("loaded_tool_names", "deferred_tool_names"):
-                data[key] = sorted(data.get(key, ()))
-            data["tools"] = sorted(data.get("tools", ()), key=lambda item: item["name"])
+            newly_available = set(data["loaded_tool_names"]) - self.available_tool_names
+            self.available_tool_names.update(newly_available)
+            return bool(newly_available)
         # Coverage is runtime metadata added after this observation and must not
         # make an otherwise identical batch look like new source content.
         data.pop("source_coverage", None)
@@ -533,7 +534,7 @@ class _RunProgress:
             "error_code": result.error_code,
             "warnings": result.warnings,
         }
-        if not has_source_observation and not normalized_paper_list and not successful_discovery:
+        if not has_source_observation and not normalized_paper_list:
             # Distinct failed or empty searches must keep their requested scope.
             payload["arguments"] = dict(call.arguments)
         digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -1033,6 +1034,7 @@ class ResearchAgentRunner:
                         permission_mode=permission_mode,
                     )
                     tool_names = tuple(spec.name for spec in tool_specs)
+                    progress.available_tool_names.update(tool_names)
                     schema_chars = sum(
                         len(
                             json.dumps(
@@ -1068,12 +1070,12 @@ class ResearchAgentRunner:
                         )), None),
                     )
                     if stage_content is not None:
-                        decision_messages = (*decision_messages, ChatMessage.user(
+                        decision_messages = (ChatMessage.user(
                             message_id=self._message_id(),
                             session_id=context.session_id,
                             content=stage_content,
                             created_at=_now_iso(),
-                        ))
+                        ), *decision_messages)
                     if (
                         stage_content is None
                         and not tool_specs
@@ -1522,6 +1524,11 @@ class ResearchAgentRunner:
                 progress.consecutive_no_progress = 0
                 progress.plan_update_available = True
                 stall_recovery_attempted = False
+            elif (plan_update_accepted and progress.execution_plan.model_status
+                  is not ResearchExecutionStatus.IN_PROGRESS):
+                # A real final disposition must reach its answer. It does not
+                # grant another plan update or mark any Source as read.
+                progress.consecutive_no_progress = 0
             elif not plan_update_accepted:
                 progress.consecutive_no_progress = prior_no_progress + 1
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -1684,7 +1691,6 @@ class ResearchAgentRunner:
             {
                 "plan_id": progress.execution_plan.plan_id,
                 "plan_version": progress.execution_plan.version,
-                "request": progress.execution_plan.request,
                 "status": progress.execution_plan.status.value,
                 "model_status": progress.execution_plan.model_status.value,
                 "explanation": progress.execution_plan.explanation,

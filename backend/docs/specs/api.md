@@ -787,17 +787,15 @@ non-write work can finish. While a write remains `approval_required`, posting an
 message to that session returns `200204 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
-The production Research Agent registers the capabilities below. For each model
-decision, the Runner first exposes the current registered catalog; the model can
-load a bounded set of exact schemas through `discover_research_tools` based on
-the requested deliverable, trajectory observations, filenames, identifiers, and
-the registered descriptions. It does not use a fixed user-keyword router.
-Ordinary conversation may finish without discovery, while collection screening,
-Source inspection, Finding review, Objective work, and research-plan work load
-the capabilities needed for that task. Backend permission mode, capability risk,
-typed arguments, Source prerequisites, and exact write approval remain the
-authoritative boundaries. The production Research Agent currently exposes these
-capabilities:
+The production Research Agent exposes core collection search, browsing, reading
+and execution-plan schemas immediately. `discover_research_tools` accepts only
+`tool_names` and loads additional registered schemas from a catalog of missing
+definitions. Already exposed names leave that catalog and remain available for
+the current user request; discovery disappears when no permitted definitions
+remain to load. Discovery does not classify the task or grant authority. User
+scope remains in the conversation. Backend permission mode, capability risk,
+typed arguments, canonical Source prerequisites and exact write approval remain
+the authoritative boundaries. The available capabilities include:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
 - `browse_collection_papers` returns a context-sized, screening-only paper survey.

@@ -63,7 +63,7 @@ async def test_cycle_trace_records_the_actual_terminal_outcome(ending, caplog) -
                             name="discover_research_tools",
                             arguments={
                                 "tool_names": [write_capability_name],
-                                "source_inspection_required": False,
+
                             },
                         ),)
                     )

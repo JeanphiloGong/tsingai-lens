@@ -34,7 +34,6 @@ async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missi
         *correction,
         ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)),
         ModelTurn(content="The provisional plan now cites only the selected finding's evidence."),
-        expected_tools={"propose_research_plan"},
     )
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((proposal,)))
     result = await runner.run_turn(
@@ -75,7 +74,7 @@ async def test_unresolved_plan_citations_do_not_expose_saving_or_claim_completio
     assert result.pending_approval is None
     assert writer.executed_arguments == []
     assert "propose_research_plan" in model.all_tool_spec_names[-1]
-    assert "Execution observations" in model.contexts[-1][-1].content
+    assert any("Execution observations" in message.content for message in model.contexts[-1])
 
 
 def test_plan_links_do_not_prescribe_a_stage_action_before_a_draft_exists():

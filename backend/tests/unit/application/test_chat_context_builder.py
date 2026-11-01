@@ -146,13 +146,13 @@ def test_current_request_follows_old_scope_and_runtime_hints_in_provider_context
     prior = _user("prior", "Identify paper A only; do not read its results yet.")
     active = _user("active", "Now inspect its treatment conditions and tensile measurements.")
     hint = _user("hint", "The current reading ledger lists the completed passages.")
-    view = ChatContextBuilder().for_model((prior, active, hint), active_user_message_id="active")
+    view = ChatContextBuilder().for_model((hint, prior, active), active_user_message_id="active")
     payload = view.provider_messages("system")
-    assert payload[-1]["content"].startswith("[CURRENT RESEARCHER REQUEST]\n" + active.content)
-    assert prior.content not in payload[-1]["content"]
-    assert "retain their choices only where this request does not change them" in payload[-1]["content"]
+    assert payload[-1]["content"] == active.content
+    assert [message["content"] for message in payload[1:]] == [hint.content, prior.content, active.content]
     compact = ChatModelContext((active, prior), compacting=True, active_user_message_id="active")
-    assert compact.provider_messages("compact")[-1]["content"].endswith("do not answer it.")
+    records = json.loads(compact.provider_messages("compact")[-1]["content"])
+    assert [item["message_id"] for item in records] == [active.message_id, prior.message_id]
 
 
 @pytest.mark.anyio

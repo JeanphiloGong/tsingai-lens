@@ -174,25 +174,19 @@ approval path, `read_only` removes durable writes while retaining reads and
 transient drafts, and `none` exposes no capabilities. A phrase such as “do not
 search” is conversational guidance for the model, not an authorization switch.
 
-`discover_research_tools` is an ordinary typed function call, not a provider's
-native ToolSearch API. Its short catalog comes from registered read/draft/write
-handlers. It loads the requested registered schemas per call and performs no scientific
-read, write, or approval. Successful results retain selected names only for
-the active user request; definitions always come from the current registry.
-The registry and each tool's risk are the authority for catalog membership;
-there is no parallel static list of known capabilities. Removed names are
-ignored. Discovery grants no execution permission. Loaded tools remain
-available after navigation; the model can discover additional tools, revisit a
-completed browse, or answer without a prescribed reader/draft order. The
-`source_inspection_required` flag records the model's assessment, not a
-backend gate. It tells the model that the requested judgment needs original
-Source inspection; it does not insert a fixed search -> outline -> read route.
-The next user request starts with a fresh catalog.
+`discover_research_tools` loads missing schemas from the current registry. Core
+search, browsing, reading and execution-plan schemas are exposed immediately.
+The discovery catalog lists only definitions not already exposed under the
+current permission mode. Loaded definitions remain available for this user
+request and leave that catalog; when it is empty, discovery is not exposed.
+The next user request starts a fresh discovery scope for non-core tools.
 
-Discovery may record model-interpreted `deferred_tool_names` for deliverables
-the researcher excluded. These names stay excluded for the active request,
-including approval continuation; they neither grant authority nor prescribe
-a research sequence. No user-phrase matching decides this scope.
+Its request contains only `tool_names`. Discovery performs no task
+classification, scientific read, scope declaration or authorization. Researcher
+choices and excluded deliverables stay in the original conversation. Backend
+permission mode, exact write approvals and canonical Source prerequisites remain
+the deterministic boundaries. Previously recorded discovery metadata remains
+history and does not change the current tool contract.
 
 Persistence intent is scoped to the requested action: saving error feedback
 while declining curation or publication exposes only the feedback write.
@@ -210,14 +204,6 @@ before approval; the runner does not fill them from earlier inspections. Identit
 Evidence bindings, paper coverage, and lineage remain subject to the canonical
 validator and the user's approval.
 
-Discovery also records whether the request needs a particular paper's claims
-or measurements inspected. That model-selected obligation survives later
-discovery calls within the request and guides the next useful Source reads,
-including for a claim attributed to a review. Paper selection alone does not
-impose this obligation, and the flag does not determine that an inspected
-passage supports the claim. The model chooses whether an outline, exact Source,
-search, table, or another registered read is the useful next action. Selecting
-papers for a later comparison therefore remains a navigation task.
 Existing-conclusion review reads the Finding and Evidence before deciding which
 original Sources need checking. Only the PaperExperiment draft validator has a
 deterministic complete-Source prerequisite; an ordinary answer reports the
@@ -310,14 +296,10 @@ this attribution against the inspected record; new scientific judgments still
 require their Source basis. A completed Finding publication does not require an
 additional, unrequested feedback or curation approval.
 
-At mandatory action stages the model context requests a provider tool call
-(`tool_choice=required`). The runner independently checks that a required
-action occurred, and suppresses answer deltas that would otherwise appear
-before that check. Provider failures remain failures: the deterministic reply
-preserves the reading ledger and distinguishes unread papers and failed reads
-from scientific absence. Invalid-response logs contain the known model name and
-normalized reason; structured errors retain reported usage and partial-response
-state for the runner.
+Ordinary research decisions use `tool_choice=auto`: the model can read,
+update a meaningful plan transition, or answer from existing observations.
+Provider failures remain technical failures; completed reads and their source
+attribution stay in the durable trajectory.
 
 Answer finalization separates the current request's reading ledger from earlier
 complete Source inspections. Zero new reads cannot erase the preceding research
@@ -484,8 +466,10 @@ terminal snapshot and unfinished plan actions as historical runtime work. They
 receive fresh counters and plan scope; earlier approval is never inherited.
 Same-request approval continuations retain their existing consumed budgets. Adding one paper or deferring a review preserves other paper choices;
 compaction retains those choices separately from Agent recommendations.
-The active request is also identified after historical records and runtime hints,
-including during compaction. Its token cost is reserved in context selection.
+Researcher inputs remain in their original order and are pinned during context
+selection. Runtime observations precede that history; the current question is
+not reissued after every tool result. The latest plan is supplied as factual
+state only when its tool exchange is absent from the selected history.
 A later request for detailed results supersedes an earlier identification-only
 request while preserving the selected paper. An ordinary model answer does not
 complete an active execution plan: the model must continue or explicitly report
@@ -642,7 +626,14 @@ checks, certify a scientific stage, or automatically restart interrupted work.
 Each complex run may expose a model-authored `execution_plan` in progress
 snapshots and the turn response. The Agent updates it through the registered
 `update_execution_plan` capability after framing the request and when new
-observations change the remaining work. On entry or resume, the runtime restores
+observations change a step status, the research route or final disposition.
+Several reads within one step need no plan update. Rephrasing a plan is saved
+but does not count as progress. Discovery counts only newly available schemas;
+permutations and subsets of already available tools do not reset stall detection.
+An accepted transition to a final disposition clears the consecutive-stall
+counter so its answer can be delivered; it grants no new read coverage or
+another plan-update allowance. Repeating that disposition does not clear it.
+On entry or resume, the runtime restores
 the latest plan once from successful durable plan updates. Each successful plan
 result then updates the current plan and its version directly. Final result
 assembly applies approval, resource, and technical status to that current plan

@@ -32,3 +32,26 @@ async def test_collection_search_returns_ranked_papers_and_matching_window(monke
     scoped=await cap.execute(context,SearchSourcesToolRequest(document_ids=['in718'],query='IN718'))
     repo.read_documents.assert_awaited_once_with('col',('in718',))
     assert scoped.data['papers'][0]['document_id']=='in718'
+
+@pytest.mark.anyio
+async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeypatch):
+    from application.chat.capabilities.document_sources import InspectTableCapability,InspectTableToolRequest
+    from domain.source import SourceTable
+    header=('Condition','Elongation (%)')
+    rows=tuple((f'condition-{i:02}',str(10+i/10)) for i in range(35))
+    table=SourceTable('table','paper',0,'Reported elongation; note: as-built',None,3,'Results',header,(header,*rows))
+    doc=SourceDocument('paper',0,'IN718','',tables=(table,))
+    monkeypatch.setattr(document_sources.collection_service,'get_collection_for_user',AsyncMock())
+    monkeypatch.setattr(document_sources,'SourceArtifactRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
+    cap=InspectTableCapability();arguments={'document_id':'paper','table_ref':'table'};seen=[]
+    for _ in range(40):
+        result=await cap.execute(CapabilityExecutionContext('chat','user','col','read',max_result_tokens=700),InspectTableToolRequest(**arguments))
+        assert result.status=='succeeded'
+        assert document_sources.InspectDocumentSourcesCapability._result_tokens(result)<=700
+        assert 'Elongation (%)' in result.data['table_markdown']
+        count=result.data['returned_row_count'];assert count>0
+        offset=result.data['row_offset'];seen.extend(rows[offset:offset+count])
+        for row in rows[offset:offset+count]:assert row[0] in result.data['table_markdown'] and row[1] in result.data['table_markdown']
+        arguments=result.data['continuation']
+        if arguments is None:break
+    assert seen==list(rows)

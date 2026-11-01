@@ -860,6 +860,8 @@ capabilities:
   digests, and pagination state. A search hit is an inspection lead, not
   Evidence or a scientific absence;
 - `inspect_table` returns a small canonical table as complete Markdown. Only a
+  The complete model message must fit the current result-token budget; oversized
+  tables split at complete rows, with repeated headers and exact continuation.
   table above the bounded response limit is split into row windows, and every
   window repeats the canonical headers and complete-table digest;
 - `inspect_research_process` reads each current Document and its latest

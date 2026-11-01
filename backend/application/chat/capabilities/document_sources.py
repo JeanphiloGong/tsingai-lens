@@ -537,7 +537,7 @@ class SearchSourcesCapability:
                 f"{len(matches) - next_offset} additional matching Source record(s) "
                 "remain on later pages."
             )
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
@@ -563,6 +563,22 @@ class SearchSourcesCapability:
             ),
             warnings=tuple(warnings),
         )
+
+        while InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+            if len(visible) > 1:
+                visible.pop()
+            elif result.data["papers"]:
+                result = replace(result, data={**result.data, "papers": result.data["papers"][:-1]})
+            else:
+                return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                                      error_code="source_batch_too_large",
+                                      error_message="Narrow the search scope to fit one Source preview.")
+            next_offset = arguments.offset + len(visible)
+            result = replace(result, data={**result.data, "matches": list(visible),
+                                          "next_offset": next_offset if next_offset < len(matches) else None},
+                             resource_refs=tuple(InspectDocumentSourcesCapability._source_ref(
+                                 context.collection_id, item["document_id"], item) for item in visible))
+        return result
 
 
 class InspectTableCapability:
@@ -720,7 +736,7 @@ class InspectTableCapability:
             if next_row_offset >= len(data_rows):
                 next_row_offset = None
 
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
@@ -765,6 +781,30 @@ class InspectTableCapability:
                 else ()
             ),
         )
+
+        while InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+            count = result.data["returned_row_count"]
+            if count <= 1:
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                    error_code="table_row_exceeds_budget",
+                    error_message="A complete table row and its headers do not fit. Read the canonical table with read_source.",
+                    data={"read_arguments": {"document_id": document.document_id, "source_kind": "table",
+                                             "source_ref": table.table_id, "source_version": source_version}},
+                )
+            count -= 1
+            next_row_offset = arguments.row_offset + count
+            headers = list(table.column_headers) or [f"column_{i+1}" for i in range(table.col_count)]
+            markdown = render_markdown_table(
+                [list(row) for row in data_rows[arguments.row_offset:next_row_offset]], headers, header_row_count=0,
+            ) or ""
+            result = replace(result, data={**result.data,
+                "returned_row_count": count, "table_markdown": markdown,
+                "next_row_offset": next_row_offset, "complete_table": False, "content_truncated": True,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                 "row_offset": next_row_offset},
+            })
+        return result
 
     @staticmethod
     def _bounded_utf8(

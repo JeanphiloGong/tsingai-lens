@@ -13,6 +13,9 @@ from domain.chat import ToolResultStatus
 
 import logging
 import re
+import hashlib
+import json
+from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -21,11 +24,12 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.chat.context_builder import ChatContextBuilder
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
 _OBJECTIVE_LIMIT = 12
-_PAPER_LIMIT = 12
+_PAPER_LIMIT = 100
 _ABSTRACT_LIMIT = 1_200
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,7 @@ class GetCollectionContextCapability:
             "Research Objective candidates. Use this before making collection-specific "
             "claims or proposing new Objective drafts."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=GetCollectionContextToolRequest,
     )
@@ -126,7 +131,10 @@ class BrowseCollectionPapersToolRequest(BaseModel):
 
     query: str | None = Field(default=None, max_length=240)
     offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=8, ge=1, le=_PAPER_LIMIT)
+    limit: int = Field(
+        default=_PAPER_LIMIT, ge=1, le=_PAPER_LIMIT,
+        description="Optional record cap; the returned page is fitted to the available context. Follow next_offset.",
+    )
 
     @field_validator("query")
     @classmethod
@@ -145,8 +153,9 @@ class BrowseCollectionPapersCapability:
         description=(
             "Browse a bounded page of papers in the current collection by visible "
             "filename or title. The optional query is a literal identity filter, not "
-            "semantic topic search; omit it to discover all visible paper identities "
-            "before selecting a paper by title or filename. Returns preparation state, document type, bounded "
+            "semantic topic search. Use it to locate named materials or titles, or omit it "
+            "for a context-sized survey. Read promising papers without first exhausting the "
+            "whole catalog. Returns preparation state, document type, bounded "
             "Paper Map materials, processes, variables, outcomes, and an abstract "
             "excerpt when an explicitly labelled abstract Source is available. "
             "Profile, Paper Map and abstract availability are optional navigation "
@@ -160,6 +169,7 @@ class BrowseCollectionPapersCapability:
             "These are screening signals only, not Evidence, and this capability "
             "does not change the formal analysis scope."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=BrowseCollectionPapersToolRequest,
     )
@@ -257,11 +267,12 @@ class BrowseCollectionPapersCapability:
             paper["source_status"] in {"preparation_failed", "unavailable", "read_failed"}
             for paper in paper_records
         )
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
+                "catalog_digest": hashlib.sha256(json.dumps(document_ids).encode()).hexdigest(),
                 "paper_total": len(candidates),
                 "offset": arguments.offset,
                 "limit": arguments.limit,
@@ -298,6 +309,29 @@ class BrowseCollectionPapersCapability:
                 else ()
             ),
         )
+        while len(paper_records) > 1 and ChatContextBuilder.estimate_tokens(
+            ChatContextBuilder.tool_result_message(result)
+        ) > context.max_result_tokens:
+            paper_records.pop()
+            visible_ids = {paper["document_id"] for paper in paper_records}
+            failed_source_count = sum(
+                paper["source_status"] in {"preparation_failed", "unavailable", "read_failed"}
+                for paper in paper_records
+            )
+            result = replace(
+                result,
+                data={**result.data, "papers": list(paper_records),
+                      "returned_paper_count": len(paper_records),
+                      "next_offset": arguments.offset + len(paper_records)},
+                resource_refs=tuple(ref for ref in result.resource_refs
+                                    if ref.resource_type == "collection" or ref.resource_id in visible_ids),
+                warnings=(
+                    (f"Prepared Source content is unavailable for {failed_source_count} paper(s) "
+                     "on this page. Check each paper's source_status; this is not scientific absence.",)
+                    if failed_source_count else ()
+                ),
+            )
+        return result
 
     @staticmethod
     def _matches_query(record: StoredDocument, profile: Any, query: str) -> bool:

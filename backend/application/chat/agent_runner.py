@@ -456,7 +456,7 @@ class _RunProgress:
             and self.model_cycles >= self.limits.emergency_max_model_cycles
         )
 
-    def stop_before_model(self) -> AgentCompletionReason | None:
+    def stop_before_model(self, *, allow_no_progress_recovery: bool = False) -> AgentCompletionReason | None:
         if (self.limits.emergency_max_model_cycles is not None
                 and self.model_cycles >= self.limits.emergency_max_model_cycles):
             return AgentCompletionReason.EMERGENCY_CEILING
@@ -465,7 +465,8 @@ class _RunProgress:
                 or (self.limits.max_tool_calls is not None
                     and self.executed_tool_calls >= self.limits.max_tool_calls)):
             return AgentCompletionReason.RESOURCE_BUDGET
-        if self.consecutive_no_progress >= self.limits.max_consecutive_no_progress:
+        if (self.consecutive_no_progress >= self.limits.max_consecutive_no_progress
+                and not allow_no_progress_recovery):
             return AgentCompletionReason.NO_PROGRESS
         return None
 
@@ -985,8 +986,14 @@ class ResearchAgentRunner:
         progress: _RunProgress,
     ) -> AgentRunResult:
         disposition_retries = 0
+        stall_recovery_attempted = False
         while True:
             stop_reason = progress.stop_before_model()
+            recovering_stall = stop_reason is AgentCompletionReason.NO_PROGRESS and not stall_recovery_attempted
+            if recovering_stall:
+                stall_recovery_attempted = True
+                progress.trace(context, phase="no_progress_recovery")
+                stop_reason = None
             if stop_reason is not None:
                 return await self._finalize_with_current_evidence(
                     stop_reason, progress, context, messages, calls, results,
@@ -995,7 +1002,7 @@ class ResearchAgentRunner:
             response_retries = 0
             non_streaming_retry = False
             while True:
-                stop_reason = progress.stop_before_model()
+                stop_reason = progress.stop_before_model(allow_no_progress_recovery=recovering_stall)
                 if stop_reason is not None:
                     return await self._finalize_with_current_evidence(
                         stop_reason, progress, context, messages, calls, results,
@@ -1030,10 +1037,16 @@ class ResearchAgentRunner:
                         ",".join(tool_names) or "none",
                     )
                     decision_messages = tuple(messages)
+                    successful = capability_policy.active_successful_results_by_name(messages)
+                    # Browsing identities remain usable when the researcher continues
+                    # a request; scientific prerequisites still use their original scope.
+                    successful["browse_collection_papers"] = capability_policy._successful_results_by_name(messages).get(
+                        "browse_collection_papers", []
+                    )
                     stage_content = capability_policy.stage_instruction(
                         tool_names,
                         calls,
-                        successful_results=capability_policy.active_successful_results_by_name(messages),
+                        successful_results=successful,
                         prior_experiment_draft=next(iter(reversed(
                             capability_policy._successful_results_by_name(messages).get("propose_paper_experiment_draft", ())
                         )), None),
@@ -1073,12 +1086,28 @@ class ResearchAgentRunner:
                                      "or scientific_refusal before a final answer. Do not only announce a "
                                      "future read. Unknown evidence may justify a limited answer; a tool "
                                      "failure is not scientific absence."), created_at=_now_iso()))
+                    if recovering_stall:
+                        decision_messages = (*decision_messages, ChatMessage.user(
+                            message_id=self._message_id(), session_id=context.session_id,
+                            content=(
+                                "[STALLED EXECUTION: CORRECTION]\n"
+                                "The requested work remains incomplete: the recent action batches produced "
+                                "no new observations. Tools remain available "
+                                "for this correction. Resolve an unfinished check with an available operation "
+                                "instead of rediscovering loaded tools, repeating an already-read page, or "
+                                "restating the plan. Use the reading ledger for known sections and pending reads. "
+                                "If no useful operation remains, record the actual plan disposition and explain "
+                                "the evidence gap. Recent actions:\n"
+                                + json.dumps([{"tool": call.name, "arguments": dict(call.arguments),
+                                               "status": call.status} for call in calls[-3:]], ensure_ascii=False)
+                            ), created_at=_now_iso()))
                     turn = await self._model_turn(
                         decision_messages, tool_specs, progress,
                         None if non_streaming_retry or active_plan else text_delta_callback,
                         active_user_message_id=next(
                             message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                         ),
+                        allow_no_progress_recovery=recovering_stall,
                     )
                 except ModelResponseError as exc:
                     if exc.reason == "model_allowance_exhausted" or progress.remaining_research_seconds() <= 0:
@@ -1314,7 +1343,7 @@ class ResearchAgentRunner:
             batch_start = len(calls)
             calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
-            stop_reason = progress.stop_before_model()
+            stop_reason = progress.stop_before_model(allow_no_progress_recovery=recovering_stall)
             budget_limited_batch = (
                 self.limits.max_tool_calls is not None
                 and progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls
@@ -1476,6 +1505,7 @@ class ResearchAgentRunner:
             if progress_increased:
                 progress.consecutive_no_progress = 0
                 progress.plan_update_available = True
+                stall_recovery_attempted = False
             elif not plan_update_accepted:
                 progress.consecutive_no_progress = prior_no_progress + 1
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -1493,6 +1523,7 @@ class ResearchAgentRunner:
         self, messages: tuple[ChatMessage, ...], tool_specs: tuple[ToolSpec, ...],
         progress: _RunProgress, text_delta_callback: Callable[[str], None] | None,
         *, active_user_message_id: str, finalizing: bool = False,
+        allow_no_progress_recovery: bool = False,
     ) -> ModelTurn:
         """Build and send one decision, shrinking only rejected context without replaying tools."""
         max_context_recoveries = 2
@@ -1518,10 +1549,13 @@ class ResearchAgentRunner:
                         or progress.context_recovery_attempts >= max_context_recoveries
                         or progress.retry_count >= self.limits.max_model_retries
                         or (progress.remaining_seconds() if finalizing else progress.remaining_research_seconds()) <= 0
-                        or (not finalizing and progress.stop_before_model() is not None)):
+                        or (not finalizing and progress.stop_before_model(
+                            allow_no_progress_recovery=allow_no_progress_recovery) is not None)):
                     raise
                 previous_limit = self._effective_context_tokens(progress)
-                reduced_limit = int(previous_limit * context_shrink_ratio)
+                reduced_limit = int(min(
+                    previous_limit, request_tokens + self.limits.max_model_output_tokens,
+                ) * context_shrink_ratio)
                 if reduced_limit <= self.limits.max_model_output_tokens + 2048:
                     raise
                 progress.context_token_limit = reduced_limit
@@ -1644,8 +1678,6 @@ class ResearchAgentRunner:
             if progress.execution_plan
             else None
         )
-        max_model_compaction_units = 8
-        min_seconds_for_model_compaction = 120.0
         context_limit = self._effective_context_tokens(progress)
         input_budget = self.context_builder.input_budget(
             context_limit=context_limit, output_limit=self.limits.max_model_output_tokens,
@@ -1684,27 +1716,17 @@ class ResearchAgentRunner:
                 raise ModelResponseError("Research context could not be compacted without repeated retries.",
                                          reason="context_compaction_unavailable", retryable=False)
             notes_budget = min(6000, input_budget // 3)
-            if (
-                len(units) > max_model_compaction_units
-                or bool(progress.compacted_message_ids)
-                or progress.remaining_research_seconds() <= min_seconds_for_model_compaction
-            ):
-                batch = [message for unit in units for message in unit]
-                summary = self._fallback_working_notes(
-                    active, batch, max_tokens=notes_budget, working_summary=progress.working_summary,
-                ).model_dump_json()
-            else:
-                try:
-                    batch = self.context_builder.compaction_batch(
-                        active, units, context_limit=context_limit,
-                        system_prompt=RESEARCH_COMPACTION_SYSTEM_PROMPT,
-                        working_summary=progress.working_summary, execution_plan=execution_plan,
-                    )
-                except ValueError as exc:
-                    raise ModelResponseError(str(exc), reason="context_window_exceeded", retryable=False) from exc
-                summary = await self._compact_working_notes(
-                    active, batch, progress, notes_budget=notes_budget, execution_plan=execution_plan,
+            try:
+                batch = self.context_builder.compaction_batch(
+                    active, units, context_limit=context_limit,
+                    system_prompt=RESEARCH_COMPACTION_SYSTEM_PROMPT,
+                    working_summary=progress.working_summary, execution_plan=execution_plan,
                 )
+            except ValueError as exc:
+                raise ModelResponseError(str(exc), reason="context_window_exceeded", retryable=False) from exc
+            summary = await self._compact_working_notes(
+                active, batch, progress, notes_budget=notes_budget, execution_plan=execution_plan,
+            )
             # Publish notes and retired IDs together, only after building the replacement.
             progress.working_summary = summary
             progress.compacted_message_ids.update(message.message_id for message in batch)
@@ -1728,7 +1750,11 @@ class ResearchAgentRunner:
             )
             if compacted.tool_calls:
                 raise ValueError("compaction cannot request tools")
-            notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
+            try:
+                notes_json = extract_json_object(compacted.content)
+            except RuntimeError as exc:
+                raise ValueError("compaction returned no JSON object") from exc
+            notes = ResearchWorkingNotesModelOutput.model_validate_json(notes_json)
             allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
             if progress.working_summary:
                 previous = ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)

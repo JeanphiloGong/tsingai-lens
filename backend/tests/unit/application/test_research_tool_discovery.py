@@ -38,6 +38,7 @@ from domain.chat import (
     ToolRisk,
 )
 from exceptions import ResourceNotFoundException
+from domain.source.artifacts import SourceBlock, SourceDocument
 from tests.unit.application.test_research_agent_runner import (
     _Capability,
     _context,
@@ -210,20 +211,24 @@ async def test_discovery_loads_more_than_six_registered_tools():
 
 @pytest.mark.anyio
 async def test_source_reads_expose_the_authoring_label_catalog():
-    document = SimpleNamespace(
+    document = SourceDocument(
         document_id="paper-1",
+        document_order=0,
         title="Controlled paper",
+        text="Methods\nResults",
         blocks=(
-            SimpleNamespace(
+            SourceBlock(
                 block_id="methods-1",
+                document_id="paper-1",
                 block_order=0,
                 block_type="paragraph",
                 text="Methods",
                 page=1,
                 heading_path="Methods",
             ),
-            SimpleNamespace(
+            SourceBlock(
                 block_id="results-1",
+                document_id="paper-1",
                 block_order=1,
                 block_type="paragraph",
                 text="Results",

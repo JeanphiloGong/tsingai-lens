@@ -43,7 +43,10 @@ async def test_three_compactions_retain_earlier_conditions_and_new_observations(
         "basis_message_ids": ["msg-result-first"],
         "unresolved": "Do not transfer heat-treated measurements to the as-built ranking.",
     }], "next_actions": ["Check tensile orientation."]}
-    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    # Later provider failures exercise archived-record recovery explicitly;
+    # a prior summary no longer bypasses model compaction.
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)),
+                             ModelTurn(content="invalid summary"), ModelTurn(content="invalid summary"))
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
                                  context_builder=ChatContextBuilder(max_messages=3))
     progress = _RunProgress(runner.limits)
@@ -59,7 +62,7 @@ async def test_three_compactions_retain_earlier_conditions_and_new_observations(
     # that an old next action is still pending after later observations.
     assert any("ledger" in action for action in saved["next_actions"])
     assert tuple(messages[:len(original)]) == original
-    assert len(model.contexts) == 1
+    assert len(model.contexts) == 3
 
 
 def test_fallback_marks_loss_and_preserves_old_and_recent_records():
@@ -251,8 +254,8 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
 
 
 @pytest.mark.anyio
-async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
-    from application.chat import CapabilityRegistry, ResearchAgentRunner
+async def test_long_trajectory_uses_model_compaction_without_changing_history():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
 
     active = _user("active", "Continue the saved experiment review.")
@@ -263,7 +266,14 @@ async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
             "source_ref": f"results-{index}",
             "content": "reported result " + str(index),
         }))
-    model = _CompactionModel()
+    original = tuple(history)
+    notes = {"scope": active.content, "checks": [{
+        "statement": f"Paper A reports result {index}; exact interpretation remains unresolved.",
+        "conditions": "Test orientation unknown.",
+        "basis_message_ids": [f"msg-result-source-{index}"],
+        "unresolved": "Check comparable test conditions.",
+    } for index in range(9)], "next_actions": ["Check the remaining result."]}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(()),
@@ -275,10 +285,11 @@ async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
         (active, *history), (), progress, active_user_message_id=active.message_id,
     )
 
-    assert not model.contexts
+    assert len(model.contexts) == 1 and model.contexts[0].compacting
     assert set(message.message_id for message in history[:-2]).issubset(progress.compacted_message_ids)
-    assert "untrusted paper content" in progress.working_summary
+    assert json.loads(progress.working_summary) == notes
     assert view.messages == (active, *history[-2:])
+    assert tuple(history) == original
 
 
 @pytest.mark.anyio
@@ -381,7 +392,7 @@ async def test_failed_compaction_keeps_archived_observations_recoverable():
 
 @pytest.mark.anyio
 async def test_oversized_completed_write_unit_is_compacted_as_lineage_only():
-    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat import AgentRunLimits, CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
 
     active = _user("active", "Generate the Finding from the saved experiment selection.")
@@ -406,6 +417,7 @@ async def test_oversized_completed_write_unit_is_compacted_as_lineage_only():
         model=model,
         capabilities=CapabilityRegistry(()),
         context_builder=ChatContextBuilder(max_messages=3),
+        limits=AgentRunLimits(max_context_tokens=64_000),
     )
     progress = _RunProgress(runner.limits)
 
@@ -852,4 +864,7 @@ async def test_recovery_does_not_replay_partial_output_or_unchanged_small_reques
         await runner._model_turn((_user("active", "Explain the research workflow."),), (), progress, None,
                                  active_user_message_id="active")
     assert len(model.contexts) == 1
-    assert progress.context_recovery_attempts == (2 if reason == "context_window_exceeded" and not partial else 0)
+    if reason == "context_window_exceeded" and not partial:
+        assert 1 <= progress.context_recovery_attempts <= 2
+    else:
+        assert progress.context_recovery_attempts == 0

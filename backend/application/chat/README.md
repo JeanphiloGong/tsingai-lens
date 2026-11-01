@@ -388,7 +388,12 @@ default to 300 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
 Their environment settings accept a positive limit; zero explicitly disables
 that ceiling. Approval waiting time is excluded; active usage survives approval.
 Individual model/read requests retain a 180-second timeout, cancellation and
-the repeated-observation guard. Context compaction is runtime memory rather
+the repeated-observation guard. Before stopping for repeated observations, the
+runner gives one correction decision with tools still available and the actual
+recent calls plus reading ledger. Restating a plan does not count as new
+evidence; if the correction still makes no progress, the guard stops the turn.
+Other resource ceilings still apply during that correction.
+Context compaction is runtime memory rather
 than evidence: when the provider cannot produce its optional working-notes
 JSON, the runner keeps bounded raw records with their message IDs and
 continues from the durable trajectory. A failed compaction counter is reset
@@ -413,13 +418,14 @@ credentials do not enter these diagnostics.
 Model requests recheck the remaining output allowance after context preparation;
 an exhausted optional cumulative allowance cannot produce a zero or negative
 provider output limit.
-`LENS_AGENT_CONTEXT_TOKENS` defaults to 65,536 for the entire model request,
+`LENS_AGENT_CONTEXT_TOKENS` defaults to 200,000 for the entire model request,
 including system instructions, tool schemas, observations, output reserve and
 protocol margin. Token counts use the existing cl100k tokenizer with 20% reserve;
 operators must choose a window supported by their configured model. Both normal
 decisions and context compaction are checked at the provider boundary.
 Explicit provider context-size rejections receive up to two recovery attempts
-within the existing retry allowance. Each reduces the effective window by 20%,
+within the existing retry allowance. Each reduces the smaller of the effective
+window and the rejected input plus reserved output by 20%,
 rebuilds notes and complete exchanges, and sends again only if the actual input
 is smaller. The effective window and recovery count survive approval
 continuations alongside usage and elapsed time. A pinned request that cannot
@@ -443,6 +449,14 @@ Context preparation follows an explicit select -> compact -> rebuild loop.
 `context_builder.py` owns pure budget and complete-exchange selection;
 `agent_runner.py` owns model calls and publishes the replacement notes with
 the retired message IDs after construction succeeds.
+When capacity is sufficient, original messages stay in context. When it is not,
+selection retains a continuous suffix of complete exchanges alongside pinned
+researcher inputs; it does not skip a large recent exchange to fill space with
+older small ones. Only the omitted prefix enters model compaction. Earlier
+compaction, the number of omitted exchanges and time remaining do not switch
+normal preparation to fixed excerpts. Bounded archived records are used only
+when optional model summary construction fails. State retains every original
+message throughout; the context projection never overwrites that history.
 
 When older operations leave context, the runner creates provisional working
 notes containing scope, comparison conditions, conclusions, basis message IDs,
@@ -477,6 +491,34 @@ request while preserving the selected paper. An ordinary model answer does not
 complete an active execution plan: the model must continue or explicitly report
 completed, waiting_for_clarification, or scientific_refusal. One corrective
 opportunity precedes a stalled finalization; technical stops retain their reason.
+The browsing tool fits up to 100 paper identities into the available model
+context instead of requiring a fixed twelve-paper page. It returns an exact
+`next_offset` when another page is needed. The runtime reconstructs covered
+identity ranges and a compact paper list from successful page records, grouped
+by query and catalog identity. This ledger survives compaction and continued
+requests; revisiting an earlier page cannot move its next unread position back.
+It reports navigation only and does not certify relevance or Source coverage.
+When fallback compaction receives new observations, it retires earlier next-action
+suggestions and points to the current ledgers; uncertainties stay in attributed
+checks. For archived Source batches, fallback notes retain bounded verbatim
+passages with their document IDs, Source references, digests, pages, and truncation
+flags, instead of losing body text behind an outline JSON prefix. These excerpts
+are explicitly incomplete, untrusted paper content, not scientific summaries.
+Model-visible Source results retain complete text, digests, labels, pages
+and citation links while omitting duplicated locator metadata. Selecting a
+parent heading reads its child sections as well, so a Methods heading cannot
+stand in for its unread Powder and Process paragraphs. Pending section offsets
+remain explicit until their selected subtree has been read. Durable tool
+results retain their complete original shape. Read batching sizes this same
+model representation.
+Reading a selected section merges its outline into the known document outline;
+it cannot hide unread sibling sections. A changed Source version replaces the
+old outline. On reaching the no-progress threshold, the runner reports recent
+actions and gives the model one corrective decision with its current tools.
+Only a new observation resets this opportunity; another plan-only or repeated
+action closes with `no_progress`. Time, tool, token, and cycle exhaustion still
+take precedence over this correction.
+
 Source reading history is rebuilt from complete tool records in the current
 request and earlier requests, even after their messages are compacted. Bounded
 verbatim excerpts retain conditions, units, Source references, digests and pages.
@@ -636,7 +678,7 @@ not raw Source text; an unlimited time budget is recorded as `null`.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
   together. Selection uses the token capacity remaining after request overhead
-  and answer/reading reserves. Explicit character/message caps remain available
+  and reserved output. Explicit character/message caps remain available
   to local callers; the production default uses token capacity. The same model
   message representation is counted and transmitted. Omitted operations have
   validated provisional working notes while stored history remains complete;

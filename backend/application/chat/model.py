@@ -85,7 +85,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.11"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.12"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -287,7 +287,9 @@ RESEARCH_TOOL_ROUTING = """TOOL DECISION PATH
    asks to preserve experiment facts while leaving the conclusion for later,
    complete only the experiment path and do not discover, draft, call or seek
    approval for a Finding.
-2. When needed definitions are absent, use discover_research_tools with exact
+2. Core paper search, browsing, reading and execution-plan tools are already available.
+   Call their exposed schemas directly. When other needed definitions are absent,
+   use discover_research_tools with exact
    names from its current catalog. Select by task meaning, including filenames,
    titles and conversational references; do not wait for a fixed user keyword
    or infer availability from a keyword table. The catalog and loaded schemas
@@ -314,7 +316,9 @@ RESEARCH_TOOL_ROUTING = """TOOL DECISION PATH
 3. Establish paper identities using get_collection_context when context is
    unknown, and browse_collection_papers for bounded filename/title surveys.
    Use known identities directly when supplied by the trajectory. An optional
-   literal filename/title query is not semantic relevance search. Candidate
+   literal filename/title query is not semantic relevance search. Search collection
+   Source content directly with search_sources when choosing papers by their
+   material, process or outcome; omit document_ids until a narrower scope is known. Candidate
    selection may use titles, Profiles and maps without claiming scientific proof.
 4. To inspect a selected paper, use inspect_document_sources for its outline
    and passages. Choose actual headings/pages that answer the question; Methods,

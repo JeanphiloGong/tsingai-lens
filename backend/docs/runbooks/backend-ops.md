@@ -152,7 +152,7 @@ applies. Finalization cannot resume tools or execute an unchecked draft. These g
 limits include reasoning tokens. A provider `length` finish reason is a
 truncated response, not a completed answer or executable tool request.
 
-`LENS_AGENT_CONTEXT_TOKENS` is the total request window, default 65,536.
+`LENS_AGENT_CONTEXT_TOKENS` is the total request window, default 200,000.
 Configure it for the deployed model; it is not inferred from cumulative usage.
 System instructions, tools, complete message envelopes, review payloads and
 reserved output all count. Estimates use cl100k with 20% reserve and a protocol

@@ -175,6 +175,7 @@ class ReadSourceCapability:
             "it does not itself create Evidence or a Finding. Use inspect_table for "
             "row-aware inspection of an oversized table."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=ReadSourceToolRequest,
         parallel_safe=True,
@@ -410,6 +411,7 @@ class SearchSourcesCapability:
             "canonical Source digests. A match is not Evidence and does not prove "
             "relevance; inspect the exact Source before making a scientific judgment."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=SearchSourcesToolRequest,
         parallel_safe=True,
@@ -590,6 +592,7 @@ class InspectTableCapability:
             "into header-preserving row windows. The complete-table digest remains "
             "stable across windows. A table read is Source inspection, not Evidence."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=InspectTableToolRequest,
         parallel_safe=True,
@@ -831,6 +834,7 @@ class InspectDocumentSourcesCapability:
             "limit for automatic batching; continue with next_offset, and use read_source "
             "for any oversized truncated Source."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=InspectDocumentSourcesToolRequest,
         parallel_safe=True,

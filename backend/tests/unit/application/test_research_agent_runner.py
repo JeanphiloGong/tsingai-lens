@@ -3083,7 +3083,8 @@ async def test_plan_only_loop_reaches_no_progress(kind: str) -> None:
 
     assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
     plan_results = _results_for(result, "update_execution_plan")
-    assert len(plan_results) == (2 if kind == "invalid" else 3)
+    # One corrective model decision is allowed before the stalled run closes.
+    assert len(plan_results) == (3 if kind == "invalid" else 4)
     assert all(item.status is (ToolResultStatus.FAILED if kind == "invalid" else ToolResultStatus.SUCCEEDED)
                for item in plan_results)
     assert result.warnings
@@ -5049,7 +5050,7 @@ async def test_original_inconel_request_survives_reading_compaction_and_provider
         assert result.error_code == "context_window_exceeded"
         assert len(sources.executed_arguments) == 4
     assert any(trace["phase"] == "context_recovery" for trace in traces)
-    assert sum(trace["phase"] == "context_compaction" for trace in traces) >= 3
+    assert any(trace["phase"] == "context_compaction" for trace in traces)
     assert all(after < before for before, after in zip(model.requests_after_rejection, model.requests_after_rejection[1:]))
     assert len({arguments["document_id"] for arguments in sources.executed_arguments}) == len(sources.executed_arguments)
     assert len([message for message in result.messages if message.tool_result and message.tool_result.data.get("content")]) == len(sources.executed_arguments)

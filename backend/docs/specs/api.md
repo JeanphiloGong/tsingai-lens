@@ -706,7 +706,9 @@ Simple answers may have no plan. It never represents Evidence, permission, or a
 scientific conclusion.
 Progress also includes `retry_count`, `remaining_retry_budget`, `retry_attempt`,
 `retry_delay_ms` and `termination_reason`. `model_retry`, `context_compaction`
-and `context_recovery` describe technical work. `context_token_limit` records
+and `context_recovery` describe technical work. `no_progress_recovery` marks
+one correction decision before the repeated-observation guard stops a stalled
+turn; tools remain available within the existing budgets. `context_token_limit` records
 the reduced request window (zero means the configured default), and
 `context_recovery_attempts` counts the bounded reductions within this request,
 including approval continuations. A reduction sends another model request only
@@ -798,7 +800,11 @@ authoritative boundaries. The production Research Agent currently exposes these
 capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
-- `browse_collection_papers` returns a bounded, screening-only paper survey. A
+- `browse_collection_papers` returns a context-sized, screening-only paper survey.
+  Omitting `limit` permits up to 100 records; an explicit limit is a record cap.
+  The returned page fits the available context, and `next_offset` identifies
+  the first record after that page. `catalog_digest` identifies the ordered
+  collection membership used to reconstruct browsing progress across requests. A
   paper's `source_status` is `available` when canonical parsed Source content
   can be read, `preparing` while preparation is still running,
   `not_prepared` when an uploaded/stored paper has not been prepared,

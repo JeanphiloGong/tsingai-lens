@@ -26,7 +26,6 @@ from application.chat.model import (
 )
 from domain.chat import ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
-from repositories.chat_repository import ModelCallInput, ModelCallOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +110,13 @@ class OpenAIChatModel:
                     retryable=False,
                 )
             request_snapshot = _json_snapshot(provider_request)
-            call_id = await observer.start(ModelCallInput(
+            call_id = await observer.start(
                 session_id=session_id,
                 trigger_message_id=context.active_user_message_id,
                 response_message_id=context.model_call_response_message_id,
                 purpose=context.model_call_purpose,
                 request=request_snapshot,
-            ))
+            )
 
         async def finish(
             status: str,
@@ -129,14 +128,15 @@ class OpenAIChatModel:
             if observer is None or call_id is None or call_finished:
                 return
             try:
-                await observer.finish(call_id, ModelCallOutcome(
+                await observer.finish(
+                    call_id,
                     status=status,
                     finished_at=datetime.now(timezone.utc).isoformat(),
                     error_code=error_code,
                     prompt_tokens=usage.prompt_tokens if usage else None,
                     completion_tokens=usage.completion_tokens if usage else None,
                     total_tokens=usage.total_tokens if usage else None,
-                ))
+                )
             except Exception as exc:  # noqa: BLE001
                 raise ModelResponseError(
                     "The model call could not be saved.",

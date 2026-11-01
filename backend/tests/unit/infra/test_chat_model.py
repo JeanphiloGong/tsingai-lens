@@ -715,11 +715,23 @@ async def test_provider_context_rejection_is_normalized_and_audited(streaming, n
     outcomes = []
 
     class Observer:
-        async def start(self, record):
+        async def start(
+            self, *, session_id, trigger_message_id, response_message_id, purpose, request
+        ):
             return "model-call-1"
 
-        async def finish(self, call_id, outcome):
-            outcomes.append(outcome)
+        async def finish(
+            self, call_id, *, status, finished_at, error_code=None,
+            prompt_tokens=None, completion_tokens=None, total_tokens=None,
+        ):
+            outcomes.append({
+                "status": status,
+                "finished_at": finished_at,
+                "error_code": error_code,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            })
 
     detail = {"code": code, "message": "private prompt/provider details", "type": "invalid_request_error"}
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
@@ -736,7 +748,7 @@ async def test_provider_context_rejection_is_normalized_and_audited(streaming, n
     assert not caught.value.retryable
     assert not caught.value.partial_content
     assert "private" not in str(caught.value)
-    assert outcomes[-1].error_code == "context_window_exceeded"
+    assert outcomes[-1]["error_code"] == "context_window_exceeded"
 
 
 @pytest.mark.parametrize("status,code", [(400, "invalid_request_error"), (401, "context_length_exceeded"),

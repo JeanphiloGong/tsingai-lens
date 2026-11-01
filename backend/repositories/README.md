@@ -97,8 +97,10 @@ service behavior, persistence, locking, constraints and rollback.
 
 The [ObjectStore contract](object_store.py) describes uploaded/extracted bytes,
 not database rows; its existing file implementation remains infrastructure.
-The [model-call observer](chat_repository.py) reports model audit events; it is
-not a second Chat repository interface.
+The [model-call observer](../application/chat/session_service.py) reports audit
+events through explicit `start` and `finish` arguments. It constructs the
+persisted `ChatModelCall` beside the application operation; the model client
+does not import repository types or wrap audit arguments in transfer models.
 
 Dedicated results reuse domain values when possible: `StoredObjective`,
 `StoredDataset`, `StoredCollection` and `StoredDocument` attach metadata without

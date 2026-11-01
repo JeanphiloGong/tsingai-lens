@@ -64,8 +64,8 @@ from repositories.chat_repository import (
     ChatSessionBusyError,
     ChatSessionSummary,
     ChatWriteConflict,
-    ModelCallInput,
-    ModelCallOutcome,
+    ModelCallPurpose,
+    ModelCallStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,40 +145,63 @@ class RepositoryModelCallObserver:
     def __init__(self) -> None:
         self._sessions: dict[str, str] = {}
 
-    async def start(self, call: ModelCallInput) -> str:
-        request = json.loads(
-            json.dumps(call.request, ensure_ascii=False, separators=(",", ":"))
+    async def start(
+        self,
+        *,
+        session_id: str,
+        trigger_message_id: str | None,
+        response_message_id: str | None,
+        purpose: ModelCallPurpose,
+        request: Mapping[str, Any],
+    ) -> str:
+        normalized_request = json.loads(
+            json.dumps(request, ensure_ascii=False, separators=(",", ":"))
         )
         call_id = f"model_call_{uuid4().hex}"
         digest = sha256(
             json.dumps(
-                request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                normalized_request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")
         ).hexdigest()
         await ChatRepo.start_model_call(
             ChatModelCall(
                 call_id=call_id,
-                session_id=call.session_id,
-                trigger_message_id=call.trigger_message_id,
-                response_message_id=call.response_message_id,
-                purpose=call.purpose,
-                model=str(request.get("model") or "unknown"),
-                request=request,
+                session_id=session_id,
+                trigger_message_id=trigger_message_id,
+                response_message_id=response_message_id,
+                purpose=purpose,
+                model=str(normalized_request.get("model") or "unknown"),
+                request=normalized_request,
                 request_digest=digest,
                 started_at=_now_iso(),
             )
         )
-        self._sessions[call_id] = call.session_id
+        self._sessions[call_id] = session_id
         return call_id
 
-    async def finish(self, call_id: str, outcome: ModelCallOutcome) -> None:
+    async def finish(
+        self,
+        call_id: str,
+        *,
+        status: ModelCallStatus,
+        finished_at: str,
+        error_code: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+    ) -> None:
         session_id = self._sessions.get(call_id)
         if session_id is None:
             raise FileNotFoundError(f"chat model call not found: {call_id}")
         await ChatRepo.finish_model_call(
             session_id=session_id,
             call_id=call_id,
-            outcome=outcome,
+            status=status,
+            finished_at=finished_at,
+            error_code=error_code,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
 
 

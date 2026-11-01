@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Literal, Mapping, Protocol
+from typing import Any, Literal, Mapping
 from uuid import uuid4
 
 from domain.chat import (
@@ -48,31 +48,6 @@ ModelCallStatus = Literal[
     "response_invalid",
     "cancelled",
 ]
-
-
-@dataclass(frozen=True)
-class ModelCallInput:
-    session_id: str
-    trigger_message_id: str | None
-    response_message_id: str | None
-    purpose: ModelCallPurpose
-    request: Mapping[str, Any]
-
-
-@dataclass(frozen=True)
-class ModelCallOutcome:
-    status: ModelCallStatus
-    finished_at: str
-    error_code: str | None = None
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    total_tokens: int | None = None
-
-
-class ModelCallObserver(Protocol):
-    async def start(self, call: ModelCallInput) -> str: ...
-
-    async def finish(self, call_id: str, outcome: ModelCallOutcome) -> None: ...
 
 
 class ChatWriteConflict(ValueError):
@@ -976,14 +951,23 @@ class ChatRepository:
             )
 
     async def finish_model_call(
-        self, *, session_id: str, call_id: str, outcome: ModelCallOutcome
+        self,
+        *,
+        session_id: str,
+        call_id: str,
+        status: ModelCallStatus,
+        finished_at: str,
+        error_code: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
     ) -> ChatModelCall:
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.get(ChatModelCallORM, call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise ChatRecordNotFound(f"chat model call not found: {call_id}")
             if row.finished_at is not None:
-                if row.status != outcome.status:
+                if row.status != status:
                     raise ValueError("model call outcome cannot be reassigned")
                 return ChatModelCall(
                     call_id=row.call_id,
@@ -1003,13 +987,13 @@ class ChatRepository:
                     completion_tokens=row.completion_tokens,
                     total_tokens=row.total_tokens,
                 )
-            row.status = outcome.status
-            row.finished_at = _datetime(outcome.finished_at)
-            row.error_code = outcome.error_code
-            row.provider_confirmed = outcome.status == "provider_succeeded"
-            row.prompt_tokens = outcome.prompt_tokens
-            row.completion_tokens = outcome.completion_tokens
-            row.total_tokens = outcome.total_tokens
+            row.status = status
+            row.finished_at = _datetime(finished_at)
+            row.error_code = error_code
+            row.provider_confirmed = status == "provider_succeeded"
+            row.prompt_tokens = prompt_tokens
+            row.completion_tokens = completion_tokens
+            row.total_tokens = total_tokens
             await db.flush()
             return ChatModelCall(
                 call_id=row.call_id,

@@ -47,7 +47,6 @@ from application.chat.model import (
     ResearchWorkingNotesModelOutput,
 )
 from application.core.structured_extraction.json_support import extract_json_object
-from repositories.chat_repository import ModelCallObserver
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -346,7 +345,7 @@ class _RunProgress:
     context_token_limit: int = 0
     context_recovery_attempts: int = 0
     complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
-    model_call_observer: ModelCallObserver | None = None
+    model_call_observer: Any | None = None
     model_call_session_id: str | None = None
     execution_plan: ResearchExecutionPlan | None = None
     plan_update_available: bool = True
@@ -673,7 +672,7 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
+        model_call_observer: Any | None = None,
         context_checkpoint: Mapping[str, Any] | None = None,
     ) -> AgentRunResult:
         # Normalize the caller policy before creating any trajectory state. A
@@ -732,7 +731,7 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
+        model_call_observer: Any | None = None,
         continuation_progress: Mapping[str, Any] | None = None,
     ) -> AgentRunResult:
         progress = _RunProgress(
@@ -839,7 +838,7 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
+        model_call_observer: Any | None = None,
         continuation_progress: Mapping[str, Any] | None = None,
         permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AgentRunResult:

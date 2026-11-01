@@ -11,3 +11,6 @@ agent.log
 
 # Local-only expert gold-set fixtures
 backend/tests/fixtures/local_expert_gold/
+
+# Local design review artifacts
+/.impeccable/

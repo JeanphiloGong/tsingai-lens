@@ -34,18 +34,29 @@ invariants; repositories own SQL and record mapping; infrastructure supplies
 database sessions, ORM tables, parsing, and model access.
 The scientific meaning belongs to the Core services and analysis stages.
 
-[`../../main.py`](../../main.py) is the assembly point. `create_app()` configures
-routes, middleware, and the startup lifecycle. On startup,
-`build_application_runtime()` binds the database session factory, creates Web file
-resources, and configures the Chat runner and model-call observer. Repositories
-expose concrete singletons beside their implementations; controllers call the
-owning business functions directly. Preparation, discovery and analysis are
-queued in PostgreSQL and executed by concrete scripts. Feedback and dataset
-sample entry points similarly create only their own database and model resources.
-Each worker owns its operation and heartbeat and closes its resources on exit.
+[`../../main.py`](../../main.py) configures routes and middleware and owns the
+startup/shutdown lifespan. It binds the database session factory, creates file
+resources in their infrastructure modules, and configures the Chat runner and
+model-call observer. Shared instances live with their actual owners:
+`application.chat.session_service.ChatService`,
+`infra.persistence.file.collection_workspace.Workspace`, and
+`infra.persistence.file.object_store.Store`. Modules declare these names without
+creating clients or directories during import. Chat controllers call
+`session_service.ChatService` directly. File-facing application functions use
+the owning file module's instance internally; controllers pass research input
+and the authenticated actor, not storage dependencies.
+Repositories expose concrete singletons beside their implementations.
+Preparation, discovery and analysis are queued in PostgreSQL and executed by
+concrete scripts. Feedback and dataset sample entry points similarly create
+only their own database and model resources. Each independent worker owns its
+operation, file resources and heartbeat and closes its resources on exit.
 The optional synchronous Finding summary owns a separate request client with
-its existing budget. `ApplicationRuntime` retains Chat's actual streaming
-lifecycle; browser disconnect still leaves the Chat turn running.
+its existing budget. On shutdown the Web lifespan cancels and awaits active
+Chat tasks, closes the model client, then disposes the database engine. The same
+cleanup runs for resources already created when startup fails. Each Web worker
+process owns one set of shared instances; overlapping applications with
+different bindings in the same process are not supported. Browser disconnect
+still leaves the Chat turn running.
 The four legacy snapshot handlers remain unmounted.
 
 `controllers/exception_router.py` owns the four centralized exception handlers;

@@ -8,5 +8,10 @@ def test_worker_scripts_do_not_import_web_or_runtime():
     for name in names:
         source=(root/(name+".py")).read_text()
         tree=ast.parse(source)
-        assert not any(isinstance(node,ast.ImportFrom) and node.module=="main" for node in ast.walk(tree)), name
-        assert "build_application_runtime" not in source
+        assert not any(
+            (isinstance(node, ast.ImportFrom) and node.module in {"main", "runtime"})
+            or (isinstance(node, ast.Import) and any(
+                alias.name in {"main", "runtime"} for alias in node.names
+            ))
+            for node in ast.walk(tree)
+        ), name

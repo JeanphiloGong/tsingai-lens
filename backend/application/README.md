@@ -64,8 +64,19 @@ need service objects or forwarding interfaces. Research task submission stores w
 preparation, discovery and analysis entry points own their actual model and file
 resources, claims and lease heartbeats. Feedback and sample worker scripts also
 create only their own resources and never construct the Web runtime.
-`ApplicationRuntime` owns the database, Web file resources and current Chat
-runtime. Chat preserves disconnect continuation, approval and snapshot replay.
+Shared instances live beside their owning implementations:
+`application.chat.session_service.ChatService`,
+`infra.persistence.file.collection_workspace.Workspace`, and
+`infra.persistence.file.object_store.Store`. `main.py` initializes these values
+and the database engine at startup; importing their modules does not initialize
+resources. Chat controllers call the shared Chat service directly. File-facing
+application operations use the shared workspace or store internally, so HTTP
+controllers do not select or pass file resources. Independent workers continue
+to construct and pass their own resources where the operation requires them.
+The Web lifespan cancels active Chat tasks, closes the model client, and disposes
+the database engine on shutdown, including partial startup failures. Chat
+preserves disconnect continuation, approval and snapshot replay. There is no
+central runtime container, locator, or compatibility service.
 
 External formats are parsed at their input boundary. An expected missing
 resource, invalid decision, stale version, or write conflict is reported by its

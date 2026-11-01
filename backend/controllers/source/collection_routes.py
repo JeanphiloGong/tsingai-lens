@@ -15,7 +15,7 @@ from application.source import (
 from controllers.dependencies.auth import get_current_user_id
 from domain.chat.permissions import AUTO_ACTIONS
 from exceptions import RequestInvalidException
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from repositories.collection_repository import CollectionRepo, StoredCollection, StoredDocument
@@ -225,15 +225,12 @@ def collection_response(record: StoredCollection) -> CollectionResponse:
 async def create_collection(
     payload: CollectionCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    *,
-    request: Request,
 ) -> Response:
     # create collection of paper
     record = await collection_service.create_collection(
         name=payload.name,
         description=payload.description,
         owner_user_id=user_id,
-        workspace=request.app.state.runtime.collection_workspace,
     )
     return make_api_response(data=collection_response(record))
 
@@ -312,13 +309,10 @@ async def set_collection_agent_permission(
 async def delete_collection(
     collection_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    *,
-    request: Request,
 ) -> Response:
     result = await collection_service.delete_collection_for_user(
         collection_id,
         user_id,
-        workspace=request.app.state.runtime.collection_workspace,
     )
     return make_api_response(data=CollectionDeleteResponse(**result))
 
@@ -333,8 +327,6 @@ async def upload_collection_document(
     user_id: Annotated[str, Depends(get_current_user_id)],
     file: UploadFile=File(...),
     reuse_existing: bool=False,
-    *,
-    request: Request,
 ) -> Response:
     content = await _read_upload_content(file)
     record = await source_import_service.add_document(
@@ -344,7 +336,6 @@ async def upload_collection_document(
         media_type=file.content_type,
         reuse_existing=reuse_existing,
         user_id=user_id,
-        object_store=request.app.state.runtime.object_store,
     )
     return make_api_response(data=document_response(record))
 
@@ -373,12 +364,9 @@ async def create_collection_source_archive(
     collection_id: str,
     payload: CollectionSourceArchiveRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
-    *,
-    request: Request,
 ) -> Response:
     result = await source_archive_service.build_source_archive(
         collection_id, payload.document_ids, user_id=user_id,
-        object_store=request.app.state.runtime.object_store,
     )
 
     archive_file = result["file"]

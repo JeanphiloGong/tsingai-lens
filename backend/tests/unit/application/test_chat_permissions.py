@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
+from application.chat import session_service as shared_chat_service
 import pytest
 from application.chat import (
     CapabilityRegistry,
@@ -273,7 +273,7 @@ async def test_each_automatic_write_rechecks_current_permission(
 
 
 async def test_permission_controller_enforces_owner_and_revision(
-    *, postgres_session_factory
+    monkeypatch, *, postgres_session_factory
 ):
     from controllers.chat.chat_session_routes import (
         get_chat_permission,
@@ -290,12 +290,10 @@ async def test_permission_controller_enforces_owner_and_revision(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
     service = chat_session_service.ChatSessionService(runner=runner)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
-        runtime=SimpleNamespace(chat_session_service=service)
-    )))
+    monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     assert (
-        json.loads((await get_chat_permission(request, session.session_id, "user-1")).body)[
+        json.loads((await get_chat_permission(session.session_id, "user-1")).body)[
             "data"
         ]["mode"]
         == "confirm"
@@ -303,19 +301,19 @@ async def test_permission_controller_enforces_owner_and_revision(
     payload = ChatPermissionRequest(mode="read_only", expected_revision=0)
     assert (
         json.loads(
-            (await set_chat_permission(request, session.session_id, payload, "user-1")).body
+            (await set_chat_permission(session.session_id, payload, "user-1")).body
         )["data"]["revision"]
         == 1
     )
     with pytest.raises(ResourceConflictException) as conflict:
-        await set_chat_permission(request, session.session_id, payload, "user-1")
+        await set_chat_permission(session.session_id, payload, "user-1")
     assert conflict.value.code == 200204
     with pytest.raises(ResourceNotFoundException) as forbidden:
-        await get_chat_permission(request, session.session_id, "another-user")
+        await get_chat_permission(session.session_id, "another-user")
     assert forbidden.value.code == 200201
     fresh = await service.create_session(collection_id="col-1", user_id="user-1")
     assert (
-        json.loads((await get_chat_permission(request, fresh.session_id, "user-1")).body)[
+        json.loads((await get_chat_permission(fresh.session_id, "user-1")).body)[
             "data"
         ]["mode"]
         == "confirm"

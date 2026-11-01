@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence.file import collection_workspace as workspace_module, object_store as store_module
+
 import json
 import os
 from datetime import timedelta
@@ -499,7 +501,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -574,8 +576,8 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             client.portal.call(
                 partial(
                     run_document_preparation.run_forever,
-                    workspace=client.app.state.runtime.collection_workspace,
-                    object_store=client.app.state.runtime.object_store,
+                    workspace=workspace_module.Workspace,
+                    object_store=store_module.Store,
                     profile_extractor=model,
                     **worker_options,
                 )

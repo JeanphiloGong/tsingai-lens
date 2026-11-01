@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 import asyncio
 import json
 from dataclasses import asdict, replace
@@ -101,7 +103,7 @@ class _Sources:
 
 
 @pytest.fixture
-async def branch_app(postgres_session_factory, tmp_path):
+async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
     auth_session_service.AuthRepo = AuthRepository()
     auth = auth_session_service
     users, cookies = [], []
@@ -273,7 +275,7 @@ async def branch_app(postgres_session_factory, tmp_path):
     collection_service.CollectionRepo = collections
     service = chat_session_service.ChatSessionService(runner=runner)
     app = FastAPI()
-    app.state.runtime = SimpleNamespace(chat_session_service=service)
+    monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)

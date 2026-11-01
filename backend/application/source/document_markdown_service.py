@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence.file import object_store as object_store_module
+
 from repositories.collection_repository import StoredCollection
 
 import re
@@ -106,8 +108,8 @@ async def get_document_markdown(
     document_id: str,
     *,
     user_id: str,
-    object_store: ObjectStore,
 ) -> dict[str, Any]:
+    object_store = object_store_module.Store
     collection = await collection_service.get_collection_for_user(
         collection_id, user_id
     )
@@ -150,8 +152,8 @@ async def resolve_figure_image_file(
     figure_id: str,
     *,
     user_id: str,
-    object_store: ObjectStore,
 ) -> dict[str, Any]:
+    object_store = object_store_module.Store
     await collection_service.get_collection_for_user(collection_id, user_id)
     document_key = str(document_id or "").strip()
     figure_key = str(figure_id or "").strip()

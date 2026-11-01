@@ -97,7 +97,7 @@ async def test_document_profile_service_builds_profiles_and_summary(
     collection_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Profiled Collection", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection.collection.collection_id
 
     documents = pd.DataFrame(
@@ -186,14 +186,13 @@ async def test_document_profile_service_does_not_duplicate_source_filename(
     collection_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Profiled Collection", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection.collection.collection_id
     document_record = await source_import_service.add_document(
         collection_id,
         "wang_2024_battery.txt",
         b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",
         user_id="local-user",
-        object_store=object_store,
     )
 
     documents = pd.DataFrame(
@@ -244,7 +243,7 @@ async def test_document_profile_service_combines_filters_before_paginating(
     collection_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Searchable Profiles", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Searchable Profiles")
     collection_id = collection.collection.collection_id
     for row in (
         {
@@ -317,7 +316,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     profile_service = document_profile_service
     collection = await collection_service.create_collection(
-        "Sparse Profiles", workspace=collection_workspace
+        "Sparse Profiles"
     )
     collection_id = collection.collection.collection_id
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
@@ -396,7 +395,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     profile_service = document_profile_service
     collection = await collection_service.create_collection(
-        "Partial Profiles", workspace=collection_workspace
+        "Partial Profiles"
     )
     collection_id = collection.collection.collection_id
     documents = pd.DataFrame(
@@ -460,7 +459,7 @@ async def test_document_profile_read_does_not_build_missing_profiles(
     collection_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Read Only Profiles", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Read Only Profiles")
     collection_id = collection.collection.collection_id
 
     def fail_build(collection_id: str):  # noqa: ANN001
@@ -481,7 +480,7 @@ async def test_document_profile_service_round_trips_repository_storage_fields(
     collection_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Round Trip Profiles", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Round Trip Profiles")
     collection_id = collection.collection.collection_id
     documents = pd.DataFrame(
         [
@@ -533,7 +532,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
     collections, service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collections.create_collection("Twenty papers", workspace=collection_workspace)
+    collection = await collections.create_collection("Twenty papers")
     collection_id = collection.collection.collection_id
     for index in range(20):
         await seed_collection(
@@ -601,7 +600,7 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
     collections, service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection_id = (await collections.create_collection('Missing source', workspace=collection_workspace)).collection.collection_id
+    collection_id = (await collections.create_collection('Missing source')).collection.collection_id
     if has_other_source:
         await seed_collection(
             database.AsyncSessionLocal, collection_id, document_ids=("other",)
@@ -660,7 +659,7 @@ async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(
     collections, service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection_id = (await collections.create_collection('Metadata', workspace=collection_workspace)).collection.collection_id
+    collection_id = (await collections.create_collection('Metadata')).collection.collection_id
     await seed_collection(
         database.AsyncSessionLocal, collection_id, document_ids=("doc_a",)
     )

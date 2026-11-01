@@ -59,7 +59,7 @@ async def test_source_reference_routes_build_and_read_refs(
     collection_workspace,
 ):
     collection_service, repository, request = source_reference_services
-    collection = await collection_service.create_collection("Refs Collection", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Refs Collection")
     collection_id = collection.collection.collection_id
     artifacts = assemble_source_documents(
         documents=(
@@ -139,7 +139,7 @@ async def test_source_reference_build_route_returns_409_when_source_is_not_ready
     collection_workspace,
 ):
     collection_service, _repository, request = source_reference_services
-    collection = await collection_service.create_collection("Pending Refs Collection", workspace=collection_workspace)
+    collection = await collection_service.create_collection("Pending Refs Collection")
 
     with pytest.raises(ResourceConflictException) as exc_info:
         references_controller.SourceReferenceSummaryResponse.model_validate(

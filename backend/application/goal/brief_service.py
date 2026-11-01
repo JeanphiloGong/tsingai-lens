@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+
 from application.source import collection_service
 from exceptions import RequestInvalidException
-from infra.persistence.file import FileCollectionWorkspace
 
 
 def _build_objective(
@@ -112,8 +112,6 @@ async def intake_goal(
     context: str | None=None,
     max_seed_documents: int=30,
     owner_user_id: str='local-user',
-    *,
-    workspace: FileCollectionWorkspace,
 ) -> dict:
     normalized_material_system = str(material_system or "").strip() or None
     normalized_target_property = str(target_property or "").strip() or None
@@ -155,7 +153,6 @@ async def intake_goal(
         ),
         description=objective,
         owner_user_id=owner_user_id,
-        workspace=workspace,
     )
     collection_id = collection.collection.collection_id
     seed_collection = {

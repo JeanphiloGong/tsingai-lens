@@ -33,7 +33,6 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     service = collection_service
     collection = await service.create_collection(
         "Agent settings", owner_user_id="owner",
-        workspace=collection_workspace,
     )
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 
@@ -66,7 +65,6 @@ async def test_collection_default_permission_can_be_persistent(
     service = collection_service
     collection = await service.create_collection(
         "Persistent Agent settings", owner_user_id="owner",
-        workspace=collection_workspace,
     )
 
     saved = await service.set_agent_default_permission_for_user(
@@ -97,7 +95,6 @@ async def test_collection_default_permission_hides_collection_from_other_users(
     service = collection_service
     collection = await service.create_collection(
         "Private settings", owner_user_id="owner",
-        workspace=collection_workspace,
     )
 
     with pytest.raises(ResourceNotFoundException):
@@ -116,7 +113,6 @@ async def test_collection_default_permission_rejects_stale_revision(
     service = collection_service
     collection = await service.create_collection(
         "Concurrent settings", owner_user_id="owner",
-        workspace=collection_workspace,
     )
     expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 

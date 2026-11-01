@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infra.persistence.file import object_store as object_store_module
+
 from repositories.collection_repository import StoredDocument
 
 import asyncio
@@ -76,9 +78,9 @@ async def build_source_archive(
     document_ids: list[str],
     *,
     user_id: str,
-    object_store: ObjectStore,
 ) -> dict[str, Any]:
     """Build a bounded ZIP of original uploads for failure reproduction."""
+    object_store = object_store_module.Store
 
     normalized_document_ids = document_ids
     if not normalized_document_ids or any(
@@ -136,8 +138,8 @@ async def resolve_document_source_file(
     *,
     user_id: str,
     source_filename: str | None = None,
-    object_store: ObjectStore,
 ) -> dict[str, Any]:
+    object_store = object_store_module.Store
     collection = await collection_service.get_collection_for_user(
         collection_id, user_id
     )

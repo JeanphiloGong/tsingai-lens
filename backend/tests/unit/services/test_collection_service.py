@@ -63,14 +63,13 @@ async def test_collection_contains_its_uploaded_documents(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Current papers", workspace=collection_workspace)
+    collection = await service.create_collection("Current papers")
     first = await source_import_service.add_document(
         collection.collection.collection_id,
         "first.pdf",
         _valid_pdf_bytes("First paper"),
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
     second = await source_import_service.add_document(
         collection.collection.collection_id,
@@ -78,7 +77,6 @@ async def test_collection_contains_its_uploaded_documents(
         _valid_pdf_bytes("Second paper"),
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
 
     current = await service.get_collection(collection.collection.collection_id)
@@ -88,45 +86,45 @@ async def test_collection_contains_its_uploaded_documents(
     assert current.collection.status == "uploaded"
 
 
-async def test_collection_files_use_the_supplied_app_resources(
-    tmp_path, *, postgres_session_factory
+async def test_shared_collection_files_preserve_collection_isolation(
+    tmp_path, monkeypatch, *, postgres_session_factory
 ) -> None:
     first_workspace = FileCollectionWorkspace(tmp_path / "first-app")
     second_workspace = FileCollectionWorkspace(tmp_path / "second-app")
     first_store = FileObjectStore(first_workspace.root_dir)
     second_store = FileObjectStore(second_workspace.root_dir)
+    from infra.persistence.file import collection_workspace as workspace_module, object_store as store_module
+
+    monkeypatch.setattr(workspace_module, "Workspace", first_workspace, raising=False)
+    monkeypatch.setattr(store_module, "Store", first_store, raising=False)
     first = await collection_service.create_collection(
         "LPBF porosity",
-        workspace=first_workspace,
     )
     second = await collection_service.create_collection(
         "Tensile comparison",
-        workspace=second_workspace,
     )
     first_content = _valid_pdf_bytes("Porosity")
     second_content = _valid_pdf_bytes("Tensile")
     first_document = await source_import_service.add_document(
         first.collection.collection_id, "porosity.pdf", first_content,
         user_id="local-user",
-        object_store=first_store,
     )
     second_document = await source_import_service.add_document(
         second.collection.collection_id, "tensile.pdf", second_content,
         user_id="local-user",
-        object_store=second_store,
     )
+    monkeypatch.setattr(store_module, "Store", second_store)
     with pytest.raises(DocumentSourceUnavailableError):
         await source_archive_service.resolve_document_source_file(
             first.collection.collection_id, first_document.document.document_id,
             user_id="local-user",
-            object_store=second_store,
         )
+    monkeypatch.setattr(store_module, "Store", first_store)
     await collection_service.delete_collection_for_user(
         first.collection.collection_id, "local-user",
-        workspace=first_workspace,
     )
     assert not first_workspace.get_paths(first.collection.collection_id).collection_dir.exists()
-    assert second_store.read(
+    assert first_store.read(
         second_document.storage_key, second_document.document.sha256
     ) == second_content
     surviving = await collection_service.get_collection(second.collection.collection_id)
@@ -141,12 +139,11 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(
     object_store,
 ) -> None:
     service = collection_service
-    collection_id = (await service.create_collection('LPBF papers', workspace=collection_workspace)).collection.collection_id
+    collection_id = (await service.create_collection('LPBF papers')).collection.collection_id
     importer = source_import_service
     content = _valid_pdf_bytes("LPBF heat treatment")
     original = await importer.add_document(
         collection_id, "study.pdf", content, "application/pdf", user_id="local-user",
-        object_store=object_store,
     )
     await service.update_document_preparation(
         collection_id,
@@ -165,7 +162,6 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(
         "application/pdf",
         reuse_existing=True,
         user_id="local-user",
-        object_store=object_store,
     )
     assert recovered == prepared
     input_dir = collection_workspace.get_paths(collection_id).input_dir
@@ -175,7 +171,6 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(
     ):
         await importer.add_document(
             collection_id, "again.pdf", content, "application/pdf", user_id="local-user",
-            object_store=object_store,
         )
     assert [path.name for path in input_dir.iterdir()] == [original.stored_filename]
     different = await importer.add_document(
@@ -185,7 +180,6 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(
         "application/pdf",
         reuse_existing=True,
         user_id="local-user",
-        object_store=object_store,
     )
     assert different.document.document_id != original.document.document_id
     assert len((await service.get_collection(collection_id)).documents) == 2
@@ -200,14 +194,13 @@ async def test_collection_update_preserves_documents(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Before", workspace=collection_workspace)
+    collection = await service.create_collection("Before")
     document = await source_import_service.add_document(
         collection.collection.collection_id,
         "paper.pdf",
         _valid_pdf_bytes(),
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
 
     updated = await service.update_collection(
@@ -239,7 +232,6 @@ async def test_collection_agent_default_permission_is_owner_scoped(
     )
     collection = await service.create_collection(
         "Permission defaults", owner_user_id="user-1",
-        workspace=collection_workspace,
     )
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 
@@ -286,7 +278,7 @@ async def test_upload_registers_document_and_preserves_original_bytes(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Uploaded Collection", workspace=collection_workspace)
+    collection = await service.create_collection("Uploaded Collection")
     content = b"  Experimental Section\r\nMix and anneal.\r\n"
     document = await source_import_service.add_document(
         collection.collection.collection_id,
@@ -294,7 +286,6 @@ async def test_upload_registers_document_and_preserves_original_bytes(
         content,
         " text/plain ",
         user_id="local-user",
-        object_store=object_store,
     )
 
     assert document.document.document_id.startswith("doc_")
@@ -322,7 +313,7 @@ async def test_failed_document_registration_removes_unregistered_bytes(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Failed upload", workspace=collection_workspace)
+    collection = await service.create_collection("Failed upload")
     written_keys: list[str] = []
     write = object_store.write
 
@@ -343,7 +334,6 @@ async def test_failed_document_registration_removes_unregistered_bytes(
             b"not registered",
             "text/plain",
             user_id="local-user",
-            object_store=object_store,
         )
 
     assert len(written_keys) == 1
@@ -363,7 +353,7 @@ async def test_registration_error_preserves_bytes_already_registered(
     object_store,
 ) -> None:
     service = collection_service
-    collection_id = (await service.create_collection('Committed upload', workspace=collection_workspace)).collection.collection_id
+    collection_id = (await service.create_collection('Committed upload')).collection.collection_id
     add_documents = service.CollectionRepo.add_documents
     content = b"Experimental Section\nMix and anneal."
 
@@ -375,7 +365,6 @@ async def test_registration_error_preserves_bytes_already_registered(
     with pytest.raises(RuntimeError, match="connection lost after commit"):
         await source_import_service.add_document(
             collection_id, "paper.txt", content, "text/plain", user_id="local-user",
-            object_store=object_store,
         )
 
     documents = (await service.get_collection(collection_id)).documents
@@ -394,7 +383,7 @@ async def test_source_archive_uses_document_ids(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Reproduction sources", workspace=collection_workspace)
+    collection = await service.create_collection("Reproduction sources")
     first_payload = _valid_pdf_bytes("First")
     second_payload = _valid_pdf_bytes("Second")
     first = await source_import_service.add_document(
@@ -403,7 +392,6 @@ async def test_source_archive_uses_document_ids(
         first_payload,
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
     second = await source_import_service.add_document(
         collection.collection.collection_id,
@@ -411,14 +399,12 @@ async def test_source_archive_uses_document_ids(
         second_payload,
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
 
     result = await source_archive_service.build_source_archive(
         collection.collection.collection_id,
         [second.document.document_id, first.document.document_id],
         user_id="local-user",
-        object_store=object_store,
     )
     try:
         with ZipFile(result["file"]) as archive:
@@ -445,12 +431,11 @@ async def test_source_archive_rejects_unknown_document(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Reproduction sources", workspace=collection_workspace)
+    collection = await service.create_collection("Reproduction sources")
 
     with pytest.raises(ResourceNotFoundException) as exc_info:
         await source_archive_service.build_source_archive(
             collection.collection.collection_id, ["doc_missing"], user_id="local-user",
-            object_store=object_store,
         )
 
     assert exc_info.value.data["code"] == "collection_source_document_not_found"
@@ -465,15 +450,14 @@ async def test_source_resolution_reads_only_current_collection_documents(
     object_store,
 ) -> None:
     service = collection_service
-    first_collection = await service.create_collection("First", workspace=collection_workspace)
-    second_collection = await service.create_collection("Second", workspace=collection_workspace)
+    first_collection = await service.create_collection("First")
+    second_collection = await service.create_collection("Second")
     first = await source_import_service.add_document(
         first_collection.collection.collection_id,
         "first.pdf",
         _valid_pdf_bytes("First"),
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
     second = await source_import_service.add_document(
         second_collection.collection.collection_id,
@@ -481,12 +465,10 @@ async def test_source_resolution_reads_only_current_collection_documents(
         _valid_pdf_bytes("Second"),
         "application/pdf",
         user_id="local-user",
-        object_store=object_store,
     )
 
     source = await source_archive_service.resolve_document_source_file(
         first_collection.collection.collection_id, first.document.document_id, user_id="local-user",
-        object_store=object_store,
     )
     assert source["filename"] == "first.pdf"
     with pytest.raises(ResourceNotFoundException, match="Document not found"):
@@ -494,7 +476,6 @@ async def test_source_resolution_reads_only_current_collection_documents(
             first_collection.collection.collection_id,
             second.document.document_id,
             user_id="local-user",
-            object_store=object_store,
         )
 
 
@@ -506,7 +487,7 @@ async def test_source_resolution_rejects_invalid_storage_key(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Unsafe", workspace=collection_workspace)
+    collection = await service.create_collection("Unsafe")
     document = StoredDocument(
         document=Document(
             document_id="doc_unsafe",
@@ -531,7 +512,6 @@ async def test_source_resolution_rejects_invalid_storage_key(
             collection.collection.collection_id,
             document.document.document_id,
             user_id="local-user",
-            object_store=object_store,
         )
     assert exc_info.value.data["code"] == "document_source_path_invalid"
 
@@ -544,17 +524,16 @@ async def test_delete_collection_removes_documents_and_bytes(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Delete", workspace=collection_workspace)
+    collection = await service.create_collection("Delete")
     uploaded = await source_import_service.add_document(
         collection.collection.collection_id,
         "paper.txt",
         b"Methods",
         "text/plain",
         user_id="local-user",
-        object_store=object_store,
     )
 
-    await service.delete_collection(collection.collection.collection_id, workspace=collection_workspace)
+    await service.delete_collection(collection.collection.collection_id)
 
     with pytest.raises(ResourceNotFoundException):
         await service.get_collection(collection.collection.collection_id)
@@ -583,13 +562,12 @@ async def test_invalid_upload_leaves_no_document_or_bytes(
     object_store,
 ) -> None:
     service = collection_service
-    collection = await service.create_collection("Upload", workspace=collection_workspace)
+    collection = await service.create_collection("Upload")
     collection_id = collection.collection.collection_id
 
     with pytest.raises(RequestInvalidException, match=message):
         await source_import_service.add_document(
             collection_id, filename, content, media_type, user_id="local-user",
-            object_store=object_store,
         )
 
     assert (await service.get_collection(collection_id)).documents == ()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 from exceptions import ProjectException
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -10,7 +12,6 @@ import json
 import multiprocessing
 import os
 import socket
-from types import SimpleNamespace
 from contextlib import asynccontextmanager
 
 import pytest
@@ -81,7 +82,7 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
         )
         service = chat_session_service.ChatSessionService(runner=runner)
         app = FastAPI()
-        app.state.runtime = SimpleNamespace(chat_session_service=service)
+        shared_chat_service.ChatService = service
         app.add_exception_handler(ProjectException, project_exception_handler)
         app.include_router(router, prefix="/api/v1")
         server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))

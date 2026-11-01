@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 import asyncio
 import json
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -221,25 +222,22 @@ class _Service:
         }
 
 
-def _request(service: _Service, user_id: str = "user-1") -> SimpleNamespace:
+def _request(monkeypatch, service: _Service, user_id: str = "user-1") -> SimpleNamespace:
+    monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     return SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(runtime=SimpleNamespace(chat_session_service=service))
-        ),
         state=SimpleNamespace(current_user={"user_id": user_id}), headers={}
     )
 
 
-def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
+def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat(monkeypatch) -> None:
     service = _Service()
-    request = _request(service)
+    request = _request(monkeypatch, service)
 
     created = sessions_controller.ChatSessionResponse.model_validate(
         json.loads(
             (
                 asyncio.run(
                     sessions_controller.create_chat_session(
-                        request=request,
                         payload=ChatSessionCreateRequest(collection_id="col-1"),
                         user_id=request.state.current_user["user_id"],
                     )
@@ -252,7 +250,6 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
             (
                 asyncio.run(
                     sessions_controller.get_chat_session(
-                        request=request,
                         session_id="chat-1",
                         user_id=request.state.current_user["user_id"],
                     )
@@ -279,7 +276,6 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
             (
                 asyncio.run(
                     sessions_controller.list_chat_messages(
-                        request=request,
                         session_id="chat-1",
                         user_id=request.state.current_user["user_id"],
                     )
@@ -296,14 +292,13 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert messages.pending_approval.tool_call_id == "call-1"
 
 
-def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
+def test_chat_sessions_api_lists_owned_collection_sessions(monkeypatch) -> None:
     response = sessions_controller.ChatSessionListResponse.model_validate(
         json.loads(
             (
                 asyncio.run(
                     sessions_controller.list_chat_sessions(
-                        request=_request(_Service()),
-                        user_id=_request(_Service()).state.current_user["user_id"],
+                        user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
                         collection_id="col-1",
                         limit=12,
                         offset=0,
@@ -331,6 +326,7 @@ def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
     ],
 )
 def test_chat_history_title_is_a_bounded_first_question(
+    monkeypatch,
     question: str | None,
     title: str | None,
 ) -> None:
@@ -352,8 +348,7 @@ def test_chat_history_title_is_a_bounded_first_question(
             (
                 asyncio.run(
                     sessions_controller.list_chat_sessions(
-                        request=_request(service),
-                        user_id=_request(service).state.current_user["user_id"],
+                        user_id=_request(monkeypatch, service).state.current_user["user_id"],
                         collection_id="col-1",
                         limit=12,
                         offset=0,
@@ -365,7 +360,7 @@ def test_chat_history_title_is_a_bounded_first_question(
     assert response.items[0].title == title
 
 
-def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
+def test_chat_sessions_api_forwards_explicit_permission_mode(monkeypatch) -> None:
     service = _Service()
 
     sessions_controller.ChatTurnResponse.model_validate(
@@ -377,8 +372,8 @@ def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
                         payload=SendChatMessageRequest(
                             message="你好", permission_mode="none"
                         ),
-                        request=_request(service),
-                        user_id=_request(service).state.current_user["user_id"],
+                        request=_request(monkeypatch, service),
+                        user_id=_request(monkeypatch, service).state.current_user["user_id"],
                     )
                 )
             ).body
@@ -389,7 +384,7 @@ def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
 
 
 @pytest.mark.parametrize("count", [1, 3, 12])
-def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None:
+def test_chat_sessions_api_accepts_traceable_source_contexts(monkeypatch, count: int) -> None:
     service = _Service()
     source_context = {
         "resource_ref": {
@@ -431,8 +426,8 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
                                 for index in range(1, count)
                             ],
                         ),
-                        request=_request(service),
-                        user_id=_request(service).state.current_user["user_id"],
+                        request=_request(monkeypatch, service),
+                        user_id=_request(monkeypatch, service).state.current_user["user_id"],
                     )
                 )
             ).body
@@ -458,7 +453,7 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
     )
 
 
-def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
+def test_chat_sessions_api_maps_a_forged_source_context_to_422(monkeypatch) -> None:
     with pytest.raises(ProjectException) as invalid:
         sessions_controller.ChatTurnResponse.model_validate(
             json.loads(
@@ -467,8 +462,8 @@ def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
                         sessions_controller.send_chat_message(
                             session_id="chat-1",
                             payload=SendChatMessageRequest(message="forged source"),
-                            request=_request(_Service()),
-                            user_id=_request(_Service()).state.current_user["user_id"],
+                            request=_request(monkeypatch, _Service()),
+                            user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
                         )
                     )
                 ).body
@@ -485,7 +480,7 @@ def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
     }
 
 
-def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
+def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict(monkeypatch) -> None:
     service = _Service()
     with pytest.raises(ProjectException) as missing:
         sessions_controller.ChatSessionResponse.model_validate(
@@ -493,9 +488,8 @@ def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
                 (
                     asyncio.run(
                         sessions_controller.get_chat_session(
-                            request=_request(service, "user-2"),
                             session_id="chat-1",
-                            user_id=_request(service, "user-2").state.current_user[
+                            user_id=_request(monkeypatch, service, "user-2").state.current_user[
                                 "user_id"
                             ],
                         )
@@ -512,13 +506,12 @@ def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
                 (
                     asyncio.run(
                         sessions_controller.decide_chat_tool_call(
-                            request=_request(service),
                             session_id="chat-1",
                             tool_call_id="call-1",
                             payload=ChatToolDecisionRequest(
                                 decision="approved", arguments_digest="0" * 64
                             ),
-                            user_id=_request(service).state.current_user["user_id"],
+                            user_id=_request(monkeypatch, service).state.current_user["user_id"],
                         )
                     )
                 ).body
@@ -528,7 +521,7 @@ def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
     assert conflict.value.data["code"] == "chat_tool_decision_conflict"
 
 
-def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending() -> None:
+def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending(monkeypatch) -> None:
     service = _Service()
 
     with pytest.raises(ProjectException) as conflict:
@@ -539,8 +532,8 @@ def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending() 
                         sessions_controller.send_chat_message(
                             session_id="chat-1",
                             payload=SendChatMessageRequest(message="blocked"),
-                            request=_request(service),
-                            user_id=_request(service).state.current_user["user_id"],
+                            request=_request(monkeypatch, service),
+                            user_id=_request(monkeypatch, service).state.current_user["user_id"],
                         )
                     )
                 ).body
@@ -575,7 +568,7 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
         "application.auth.session_service.resolve_session",
         _AuthService().resolve_session,
     )
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -583,7 +576,7 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
     app = create_app()
 
     with TestClient(app) as client:
-        app.state.runtime = replace(app.state.runtime, chat_session_service=service)
+        monkeypatch.setattr(shared_chat_service, "ChatService", service)
         response = client.post("/api/v1/chat-sessions", json={"collection_id": "col-1"})
         assert response.status_code == 200
         assert response.json()["code"] == 200301
@@ -613,7 +606,7 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
         "application.auth.session_service.resolve_session",
         _AuthService().resolve_session,
     )
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -621,7 +614,7 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
     app = create_app()
 
     with TestClient(app) as client:
-        app.state.runtime = replace(app.state.runtime, chat_session_service=service)
+        monkeypatch.setattr(shared_chat_service, "ChatService", service)
         client.cookies.set("lens_session", "browser-session")
         response = client.post(
             "/api/v1/chat-sessions/chat-1/messages",
@@ -661,7 +654,7 @@ def test_title_route_validates_input_and_hides_unowned_sessions(
         "application.auth.session_service.resolve_session",
         _AuthService().resolve_session,
     )
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],

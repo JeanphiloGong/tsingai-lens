@@ -76,7 +76,6 @@ async def _fixture_collection(
         "P002 prompt behavior fixture",
         "Isolated PostgreSQL collection for the opt-in prompt check.",
         owner_user_id=user_id,
-        workspace=collection_workspace,
     )
     record = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     document_id = record["document_id"]

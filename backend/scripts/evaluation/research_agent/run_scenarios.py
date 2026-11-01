@@ -314,11 +314,11 @@ async def run(args):
         )
     # Import composition only after selecting the isolated database.
     from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
-    from main import build_application_runtime
+    from main import lifespan
+    from application.chat import session_service
 
-    runtime = await build_application_runtime()
-    chat_session_service = runtime.chat_session_service
-    try:
+    async with lifespan():
+        chat_session_service = session_service.ChatService
         report = {
             "implementation_revision": subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], text=True
@@ -346,8 +346,6 @@ async def run(args):
             save(args.output, report)
             print(case["id"], report["scenarios"][-1]["technical_result"], flush=True)
         return int(any(case["failures"] for case in report["scenarios"]))
-    finally:
-        await runtime.close()
 
 
 def main():

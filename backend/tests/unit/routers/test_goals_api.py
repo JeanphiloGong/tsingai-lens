@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence.file import collection_workspace as workspace_module
 from application.source import collection_service
 
 import json
@@ -25,14 +27,15 @@ def anyio_backend() -> str:
 
 
 def _request(
+    monkeypatch,
     goal_service,
     user_id: str='local-user',
     *,
     collection_workspace,
 ):
+    monkeypatch.setattr(workspace_module, "Workspace", collection_workspace, raising=False)
     goals_controller.brief_service = goal_service
     return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(runtime=SimpleNamespace(collection_workspace=collection_workspace))),
         state=SimpleNamespace(current_user={"user_id": user_id}),
     )
 
@@ -45,6 +48,7 @@ def goal_services(tmp_path, *, postgres_session_factory):
 
 
 async def test_goals_route_returns_goal_contract(
+    monkeypatch,
     goal_services,
     *,
     collection_workspace,
@@ -61,8 +65,7 @@ async def test_goals_route_returns_goal_contract(
                         intent="compare",
                         constraints={"substrate": "Al"},
                     ),
-                    user_id=_request(goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
-                    request=_request(goal_service, collection_workspace=collection_workspace),
+                    user_id=_request(monkeypatch, goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
                 )
             ).body
         )["data"]
@@ -81,6 +84,7 @@ async def test_goals_route_returns_goal_contract(
 
 
 async def test_goals_route_returns_400_for_empty_goal_signal(
+    monkeypatch,
     goal_services,
     *,
     collection_workspace,
@@ -99,8 +103,7 @@ async def test_goals_route_returns_400_for_empty_goal_signal(
                             constraints={},
                             context=None,
                         ),
-                        user_id=_request(goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
-                        request=_request(goal_service, collection_workspace=collection_workspace),
+                        user_id=_request(monkeypatch, goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
                     )
                 ).body
             )["data"]

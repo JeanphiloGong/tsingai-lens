@@ -63,6 +63,10 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         )
     try:
         factory = async_sessionmaker(engine, expire_on_commit=False)
+        # Web startup configures the same native factory as the repositories.
+        # Keep its engine inside this test's isolated PostgreSQL database.
+        monkeypatch.setenv("LENS_DATABASE_URL", postgres_sync_engine.url.render_as_string(hide_password=False))
+        monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
         monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", factory)
         monkeypatch.setattr(
             "application.core.objectives.analysis.experiment_query_service.AsyncSessionLocal",
@@ -172,15 +176,21 @@ def auth_session_service(postgres_session_factory):
 
 
 @pytest.fixture
-def collection_workspace(tmp_path):
-    from infra.persistence.file import FileCollectionWorkspace
+def collection_workspace(tmp_path, monkeypatch):
+    from infra.persistence.file import collection_workspace as workspace_module
 
-    return FileCollectionWorkspace(tmp_path / "collections")
+    workspace = workspace_module.FileCollectionWorkspace(tmp_path / "collections")
+    monkeypatch.setattr(workspace_module, "Workspace", workspace, raising=False)
+    return workspace
 
 
 @pytest.fixture
-def object_store(collection_workspace):
-    return FileObjectStore(collection_workspace.root_dir)
+def object_store(collection_workspace, monkeypatch):
+    from infra.persistence.file import object_store as store_module
+
+    store = FileObjectStore(collection_workspace.root_dir)
+    monkeypatch.setattr(store_module, "Store", store, raising=False)
+    return store
 
 
 

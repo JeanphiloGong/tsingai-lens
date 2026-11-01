@@ -44,7 +44,6 @@ async def test_source_availability_uses_real_collection_lookup(
 ):
     collection = await collection_service.create_collection(
         "LPBF source inspection", owner_user_id="local-user",
-        workspace=collection_workspace,
     )
     collection_id = collection.collection.collection_id
     if state == "unprepared":

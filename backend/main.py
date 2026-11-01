@@ -1,11 +1,11 @@
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from contextlib import AsyncExitStack, asynccontextmanager
 from time import perf_counter
 
 from application.auth import session_service as auth_session_service
 from application.chat import AgentRunLimits, CapabilityRegistry, ResearchAgentRunner
+from application.chat import session_service
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
     BrowseCollectionPapersCapability,
@@ -36,7 +36,14 @@ from application.chat.capabilities import (
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
-from application.chat.session_service import ChatSessionService
+from infra.llm.chat_model import OpenAIChatModel
+from infra.persistence.database import (
+    DatabaseSettings,
+    build_database_engine,
+)
+from infra.persistence import database
+from infra.persistence.file import collection_workspace, object_store
+
 from config import DATA_DIR
 from controllers import auth_routes as auth
 from controllers import feedback_case_routes as feedback_cases
@@ -61,15 +68,6 @@ from exceptions import ProjectException
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from infra.llm.chat_model import OpenAIChatModel
-from infra.persistence.database import (
-    AsyncSessionLocal,
-    DatabaseSettings,
-    build_database_engine,
-)
-from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.file.object_store import FileObjectStore
-from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from utils.logger import (
     REQUEST_ID_HEADER,
@@ -134,28 +132,20 @@ def _parse_agent_run_limits() -> AgentRunLimits:
             value = default
         values[field_name] = value
     return AgentRunLimits(**values)
-@dataclass(frozen=True)
-class ApplicationRuntime:
-    """Database, file resources and Chat execution owned by one Web process."""
-
-    database_engine: AsyncEngine
-    collection_workspace: FileCollectionWorkspace
-    object_store: FileObjectStore
-    chat_session_service: ChatSessionService
-
-    async def close(self) -> None:
-        await self.chat_session_service.close()
-        await self.database_engine.dispose()
 
 
-async def build_application_runtime() -> ApplicationRuntime:
-    database_engine = build_database_engine(DatabaseSettings())
-    AsyncSessionLocal.configure(bind=database_engine)
-    collection_workspace = FileCollectionWorkspace(DATA_DIR / "collections")
-    object_store = FileObjectStore(collection_workspace.root_dir)
-    try:
+@asynccontextmanager
+async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
+    async with AsyncExitStack() as cleanup:
+        database_engine = build_database_engine(DatabaseSettings())
+        cleanup.push_async_callback(database_engine.dispose)
+        database.engine = database_engine
+        database.AsyncSessionLocal.configure(bind=database_engine)
+        collection_workspace.Workspace = collection_workspace.FileCollectionWorkspace(DATA_DIR / "collections")
+        object_store.Store = object_store.FileObjectStore(collection_workspace.Workspace.root_dir)
         await auth_session_service.ensure_bootstrap_user()
         chat_model = OpenAIChatModel()
+        cleanup.push_async_callback(chat_model.client.close)
         runner = ResearchAgentRunner(
             model=chat_model,
             limits=_parse_agent_run_limits(),
@@ -192,25 +182,10 @@ async def build_application_runtime() -> ApplicationRuntime:
                 )
             ),
         )
-        return ApplicationRuntime(
-            database_engine=database_engine,
-            collection_workspace=collection_workspace,
-            object_store=object_store,
-            chat_session_service=ChatSessionService(runner=runner),
-        )
-    except BaseException:
-        await database_engine.dispose()
-        raise
-
-
-@asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    runtime = await build_application_runtime()
-    application.state.runtime = runtime
-    try:
+        service = session_service.ChatSessionService(runner=runner)
+        cleanup.push_async_callback(service.close)
+        session_service.ChatService = service
         yield
-    finally:
-        await runtime.close()
 
 
 def configure_middleware(app: FastAPI) -> None:

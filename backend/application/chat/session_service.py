@@ -2029,3 +2029,7 @@ __all__ = [
     "ChatSessionNotFoundError",
     "ChatSourceContextError",
 ]
+
+
+# Initialized by main.lifespan for the current Web worker process.
+ChatService: ChatSessionService

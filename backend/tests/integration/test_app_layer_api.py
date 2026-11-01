@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence.file import object_store as store_module
+
 from infra.persistence import database
 
 import asyncio
@@ -121,7 +123,7 @@ def app_client(
 
     from main import create_app
 
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -133,7 +135,7 @@ def app_client(
             _ImmediateDocumentPreparationService(
                 collection_service,
                 pipeline_run_service,
-                client.app.state.runtime.object_store,
+                store_module.Store,
             ).queue_document_preparation,
         )
         login = client.post(

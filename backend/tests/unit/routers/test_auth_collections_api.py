@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 import asyncio
 import json
 import os
@@ -44,7 +46,7 @@ def _build_client(
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -104,7 +106,7 @@ def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) ->
     )
     monkeypatch.setattr("main.DatabaseSettings", lambda: object())
     monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
-    monkeypatch.setattr("main.AsyncSessionLocal", Mock())
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", Mock())
     monkeypatch.setattr(
         "application.auth.session_service.ensure_bootstrap_user",
         service.ensure_bootstrap_user,
@@ -138,7 +140,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -161,7 +163,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
             for service in collection_consumers
         )
         capability_names = {
-            spec.name for spec in client.app.state.runtime.chat_session_service.runner.capabilities.specs
+            spec.name for spec in shared_chat_service.ChatService.runner.capabilities.specs
         }
         assert {
             "get_collection_context",
@@ -209,7 +211,7 @@ def test_web_lifespan_does_not_claim_or_interrupt_worker_jobs(
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],

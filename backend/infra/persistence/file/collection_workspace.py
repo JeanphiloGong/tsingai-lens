@@ -40,3 +40,7 @@ class FileCollectionWorkspace:
 
     def delete_collection_dir(self, collection_id: str) -> None:
         shutil.rmtree(self.get_paths(collection_id).collection_dir)
+
+
+# Initialized by main.lifespan; workers continue to construct their own workspace.
+Workspace: FileCollectionWorkspace

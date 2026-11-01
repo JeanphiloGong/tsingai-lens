@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence.file import collection_workspace
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataclasses import replace
@@ -11,7 +13,6 @@ from uuid import uuid4
 from domain.chat.permissions import change_permission
 from domain.source import Collection
 from exceptions import ResourceConflictException, ResourceNotFoundException
-from infra.persistence.file import FileCollectionWorkspace
 from repositories.collection_repository import (
     PermissionRevisionConflict,
     StoredCollection,
@@ -84,9 +85,8 @@ async def create_collection(
     name: str,
     description: str | None=None,
     owner_user_id: str='local-user',
-    *,
-    workspace: FileCollectionWorkspace,
 ) -> StoredCollection:
+    workspace = collection_workspace.Workspace
     collection_id = f"col_{uuid4().hex[:12]}"
     now = _now_iso()
     record = StoredCollection(
@@ -313,9 +313,8 @@ async def update_collection(collection_id: str, **fields) -> StoredCollection:
 
 async def delete_collection(
     collection_id: str,
-    *,
-    workspace: FileCollectionWorkspace,
 ) -> dict:
+    workspace = collection_workspace.Workspace
     paths = workspace.get_paths(collection_id)
     target_dir = paths.collection_dir
     collection = await CollectionRepo.read_collection(collection_id)
@@ -358,11 +357,9 @@ async def delete_collection(
 async def delete_collection_for_user(
     collection_id: str,
     owner_user_id: str,
-    *,
-    workspace: FileCollectionWorkspace,
 ) -> dict:
     await get_collection_for_user(collection_id, owner_user_id)
-    return await delete_collection(collection_id, workspace=workspace)
+    return await delete_collection(collection_id)
 
 
 def _input_storage_key(collection_id: str, stored_filename: str) -> str:

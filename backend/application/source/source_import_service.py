@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infra.persistence.file import object_store as object_store_module
+
 import asyncio
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -15,7 +17,6 @@ from repositories.collection_repository import (
     DocumentContentAlreadyExists,
     StoredDocument,
 )
-from repositories.object_store import ObjectStore
 
 
 def _now_iso() -> str:
@@ -34,8 +35,8 @@ async def add_document(
     *,
     user_id: str,
     reuse_existing: bool = False,
-    object_store: ObjectStore,
 ) -> StoredDocument:
+    object_store = object_store_module.Store
     await collection_service.get_collection_for_user(collection_id, user_id)
 
     filename = Path(filename or "upload.bin").name or "upload.bin"

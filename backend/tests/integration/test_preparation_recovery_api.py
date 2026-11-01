@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence.file import object_store as store_module
+
 
 import pytest
 from application.core.document_profiles import service as document_profile_service
@@ -76,7 +78,7 @@ def test_upload_classification_retry_content_and_research_readiness(
         await preparation.execute_document_preparation_job(
             job,
             workspace=collection_workspace,
-            object_store=app_client.app.state.runtime.object_store,
+            object_store=store_module.Store,
             source_artifact_builder=parse_sources,
             profile_extractor=classifier,
         )

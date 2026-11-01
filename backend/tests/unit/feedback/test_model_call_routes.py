@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 import json
 from types import SimpleNamespace
 
@@ -69,20 +71,17 @@ class _Service:
         return CALL
 
 
-def _request(service: _Service, user_id: str = "user-1") -> SimpleNamespace:
+def _request(monkeypatch, service: _Service, user_id: str = "user-1") -> SimpleNamespace:
+    monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     return SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(runtime=SimpleNamespace(chat_session_service=service))
-        ),
         state=SimpleNamespace(current_user={"user_id": user_id}), cookies={}
     )
 
 
-async def test_model_call_list_is_summary_only_and_supports_paging() -> None:
+async def test_model_call_list_is_summary_only_and_supports_paging(monkeypatch) -> None:
     response = await list_chat_model_calls(
-        request=_request(_Service()),
         session_id="session-1",
-        user_id=_request(_Service()).state.current_user["user_id"],
+        user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
         limit=1,
         offset=0,
     )
@@ -95,12 +94,11 @@ async def test_model_call_list_is_summary_only_and_supports_paging() -> None:
     assert response["items"][0]["provider_confirmed"] is True
 
 
-async def test_model_call_detail_returns_the_exact_request() -> None:
+async def test_model_call_detail_returns_the_exact_request(monkeypatch) -> None:
     response = await get_chat_model_call(
-        request=_request(_Service()),
         session_id="session-1",
         call_id=CALL.call_id,
-        user_id=_request(_Service()).state.current_user["user_id"],
+        user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
     )
 
     response = routes.ChatModelCallResponse.model_validate(
@@ -112,20 +110,18 @@ async def test_model_call_detail_returns_the_exact_request() -> None:
 
 
 @pytest.mark.parametrize("route", ["list", "detail"])
-async def test_model_call_routes_hide_another_user(route: str) -> None:
+async def test_model_call_routes_hide_another_user(monkeypatch, route: str) -> None:
     with pytest.raises(ProjectException) as error:
         if route == "list":
             await list_chat_model_calls(
-                request=_request(_Service(), "user-2"),
                 session_id="session-1",
-                user_id=_request(_Service(), "user-2").state.current_user["user_id"],
+                user_id=_request(monkeypatch, _Service(), "user-2").state.current_user["user_id"],
             )
         else:
             await get_chat_model_call(
-                request=_request(_Service(), "user-2"),
                 session_id="session-1",
                 call_id=CALL.call_id,
-                user_id=_request(_Service(), "user-2").state.current_user["user_id"],
+                user_id=_request(monkeypatch, _Service(), "user-2").state.current_user["user_id"],
             )
 
     assert error.value.code == 200201
@@ -133,23 +129,22 @@ async def test_model_call_routes_hide_another_user(route: str) -> None:
 
 @pytest.mark.parametrize("route", ["list", "detail"])
 async def test_model_call_routes_map_deleted_collection_to_not_found(
+    monkeypatch,
     route: str,
 ) -> None:
     with pytest.raises(ProjectException) as error:
         if route == "list":
             await list_chat_model_calls(
-                request=_request(_Service(collection_missing=True)),
                 session_id="session-1",
-                user_id=_request(_Service(collection_missing=True)).state.current_user[
+                user_id=_request(monkeypatch, _Service(collection_missing=True)).state.current_user[
                     "user_id"
                 ],
             )
         else:
             await get_chat_model_call(
-                request=_request(_Service(collection_missing=True)),
                 session_id="session-1",
                 call_id=CALL.call_id,
-                user_id=_request(_Service(collection_missing=True)).state.current_user[
+                user_id=_request(monkeypatch, _Service(collection_missing=True)).state.current_user[
                     "user_id"
                 ],
             )
@@ -158,13 +153,12 @@ async def test_model_call_routes_map_deleted_collection_to_not_found(
     assert error.value.message == "collection not found"
 
 
-async def test_model_call_detail_does_not_leak_a_call_from_another_session() -> None:
+async def test_model_call_detail_does_not_leak_a_call_from_another_session(monkeypatch) -> None:
     with pytest.raises(ProjectException) as error:
         await get_chat_model_call(
-            request=_request(_Service()),
             session_id="session-1",
             call_id="missing-call",
-            user_id=_request(_Service()).state.current_user["user_id"],
+            user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
         )
 
     assert error.value.code == 200201

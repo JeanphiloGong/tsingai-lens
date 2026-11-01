@@ -29,7 +29,6 @@ async def test_goal_service_creates_seed_collection_and_contract(
         constraints={"temperature": "298 K"},
         context="Focus on battery cathode studies.",
         max_seed_documents=24,
-        workspace=collection_workspace,
     )
 
     collection_id = payload["seed_collection"]["collection_id"]
@@ -72,7 +71,6 @@ async def test_goal_service_rejects_empty_goal_signal(
             constraints={},
             context=None,
             max_seed_documents=30,
-            workspace=collection_workspace,
         )
 
     assert "Provide at least one" in str(exc_info.value)

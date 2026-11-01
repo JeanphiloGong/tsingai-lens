@@ -17,7 +17,11 @@ identity model is [`../../docs/architecture/persistence-model.md`](../../docs/ar
 `expire_on_commit=False`. `main.py` creates one SQLAlchemy `AsyncEngine` during
 startup and calls `AsyncSessionLocal.configure(bind=engine)` before bootstrap.
 Imports do not create engines; startup failure and normal shutdown dispose the
-owned engine. The process uses one database binding, so overlapping runtimes
+owned engine. The engine is available as `database.engine`; file resources are
+initialized as `collection_workspace.Workspace` and `object_store.Store` in
+their own modules. File-facing application functions reference these instances
+directly, while independent workers create and pass their own resources.
+The process uses one database binding, so overlapping runtimes
 cannot configure different databases in the same process.
 
 Standalone reads create a task-local session with `AsyncSessionLocal() as db`;

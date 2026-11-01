@@ -1087,10 +1087,6 @@ def _client(
     research_objective_routes.start_objective_discovery = (
         scope_and_discovery.start_objective_discovery
     )
-    app.state.runtime = SimpleNamespace(
-        objective_discovery_service=scope_and_discovery,
-        objective_analysis_service=research_objective_routes.objective_analysis_service,
-    )
     research_objective_routes.objective_scope_service = scope_and_discovery
     app.dependency_overrides[get_current_user_id] = lambda: "user-researcher"
     app.include_router(router)

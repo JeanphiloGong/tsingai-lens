@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence.file import object_store as store_module
 from application.source import collection_service, source_import_service
 
 import json
@@ -92,10 +94,12 @@ def document_services(tmp_path, *, postgres_session_factory):
 
 
 def _document_request(
+    monkeypatch,
     document_services,
     *,
     object_store,
 ):
+    monkeypatch.setattr(store_module, "Store", object_store, raising=False)
     (
         collection_service,
         document_profile_service,
@@ -105,12 +109,12 @@ def _document_request(
     documents_controller.document_profile_service = document_profile_service
     documents_controller.document_markdown_service = document_markdown_service
     return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(runtime=SimpleNamespace(object_store=object_store))),
         state=SimpleNamespace(current_user={"user_id": "local-user"})
     )
 
 
 async def test_documents_route_returns_409_when_profiles_are_not_ready(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -121,7 +125,7 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Pending Collection", workspace=collection_workspace)
+    record = await collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(ProjectException) as exc_info:
         documents_controller.DocumentProfileListResponse.model_validate(
@@ -129,7 +133,7 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
                 (
                     await documents_controller.list_collection_document_profiles(
                         collection_id=record.collection.collection_id,
-                        user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                             "user_id"
                         ],
                     )
@@ -144,6 +148,7 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
 
 
 async def test_documents_route_returns_404_for_missing_collection(
+    monkeypatch,
     document_services,
     *,
     object_store,
@@ -160,7 +165,7 @@ async def test_documents_route_returns_404_for_missing_collection(
                 (
                     await documents_controller.list_collection_document_profiles(
                         collection_id="col_missing",
-                        user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                             "user_id"
                         ],
                     )
@@ -174,6 +179,7 @@ async def test_documents_route_returns_404_for_missing_collection(
 
 
 async def test_documents_route_forwards_profile_search_filters_and_pagination(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -184,7 +190,7 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Searchable Collection", workspace=collection_workspace)
+    record = await collection_service.create_collection(name="Searchable Collection")
     collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
@@ -219,7 +225,7 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(
             (
                 await documents_controller.list_collection_document_profiles(
                     collection_id=collection_id,
-                    user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
                     ],
                     limit=1,
@@ -238,6 +244,7 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(
 
 
 async def test_document_profile_route_returns_single_profile(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -250,7 +257,6 @@ async def test_document_profile_route_returns_single_profile(
     ) = document_services
     record = await collection_service.create_collection(
         name="Single Profile Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     await _store_document_profiles(
@@ -272,7 +278,7 @@ async def test_document_profile_route_returns_single_profile(
                 await documents_controller.get_collection_document_profile(
                     collection_id=collection_id,
                     document_id="paper-1",
-                    user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
                     ],
                 )
@@ -285,6 +291,7 @@ async def test_document_profile_route_returns_single_profile(
 
 
 async def test_document_profile_route_preserves_normalized_stored_values(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -297,7 +304,6 @@ async def test_document_profile_route_preserves_normalized_stored_values(
     ) = document_services
     record = await collection_service.create_collection(
         name="Invalid Profile Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     await _store_document_profiles(
@@ -319,7 +325,7 @@ async def test_document_profile_route_preserves_normalized_stored_values(
                 await documents_controller.get_collection_document_profile(
                     collection_id=collection_id,
                     document_id="paper-1",
-                    user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
                     ],
                 )
@@ -331,6 +337,7 @@ async def test_document_profile_route_preserves_normalized_stored_values(
 
 
 async def test_document_content_route_uses_stable_block_locator(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -343,7 +350,6 @@ async def test_document_content_route_uses_stable_block_locator(
     ) = document_services
     record = await collection_service.create_collection(
         name="Document Locator Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     await _store_source_documents(
@@ -392,7 +398,7 @@ async def test_document_content_route_uses_stable_block_locator(
                 await documents_controller.get_collection_document_content(
                     collection_id=collection_id,
                     document_id="paper-1",
-                    user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
                     ],
                 )
@@ -416,6 +422,7 @@ async def test_document_content_route_uses_stable_block_locator(
 
 
 async def test_document_markdown_route_returns_markdown_projection(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -428,7 +435,6 @@ async def test_document_markdown_route_returns_markdown_projection(
     ) = document_services
     record = await collection_service.create_collection(
         name="Markdown Route Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     await _store_source_documents(
@@ -476,10 +482,9 @@ async def test_document_markdown_route_returns_markdown_projection(
                 await documents_controller.get_collection_document_markdown(
                     collection_id=collection_id,
                     document_id="paper-1",
-                    user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
                     ],
-                    request=_document_request(document_services, object_store=object_store),
                 )
             ).body
         )["data"]
@@ -498,6 +503,7 @@ async def test_document_markdown_route_returns_markdown_projection(
 
 
 async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -510,7 +516,6 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     ) = document_services
     record = await collection_service.create_collection(
         name="Markdown Pending Collection",
-        workspace=collection_workspace,
     )
 
     with pytest.raises(ProjectException) as exc_info:
@@ -520,10 +525,9 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
                     await documents_controller.get_collection_document_markdown(
                         collection_id=record.collection.collection_id,
                         document_id="paper-1",
-                        user_id=_document_request(document_services, object_store=object_store).state.current_user[
+                        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                             "user_id"
                         ],
-                        request=_document_request(document_services, object_store=object_store),
                     )
                 ).body
             )["data"]
@@ -540,6 +544,7 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     ("论文.pdf", "inline; filename*=UTF-8''%E8%AE%BA%E6%96%87.pdf"),
 ])
 async def test_document_source_route_streams_current_collection_document(
+    monkeypatch,
     document_services,
     filename,
     expected_disposition,
@@ -552,7 +557,7 @@ async def test_document_source_route_streams_current_collection_document(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Source File Collection", workspace=collection_workspace)
+    record = await collection_service.create_collection(name="Source File Collection")
     collection_id = record.collection.collection_id
     writer = PdfWriter()
     writer.add_blank_page(width=72, height=72)
@@ -561,14 +566,12 @@ async def test_document_source_route_streams_current_collection_document(
     payload = pdf.getvalue()
     document = await source_import_service.add_document(
         collection_id, filename, payload, "application/pdf", user_id="local-user",
-        object_store=object_store,
     )
 
     response = await documents_controller.get_collection_document_source(
         collection_id=collection_id,
         document_id=document.document.document_id,
-        user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-        request=_document_request(document_services, object_store=object_store),
+        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
     )
 
     assert response.body == payload
@@ -577,6 +580,7 @@ async def test_document_source_route_streams_current_collection_document(
 
 
 async def test_document_source_route_returns_404_when_document_is_missing(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -589,15 +593,13 @@ async def test_document_source_route_returns_404_when_document_is_missing(
     ) = document_services
     record = await collection_service.create_collection(
         name="Missing Source Collection",
-        workspace=collection_workspace,
     )
 
     with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_source(
             collection_id=record.collection.collection_id,
             document_id="paper-1",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     exc = exc_info.value
@@ -607,6 +609,7 @@ async def test_document_source_route_returns_404_when_document_is_missing(
 
 
 async def test_document_source_route_rejects_path_outside_collection(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -617,7 +620,7 @@ async def test_document_source_route_rejects_path_outside_collection(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Unsafe Source Collection", workspace=collection_workspace)
+    record = await collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record.collection.collection_id
     unsafe_document = StoredDocument(
         document=Document(
@@ -642,8 +645,7 @@ async def test_document_source_route_rejects_path_outside_collection(
         await documents_controller.get_collection_document_source(
             collection_id=collection_id,
             document_id="paper-1",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     exc = exc_info.value
@@ -653,6 +655,7 @@ async def test_document_source_route_rejects_path_outside_collection(
 
 
 async def test_document_source_route_rejects_another_collections_storage_key(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -663,8 +666,8 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    first = await collection_service.create_collection(name="First source collection", workspace=collection_workspace)
-    second = await collection_service.create_collection(name="Second source collection", workspace=collection_workspace)
+    first = await collection_service.create_collection(name="First source collection")
+    second = await collection_service.create_collection(name="Second source collection")
     payload = b"%PDF-1.4\nsecond collection\n"
     storage_key = f"{second.collection.collection_id}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
@@ -692,8 +695,7 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         await documents_controller.get_collection_document_source(
             collection_id=first.collection.collection_id,
             document_id="paper-1",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     assert exc_info.value.code == 200204
@@ -701,6 +703,7 @@ async def test_document_source_route_rejects_another_collections_storage_key(
 
 
 async def test_document_figure_image_route_streams_extracted_asset(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -711,7 +714,7 @@ async def test_document_figure_image_route_streams_extracted_asset(
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Figure Image Collection", workspace=collection_workspace)
+    record = await collection_service.create_collection(name="Figure Image Collection")
     collection_id = record.collection.collection_id
     content = b"\x89PNG\r\n\x1a\nfixture\n"
     asset_sha256 = sha256(content).hexdigest()
@@ -748,8 +751,7 @@ async def test_document_figure_image_route_streams_extracted_asset(
         collection_id=collection_id,
         document_id="paper-1",
         figure_id="fig-1",
-        user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-        request=_document_request(document_services, object_store=object_store),
+        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
     )
 
     assert response.body == content
@@ -758,6 +760,7 @@ async def test_document_figure_image_route_streams_extracted_asset(
 
 
 async def test_document_figure_image_route_rejects_figure_from_other_document(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -770,7 +773,6 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
     ) = document_services
     record = await collection_service.create_collection(
         name="Cross Document Figure Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     await _store_source_documents(
@@ -798,8 +800,7 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
             collection_id=collection_id,
             document_id="paper-1",
             figure_id="fig-2",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     exc = exc_info.value
@@ -810,6 +811,7 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
 
 
 async def test_document_figure_image_route_rejects_path_outside_collection(
+    monkeypatch,
     document_services,
     tmp_path,
     *,
@@ -823,7 +825,6 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
     ) = document_services
     record = await collection_service.create_collection(
         name="Unsafe Figure Image Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     outside_path = tmp_path / "outside.png"
@@ -850,8 +851,7 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
             collection_id=collection_id,
             document_id="paper-1",
             figure_id="fig-1",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     exc = exc_info.value
@@ -861,6 +861,7 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
 
 
 async def test_document_figure_image_route_rejects_another_collections_object_key(
+    monkeypatch,
     document_services,
     *,
     collection_workspace,
@@ -871,8 +872,8 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
         _document_profile_service,
         markdown_service,
     ) = document_services
-    first = await collection_service.create_collection(name="First Figure Collection", workspace=collection_workspace)
-    second = await collection_service.create_collection(name="Second Figure Collection", workspace=collection_workspace)
+    first = await collection_service.create_collection(name="First Figure Collection")
+    second = await collection_service.create_collection(name="Second Figure Collection")
     content = b"figure"
     digest = sha256(content).hexdigest()
     foreign_key = collection_service.write_figure_asset(
@@ -907,8 +908,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
             collection_id=first.collection.collection_id,
             document_id="paper-1",
             figure_id="fig-1",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     assert exc_info.value.code == 200204
@@ -917,6 +917,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
 
 @pytest.mark.parametrize("failure", ["missing", "hash_mismatch"])
 async def test_document_figure_image_route_reports_unavailable_object_bytes(
+    monkeypatch,
     document_services,
     failure,
     *,
@@ -930,7 +931,6 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
     ) = document_services
     record = await collection_service.create_collection(
         name="Unavailable Figure Collection",
-        workspace=collection_workspace,
     )
     collection_id = record.collection.collection_id
     content = b"figure"
@@ -971,8 +971,7 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
             collection_id=collection_id,
             document_id="paper-1",
             figure_id="fig-1",
-            user_id=_document_request(document_services, object_store=object_store).state.current_user["user_id"],
-            request=_document_request(document_services, object_store=object_store),
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
 
     assert exc_info.value.code == 200204

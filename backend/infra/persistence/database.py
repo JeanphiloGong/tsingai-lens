@@ -16,6 +16,10 @@ from sqlalchemy.ext.asyncio import (
 from config import ENV_FILE_PATH
 
 
+# The Web lifespan owns this process engine and disposes it on exit.
+engine: AsyncEngine
+
+
 AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,

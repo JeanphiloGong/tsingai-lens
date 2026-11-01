@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 from application.chat.capabilities import collection_context
 
 import pytest
@@ -93,7 +95,6 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "Ti-6Al-4V energy input",
         "Literature for a traceable energy-input comparison.",
         owner_user_id=user["user_id"],
-        workspace=collection_workspace,
     )
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
@@ -134,7 +135,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         collection_context.collection_service = collection_service
         collection_context.ObjectiveRepo = objective_repository
         monkeypatch.setattr(
-            client.app.state.runtime.chat_session_service,
+            shared_chat_service.ChatService,
             "runner",
             ResearchAgentRunner(
                 model=model,

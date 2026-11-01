@@ -518,6 +518,12 @@ actions and gives the model one corrective decision with its current tools.
 Only a new observation resets this opportunity; another plan-only or repeated
 action closes with `no_progress`. Time, tool, token, and cycle exhaustion still
 take precedence over this correction.
+Plan reminders are sent after an attempted final answer leaves an active plan,
+not after every read. Rewording the same plan receives an explicit instruction
+to continue the actual checks. A collection search presents a first hit from
+each ranked paper before additional hits from one paper; its paper summaries
+cover the returned page. Reworded searches and smaller subsets of the same
+Source previews do not count as new observations.
 
 Source reading history is rebuilt from complete tool records in the current
 request and earlier requests, even after their messages are compacted. Bounded

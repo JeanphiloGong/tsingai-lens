@@ -276,6 +276,9 @@ class ReadSourceCapability:
                 "complete_source": complete_source,
                 "content_truncated": not complete_source,
                 "source_digest": digest,
+                "source_version": source_version,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                 "offset": next_offset} if next_offset is not None else None,
                 "support_is_evidence": False,
             },
             resource_refs=(source_ref,),
@@ -294,6 +297,8 @@ class ReadSourceCapability:
                         **result.data,
                         "content": canonical_content[start:candidate_end],
                         "next_offset": candidate_end,
+                        "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                         "offset": candidate_end},
                         "complete_source": False,
                         "content_truncated": True,
                     },
@@ -321,6 +326,8 @@ class ReadSourceCapability:
                     **result.data,
                     "content": canonical_content[start:low],
                     "next_offset": low,
+                    "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                     "offset": low},
                     "complete_source": False,
                     "content_truncated": True,
                 },
@@ -328,9 +335,7 @@ class ReadSourceCapability:
                     "Continue at next_offset before treating this Source as completely read.",
                 ),
             )
-        return replace(result, data={**result.data, "source_version": source_version,
-            "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
-                             "offset": result.data["next_offset"]} if result.data["next_offset"] is not None else None})
+        return result
 
     @staticmethod
     def _source_record(
@@ -517,12 +522,18 @@ class SearchSourcesCapability:
             paper_scores[document_id] = (len(paper_terms), title_terms)
         matches.sort(key=lambda item: (*paper_scores[item["document_id"]], len(item["matched_terms"])), reverse=True)
         papers = []
+        paper_hits = []
         for document_id in sorted(paper_scores, key=paper_scores.get, reverse=True):
             hits = [item for item in matches if item["document_id"] == document_id]
             if hits:
+                paper_hits.append(hits)
                 papers.append({"document_id": document_id, "title": documents_by_id[document_id].title[:500],
                                "matching_source_count": len(hits),
                                "matched_terms": sorted({term for item in hits for term in item["matched_terms"]})})
+        # Surface each ranked paper before returning additional passages from
+        # the same paper, so a long paper cannot hide the rest of the corpus.
+        matches = [hits[index] for index in range(max((len(hits) for hits in paper_hits), default=0))
+                   for hits in paper_hits if index < len(hits)]
 
         visible = matches[arguments.offset : arguments.offset + arguments.limit]
         next_offset = arguments.offset + len(visible)
@@ -546,7 +557,9 @@ class SearchSourcesCapability:
                 "query": arguments.query,
                 "document_ids": arguments.document_ids,
                 "match_mode": arguments.match_mode,
-                "papers": papers[:100],
+                "papers": [paper for paper in papers
+                           if paper["document_id"] in {item["document_id"] for item in visible}],
+                "matching_paper_total": len(papers),
                 "source_types": list(arguments.source_types),
                 "match_total": len(matches),
                 "offset": arguments.offset,

@@ -75,7 +75,8 @@ class ChatModelContext:
                 "[CURRENT EXECUTION PLAN]\n"
                 "The last accepted model plan for this request, retained independently of "
                 "compacted messages. It is fallible progress, not evidence or permission. "
-                "Use observations to revise it through update_execution_plan.\n"
+                "Continue the active step with the available tools; revise the plan when "
+                "the research phase, remaining work or final disposition changes.\n"
                 + json.dumps(self.execution_plan, ensure_ascii=False)
             )})
         active = next((message for message in self.messages

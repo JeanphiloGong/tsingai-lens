@@ -539,6 +539,16 @@ class _RunProgress:
         self.complete_source_identities.update(completed)
         new_resource_refs = self.resource_refs - previous_resource_refs
         observation_changed = len(self.seen_observations) > previous
+        if call.name == "search_sources" and result.status is ToolResultStatus.SUCCEEDED and data.get("matches"):
+            new_hits = False
+            for match in data["matches"]:
+                hit = {key: match.get(key) for key in (
+                    "document_id", "source_kind", "source_ref", "source_digest", "content_offset", "content",
+                )}
+                hit_digest = "search_hit:" + sha256(json.dumps(hit, sort_keys=True).encode()).hexdigest()
+                new_hits |= hit_digest not in self.seen_observations
+                self.seen_observations.add(hit_digest)
+            return new_hits
         if not has_source_observation:
             if normalized_paper_list:
                 return bool(new_resource_refs)
@@ -1078,7 +1088,7 @@ class ResearchAgentRunner:
                         )
                     active_plan = (progress.execution_plan is not None
                                    and progress.execution_plan.model_status is ResearchExecutionStatus.IN_PROGRESS)
-                    if active_plan:
+                    if active_plan and disposition_retries:
                         decision_messages = (*decision_messages, ChatMessage.user(
                             message_id=self._message_id(), session_id=context.session_id,
                             content=("The current execution plan is still in progress. Continue the available "

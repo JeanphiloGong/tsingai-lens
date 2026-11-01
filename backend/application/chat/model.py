@@ -85,7 +85,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.12"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.13"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -129,7 +129,10 @@ The runtime exposes an execution_plan for the current request. Maintain it by
 calling update_execution_plan with the complete current step list after framing
 a complex request and whenever a meaningful observation changes the remaining
 work. Keep completed steps, use short researcher-facing actions, and keep at
-most one step in_progress. The runtime adds approval, permission, stalled,
+most one step in_progress. Continue reading within the active step without
+resubmitting the same plan or recording each reading position in it; runtime
+ledgers retain those positions. Update the plan when a research phase, remaining
+work or final disposition changes. The runtime adds approval, permission, stalled,
 resource and technical dispositions around your plan; it does not invent
 scientific steps for you.
 The saved plan has a stable plan_id, a monotonically increasing plan_version,

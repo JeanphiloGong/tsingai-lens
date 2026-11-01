@@ -68,6 +68,35 @@ def test_changed_batch_length_is_not_new_source_coverage():
     assert progress.observe(call,result)
     assert not progress.observe(call,replace(result,data={**result.data,'sources':sources[:2]}))
 
+
+@pytest.mark.anyio
+async def test_exact_read_budget_includes_version_and_continuation_arguments(monkeypatch):
+    from application.chat.capabilities.document_sources import ReadSourceCapability, ReadSourceToolRequest
+    from application.chat.context_builder import ChatContextBuilder
+
+    text = "Measured IN718 elongation and test conditions. " * 100
+    document = SourceDocument("paper", 0, "IN718", "", blocks=(
+        SourceBlock("results", "paper", "paragraph", text, 0),
+    ))
+    monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
+        read_document=AsyncMock(return_value=document),
+    ))
+    monkeypatch.setattr(document_sources.collection_service, "get_collection_for_user", AsyncMock())
+    arguments = {"document_id": "paper", "source_kind": "text_window", "source_ref": "results"}
+    parts = []
+    for _ in range(30):
+        result = await ReadSourceCapability().execute(
+            CapabilityExecutionContext("chat", "user", "col", "read", max_result_tokens=800),
+            ReadSourceToolRequest(**arguments),
+        )
+        assert result.status is ToolResultStatus.SUCCEEDED
+        assert ChatContextBuilder.estimate_tokens(ChatContextBuilder.tool_result_message(result)) <= 800
+        parts.append(result.data["content"])
+        arguments = result.data["continuation"]
+        if arguments is None:
+            break
+    assert "".join(parts) == text
+
 @pytest.mark.anyio
 async def test_current_and_previous_turn_facts_survive_repeated_fallback_compaction():
     import json

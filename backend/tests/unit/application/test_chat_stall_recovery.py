@@ -107,6 +107,31 @@ def test_stall_correction_does_not_override_the_tool_budget():
     assert progress.stop_before_model(allow_no_progress_recovery=True) is AgentCompletionReason.RESOURCE_BUDGET
 
 
+@pytest.mark.anyio
+async def test_active_research_step_does_not_receive_a_plan_update_reminder_after_each_read():
+    reader = _Capability("read_source", ToolRisk.READ, _QuestionArguments)
+    step = {"step_id": "read", "action": "Compare paper conditions", "status": "in_progress"}
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [step], "status": "in_progress", "explanation": "Read both papers.",
+        }),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "paper-1"}),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "paper-2"}),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [{**step, "status": "completed"}], "status": "completed",
+            "explanation": "Both papers inspected.",
+        }),)),
+        ModelTurn(content="The reported conditions differ."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((reader,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Compare both papers.",
+    )
+    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
+    assert len(reader.executed_arguments) == 2
+    assert not any("The current execution plan is still in progress." in message.content
+                   for context in model.contexts for message in context)
+
+
 def test_core_reader_specs_are_available_without_discovery_but_writes_are_not():
     from application.chat.capability_policy import select_tool_specs
     from application.chat.capabilities.document_sources import SearchSourcesCapability,InspectDocumentSourcesCapability,ReadSourceCapability,InspectTableCapability

@@ -222,6 +222,13 @@ async def test_each_automatic_write_rechecks_current_permission(
                 ),
             )
         ),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [
+                {"step_id": "correct", "action": "Save the verified correction", "status": "completed"},
+                {"step_id": "follow_up", "action": "Record the next experiment", "status": "completed"},
+            ],
+            "status": "completed", "explanation": "Both requested revisions were saved.",
+        }),)),
         ModelTurn(content="Both revisions are saved."),
     )
     chat_session_service.ChatRepo = repository

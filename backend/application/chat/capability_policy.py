@@ -516,6 +516,14 @@ def stage_instruction(
         observations["paper_browsing"] = list(browsing.values())[-3:]
     if successful_results.get("discover_research_tools"):
         observations["loaded_tools"] = list(tool_names)
+    plans = successful_results.get("update_execution_plan", ())
+    if (len(plans) > 1 and calls and calls[-1].name == "update_execution_plan"
+            and all(plans[-1].get(key) == plans[-2].get(key) for key in ("steps", "status"))):
+        observations["unchanged_plan"] = (
+            "This plan state was already accepted. Continue the active step with available research tools; "
+            "another explanation or plan submission does not inspect evidence. Update it when the phase, "
+            "remaining work or final disposition changes."
+        )
     if calls:
         latest = calls[-1]
         previous_count = sum(

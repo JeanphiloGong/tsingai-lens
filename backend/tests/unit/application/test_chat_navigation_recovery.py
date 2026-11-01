@@ -76,6 +76,34 @@ def test_repeated_successful_action_is_visible_before_the_next_model_decision():
     assert payload["repeated_action"]["previous_successful_count"] == 1
 
 
+def test_collection_search_records_candidates_without_claiming_exact_reads():
+    text = stage_instruction(("inspect_document_sources",), [], successful_results={
+        "search_sources": [{"document_ids": None, "matches": [
+            {"document_id": "paper-A", "source_ref": "methods"},
+            {"document_id": "paper-A", "source_ref": "results"},
+            {"document_id": "paper-B", "source_ref": "results"},
+        ]}],
+    })
+    ledger = json.loads(text[text.index("{"):])["reading_ledger"]
+    assert [item["document_id"] for item in ledger] == ["paper-A", "paper-B"]
+    assert all(item["completely_read_passages"] == 0 for item in ledger)
+    assert all(item["outline_status"] == "not_inspected" for item in ledger)
+
+
+def test_reworded_plan_explanation_points_to_research_instead_of_another_plan_update():
+    from domain.chat import ChatToolCall, ToolRisk
+
+    call = ChatToolCall.requested(tool_call_id="plan", session_id="chat", assistant_message_id="a",
+                                  name="update_execution_plan", arguments={}, risk=ToolRisk.READ)
+    plan = {"steps": [{"step_id": "read", "status": "in_progress", "action": "Read conditions"}],
+            "status": "in_progress"}
+    text = stage_instruction(("read_source",), [call], successful_results={
+        "update_execution_plan": [{**plan, "explanation": "Read the paper."},
+                                  {**plan, "explanation": "I will inspect the paper next."}],
+    })
+    assert "unchanged_plan" in json.loads(text[text.index("{"):])
+
+
 def test_fallback_replaces_old_next_actions_after_new_observations():
     runner = ResearchAgentRunner(model=object(), capabilities=CapabilityRegistry(()))
     active = ChatMessage.user(

@@ -33,6 +33,46 @@ async def test_collection_search_returns_ranked_papers_and_matching_window(monke
     repo.read_documents.assert_awaited_once_with('col',('in718',))
     assert scoped.data['papers'][0]['document_id']=='in718'
 
+
+@pytest.mark.anyio
+async def test_search_surfaces_other_papers_before_repeating_one_papers_passages(monkeypatch):
+    documents = tuple(SourceDocument(
+        f"paper-{i}", i, f"IN718 elongation study {i}", "",
+        blocks=tuple(SourceBlock(f"p{i}-{j}", f"paper-{i}", "paragraph",
+                                 "IN718 elongation reported.", j) for j in range(20)),
+    ) for i in range(3))
+    monkeypatch.setattr(document_sources.collection_service, "get_collection_for_user", AsyncMock())
+    monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
+        read_collection_documents=AsyncMock(return_value=documents),
+    ))
+    capability = SearchSourcesCapability()
+    context = CapabilityExecutionContext("chat", "user", "col", "search")
+    result = await capability.execute(context, SearchSourcesToolRequest(query="IN718 elongation", limit=3))
+    assert [hit["document_id"] for hit in result.data["matches"]] == [f"paper-{i}" for i in range(3)]
+    assert result.data["matching_paper_total"] == 3
+    assert result.data["match_total"] == 60
+    next_page = await capability.execute(context, SearchSourcesToolRequest(
+        query="IN718 elongation", limit=3, offset=result.data["next_offset"],
+    ))
+    assert [hit["source_ref"] for hit in next_page.data["matches"]] == [f"p{i}-1" for i in range(3)]
+
+
+def test_rewording_a_search_or_returning_a_subset_is_not_new_progress():
+    from application.chat.agent_runner import AgentRunLimits, _RunProgress
+    from domain.chat import ChatToolCall, ChatToolResult, ToolResultStatus, ToolRisk
+
+    progress = _RunProgress(AgentRunLimits())
+    call = ChatToolCall.requested(tool_call_id="search", session_id="chat", assistant_message_id="a",
+                                  name="search_sources", arguments={"query": "elongation"}, risk=ToolRisk.READ)
+    hits = [{"document_id": "paper", "source_kind": "text_window", "source_ref": f"result-{i}",
+             "source_digest": f"digest-{i}", "content_offset": 0, "content": "Elongation measured."}
+            for i in range(2)]
+    for matches, expected in ((hits, True), (hits[:1], False), ([{**hits[0], "content_offset": 800,
+                                                              "content": "Another measurement."}], True)):
+        result = ChatToolResult("search", ToolResultStatus.SUCCEEDED,
+                                data={"query": "differently worded search", "matches": matches})
+        assert progress.observe(call, result) is expected
+
 @pytest.mark.anyio
 async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeypatch):
     from application.chat.capabilities.document_sources import InspectTableCapability,InspectTableToolRequest

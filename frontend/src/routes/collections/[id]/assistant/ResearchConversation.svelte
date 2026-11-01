@@ -121,6 +121,7 @@
 	let revisionRequest: { key: string; id: string } | null = null;
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
+	let retryableDecision: ChatToolCall | null = null;
 	let permissionsPanel: { openPanel: () => void } | null = null;
 	let history: StoredChatSession[] = [];
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
@@ -631,6 +632,7 @@
 		notice = '';
 		turnRecovery = null;
 		pendingApproval = null;
+		retryableDecision = null;
 		progress = null;
 		settledExecutionPlan = null;
 		pendingSourceContexts = [];
@@ -705,6 +707,7 @@
 			session = null;
 			messages = [];
 			pendingApproval = null;
+			retryableDecision = null;
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) {
 				loading = false;
@@ -721,7 +724,8 @@
 				.flatMap((message) => message.tool_calls)
 				.find(
 					(call) =>
-						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
+						call.tool_call_id !== pendingApproval?.tool_call_id &&
+						call.tool_call_id !== retryableDecision?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
 		if (
 			running &&
@@ -777,6 +781,7 @@
 		running = Boolean(trajectory.running || trajectory.response?.status === 'running');
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
+		retryableDecision = trajectory.retryable_decision ?? null;
 		if (trajectory.response) acceptSnapshot(trajectory.response);
 		else {
 			responseSnapshot = null;
@@ -916,6 +921,7 @@
 		session = null;
 		messages = [];
 		pendingApproval = null;
+		retryableDecision = null;
 		input = '';
 		await loadSession();
 	}
@@ -927,6 +933,7 @@
 		session = null;
 		messages = [];
 		pendingApproval = null;
+		retryableDecision = null;
 		await loadSession(sessionId);
 		if (preserveDraft && userId === owner && activeSessionId === sessionId) input = draft;
 	}
@@ -1023,6 +1030,7 @@
 			session = null;
 			messages = [];
 			pendingApproval = null;
+			retryableDecision = null;
 			await loadSession(remaining[0]?.session_id ?? '');
 		} catch (err) {
 			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
@@ -1103,6 +1111,7 @@
 			revising ||
 			running ||
 			pendingApproval ||
+			retryableDecision ||
 			recoveringCallId
 		)
 			return false;
@@ -1175,6 +1184,7 @@
 			deciding ||
 			running ||
 			pendingApproval ||
+			retryableDecision ||
 			recoveringCallId
 		)
 			return;
@@ -1443,6 +1453,7 @@
 		const knownIds = new Set(prior.map((message) => message.message_id));
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
+		retryableDecision = null;
 		settledExecutionPlan = turn.execution_plan ?? null;
 		turnRecovery = getTurnRecoveryState(turn);
 		if (turn.status === 'rejected') {
@@ -1465,12 +1476,14 @@
 		}
 	}
 
-	async function decide(decision: 'approved' | 'rejected') {
-		if (!session || !pendingApproval || deciding) return;
+	async function decide(
+		decision: 'approved' | 'rejected',
+		call: ChatToolCall | null = pendingApproval
+	) {
+		if (!session || !call || deciding) return;
 		const activeSession = session;
 		const generation = sessionGeneration;
 		const activeCollectionId = collectionId;
-		const call = pendingApproval;
 		deciding = true;
 		failedSessionId = null;
 		error = '';
@@ -1503,7 +1516,7 @@
 					!messages.some((message) => message.tool_result?.tool_call_id === call.tool_call_id)
 				) {
 					error = errorMessage(decisionError);
-					failedSessionId = activeSession.session_id;
+					failedSessionId = retryableDecision ? null : activeSession.session_id;
 				}
 			} else {
 				applyTurn(turn, [], call.name);
@@ -1515,6 +1528,12 @@
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) deciding = false;
 		}
+	}
+
+	async function retryDecision() {
+		const call = retryableDecision;
+		if (!call || (call.status !== 'approved' && call.status !== 'rejected')) return;
+		await decide(call.status, call);
 	}
 
 	function rejectionNoticeKey(toolName: string | null) {
@@ -1685,6 +1704,14 @@
 					sessionId={session.session_id}
 				/>{/key}
 		{/if}
+		{#if retryableDecision && !checkpointId}
+			<div class="status status-notice" role="status" data-testid="decision-recovery">
+				<span>{$t(retryableDecision.status === 'approved' ? 'researchAgent.savedApprovalWaiting' : 'researchAgent.savedRejectionWaiting')}</span>
+				<button type="button" disabled={deciding || loading || running} on:click={retryDecision}>
+					{$t(retryableDecision.status === 'approved' ? 'researchAgent.retryApprovedDecision' : 'researchAgent.retryRejectedDecision')}
+				</button>
+			</div>
+		{/if}
 		{#if error || modelConnectionsError || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
 			<div class="status status-error" role="alert">
 				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
@@ -1703,7 +1730,7 @@
 				<span>{notice}</span>
 			</div>
 		{/if}
-		{#if turnRecovery && turnRecovery !== 'permissionDenied' && session && !checkpointId && !branchDraft && !running && !pendingApproval}
+		{#if turnRecovery && turnRecovery !== 'permissionDenied' && session && !checkpointId && !branchDraft && !running && !pendingApproval && !retryableDecision}
 			<button class="continue-research" type="button"
 				disabled={loading || sending || deciding || revising || Boolean(recoveringCallId)}
 				on:click={() => sendMessage($t('researchAgent.continueRequest'))}>
@@ -1717,7 +1744,7 @@
 			{branches}
 			running={!checkpointId && running}
 			revisionDisabled={revising ||
-				Boolean(checkpointId && (running || sending || pendingApproval || recoveringCallId))}
+				Boolean(checkpointId && (running || sending || pendingApproval || retryableDecision || recoveringCallId))}
 			onRevise={reviseMessage}
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
@@ -1763,6 +1790,7 @@
 						running ||
 						deciding ||
 						Boolean(pendingApproval) ||
+						Boolean(retryableDecision) ||
 						Boolean(recoveringCallId)}
 					on:click={() =>
 						branchDraft && sendMessage(branchDraft.content, branchDraft.source_contexts)}
@@ -1786,6 +1814,7 @@
 					sending ||
 					deciding ||
 					Boolean(pendingApproval) ||
+					Boolean(retryableDecision) ||
 					Boolean(recoveringCallId)}
 				pendingSourceContexts={checkpointId ? [] : pendingSourceContexts}
 				hasExtraContext={!checkpointId && selectedPapers.length > 0}

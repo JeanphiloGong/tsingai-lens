@@ -418,6 +418,10 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		researchAgent: {
+			savedApprovalWaiting: 'This action was approved but has not run. Retry after the model connection is restored.',
+			savedRejectionWaiting: 'This action was rejected. Continue the response when the model connection is restored; the action will not run.',
+			retryApprovedDecision: 'Retry approved action',
+			retryRejectedDecision: 'Continue after rejection',
 			modelConnectionLabel: 'Model',
 			modelConnectionEmpty: 'No models configured.',
 			title: 'Research Agent',
@@ -4006,6 +4010,10 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		researchAgent: {
+			savedApprovalWaiting: '此操作已批准，但尚未执行。模型连接恢复后可以重试。',
+			savedRejectionWaiting: '此操作已拒绝。模型连接恢复后可继续回答，不会执行此操作。',
+			retryApprovedDecision: '重试已批准的操作',
+			retryRejectedDecision: '继续拒绝后的回答',
 			modelConnectionLabel: '模型',
 			modelConnectionEmpty: '暂无配置的模型。',
 			title: '研究 Agent',

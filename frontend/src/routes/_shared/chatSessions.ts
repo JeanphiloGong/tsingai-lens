@@ -137,6 +137,7 @@ export type ChatTurn = {
 export type ChatTrajectory = {
 	items: ChatMessage[];
 	pending_approval: ChatToolCall | null;
+	retryable_decision?: ChatToolCall | null;
 	feedback: ChatMessageFeedback[];
 	branches: ChatBranchOptions[];
 	branch_draft: ChatMessage | null;

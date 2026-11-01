@@ -83,3 +83,95 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
     refused = await fixture.client.post(f"/api/v1/chat-sessions/{sessions[0]}/messages",
         json={"message": "Another question", "model_connection_id": "lab-a"})
     assert refused.status_code == 200 and refused.json()["code"] == 200204 and len(requests) == 2
+
+
+@pytest.mark.parametrize("decision", ["approved", "rejected"])
+async def test_other_worker_recovers_saved_decision_through_http(branch_app, decision, monkeypatch):
+    from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
+    from application.chat.session_service import ChatSessionService
+    from infra.llm import chat_model as provider_module
+    from infra.llm.chat_model import OpenAIChatModel
+    from tests.unit.application.test_chat_model_connections import ClosableModel
+    from tests.unit.application.test_chat_session_service import _WriteCapability
+
+    fixture = branch_app
+    fixture.client._transport.app.include_router(model_router, prefix="/api/v1")
+    now = datetime.now(timezone.utc)
+    async with fixture.factory.begin() as database:
+        database.add(ModelConnectionORM(
+            connection_id="lab-a", display_name="Lab A", model="model-a",
+            base_url="https://lab-a.example.invalid/v1", api_key_ref="env:LENS_MODEL_KEY_LAB_A",
+            enabled=True, created_at=now, updated_at=now,
+        ))
+    selected = []
+    clients = []
+
+    def build_model(*, model, **options):
+        turns = ([ModelTurn(tool_calls=(ModelToolCall(
+            "create_objective_candidate", {"question": "Compare LPBF evidence"},
+        ),))] if not selected else [ModelTurn(content="Preserve the original research context.")])
+        selected.append(model)
+        client = ClosableModel(*turns)
+        clients.append(client)
+        return client
+
+    first = fixture.service
+    monkeypatch.setattr(provider_module, "OpenAIChatModel", build_model)
+    monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-test-value")
+    session = await first.create_session(collection_id="collection", user_id=fixture.owner)
+    turn = await first.send_message(session.session_id, fixture.owner,
+        message="Save the research objective.", model_connection_id="lab-a")
+    pending = turn["pending_approval"]
+    assert pending is not None
+    async with fixture.factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).values(enabled=False))
+        database.add(ModelConnectionORM(
+            connection_id="lab-b", display_name="Lab B", model="model-b",
+            base_url="https://lab-a.example.invalid/v1", api_key_ref=None,
+            enabled=True, created_at=now, updated_at=now,
+        ))
+    directory = (await fixture.client.get("/api/v1/model-connections")).json()
+    assert [item["connection_id"] for item in directory["data"]["items"]] == ["lab-b"]
+    write = _WriteCapability()
+    second = ChatSessionService(
+        runner=ResearchAgentRunner(model=first.runner.model, capabilities=CapabilityRegistry((write,))),
+    )
+    monkeypatch.setattr("application.chat.session_service.ChatService", second)
+    monkeypatch.setattr(provider_module, "OpenAIChatModel", OpenAIChatModel)
+    monkeypatch.delenv("LENS_MODEL_KEY_LAB_A", raising=False)
+    path = f"/api/v1/chat-sessions/{session.session_id}"
+    body = {"arguments_digest": pending.arguments_digest, "decision": decision}
+    response = await fixture.client.post(f"{path}/tool-calls/{pending.tool_call_id}/decision", json=body)
+    assert response.status_code == 200 and response.json()["code"] == 200205
+    assert response.json()["data"]["code"] == "model_connection_key_unavailable"
+    saved = await fixture.repository.read_tool_call(pending.tool_call_id)
+    assert saved.status.value == decision and write.executed == []
+    trajectory = (await fixture.client.get(f"{path}/messages")).json()["data"]
+    assert trajectory["pending_approval"] is None and not trajectory["running"]
+    assert trajectory["retryable_decision"]["tool_call_id"] == pending.tool_call_id
+    assert trajectory["retryable_decision"]["status"] == decision
+    assert selected == ["model-a"]  # GET observation did not construct a client or execute.
+
+    # A third instance sees only durable state, as it would after a reload/restart.
+    third = ChatSessionService(
+        runner=ResearchAgentRunner(model=first.runner.model, capabilities=CapabilityRegistry((write,))),
+    )
+    monkeypatch.setattr("application.chat.session_service.ChatService", third)
+    monkeypatch.setattr(provider_module, "OpenAIChatModel", build_model)
+    monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-restored-key")
+    response = await fixture.client.post(f"{path}/tool-calls/{pending.tool_call_id}/decision", json=body)
+    assert response.status_code == 200 and response.json()["data"]["status"] == "completed", response.text
+    snapshot = await fixture.repository.read_response_snapshot(session.session_id)
+    assert snapshot.model_connection_id == "lab-a"
+    assert selected == ["model-a", "model-a"] and all(model.closed for model in clients)
+    assert len(write.executed) == (1 if decision == "approved" else 0)
+    messages = await fixture.repository.read_messages(session.session_id)
+    assert sum(item.tool_result is not None and item.tool_result.tool_call_id == pending.tool_call_id
+               for item in messages) == 1
+    trajectory = (await fixture.client.get(f"{path}/messages")).json()["data"]
+    assert trajectory["retryable_decision"] is None and trajectory["response"]["status"] == "completed"
+    response_id = snapshot.response_id
+    repeated = await fixture.client.post(f"{path}/tool-calls/{pending.tool_call_id}/decision", json=body)
+    assert repeated.status_code == 200 and repeated.json()["code"] == 200
+    assert (await fixture.repository.read_response_snapshot(session.session_id)).response_id == response_id
+    assert selected == ["model-a", "model-a"] and len(write.executed) == (1 if decision == "approved" else 0)

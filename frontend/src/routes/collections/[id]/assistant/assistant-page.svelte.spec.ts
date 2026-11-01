@@ -192,7 +192,7 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'response'>;
+	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'retryable_decision' | 'response'>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -336,6 +336,78 @@ describe('collections/[id]/assistant Research Agent', () => {
 	});
 
 
+
+	it.each([
+		[false, 'approved'], [false, 'rejected'], [true, 'approved'], [true, 'rejected']
+	] as const)('recovers embedded=%s saved %s decision after a model failure', async (embedded, decision) => {
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }]
+		});
+		const question = message('question', 'user', 'Save the reviewed research objective.');
+		const initial = { feedback: [], items: [question, request], pending_approval: call };
+		const savedCall = { ...call, status: decision, decision_user_id: 'researcher_1',
+			decision_arguments_digest: call.arguments_digest, decided_at: createdAt };
+		const recovery = { feedback: [], items: [question, request], pending_approval: null,
+			retryable_decision: savedCall, running: false, response: {
+				response_id: 'saved-decision', sequence: 1, started_at: createdAt, updated_at: createdAt,
+				status: 'approval_required', message_id: null, message_created_at: null, content: '',
+				progress: { phase: 'terminal' }, checkpoint_message_id: null,
+				completion_reason: null, error_code: null, warnings: [],
+				model_connection_id: 'lab-a', model_connection_name: 'Lab A'
+			}
+		};
+		localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
+		installApi({ trajectory: initial });
+		const original = fetchMock.getMockImplementation()!;
+		let saved = false;
+		let restored = false;
+		const decisions: unknown[] = [];
+		let finishRetry!: (response: Response) => void;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST') {
+				decisions.push(requestBody(input, init));
+				if (!restored) {
+					saved = true;
+					return Promise.resolve(jsonResponse({ code: 'model_connection_key_unavailable' }, 200205, 'The selected model connection is unavailable.'));
+				}
+				return new Promise<Response>((resolve) => { finishRetry = resolve; });
+			}
+			if (saved && requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'GET')
+				return Promise.resolve(jsonResponse(recovery));
+			return original(input, init);
+		});
+		let view = render(Conversation, { embedded });
+		await browserPage.getByRole('button', { name: decision === 'approved' ? 'Approve and create' : 'Reject', exact: true }).click();
+		const label = decision === 'approved' ? 'Retry approved action' : 'Continue after rejection';
+		await expect.element(browserPage.getByRole('button', { name: label, exact: true })).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Approve and create', exact: true })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		await view.unmount();
+		view = render(Conversation, { embedded });
+		const retry = browserPage.getByRole('button', { name: label, exact: true });
+		await expect.element(retry).toBeVisible();
+		expect(decisions).toHaveLength(1); // Reload and GET observation never retry.
+		await browserPage.getByTitle('Model', { exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		restored = true;
+		await retry.click();
+		await expect.element(retry).toBeDisabled();
+		expect(decisions).toEqual([
+			{ decision, arguments_digest: call.arguments_digest },
+			{ decision, arguments_digest: call.arguments_digest }
+		]); // No model selection and no new approval on the recovery request.
+		const result: ChatToolResult = decision === 'approved' ? baseToolResult(call.tool_call_id)
+			: { ...baseToolResult(call.tool_call_id), status: 'failed', error_code: 'user_rejected', error_message: 'The action was rejected.' };
+		finishRetry(jsonResponse({ status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null,
+			messages: [message('result', 'tool', '', { tool_call_id: call.tool_call_id, tool_result: result }),
+				message('answer', 'assistant', 'The saved decision has been handled.')]
+		}));
+		await expect.element(browserPage.getByText('The saved decision has been handled.', { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByTestId('decision-recovery')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled(); // Composer is empty, but it is available again.
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+	});
 
 	it.each([false, true])('model selection in embedded=%s sends one chosen ID', async (embedded) => {
 		installApi({ messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [], pending_approval: null, error_code: null } });

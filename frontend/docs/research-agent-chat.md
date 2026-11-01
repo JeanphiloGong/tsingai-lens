@@ -123,6 +123,16 @@ another one. An empty directory is explained inside the picker, and directory
 request failures use the existing error area. A selection must exist before
 sending; initial directory loading does not imply a model health check.
 
+A saved approval or rejection with no result appears as `retryable_decision`,
+separately from `pending_approval`. Both entrypoints display its saved decision
+and a retry button. The button resubmits the original call, decision and digest
+through the existing decision endpoint without sending a model selection. It
+never changes a rejection into an approval. Completed results clear the control;
+reloading or reconnecting restores it without executing anything. Automatic
+recovery polling excludes this explicitly retryable call, and new questions wait
+until its continuation finishes. A repeated completed decision cannot run twice.
+
+
 The composer also exposes an explicit PDF-paper upload action for the current
 Collection. It calls the same `POST /collections/{collection_id}/documents`
 and per-document preparation endpoint used by the Collection workspace. The

@@ -48,7 +48,10 @@ _FIXTURE = (
     / "source_document.json"
 )
 
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
 pytestmark = [
+    pytest.mark.usefixtures("scripted_chat_runner"),
     pytest.mark.anyio,
     pytest.mark.skipif(
         not _LIVE,

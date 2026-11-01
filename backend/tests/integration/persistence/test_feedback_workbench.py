@@ -64,7 +64,9 @@ from repositories.feedback_case_repository import (
 )
 from repositories.feedback_dataset_sample_repository import source_digest_for_case
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 NOW = "2026-09-24T10:00:00+00:00"
 USER_ID = "feedback-chain-user"

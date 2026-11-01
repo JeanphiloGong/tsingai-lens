@@ -13,6 +13,7 @@ import multiprocessing
 import os
 import socket
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import pytest
 import uvicorn
@@ -33,7 +34,9 @@ from sqlalchemy import inspect, text
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401
 from tests.unit.application.test_chat_session_service import _PausedResponseModel
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 class _ProcessPausedModel:
@@ -44,6 +47,9 @@ class _ProcessPausedModel:
         self.resume = resume
         self.finish = finish
         self.calls = calls
+
+    async def aclose(self):
+        return None
 
     async def respond(self, *, text_delta_callback=None, **kwargs):
         with self.calls.get_lock():
@@ -61,7 +67,10 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
     """Bind a fresh module graph and database factory in each spawned worker."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
-    from repositories import auth_repository, chat_repository, collection_repository
+    from repositories import auth_repository, chat_repository, collection_repository, model_connection_repository
+    from infra.persistence.postgres.models.model_connection import ModelConnectionORM
+    from infra.llm import chat_model
+    from sqlalchemy.dialects.postgresql import insert
     from application.source import collection_service
     from controllers.exception_router import project_exception_handler
     from exceptions import ProjectException
@@ -72,6 +81,14 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
         auth_repository.AsyncSessionLocal = factory
         chat_repository.AsyncSessionLocal = factory
         collection_repository.AsyncSessionLocal = factory
+        model_connection_repository.AsyncSessionLocal = factory
+        now = datetime.now(timezone.utc)
+        async with factory.begin() as db:
+            await db.execute(insert(ModelConnectionORM).values(
+                connection_id="worker-test", display_name="Worker test model",
+                base_url="https://worker.example.invalid/v1", model="scripted-model",
+                api_key_ref=None, enabled=True, created_at=now, updated_at=now,
+            ).on_conflict_do_nothing(index_elements=["connection_id"]))
         auth_session_service.AuthRepo = AuthRepository()
         collection_service.CollectionRepo = collection_repository.CollectionRepository()
         chat_session_service.collection_service = collection_service
@@ -80,7 +97,10 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
         runner = ResearchAgentRunner(
             model=_ProcessPausedModel(resume, finish, calls), capabilities=CapabilityRegistry(()),
         )
-        service = chat_session_service.ChatSessionService(runner=runner)
+        chat_model.OpenAIChatModel = lambda **options: runner.model
+        service = chat_session_service.ChatSessionService(
+            runner=runner, default_model_connection_id="worker-test",
+        )
         app = FastAPI()
         shared_chat_service.ChatService = service
         app.add_exception_handler(ProjectException, project_exception_handler)

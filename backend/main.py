@@ -47,6 +47,7 @@ from infra.persistence.file import collection_workspace, object_store
 from config import DATA_DIR
 from controllers import auth_routes as auth
 from controllers import feedback_case_routes as feedback_cases
+from controllers import model_connection_routes as model_connections
 from controllers.chat import chat_session_routes as chat_sessions
 from controllers.core import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
@@ -182,7 +183,10 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
                 )
             ),
         )
-        service = session_service.ChatSessionService(runner=runner)
+        service = session_service.ChatSessionService(
+            runner=runner,
+            default_model_connection_id=os.getenv("LENS_DEFAULT_MODEL_CONNECTION_ID", "").strip() or None,
+        )
         cleanup.push_async_callback(service.close)
         session_service.ChatService = service
         yield
@@ -260,6 +264,7 @@ def register_routes(app: FastAPI) -> None:
         experiment_plans.experiment_plan_router, prefix=PUBLIC_API_V1_PREFIX
     )
     app.include_router(chat_sessions.chat_session_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX

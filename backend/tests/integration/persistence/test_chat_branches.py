@@ -63,7 +63,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from tests.unit.application.test_chat_session_service import _WriteCapability
 from tests.unit.application.test_research_agent_runner import _Model
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 NOW = "2026-09-09T00:00:00+00:00"
 QUOTE = "The LPBF Ti-6Al-4V specimens were tensile tested at 293 K."
 QUESTION = "Which test conditions should I verify before comparing the reported tensile strengths?"

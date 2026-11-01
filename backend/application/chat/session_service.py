@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+
+import httpx
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -22,6 +26,7 @@ from application.chat.agent_runner import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities import AgentContext
+from repositories.model_connection_repository import ModelConnectionRepo, ModelConnectionRecord
 from application.chat.inline_citations import (
     format_inline_citations,
     format_message_citations,
@@ -47,6 +52,7 @@ from domain.feedback.correction_signal import (
 )
 from domain.feedback.tool_failure import tool_result_digest
 from exceptions import (
+    ProjectException,
     RequestInvalidException,
     ResourceConflictException,
     ResourceNotFoundException,
@@ -142,7 +148,8 @@ def _now_iso() -> str:
 class RepositoryModelCallObserver:
     """Persist provider-call facts before and after the SDK submission."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, model_connection_id: str | None = None) -> None:
+        self.model_connection_id = model_connection_id
         self._sessions: dict[str, str] = {}
 
     async def start(
@@ -171,6 +178,7 @@ class RepositoryModelCallObserver:
                 response_message_id=response_message_id,
                 purpose=purpose,
                 model=str(normalized_request.get("model") or "unknown"),
+                model_connection_id=self.model_connection_id,
                 request=normalized_request,
                 request_digest=digest,
                 started_at=_now_iso(),
@@ -261,9 +269,12 @@ from repositories.source_artifact_repository import SourceArtifactRepo
 class ChatSessionService:
     """Own one app's Research Agent runner, observer and streaming turns."""
 
-    def __init__(self, *, runner: ResearchAgentRunner) -> None:
+    def __init__(
+        self, *, runner: ResearchAgentRunner,
+        default_model_connection_id: str | None = None,
+    ) -> None:
         self.runner = runner
-        self.model_call_observer = RepositoryModelCallObserver()
+        self.default_model_connection_id = default_model_connection_id
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
 
     async def close(self) -> None:
@@ -680,13 +691,23 @@ class ChatSessionService:
                     source_contexts=original.source_contexts,
                 )
         pending = None
+        retryable_decision = None
+        observed_calls = {
+            message.tool_result.tool_call_id
+            for message in messages if message.tool_result is not None
+        }
         for message in reversed(messages):
             for request in message.tool_calls:
                 call = await ChatRepo.read_tool_call(request.tool_call_id)
                 if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
                     pending = call
                     break
-            if pending is not None:
+                if (not running and call is not None
+                        and call.status in {ToolCallStatus.APPROVED, ToolCallStatus.REJECTED}
+                        and call.tool_call_id not in observed_calls):
+                    retryable_decision = call
+                    break
+            if pending is not None or retryable_decision is not None:
                 break
         return {
             "messages": messages,
@@ -694,6 +715,7 @@ class ChatSessionService:
             "branch_draft": draft,
             "running": running,
             "pending_approval": pending,
+            "retryable_decision": retryable_decision,
             "response": response,
             "feedback": await ChatRepo.read_feedback(session_id, user_id),
         }
@@ -942,6 +964,7 @@ class ChatSessionService:
         user_id: str,
         *,
         message: str,
+        model_connection_id: str | None = None,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         branch_revision: bool = False,
         permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
@@ -967,6 +990,7 @@ class ChatSessionService:
                     previous_messages=previous_messages,
                     message=message,
                     source_contexts=source_contexts,
+                    model_connection_id=model_connection_id,
                     permission_mode=effective_permission_mode,
                 )
                 if (
@@ -1012,6 +1036,7 @@ class ChatSessionService:
         user_id: str,
         *,
         message: str,
+        model_connection_id: str | None = None,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         branch_revision: bool = False,
         permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
@@ -1064,6 +1089,7 @@ class ChatSessionService:
                                 previous_messages=current_messages,
                                 message=message,
                                 source_contexts=source_contexts,
+                                model_connection_id=model_connection_id,
                                 emit=emit,
                                 permission_mode=effective_permission_mode,
                             )
@@ -1108,6 +1134,11 @@ class ChatSessionService:
                                 },
                             }
                         )
+                    except ProjectException as exc:
+                        emit({"type": "error", "error": {
+                            "code": (exc.data or {}).get("code", "chat_stream_failed"),
+                            "message": exc.message,
+                        }})
                     except Exception as exc:  # noqa: BLE001
                         logger.error(
                             "Research Agent streaming turn failed session_id=%s exception_type=%s",
@@ -1312,14 +1343,123 @@ class ChatSessionService:
             return False
         return True if queued else None
 
+    async def _resolve_model_connection(
+        self, requested_id: str | None, prior_snapshot: ChatResponseSnapshot | None,
+        *, continuation: bool,
+    ) -> ModelConnectionRecord:
+        if continuation:
+            if prior_snapshot is None or prior_snapshot.model_connection_id is None:
+                raise ServiceUnavailableException("The selected model connection is unavailable.", data={"code": "model_connection_binding_missing"})
+            record = await ModelConnectionRepo.read(prior_snapshot.model_connection_id)
+            if record is None:
+                raise ServiceUnavailableException("The selected model connection is unavailable.", data={"code": "model_connection_binding_missing"})
+            return record
+        connection_id = requested_id or self.default_model_connection_id
+        if not connection_id:
+            raise ServiceUnavailableException("The selected model connection is unavailable.", data={"code": "model_connection_default_unavailable"})
+        record = await ModelConnectionRepo.read_enabled(connection_id)
+        if record is None:
+            raise ResourceConflictException("The selected model connection is unavailable.", data={"code": "model_connection_unavailable"})
+        return record
+
+
+    @asynccontextmanager
+    async def _runner_for_connection(self, connection: ModelConnectionRecord):
+        # Import at construction time: application.chat's package entrypoint
+        # also imports this service, so an eager provider import forms a cycle.
+        from infra.llm.chat_model import OpenAIChatModel
+
+        try:
+            url = httpx.URL(connection.base_url)
+        except httpx.InvalidURL as exc:
+            raise ServiceUnavailableException(
+                "The selected model connection is unavailable.",
+                data={"code": "model_connection_invalid_configuration"},
+            ) from exc
+        if (
+            url.scheme not in {"http", "https"} or not url.host
+            or url.userinfo or url.query or url.fragment
+            or any(char.isspace() for char in connection.base_url)
+            or not connection.model.strip()
+        ):
+            raise ServiceUnavailableException(
+                "The selected model connection is unavailable.",
+                data={"code": "model_connection_invalid_configuration"},
+            )
+        api_key = "not-needed"
+        if connection.api_key_ref is not None:
+            if not connection.api_key_ref.startswith("env:") or not connection.api_key_ref[4:]:
+                raise ServiceUnavailableException(
+                    "The selected model connection is unavailable.",
+                    data={"code": "model_connection_invalid_configuration"},
+                )
+            api_key = os.getenv(connection.api_key_ref[4:], "").strip()
+            if not api_key:
+                raise ServiceUnavailableException(
+                    "The selected model connection is unavailable.",
+                    data={"code": "model_connection_key_unavailable"},
+                )
+        timeout = connection.request_timeout_seconds
+        if timeout is not None and (not isfinite(timeout) or timeout <= 0):
+            raise ServiceUnavailableException(
+                "The selected model connection is unavailable.",
+                data={"code": "model_connection_invalid_configuration"},
+            )
+        base = self.runner.limits
+        try:
+            limits = replace(
+                base,
+                max_context_tokens=(
+                    min(base.max_context_tokens, connection.context_window_tokens)
+                    if connection.context_window_tokens is not None else base.max_context_tokens
+                ),
+                max_model_output_tokens=(
+                    min(base.max_model_output_tokens, connection.max_output_tokens)
+                    if connection.max_output_tokens is not None else base.max_model_output_tokens
+                ),
+                max_finalization_output_tokens=(
+                    min(base.max_finalization_output_tokens, connection.max_output_tokens)
+                    if connection.max_output_tokens is not None else base.max_finalization_output_tokens
+                ),
+                max_request_seconds=(
+                    min(base.max_request_seconds, timeout)
+                    if timeout is not None else base.max_request_seconds
+                ),
+            )
+        except ValueError as exc:
+            raise ServiceUnavailableException(
+                "The selected model connection is unavailable.",
+                data={"code": "model_connection_invalid_configuration"},
+            ) from exc
+        model = OpenAIChatModel(
+            base_url=connection.base_url,
+            api_key=api_key,
+            model=connection.model,
+            request_timeout=timeout,
+        )
+        try:
+            yield ResearchAgentRunner(
+                model=model,
+                capabilities=self.runner.capabilities,
+                context_builder=self.runner.context_builder,
+                limits=limits,
+            )
+        finally:
+            try:
+                await model.aclose()
+            except Exception as exc:  # A close failure must not replace a saved answer.
+                logger.warning("Model client close failed exception_type=%s", type(exc).__name__)
+
+
     async def _run_response(
         self,
         session: ChatSession,
         *,
         previous_messages: tuple[ChatMessage, ...],
+        model_connection_id: str | None = None,
         message: str | None = None,
         source_contexts: tuple[ChatSourceContext, ...] = (),
-        claimed_call: ChatToolCall | None = None,
+        approved_call: ChatToolCall | None = None,
         rejected_call: ChatToolCall | None = None,
         rejected_result: ChatToolResult | None = None,
         continuation_calls: tuple[ChatToolCall, ...] = (),
@@ -1331,7 +1471,11 @@ class ChatSessionService:
         # The caller holds the execution lock through the final snapshot write.
         loop = asyncio.get_running_loop()
         prior_snapshot = await ChatRepo.read_response_snapshot(session.session_id)
-        if claimed_call is not None or rejected_call is not None:
+        connection = await self._resolve_model_connection(
+            model_connection_id, prior_snapshot,
+            continuation=approved_call is not None or rejected_call is not None,
+        )
+        if approved_call is not None or rejected_call is not None:
             if continuation_progress is None:
                 continuation_progress = (
                     prior_snapshot.progress if prior_snapshot is not None else None
@@ -1367,6 +1511,8 @@ class ChatSessionService:
                 previous_messages[-1].message_id if previous_messages else None
             ),
             progress=inherited_progress,
+            model_connection_id=connection.connection_id,
+            model_connection_name=connection.display_name,
         )
         saved_sequence = -1
         snapshot_lock = asyncio.Lock()
@@ -1477,201 +1623,222 @@ class ChatSessionService:
                         type(exc).__name__,
                     )
 
-        await flush_snapshot()
-        writer = asyncio.create_task(save_updates())
-        try:
-            arguments = {
-                "context": AgentContext(
+        async with self._runner_for_connection(connection) as runner:
+            await flush_snapshot()
+            # Resolve credentials before claiming the approved write.
+            claimed_call = None
+            if approved_call is not None:
+                claimed_call = await ChatRepo.claim_approved_tool_call(
                     session_id=session.session_id,
-                    user_id=session.user_id,
-                    collection_id=session.collection_id,
-                ),
-                "previous_messages": previous_messages,
-                "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
-                "text_delta_callback": emit_text_delta,
-                "progress_callback": emit_progress,
-                "response_started_callback": start_response,
-                "model_call_observer": self.model_call_observer,
-            }
-            if rejected_call is not None and rejected_result is not None:
-                result = await self.runner.resume_after_tool_result(
-                    **arguments,
-                    calls=continuation_calls,
-                    results=continuation_results,
-                    tool_call=rejected_call,
-                    tool_result=rejected_result,
-                    continuation_progress=continuation_progress,
-                    permission_mode=permission_mode,
-                )
-            elif claimed_call is not None:
-                result = await self.runner.resume_claimed_call(
-                    **arguments,
-                    claimed_call=claimed_call,
-                    continuation_progress=continuation_progress,
-                )
-            else:
-                result = await self.runner.run_turn(
-                    **arguments,
-                    user_message=message,
-                    source_contexts=source_contexts,
-                    permission_mode=permission_mode,
-                )
-            while result.pending_approval is not None:
-                pending = result.pending_approval
-                await self.get_session_for_user(session.session_id, session.user_id)
-                permission = await ChatRepo.read_permission(
-                    session.session_id, session.user_id
-                )
-                if permission["mode"] == "read_only":
-                    denied = await ChatRepo.decide_tool_call(
-                        session_id=session.session_id,
-                        user_id=session.user_id,
-                        tool_call_id=pending.tool_call_id,
-                        arguments_digest=pending.arguments_digest,
-                        decision="rejected",
-                        decided_at=_now_iso(),
-                    )
-                    observation = ChatToolResult(
-                        tool_call_id=denied.tool_call_id,
-                        status=ToolResultStatus.FAILED,
-                        error_code="permission_write_denied",
-                        error_message=(
-                            "The current permission or request prohibits this write. "
-                            "No research record was changed."
-                        ),
-                    )
-                    result = await self.runner.resume_after_tool_result(
-                        **{
-                            **arguments,
-                            "previous_messages": await ChatRepo.read_messages(
-                                session.session_id
-                            ),
-                        },
-                        calls=tuple(result.tool_calls[:-1]) + (denied,),
-                        results=tuple(result.tool_results),
-                        tool_call=denied,
-                        tool_result=observation,
-                        continuation_progress=snapshot.progress,
-                        permission_mode=ToolPermissionMode.READ_ONLY,
-                    )
-                    if (
-                        result.status is AgentRunStatus.FAILED
-                        and result.error_code
-                        not in {
-                            "permission_write_denied",
-                            "tool_permission_denied",
-                        }
-                    ):
-                        # A revoked write permission is the blocking event. A
-                        # model failure while explaining that denial must not
-                        # replace the user-visible cause with a provider error.
-                        result = replace(result, error_code="permission_write_denied")
-                    continue
-                automatic = await ChatRepo.claim_automatic_call(
-                    session_id=session.session_id,
-                    tool_call_id=pending.tool_call_id,
+                    tool_call_id=approved_call.tool_call_id,
                     user_id=session.user_id,
                     started_at=_now_iso(),
                 )
-                if automatic is None:
-                    break
-                arguments["previous_messages"] = await ChatRepo.read_messages(
-                    session.session_id
-                )
-                result = await self.runner.resume_claimed_call(
-                    **arguments,
-                    claimed_call=automatic,
-                    continuation_progress=snapshot.progress,
-                )
-            update_snapshot(
-                status=result.status.value,
-                message_id=None,
-                message_created_at=None,
-                content="",
-                completion_reason=(
-                    result.completion_reason.value if result.completion_reason else None
-                ),
-                error_code=result.error_code,
-                warnings=result.warnings,
-            )
-            emit_progress(
-                {
-                    **snapshot.progress,
-                    "phase": "terminal",
-                    "termination_reason": result.error_code
-                    or result.completion_reason
-                    or result.status.value,
-                    "execution_plan": result.execution_plan,
-                }
-            )
-            return result
-        except BaseException:
-            try:
-                aborted = await ChatRepo.abort_running_tool_calls(
-                    session_id=session.session_id,
-                    error_code="chat_response_interrupted",
-                    finished_at=_now_iso(),
-                )
-                if aborted:
-                    messages = list(await ChatRepo.read_messages(session.session_id))
-                    results = []
-                    for call in aborted:
-                        result = ChatToolResult(
-                            tool_call_id=call.tool_call_id,
-                            status=ToolResultStatus.FAILED,
-                            error_code="chat_response_interrupted",
-                            error_message="The research action was interrupted before it finished.",
-                        )
-                        results.append(result)
-                        messages.append(
-                            ChatMessage(
-                                message_id=f"msg_{uuid4().hex}",
-                                session_id=session.session_id,
-                                role=ChatMessageRole.TOOL,
-                                content=json.dumps(
-                                    asdict(result),
-                                    ensure_ascii=True,
-                                    separators=(",", ":"),
-                                ),
-                                created_at=_now_iso(),
-                                tool_call_id=result.tool_call_id,
-                                tool_result=result,
-                            )
-                        )
-                    await ChatRepo.save_trajectory(
-                        chat_session=session.update(
-                            user_id=session.user_id,
-                            collection_id=session.collection_id,
-                            updated_at=messages[-1].created_at,
-                        ),
-                        messages=tuple(messages),
-                        tool_calls=aborted,
-                        tool_results=tuple(results),
+                if claimed_call is None:
+                    raise ResourceConflictException(
+                        "approved research action is already running",
+                        data={"code": "chat_tool_decision_conflict"},
                     )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "failed to abort interrupted chat tool calls session_id=%s",
-                    session.session_id,
-                )
-            plan = snapshot.progress.get("execution_plan")
-            if isinstance(plan, Mapping):
-                snapshot_progress = {
-                    **snapshot.progress,
-                    "execution_plan": {
-                        **dict(plan),
-                        "status": "technical_failure",
-                        "blocking_reason": "chat_response_interrupted",
-                    },
+            writer = asyncio.create_task(save_updates())
+            try:
+                arguments = {
+                    "context": AgentContext(
+                        session_id=session.session_id,
+                        user_id=session.user_id,
+                        collection_id=session.collection_id,
+                    ),
+                    "previous_messages": previous_messages,
+                    "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
+                    "text_delta_callback": emit_text_delta,
+                    "progress_callback": emit_progress,
+                    "response_started_callback": start_response,
+                    "model_call_observer": RepositoryModelCallObserver(
+                        model_connection_id=connection.connection_id,
+                    ),
                 }
-                update_snapshot(progress=snapshot_progress)
-            update_snapshot(status="interrupted", error_code="chat_response_interrupted")
-            raise
-        finally:
-            stop_updates.set()
-            await asyncio.gather(writer, return_exceptions=True)
-            await flush_snapshot()
+                if rejected_call is not None and rejected_result is not None:
+                    result = await runner.resume_after_tool_result(
+                        **arguments,
+                        calls=continuation_calls,
+                        results=continuation_results,
+                        tool_call=rejected_call,
+                        tool_result=rejected_result,
+                        continuation_progress=continuation_progress,
+                        permission_mode=permission_mode,
+                    )
+                elif claimed_call is not None:
+                    result = await runner.resume_claimed_call(
+                        **arguments,
+                        claimed_call=claimed_call,
+                        continuation_progress=continuation_progress,
+                    )
+                else:
+                    result = await runner.run_turn(
+                        **arguments,
+                        user_message=message,
+                        source_contexts=source_contexts,
+                        permission_mode=permission_mode,
+                    )
+                while result.pending_approval is not None:
+                    pending = result.pending_approval
+                    await self.get_session_for_user(session.session_id, session.user_id)
+                    permission = await ChatRepo.read_permission(
+                        session.session_id, session.user_id
+                    )
+                    if permission["mode"] == "read_only":
+                        denied = await ChatRepo.decide_tool_call(
+                            session_id=session.session_id,
+                            user_id=session.user_id,
+                            tool_call_id=pending.tool_call_id,
+                            arguments_digest=pending.arguments_digest,
+                            decision="rejected",
+                            decided_at=_now_iso(),
+                        )
+                        observation = ChatToolResult(
+                            tool_call_id=denied.tool_call_id,
+                            status=ToolResultStatus.FAILED,
+                            error_code="permission_write_denied",
+                            error_message=(
+                                "The current permission or request prohibits this write. "
+                                "No research record was changed."
+                            ),
+                        )
+                        result = await runner.resume_after_tool_result(
+                            **{
+                                **arguments,
+                                "previous_messages": await ChatRepo.read_messages(
+                                    session.session_id
+                                ),
+                            },
+                            calls=tuple(result.tool_calls[:-1]) + (denied,),
+                            results=tuple(result.tool_results),
+                            tool_call=denied,
+                            tool_result=observation,
+                            continuation_progress=snapshot.progress,
+                            permission_mode=ToolPermissionMode.READ_ONLY,
+                        )
+                        if (
+                            result.status is AgentRunStatus.FAILED
+                            and result.error_code
+                            not in {
+                                "permission_write_denied",
+                                "tool_permission_denied",
+                            }
+                        ):
+                            # A revoked write permission is the blocking event. A
+                            # model failure while explaining that denial must not
+                            # replace the user-visible cause with a provider error.
+                            result = replace(result, error_code="permission_write_denied")
+                        continue
+                    automatic = await ChatRepo.claim_automatic_call(
+                        session_id=session.session_id,
+                        tool_call_id=pending.tool_call_id,
+                        user_id=session.user_id,
+                        started_at=_now_iso(),
+                    )
+                    if automatic is None:
+                        break
+                    arguments["previous_messages"] = await ChatRepo.read_messages(
+                        session.session_id
+                    )
+                    result = await runner.resume_claimed_call(
+                        **arguments,
+                        claimed_call=automatic,
+                        continuation_progress=snapshot.progress,
+                    )
+                update_snapshot(
+                    status=result.status.value,
+                    message_id=None,
+                    message_created_at=None,
+                    content="",
+                    completion_reason=(
+                        result.completion_reason.value if result.completion_reason else None
+                    ),
+                    error_code=result.error_code,
+                    warnings=result.warnings,
+                )
+                emit_progress(
+                    {
+                        **snapshot.progress,
+                        "phase": "terminal",
+                        "termination_reason": result.error_code
+                        or result.completion_reason
+                        or result.status.value,
+                        "execution_plan": result.execution_plan,
+                    }
+                )
+                return result
+            except BaseException:
+                try:
+                    aborted = await ChatRepo.abort_running_tool_calls(
+                        session_id=session.session_id,
+                        error_code="chat_response_interrupted",
+                        finished_at=_now_iso(),
+                    )
+                    if aborted:
+                        messages = list(await ChatRepo.read_messages(session.session_id))
+                        results = []
+                        for call in aborted:
+                            result = ChatToolResult(
+                                tool_call_id=call.tool_call_id,
+                                status=ToolResultStatus.FAILED,
+                                error_code="chat_response_interrupted",
+                                error_message="The research action was interrupted before it finished.",
+                            )
+                            results.append(result)
+                            messages.append(
+                                ChatMessage(
+                                    message_id=f"msg_{uuid4().hex}",
+                                    session_id=session.session_id,
+                                    role=ChatMessageRole.TOOL,
+                                    content=json.dumps(
+                                        asdict(result),
+                                        ensure_ascii=True,
+                                        separators=(",", ":"),
+                                    ),
+                                    created_at=_now_iso(),
+                                    tool_call_id=result.tool_call_id,
+                                    tool_result=result,
+                                )
+                            )
+                        await ChatRepo.save_trajectory(
+                            chat_session=session.update(
+                                user_id=session.user_id,
+                                collection_id=session.collection_id,
+                                updated_at=messages[-1].created_at,
+                            ),
+                            messages=tuple(messages),
+                            tool_calls=aborted,
+                            tool_results=tuple(results),
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "failed to abort interrupted chat tool calls session_id=%s",
+                        session.session_id,
+                    )
+                plan = snapshot.progress.get("execution_plan")
+                if isinstance(plan, Mapping):
+                    snapshot_progress = {
+                        **snapshot.progress,
+                        "execution_plan": {
+                            **dict(plan),
+                            "status": "technical_failure",
+                            "blocking_reason": "chat_response_interrupted",
+                        },
+                    }
+                    update_snapshot(progress=snapshot_progress)
+                update_snapshot(status="interrupted", error_code="chat_response_interrupted")
+                raise
+            finally:
+                stop_updates.set()
+                await asyncio.gather(writer, return_exceptions=True)
+                await flush_snapshot()
 
     async def _ensure_turn_ready(self, messages: tuple[ChatMessage, ...]) -> None:
+        result_ids = {
+            item.tool_result.tool_call_id for item in messages
+            if item.tool_result is not None
+        }
         for message in messages:
             for request in message.tool_calls:
                 call = await ChatRepo.read_tool_call(request.tool_call_id)
@@ -1682,6 +1849,9 @@ class ChatSessionService:
                     ToolCallStatus.FAILED,
                     ToolCallStatus.REJECTED,
                 }:
+                    raise ChatSessionBusyError()
+
+                if call.status is ToolCallStatus.REJECTED and call.tool_call_id not in result_ids:
                     raise ChatSessionBusyError()
 
     async def _recover_orphaned_tool_calls(self, session: ChatSession) -> None:
@@ -1879,129 +2049,72 @@ class ChatSessionService:
     ) -> dict[str, Any]:
         try:
             session = await self.get_session_for_user(session_id, user_id)
-            existing = await ChatRepo.read_tool_call(tool_call_id)
-            if existing is None or existing.session_id != session_id:
-                raise ResourceNotFoundException(
-                    "Chat tool call not found.",
-                    data={"code": "chat_tool_call_not_found", "tool_call_id": tool_call_id},
-                )
-            if existing.status is ToolCallStatus.SUCCEEDED:
-                return {
-                    "status": "completed",
-                    "completion_reason": "model_answer",
-                    "messages": (),
-                    "pending_approval": None,
-                }
-            if existing.status is ToolCallStatus.REJECTED:
-                return {"status": "rejected", "messages": (), "pending_approval": None}
+            # Inspect, record, and continue one decision under the same execution lock.
+            # A second submit sees the first result before allocating another response.
+            async with ChatRepo.session_execution(session_id):
+                existing = await ChatRepo.read_tool_call(tool_call_id)
+                if existing is None or existing.session_id != session_id:
+                    raise ResourceNotFoundException("Chat tool call not found.", data={"code": "chat_tool_call_not_found", "tool_call_id": tool_call_id})
+                if existing.status is ToolCallStatus.SUCCEEDED:
+                    return {
+                        "status": "completed", "completion_reason": "model_answer",
+                        "messages": (), "pending_approval": None,
+                    }
+                previous_messages = await ChatRepo.read_messages(session_id)
+                if existing.status is ToolCallStatus.REJECTED and any(
+                    item.tool_result is not None
+                    and item.tool_result.tool_call_id == tool_call_id
+                    for item in previous_messages
+                ):
+                    return {"status": "rejected", "messages": (), "pending_approval": None}
 
-            decided = await ChatRepo.decide_tool_call(
-                session_id=session_id,
-                tool_call_id=tool_call_id,
-                user_id=user_id,
-                arguments_digest=arguments_digest,
-                decision=decision,
-                decided_at=_now_iso(),
-            )
-            previous_messages = await ChatRepo.read_messages(session_id)
-            if decided.status is ToolCallStatus.REJECTED:
-                observation = ChatToolResult(
-                    tool_call_id=decided.tool_call_id,
-                    status=ToolResultStatus.FAILED,
-                    error_code="user_rejected",
-                    error_message="The user rejected this research action.",
+                decided = await ChatRepo.decide_tool_call(
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    user_id=user_id,
+                    arguments_digest=arguments_digest,
+                    decision=decision,
+                    decided_at=_now_iso(),
                 )
-                prior_snapshot = await ChatRepo.read_response_snapshot(session_id)
-                async with ChatRepo.session_execution(session_id):
+                # Reload request metadata after persisting the approval/rejection.
+                previous_messages = await ChatRepo.read_messages(session_id)
+                if decided.status is ToolCallStatus.REJECTED:
+                    observation = ChatToolResult(
+                        tool_call_id=decided.tool_call_id,
+                        status=ToolResultStatus.FAILED,
+                        error_code="user_rejected",
+                        error_message="The user rejected this research action.",
+                    )
+                    prior_snapshot = await ChatRepo.read_response_snapshot(session_id)
                     run_result = await self._run_response(
                         session,
                         previous_messages=previous_messages,
                         rejected_call=decided,
                         rejected_result=observation,
                         continuation_calls=(decided,),
-                        continuation_progress=(
-                            prior_snapshot.progress if prior_snapshot else None
-                        ),
+                        continuation_progress=(prior_snapshot.progress if prior_snapshot else None),
                     )
-                    if (
-                        await self._enqueue_tool_failure_candidates(session, result=run_result)
-                        is False
-                    ):
-                        run_result = replace(
-                            run_result,
-                            warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
-                        )
-                return {
-                    "status": run_result.status.value,
-                    "completion_reason": (
-                        run_result.completion_reason.value
-                        if run_result.completion_reason
-                        else None
-                    ),
-                    "warnings": run_result.warnings,
-                    "messages": run_result.messages[len(previous_messages) :],
-                    "pending_approval": run_result.pending_approval,
-                    "error_code": run_result.error_code,
-                    "execution_plan": run_result.execution_plan,
-                }
-
-            async with ChatRepo.session_execution(session_id):
-                claimed = await ChatRepo.claim_approved_tool_call(
-                    session_id=session_id,
-                    tool_call_id=tool_call_id,
-                    user_id=user_id,
-                    started_at=_now_iso(),
-                )
-                if claimed is None:
-                    current = await ChatRepo.read_tool_call(tool_call_id)
-                    if current is not None and current.status is ToolCallStatus.SUCCEEDED:
-                        return {
-                            "status": "completed",
-                            "completion_reason": "model_answer",
-                            "messages": (),
-                            "pending_approval": None,
-                        }
-                    if current is not None and current.status is ToolCallStatus.FAILED:
-                        return {
-                            "status": "failed",
-                            "messages": (),
-                            "pending_approval": None,
-                            "error_code": current.error_code,
-                        }
-                    raise ResourceConflictException(
-                        "approved research action is already running",
-                        data={
-                            "code": "chat_tool_decision_conflict",
-                            "tool_call_id": tool_call_id,
-                        },
+                else:
+                    run_result = await self._run_response(
+                        session,
+                        previous_messages=previous_messages,
+                        approved_call=decided,
                     )
-                previous_messages = await ChatRepo.read_messages(session_id)
-                run_result = await self._run_response(
-                    session,
-                    previous_messages=previous_messages,
-                    claimed_call=claimed,
-                )
-                if (
-                    await self._enqueue_tool_failure_candidates(session, result=run_result)
-                    is False
-                ):
+                if await self._enqueue_tool_failure_candidates(session, result=run_result) is False:
                     run_result = replace(
                         run_result,
                         warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
                     )
             return {
                 "status": run_result.status.value,
-                "completion_reason": (
-                    run_result.completion_reason.value
-                    if run_result.completion_reason
-                    else None
-                ),
+                "completion_reason": run_result.completion_reason.value if run_result.completion_reason else None,
                 "warnings": run_result.warnings,
-                "messages": run_result.messages[len(previous_messages) :],
+                "messages": run_result.messages[len(previous_messages):],
                 "pending_approval": run_result.pending_approval,
                 "error_code": run_result.error_code,
                 "execution_plan": run_result.execution_plan,
             }
+
         except ChatWriteConflict as exc:
             raise ResourceConflictException(
                 str(exc), data={"code": exc.reason, "session_id": session_id}

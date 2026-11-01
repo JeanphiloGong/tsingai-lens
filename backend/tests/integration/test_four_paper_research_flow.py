@@ -36,6 +36,12 @@ FIXTURE_DIR = (
 )
 
 
+import pytest
+
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("scripted_chat_runner")
+
 class _FourPaperResearchModel(FakeDomainModelExtractor):
     """Deterministic scientific decisions at the external model boundary only."""
 

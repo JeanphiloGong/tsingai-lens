@@ -145,6 +145,61 @@ handoff and admission limit are not an external durable queue.
 Goal intake creates an empty collection directly; it does not create a durable
 handoff record or a second research-result identity.
 
+### Shared Model Connections
+
+`GET /api/v1/model-connections` requires authentication and returns the standard
+`{code,message,data,meta}` envelope. Its `data` is
+`{"items":[{"connection_id":"lab-a","display_name":"Lab A","model":"lab-chat-a"}]}`.
+Only enabled configurations appear. Empty configuration returns an empty array.
+The directory never exposes base URLs, key references, secret values, or provider
+payloads. It has no write endpoint; operators maintain the PostgreSQL
+table through their database tools.
+
+`POST /api/v1/chat-sessions/{session_id}/messages` accepts an optional
+`model_connection_id` alongside the existing message, Source, permission, and
+branch fields. Resolve it only after ownership checks and under the existing
+session execution lock. Omission selects `LENS_DEFAULT_MODEL_CONNECTION_ID`.
+No default or an invalid/disabled selection fails before appending a user message
+or calling the provider. A valid choice binds the whole response to that connection ID;
+another user's selection cannot mutate that response's client.
+
+Response snapshots include nullable `model_connection_id` and
+`model_connection_name`. Model-call summaries and detailed audits retain the ID;
+the existing `model` field records the model actually called. Existing completed
+snapshots may have NULLs. Approval continuation reads the saved connection ID,
+even when disabled, and never substitutes another enabled configuration. Auto-approved
+tools and context compaction reuse the same response runner. GET event reconnects
+read that saved snapshot without selecting a model or generating another answer.
+
+Trajectory responses (GET messages and SSE trajectory events) include nullable
+`retryable_decision`. It is the original call with status `approved` or `rejected`
+when its decision is saved, no result has been recorded, and no worker is running.
+`pending_approval` remains reserved for a decision the user has not made. A client
+may explicitly retry the saved decision through the existing decision endpoint,
+using that call's original decision and `arguments_digest`; it sends no model
+selection and must never convert a rejection to an approval. A rejection with no
+result resumes its refusal observation and explanation, without executing a write.
+A recorded result suppresses this recovery projection, and repeated completed
+requests do not create another response or execute again. GET and reconnect only
+observe; they never perform the retry. New questions wait until this outstanding
+continuation has been handled.
+
+JSON endpoints keep HTTP 200 and return the existing business error envelope.
+An unknown or disabled choice uses `ResourceConflictException` (business code
+`200204`) and `data.code = "model_connection_unavailable"`. The request schema
+accepts IDs of 1–64 characters; invalid input uses `200100`. A missing default,
+missing saved binding, invalid configuration or missing key uses
+`ServiceUnavailableException` (`200205`) with the stable reason in `data.code`:
+`model_connection_default_unavailable`, `model_connection_binding_missing`,
+`model_connection_invalid_configuration`, or `model_connection_key_unavailable`.
+Authentication failure uses the existing `200301` contract. The directory calls
+the concrete repository directly; unexpected database errors follow the existing
+application exception handler, without inventing a second directory error API.
+If an SSE stream has already started, connection failures arrive as sanitized
+`error` events within HTTP 200. No client may treat the status alone as a
+completed scientific answer. Provider failures after dispatch continue to use
+the existing `model_unavailable`/context error contract.
+
 ### Research Agent Chat
 
 Session operation permissions are exposed by authenticated

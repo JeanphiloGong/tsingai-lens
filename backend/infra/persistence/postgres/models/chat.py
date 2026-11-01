@@ -240,6 +240,7 @@ class ChatModelCallORM(Base):
     )
     purpose: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_connection_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     request: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)

@@ -9,7 +9,9 @@ from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
 from repositories.analysis_job_repository import AnalysisJob
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.fixture

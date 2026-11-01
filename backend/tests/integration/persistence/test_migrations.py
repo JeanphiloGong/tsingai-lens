@@ -28,7 +28,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261101_0091"
+HEAD_REVISION = "20261101_0092"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 

@@ -59,7 +59,9 @@ from repositories.collection_repository import (
 from sqlalchemy import delete, func, inspect, select, update
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 NOW = "2026-09-09T08:00:00+00:00"
 ANSWER = "The two LPBF studies used different tensile test temperatures. Compare matching conditions before attributing the strength difference to heat treatment."
 PATH = "/api/v1/chat-sessions/chat-1/messages/answer/feedback"

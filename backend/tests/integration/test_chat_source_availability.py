@@ -21,7 +21,9 @@ from domain.source import Document
 from repositories.collection_repository import StoredDocument
 from repositories.source_artifact_repository import SourceArtifactRepository
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.mark.parametrize("state", ["missing", "unprepared", "database_failure"])

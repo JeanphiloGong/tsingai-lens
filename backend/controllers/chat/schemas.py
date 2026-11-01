@@ -145,6 +145,7 @@ class ChatModelCallSummaryResponse(BaseModel):
     response_message_id: str | None
     purpose: Literal["decision", "compaction", "finalization"]
     model: str
+    model_connection_id: str | None = None
     request_digest: str
     status: Literal[
         "recorded",
@@ -198,6 +199,7 @@ class SendChatMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=12000)
+    model_connection_id: str | None = Field(default=None, min_length=1, max_length=64)
     branch_revision: bool = False
     source_contexts: list[ChatSourceContextPayload] = Field(
         default_factory=list,
@@ -274,6 +276,8 @@ class ChatMessageFeedbackResponse(BaseModel):
 
 
 class ChatResponseSnapshotResponse(BaseModel):
+    model_connection_id: str | None = None
+    model_connection_name: str | None = None
     response_id: str
     sequence: int
     started_at: str
@@ -294,6 +298,7 @@ class ChatResponseSnapshotResponse(BaseModel):
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
+    retryable_decision: ChatToolCallResponse | None = None
     feedback: list[ChatMessageFeedbackResponse] = Field(default_factory=list)
     branches: list[ChatBranchOptions] = Field(default_factory=list)
     branch_draft: ChatMessageResponse | None = None

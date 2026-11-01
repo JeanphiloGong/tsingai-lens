@@ -23,7 +23,9 @@ from repositories.chat_repository import ChatRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 from tests.unit.application.test_research_agent_runner import _Model
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 class _ObjectiveRepository:

@@ -53,7 +53,9 @@ from repositories.source_artifact_repository import SourceArtifactRepository
 from tests.support.postgres import read_tool_calls, read_tool_results, seed_collection
 from tests.unit.application.test_research_agent_runner import _Model
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.fixture
@@ -645,7 +647,7 @@ async def test_chat_shutdown_keeps_another_apps_stream_running(
                 async for event in stream:
                     if event["type"] == "text_delta":
                         break
-            assert first.model_call_observer is not second.model_call_observer
+            assert first.runner is not second.runner
             first_task, = first._active_stream_tasks
             second_task, = second._active_stream_tasks
             await first.close()

@@ -89,6 +89,7 @@ class ChatModelCall:
     request: dict[str, Any]
     request_digest: str
     started_at: str
+    model_connection_id: str | None = None
     status: ModelCallStatus = "recorded"
     finished_at: str | None = None
     error_code: str | None = None
@@ -115,6 +116,8 @@ class ChatResponseSnapshot:
     completion_reason: str | None = None
     error_code: str | None = None
     warnings: tuple[str, ...] = ()
+    model_connection_id: str | None = None
+    model_connection_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -900,6 +903,7 @@ class ChatRepository:
                     response_message_id=existing.response_message_id,
                     purpose=existing.purpose,
                     model=existing.model,
+                    model_connection_id=existing.model_connection_id,
                     request=dict(existing.request),
                     request_digest=existing.request_digest,
                     started_at=_iso(existing.started_at),
@@ -918,6 +922,7 @@ class ChatRepository:
                 response_message_id=call.response_message_id,
                 purpose=call.purpose,
                 model=call.model,
+                model_connection_id=call.model_connection_id,
                 request=dict(call.request),
                 request_digest=call.request_digest,
                 status=call.status,
@@ -938,6 +943,7 @@ class ChatRepository:
                 response_message_id=row.response_message_id,
                 purpose=row.purpose,
                 model=row.model,
+                model_connection_id=row.model_connection_id,
                 request=dict(row.request),
                 request_digest=row.request_digest,
                 started_at=_iso(row.started_at),
@@ -976,6 +982,7 @@ class ChatRepository:
                     response_message_id=row.response_message_id,
                     purpose=row.purpose,
                     model=row.model,
+                    model_connection_id=row.model_connection_id,
                     request=dict(row.request),
                     request_digest=row.request_digest,
                     started_at=_iso(row.started_at),
@@ -1002,6 +1009,7 @@ class ChatRepository:
                 response_message_id=row.response_message_id,
                 purpose=row.purpose,
                 model=row.model,
+                model_connection_id=row.model_connection_id,
                 request=dict(row.request),
                 request_digest=row.request_digest,
                 started_at=_iso(row.started_at),
@@ -1035,6 +1043,7 @@ class ChatRepository:
                     response_message_id=row.response_message_id,
                     purpose=row.purpose,
                     model=row.model,
+                    model_connection_id=row.model_connection_id,
                     request=dict(row.request),
                     request_digest=row.request_digest,
                     started_at=_iso(row.started_at),
@@ -1063,6 +1072,7 @@ class ChatRepository:
                 response_message_id=row.response_message_id,
                 purpose=row.purpose,
                 model=row.model,
+                model_connection_id=row.model_connection_id,
                 request=dict(row.request),
                 request_digest=row.request_digest,
                 started_at=_iso(row.started_at),

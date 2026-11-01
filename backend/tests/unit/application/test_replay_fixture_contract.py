@@ -12,6 +12,10 @@ from scripts.evaluation.research_agent.run_scenarios import (
 )
 
 
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("scripted_chat_runner")
+
 def fixture():
     return {
         "scenarios": [

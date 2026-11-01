@@ -24,7 +24,9 @@ from tests.integration.persistence.test_chat_branches import (  # noqa: F401
     branch_app,
 )
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 async def test_http_context_recovery_persists_trajectory_budget_and_provider_reason(
@@ -193,7 +195,6 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
                 model=OpenAIChatModel(client=client, model="offline-test"),
                 capabilities=CapabilityRegistry(()),
             )
-            fixture.service.model_call_observer = RepositoryModelCallObserver()
             browser = fixture.client
             path = f"/api/v1/chat-sessions/{session.session_id}"
             response = await browser.post(

@@ -36,23 +36,32 @@ class OpenAIChatModel:
         *,
         client: Any | None = None,
         model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        request_timeout: float | None = None,
     ) -> None:
         self.model = (
             model
             or os.getenv("LLM_MODEL")
             or "gpt-4o-mini"
         ).strip()
-        self.request_timeout = _env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0)
+        self.request_timeout = (
+            request_timeout if request_timeout is not None
+            else _env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0)
+        )
         self.reasoning_effort = os.getenv("LLM_REASONING_EFFORT", "").strip() or None
         if client is not None:
             self.client = client.with_options(max_retries=0)
         else:
             self.client = AsyncOpenAI(
-                api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
-                base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
+                api_key=api_key if api_key is not None else os.getenv("LLM_API_KEY", "").strip() or "not-needed",
+                base_url=base_url if base_url is not None else os.getenv("LLM_BASE_URL", "").strip() or None,
                 timeout=self.request_timeout,
                 max_retries=0,
             )
+
+    async def aclose(self) -> None:
+        await self.client.close()
 
     async def respond(
         self,

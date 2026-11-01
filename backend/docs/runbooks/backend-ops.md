@@ -87,9 +87,11 @@ including streamed Chat responses. Set it to a value supported by the model
 provider, such as `none`, when a reasoning model must reserve its bounded
 completion budget for structured output. When unset, the provider default is
 used. A Chat request must not silently ignore this operator setting.
-`LLM_MODEL` selects the model used by Core extraction and Research Agent Chat.
-It must match one of the model ids returned by the configured OpenAI-compatible
-endpoint, for example:
+`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` configure Core extraction and
+explicitly injected environment-based clients. Database-backed Research Agent
+Chat selects the address, model, and key reference from an enabled
+`model_connections` row; reasoning effort continues to use `LLM_REASONING_EFFORT`.
+Core model IDs must match the configured endpoint, for example:
 
 ```bash
 curl "$LLM_BASE_URL/models"
@@ -377,3 +379,73 @@ chooses or deletes a row automatically. Other configuration values are preserved
 Downgrading this migration restores the old schema with revision 1 for every
 row; discarded revision numbers cannot be recovered. Migration `20261025_0089`
 still refuses to drop a nonempty registry.
+
+Treat `connection_id` as a stable configuration identity. If an address or
+model must change, insert a new row with a new ID. Disabling the old row can
+happen immediately; keep its address/model intact while a response depends on
+it. The application does not maintain configuration history.
+
+
+### Chat Binding and Operational Recovery
+
+Before enabling registry-backed Chat, add the intended enabled connection and
+set `LENS_DEFAULT_MODEL_CONNECTION_ID` for callers that omit a choice. An omitted
+choice without a configured default fails with
+`model_connection_default_unavailable`; there is no fallback to `LLM_MODEL`.
+API clients may send an explicit selection on each new question. The current
+browser uses the configured default until the model selector is implemented.
+Running answers and pending approvals retain the selected `connection_id` in their
+response snapshot; model-call audits record the same binding. Disabling a row
+only blocks new questions. It does not cancel generation or revoke credentials.
+An event-stream reconnect only reads saved state and never selects a model.
+
+Drain or explicitly interrupt unfinished pre-registry answers before rollout.
+Completed history without a binding remains readable. An old unbound approval
+must not be assigned a fabricated connection; it fails with
+`model_connection_binding_missing`. Keep a referenced row readable while a
+response or approval still depends on it. A missing row fails explicitly rather
+than substituting another enabled choice. If the environment key is absent, restore
+the intended secret reference; construction fails before an approved write is
+claimed, so the approved action remains unexecuted. If either a saved approval
+or rejection has no result, the trajectory exposes it as `retryable_decision`.
+After restoring the original configuration, resubmit the saved decision and
+`arguments_digest` to the existing tool-call decision endpoint. The browser retry
+control is a later frontend step. Reloading, reconnecting or choosing a model
+for the next question never starts this action. Retry preserves the exact
+decision, call digest and bound connection ID; a rejected action is never
+executed. Once a result exists, `retryable_decision` becomes null and repeated
+submissions cannot run it again.
+
+JSON selection failures use HTTP 200 with the existing business error envelope:
+`200204` for an unavailable selection, `200205` for configuration/key failures,
+and a stable reason under `data.code`. After an SSE response has started, the same
+failure is an `error` event. Check the envelope/event, not HTTP status alone. `model_unavailable` after dispatch denotes
+a provider/runtime failure and keeps existing research results; it is not a
+claim that the literature has no evidence. Credentials and provider response
+bodies must remain outside browser errors and audit request JSON.
+
+
+### Per-Connection Request Limits
+
+The three nullable limit fields use NULL to mean no connection-specific value,
+not unlimited. Agent defaults come from `LENS_AGENT_CONTEXT_TOKENS` (65536),
+`LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS` (16384),
+`LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS` (8192), and
+`LENS_AGENT_MAX_REQUEST_SECONDS` (180 seconds); parentheses give built-in values
+when the environment variable is absent. Context and both output limits take
+the smaller of the global Agent value and the selected row's non-NULL value.
+Raise the global cap as well when enabling a larger context window.
+
+The SDK timeout uses `request_timeout_seconds` when set, otherwise
+`LLM_REQUEST_TIMEOUT_SECONDS`, otherwise 180 seconds. The actual request is
+further bounded by the Agent timeout passed for that call. For example, with
+an Agent cap of 90 seconds and SDK environment timeout of 40 seconds, a NULL
+row timeout yields 40 seconds, a row value of 20 yields 20, and a row value of
+180 yields 90. The per-response Runner does not change shared global limits.
+
+Provider usage records consumption for each request, not context capacity.
+Budget the current complete input plus reserved output and safety headroom;
+do not subtract cumulative usage over previous calls from the window. Operators
+obtain capacity from the actual model/provider specification. Missing defaults,
+missing bound rows, and missing referenced keys still fail explicitly;
+limit fallback never substitutes another provider or credential.

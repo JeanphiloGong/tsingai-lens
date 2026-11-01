@@ -345,6 +345,7 @@ async def stream_chat_updates(
 
 def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListResponse:
     pending = trajectory["pending_approval"]
+    retryable = trajectory.get("retryable_decision")
     response = trajectory.get("response")
     visible_messages = format_message_citations(trajectory["messages"])
     return ChatMessageListResponse(
@@ -369,6 +370,10 @@ def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListRespon
             ChatResponseSnapshotResponse.model_validate(response, from_attributes=True)
             if response is not None
             else None
+        ),
+        retryable_decision=(
+            ChatToolCallResponse.model_validate(retryable, from_attributes=True)
+            if retryable is not None else None
         ),
         pending_approval=(
             ChatToolCallResponse.model_validate(pending, from_attributes=True)
@@ -420,6 +425,7 @@ async def send_chat_message(
             session_id,
             user_id,
             message=payload.message,
+            model_connection_id=payload.model_connection_id,
             source_contexts=source_contexts,
             permission_mode=payload.permission_mode,
             branch_revision=payload.branch_revision,
@@ -436,6 +442,7 @@ async def send_chat_message(
         session_id,
         user_id,
         message=payload.message,
+        model_connection_id=payload.model_connection_id,
         source_contexts=source_contexts,
         permission_mode=payload.permission_mode,
         branch_revision=payload.branch_revision,

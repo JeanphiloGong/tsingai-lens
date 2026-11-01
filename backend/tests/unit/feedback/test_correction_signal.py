@@ -28,7 +28,9 @@ from repositories.analysis_job_repository import (
     correction_signal_idempotency_key,
 )
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.fixture

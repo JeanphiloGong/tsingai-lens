@@ -517,7 +517,7 @@ def test_context_builder_keeps_tool_call_and_result_as_one_protocol_unit() -> No
     assert selected == (messages[0], call, result)
 
 
-def test_context_builder_returns_a_bounded_recent_suffix() -> None:
+def test_context_builder_pins_user_inputs_before_recent_tool_output() -> None:
     call, result = _tool_pair()
     latest = _user("msg-latest", "new question")
     messages = (
@@ -531,7 +531,7 @@ def test_context_builder_returns_a_bounded_recent_suffix() -> None:
     selected = ChatContextBuilder(max_messages=3, max_chars=1_000).for_model(messages).messages
 
     assert selected[-1] == latest
-    assert selected == (call, result, latest)
+    assert selected == (messages[0], latest)
     assert len(selected) <= 3
     assert sum(len(item.content) for item in selected) <= 1_000
     assert not (

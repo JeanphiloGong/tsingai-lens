@@ -21,6 +21,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 from application.chat.agent_runner import (
+    AgentCompletionReason,
     AgentRunResult,
     AgentRunStatus,
     ResearchAgentRunner,
@@ -276,9 +277,10 @@ class ChatSessionService:
         self.runner = runner
         self.default_model_connection_id = default_model_connection_id
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
+        self._title_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def close(self) -> None:
-        tasks = tuple(self._active_stream_tasks)
+        tasks = (*self._active_stream_tasks, *self._title_tasks.values())
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -1451,6 +1453,30 @@ class ChatSessionService:
                 logger.warning("Model client close failed exception_type=%s", type(exc).__name__)
 
 
+    async def _generate_session_title(
+        self, session: ChatSession, messages: tuple[ChatMessage, ...], connection: ModelConnectionRecord,
+    ) -> None:
+        # Naming is optional navigation metadata; its failure cannot fail research.
+        try:
+            current = await ChatRepo.read_session(session.session_id)
+            if current is None or current.title is not None:
+                return
+            question = next(item.content for item in messages if item.role is ChatMessageRole.USER)
+            async with self._runner_for_connection(connection) as runner:
+                title = await asyncio.wait_for(
+                    runner.model.generate_title(question=question, answer=messages[-1].content),
+                    timeout=45.0,
+                )
+            if title:
+                await ChatRepo.set_generated_session_title(
+                    session_id=session.session_id, user_id=session.user_id, title=title,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Chat title generation failed session_id=%s exception_type=%s",
+                session.session_id, type(exc).__name__,
+            )
+
     async def _run_response(
         self,
         session: ChatSession,
@@ -1751,6 +1777,12 @@ class ChatSessionService:
                         claimed_call=automatic,
                         continuation_progress=snapshot.progress,
                     )
+                if (result.status is AgentRunStatus.COMPLETED
+                        and result.completion_reason is AgentCompletionReason.MODEL_ANSWER
+                        and session.title is None and session.session_id not in self._title_tasks):
+                    task = asyncio.create_task(self._generate_session_title(session, result.messages, connection))
+                    self._title_tasks[session.session_id] = task
+                    task.add_done_callback(lambda _task: self._title_tasks.pop(session.session_id, None))
                 update_snapshot(
                     status=result.status.value,
                     message_id=None,

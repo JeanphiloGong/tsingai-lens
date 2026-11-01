@@ -604,6 +604,16 @@ class ChatRepository:
                 title=row.title,
             )
 
+    async def set_generated_session_title(
+        self, *, session_id: str, user_id: str, title: str,
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            await db.execute(update(ChatSessionORM).where(
+                ChatSessionORM.session_id == session_id,
+                ChatSessionORM.user_id == user_id,
+                ChatSessionORM.title.is_(None),
+            ).values(title=title))
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSessionSummary, ...]:

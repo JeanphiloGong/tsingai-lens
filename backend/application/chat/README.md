@@ -108,6 +108,16 @@ Saving a revision does not create an Objective Selection or publish an analysis.
 
 ## Main Flow
 
+When an answer completes normally, `session_service.py` names an untitled
+conversation from the first question and the answer using the request's model
+connection. This optional background call has no tools and a 45-second timeout;
+the answer and next question do not wait for it. The service owns and cancels
+pending naming tasks on shutdown. It supplies
+navigation metadata only; the title is not appended to the research trajectory.
+The repository fills only a null title, preserving concurrent manual edits.
+Once a title exists it is kept across later turns. Naming failure leaves the
+answer intact and the first-question label available for navigation.
+
 ```text
 authenticated user + collection
   -> application.chat.session_service validates and persists the user message

@@ -83,6 +83,31 @@ def _completion(*, content: str | None = None, tool_calls: list | None = None,
     )
 
 
+@pytest.mark.parametrize("title", ["IN718 工艺与延伸率", "IN718 process and ductility"])
+async def test_title_generation_uses_bounded_question_and_answer_without_research_tools(title):
+    client, completions = _client(_completion(content=title))
+    model = OpenAIChatModel(client=client, model="selected-research-model")
+    assert await model.generate_title(question="Q" * 12000, answer="A" * 20000) == title
+    request = completions.calls[0]
+    import json
+    data = json.loads(request["messages"][1]["content"])
+    assert data == {"question": "Q" * 4000, "answer": "A" * 2000}
+    assert request["model"] == "selected-research-model"
+    assert request["timeout"] <= 45
+    assert "tools" not in request and "stream" not in request
+    assert RESEARCH_AGENT_SYSTEM_PROMPT not in request["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("title,finish", [
+    ("", "stop"), ("x" * 61, "stop"), ("Title\nExplanation", "stop"),
+    ("<tool_call>rename()</tool_call>", "stop"), ("Cut off", "length"),
+])
+async def test_invalid_title_output_is_rejected(title, finish):
+    client, _ = _client(_completion(content=title, finish_reason=finish))
+    with pytest.raises(ValueError):
+        await OpenAIChatModel(client=client).generate_title(question="Compare IN718", answer="Check tensile conditions.")
+
+
 def _stream_chunk(
     *,
     content: str | None = None,

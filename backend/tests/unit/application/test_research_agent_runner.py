@@ -134,6 +134,9 @@ class _Model:
         self.contexts: list[tuple[ChatMessage, ...]] = []
         self.request_limits: list[tuple[float, int]] = []
 
+    async def generate_title(self, *, question: str, answer: str) -> str:
+        return ""
+
     async def respond(
         self,
         *,

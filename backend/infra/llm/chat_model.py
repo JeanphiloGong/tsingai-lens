@@ -16,6 +16,7 @@ from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
 from application.chat.capabilities import ToolSpec
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.model import (
+    CHAT_TITLE_SYSTEM_PROMPT,
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
@@ -62,6 +63,27 @@ class OpenAIChatModel:
 
     async def aclose(self) -> None:
         await self.client.close()
+
+    async def generate_title(self, *, question: str, answer: str) -> str:
+        completion = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": CHAT_TITLE_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps({
+                    "question": question[:4000], "answer": answer[:2000],
+                }, ensure_ascii=False)},
+            ],
+            max_completion_tokens=1024,
+            timeout=min(45.0, self.request_timeout),
+        )
+        record_llm_completion(completion, requested_model=self.model)
+        choice = completion.choices[0]
+        title = (choice.message.content or "").strip()
+        if (choice.finish_reason != "stop" or choice.message.tool_calls
+                or not title or len(title) > 60
+                or any(char in title for char in "\x00\r\n<>")):
+            raise ValueError("model returned an invalid conversation title")
+        return title
 
     async def respond(
         self,

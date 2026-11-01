@@ -219,8 +219,13 @@ that exact session. Only an explicit `404` removes the missing session and
 creates a replacement; network errors and other HTTP failures remain visible.
 
 The server trajectory is authoritative. The collection session list supplies
-each saved conversation's first-question title, so history labels remain
-available on a new browser or after local storage is cleared. Browser storage
+each saved conversation's manual or generated title, falling back to its first
+question, so history labels remain available on a new browser or after local
+storage is cleared. After a normally completed first answer, the server generates
+a short topic title in the background. The browser checks session metadata for
+up to 48 seconds and updates both the header and history without requiring a
+reload. Manual names are preserved; naming failures do not affect the answer.
+The naming timer is cleared on navigation and component teardown. Browser storage
 remembers which session to load and up to 12 pending Source blocks from the
 document reader. Pending blocks are shown above the composer and can be removed
 individually. They are cleared after the complete persisted turn

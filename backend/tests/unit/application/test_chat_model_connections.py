@@ -143,8 +143,11 @@ async def test_approval_reads_disabled_original_connection_on_another_service(de
         session.session_id, call.tool_call_id, "alice",
         arguments_digest=call.arguments_digest, decision=decision,
     )
+    await asyncio.gather(*second._title_tasks.values())
     assert result["status"] == "completed"
-    assert [model_name for model_name, _ in created] == ["model-lab-a", "model-lab-a"]
+    # Two research clients and the independent background naming client retain
+    # the original binding, including after the connection was disabled.
+    assert [model_name for model_name, _ in created] == ["model-lab-a"] * 3
     assert len(write.executed) == (1 if decision == "approved" else 0)
     assert all(model.closed for _, model in created)
 
@@ -318,8 +321,9 @@ async def test_missing_key_keeps_a_saved_decision_visible_and_retryable(decision
     monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-restored-key")
     result = await runtime.decide_tool_call_for_user(session.session_id, pending.tool_call_id, "alice",
         arguments_digest=pending.arguments_digest, decision=decision)
+    await asyncio.gather(*runtime._title_tasks.values())
     assert result["status"] == "completed" and resumed.closed
-    assert selected == ["model-lab-a"] and len(write.executed) == (1 if decision == "approved" else 0)
+    assert selected == ["model-lab-a"] * 2 and len(write.executed) == (1 if decision == "approved" else 0)
     messages = await session_service_module.ChatRepo.read_messages(session.session_id)
     assert sum(item.tool_result is not None and item.tool_result.tool_call_id == pending.tool_call_id
                for item in messages) == 1
@@ -328,7 +332,7 @@ async def test_missing_key_keeps_a_saved_decision_visible_and_retryable(decision
     assert trajectory["response"].status == "completed"
     await runtime.decide_tool_call_for_user(session.session_id, pending.tool_call_id, "alice",
         arguments_digest=pending.arguments_digest, decision=decision)
-    assert selected == ["model-lab-a"] and len(write.executed) == (1 if decision == "approved" else 0)
+    assert selected == ["model-lab-a"] * 2 and len(write.executed) == (1 if decision == "approved" else 0)
 
 
 async def test_omission_requires_a_configured_default(postgres_session_factory):

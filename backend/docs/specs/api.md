@@ -264,7 +264,7 @@ ordered by `is_pinned` descending, then `updated_at` descending and `session_id`
 descending, before applying `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
 may remember the active session but is not the authoritative history index. Each
-list item also includes `title`: the saved custom title, otherwise the trimmed first line of the first user question
+list item also includes `title`: the saved manual or generated title, otherwise the trimmed first line of the first user question
 (up to 160 characters), or `null` for an empty conversation. A client can render
 history without loading every trajectory or relying on a local title cache.
 
@@ -273,9 +273,19 @@ returns the saved session. The application service trims titles and then checks
 the 1–160 character limit. NUL, CR and LF are rejected in the original input,
 including at its edges; invalid requests return 200100. Both session and collection
 ownership are required; missing or unowned sessions return 200201. Renaming changes
-only the custom title, preserving messages, progress, pin state and activity time.
-Individual session reads expose the custom title or null. Later generation
-checkpoints do not overwrite it; branches start without a custom title.
+only the title, preserving messages, progress, pin state and activity time.
+Individual session reads expose the saved title or null. Later generation
+checkpoints do not overwrite it; branches start without a saved title.
+
+After the first normally completed answer, an untitled session receives a short
+model-generated topic title in the first question's language. Naming uses the
+same request-bound model connection, a bounded excerpt of the first question and
+answer, no tools, and a 45-second timeout. It runs in the background without
+holding the response or blocking the next question. It does not add a conversation message
+or change research evidence. Only a null title can be filled automatically, so
+manual renaming wins even while generation is pending. On naming failure the
+answer remains valid and the question-based label stays available; a later
+normally completed answer can retry naming. Named sessions are not regenerated.
 
 Session responses include `is_pinned` (false by default). `PUT .../{session_id}/pin`
 accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the

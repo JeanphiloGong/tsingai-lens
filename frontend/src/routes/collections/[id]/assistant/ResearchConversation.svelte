@@ -179,6 +179,7 @@
 	let recoveryLoading = false;
 	let recoveryError = '';
 	let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+	let titleTimer: ReturnType<typeof setTimeout> | undefined;
 
 	let sessionGeneration = 0;
 	let sessionController: AbortController | null = null;
@@ -190,6 +191,7 @@
 		modelConnectionsController?.abort();
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
+		clearTimeout(titleTimer);
 		sessionController?.abort();
 		updatesController?.abort();
 		treeController?.abort();
@@ -381,6 +383,28 @@
 			},
 			...existing
 		]);
+	}
+
+	async function refreshSessionTitle(attempt = 0) {
+		clearTimeout(titleTimer);
+		if (!session || session.title) return;
+		const sessionId = session.session_id;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		const historyRequest = historyGeneration;
+		try {
+			const saved = await fetchChatSession(sessionId, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId) || session?.session_id !== sessionId ||
+				historyRequest !== historyGeneration || session.title) return;
+			if (!saved.title) {
+				if (attempt < 24) titleTimer = setTimeout(() => void refreshSessionTitle(attempt + 1), 2000);
+				return;
+			}
+			session = { ...session, title: saved.title };
+			upsertHistory(session);
+		} catch {
+			// Optional title metadata must not hide an answer or prevent the next turn.
+		}
 	}
 
 	async function fetchServerHistory(
@@ -593,6 +617,7 @@
 		checkpointId = '';
 		const activeCollectionId = collectionId;
 		const generation = ++sessionGeneration;
+		clearTimeout(titleTimer);
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
 		historyLoading = false;
@@ -788,6 +813,7 @@
 			settledExecutionPlan = null;
 			turnRecovery = null;
 		}
+		if (!running) void refreshSessionTitle();
 	}
 
 	async function resumeResponse() {
@@ -1473,6 +1499,7 @@
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
 			session = { ...session, updated_at: updatedAt };
 			upsertHistory(session, titleFromMessages(messages));
+			void refreshSessionTitle();
 		}
 	}
 

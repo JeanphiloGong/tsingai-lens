@@ -960,6 +960,45 @@ describe('collections/[id]/assistant Research Agent', () => {
 		}
 	);
 
+	it.each([false, true])('shows the generated title after the first answer and reload (embedded=%s)', async (embedded) => {
+		let title: string | null = null;
+		const generatedTitle = 'IN718 process and ductility';
+		let completed = false;
+		let titleReads = 0;
+		const question = message('title-question', 'user', 'How should we compare IN718 process parameters and elongation?');
+		const answer = message('title-answer', 'assistant', 'Check density and tensile conditions separately.');
+		installApi({
+			trajectory: { items: [question, answer], feedback: [], pending_approval: null },
+			messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [question, answer], pending_approval: null, error_code: null }
+		});
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/chat-sessions' && method === 'GET')
+				return Promise.resolve(jsonResponse({ items: [{ ...session, title }], limit: 10, offset: 0 }));
+			if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET') {
+				if (completed && ++titleReads >= 2) title = generatedTitle;
+				return Promise.resolve(jsonResponse({ ...session, title }));
+			}
+			if (path.endsWith('/messages') && method === 'POST') completed = true;
+			return original(input, init);
+		});
+		let view = render(Conversation, { embedded });
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send(question.content, composer);
+		await vi.waitFor(() => expect(document.querySelector(embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2')?.textContent).toContain(generatedTitle), { timeout: 5000 });
+		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
+		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		await expect.element(browserPage.getByRole('button', { name: /IN718 process and ductility/ }).first()).toBeVisible();
+		await view.unmount();
+		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+		view = render(Conversation, { embedded });
+		await expect.element(composer).toBeEnabled();
+		await vi.waitFor(() => expect(document.querySelector(embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2')?.textContent).toContain(generatedTitle));
+	});
+
 	it.each([false, true])('renames, reloads and continues a conversation without losing its title (embedded=%s)', async (embedded) => {
 		const saved = { ...session, title: null as string | null, is_pinned: false };
 		const question = { message_id: 'msg_title', session_id: session.session_id, role: 'user' as const, content: 'Original research question', created_at: createdAt, tool_call_id: null, tool_calls: [], tool_result: null, source_contexts: [] };

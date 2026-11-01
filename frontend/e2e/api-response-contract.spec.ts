@@ -65,6 +65,10 @@ async function installApi(page: Page, authenticated = true) {
 			return reply({ code: 'authentication_required' }, 200301, 'Authentication is required.');
 		}
 		if (path === '/auth/me') return reply({ user });
+		if (path === '/model-connections')
+			return reply({
+				items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }]
+			});
 		if (path === '/collections') return reply({ items: [collection] });
 		if (path === `/collections/${collectionId}`) return reply(collection);
 		if (path === `/collections/${collectionId}/documents`)
@@ -84,6 +88,7 @@ async function installApi(page: Page, authenticated = true) {
 		if (path === '/chat-sessions') {
 			return reply(request.method() === 'POST' ? session : { items: [], limit: 12, offset: 0 });
 		}
+		if (path === `/chat-sessions/${session.session_id}`) return reply(session);
 		if (path === `/chat-sessions/${session.session_id}/permissions`) {
 			return reply({ mode: 'confirm', actions: [], expires_at: null, revision: 0 });
 		}

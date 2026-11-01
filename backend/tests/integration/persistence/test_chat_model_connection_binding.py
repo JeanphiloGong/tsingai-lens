@@ -55,6 +55,10 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
     for headers in ({}, {"Accept": "text/event-stream"}):
         created = await fixture.client.post("/api/v1/chat-sessions", json={"collection_id": "collection"})
         session_id = created.json()["data"]["session_id"]
+        # Keep optional title generation outside this provider-call binding check.
+        await fixture.service.set_session_title_for_user(
+            session_id, fixture.owner, title="Matched tensile conditions",
+        )
         sessions.append(session_id)
         response = await fixture.client.post(f"/api/v1/chat-sessions/{session_id}/messages", headers=headers,
             json={"message": "Which conditions should I match? Explain without tools.", "model_connection_id": "lab-a"})
@@ -119,6 +123,9 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
     monkeypatch.setattr(provider_module, "OpenAIChatModel", build_model)
     monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-test-value")
     session = await first.create_session(collection_id="collection", user_id=fixture.owner)
+    await first.set_session_title_for_user(
+        session.session_id, fixture.owner, title="Research objective approval",
+    )
     turn = await first.send_message(session.session_id, fixture.owner,
         message="Save the research objective.", model_connection_id="lab-a")
     pending = turn["pending_approval"]

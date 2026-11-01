@@ -67,3 +67,32 @@ def test_changed_batch_length_is_not_new_source_coverage():
     progress=_RunProgress(AgentRunLimits())
     assert progress.observe(call,result)
     assert not progress.observe(call,replace(result,data={**result.data,'sources':sources[:2]}))
+
+@pytest.mark.anyio
+async def test_current_and_previous_turn_facts_survive_repeated_fallback_compaction():
+    import json
+    from dataclasses import asdict
+    from application.chat import CapabilityRegistry, ResearchAgentRunner, ChatContextBuilder
+    from domain.chat import ChatMessage, ChatMessageRole, ChatToolResult, ChatToolRequest
+    def pair(name,text):
+        result=ChatToolResult(name,ToolResultStatus.SUCCEEDED,data={'document':{'document_id':'paper'},'sources':[{
+            'source_kind':'text_window','source_ref':name,'source_digest':name+'-digest','page':3,
+            'heading_path':name,'content':text,'content_truncated':False}]})
+        return [ChatMessage(name+'-a','chat',ChatMessageRole.ASSISTANT,'','2026-11-01',tool_calls=(ChatToolRequest(name,'inspect_document_sources',{'document_id':'paper'},0),)),
+                ChatMessage(name+'-r','chat',ChatMessageRole.TOOL,json.dumps(asdict(result)),'2026-11-01',tool_call_id=name,tool_result=result)]
+    active=ChatMessage.user(message_id='user',session_id='chat',content='Compare only the reported IN718 measurements. Orientation unknown.',created_at='2026-11-01')
+    messages=[active,*pair('Methods','As-built IN718; P=250 W, V=700 mm/s; test at 650 C. Orientation not reported.'),
+              *pair('Results','The matching as-built specimen elongation was 17%; density was 99.92%.')]
+    runner=ResearchAgentRunner(model=object(),capabilities=CapabilityRegistry(()),context_builder=ChatContextBuilder(max_messages=3))
+    progress=_RunProgress(runner.limits,restored_elapsed_seconds=190)
+    for i in range(3):
+        messages.extend(pair(f'other{i}','A different measurement with no orientation value.'))
+        view=await runner._prepare_model_context(tuple(messages),(),progress,active_user_message_id='user')
+        text=json.dumps(view.provider_messages('test'))
+        for fact in ('250 W','700 mm/s','650 C','17%','99.92%','Methods-digest','Results-digest'):
+            assert fact in text
+    new=ChatMessage.user(message_id='next',session_id='chat',content='Continue; what was the elongation and orientation?',created_at='2026-11-01')
+    messages.append(new)
+    view=await runner._prepare_model_context(tuple(messages),(),progress,active_user_message_id='next')
+    text=json.dumps(view.provider_messages('test'))
+    assert '17%' in text and 'Orientation not reported' in text

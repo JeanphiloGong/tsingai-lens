@@ -37,7 +37,9 @@ TASK: preserve the investigation needed to continue the same research decision.
    from this batch; retain its original basis IDs from earlier notes.
 2. For each important check, record the provisional conclusion, its conditions,
    basis_message_ids, exact document/Source references and pages in the text,
-   and remaining uncertainty. An inspected record is not automatically verified.
+   and remaining uncertainty. Preserve numerical values and units together with
+   their material, specimen state, test conditions and original Source identity.
+   Keep facts, calculations, inference and unknowns distinct. An inspected record is not automatically verified.
    Preserve the claim's original strength and attribution. An unreported grade,
    treatment or measurement is unknown, not a demonstrated difference. For
    example, Ti6Al4V ELI in A and Ti6Al4V in B leave B's ELI status unconfirmed.
@@ -83,7 +85,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.10"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.11"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the

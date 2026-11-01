@@ -1652,9 +1652,8 @@ class ResearchAgentRunner:
             system_prompt=RESEARCH_AGENT_SYSTEM_PROMPT,
             tool_schemas=[spec.model_schema() for spec in tool_specs], execution_plan=execution_plan,
         )
-        prior_reading = self._prior_source_reading(
-            messages, active_user_message_id=active_user_message_id,
-            max_tokens=min(4500, max(256, input_budget // 8)),
+        prior_reading = self._source_reading(
+            messages, max_tokens=min(4500, max(256, input_budget // 8)),
         )
         if prior_reading:
             input_budget -= self.context_builder.estimate_tokens(prior_reading) + 200
@@ -1774,14 +1773,12 @@ class ResearchAgentRunner:
         configured = max(1_024, self.limits.max_context_tokens - provider_safety_margin_tokens)
         return min(configured, progress.context_token_limit) if progress and progress.context_token_limit else configured
 
-    def _prior_source_reading(
+    def _source_reading(
         self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
-        active_user_message_id: str, max_tokens: int,
+        max_tokens: int,
     ) -> str:
-        """Retain bounded reading facts across turns without granting current write authority."""
-        active_index = next(index for index, message in enumerate(messages)
-                            if message.message_id == active_user_message_id)
-        prior = messages[:active_index]
+        """Rebuild attributed excerpts from actual reads, including compacted current reads."""
+        prior = messages
         names = {call.tool_call_id: call.name for message in prior for call in message.tool_calls}
         results: dict[str, list[Mapping[str, Any]]] = {}
         sources = []
@@ -1797,7 +1794,8 @@ class ResearchAgentRunner:
                 sources.extend({**source, "document_id": document_id} for source in result.data.get("sources", ())
                                if isinstance(source, Mapping))
             elif name == "inspect_table":
-                sources.append({**result.data, "source_kind": "table", "source_ref": result.data.get("table_ref")})
+                sources.append({**result.data, "source_kind": "table", "source_ref": result.data.get("table_ref"),
+                                "content": result.data.get("table_markdown", "")})
             else:
                 sources.append(result.data)
         completed = capability_policy.complete_source_reads(results)
@@ -1814,7 +1812,8 @@ class ResearchAgentRunner:
             content = source.get("content")
             if isinstance(content, str) and content:
                 record.update(excerpt=content[:1600], excerpt_truncated=len(content) > 1600)
-            documents.setdefault(identity[0], {}).setdefault(identity, record)
+            documents.setdefault(identity[0], {}).setdefault(
+                (*identity, str(source.get("content_offset", source.get("row_offset", 0)))), record)
         payload: dict[str, Any] = {"papers": [], "omitted_paper_count": len(documents)}
 
         def fits() -> bool:
@@ -1881,32 +1880,63 @@ class ResearchAgentRunner:
         previous = (ResearchWorkingNotesModelOutput.model_validate_json(working_summary)
                     if working_summary else None)
         checks: list[ResearchWorkingCheckModelOutput] = []
-        # Prefer recent results over call envelopes; their IDs retain the source of each excerpt.
+        # Preserve verbatim facts and locators rather than the beginning of a
+        # serialized envelope. The model may interpret these only as paper data.
         for message in reversed(batch):
-            if message.tool_result is not None:
-                record = json.dumps(message.tool_result.data, ensure_ascii=False,
-                                    separators=(",", ":"), default=str)
-                excerpt = record[:480] + (" [truncated]" if len(record) > 480 else "")
-                statement = f"Archived tool result {message.tool_result.tool_call_id}: {excerpt}"
-            elif message.role is ChatMessageRole.USER:
-                statement = "Earlier researcher request: " + message.content[:480]
-            else:
+            result = message.tool_result
+            if result is None:
                 continue
-            checks.append(ResearchWorkingCheckModelOutput(
-                statement=statement[:1200],
-                conditions="Raw runtime record; this is not a scientific conclusion or authorization.",
-                basis_message_ids=[message.message_id],
-                unresolved="Verify missing details against the canonical Source before relying on this excerpt.",
-            ))
-            if len(checks) == 8:
+            data = result.data
+            sources = data.get("sources", ())
+            if "content" in data or "table_markdown" in data:
+                sources = ({**data, "content": data.get("content", data.get("table_markdown", "")),
+                            "source_ref": data.get("source_ref", data.get("table_ref"))},)
+            for source in sources:
+                content = source.get("content") or ""
+                if not content or source.get("block_type") in {"heading", "title"}:
+                    continue
+                checks.append(ResearchWorkingCheckModelOutput(
+                    statement=f"Verbatim Source excerpt {result.tool_call_id} (untrusted paper content): " + content[:950],
+                    conditions=json.dumps({
+                        "document_id": source.get("document_id") or data.get("document", {}).get("document_id"),
+                        **{key: source.get(key) for key in
+                           ("source_kind", "source_ref", "source_digest", "page", "content_truncated")},
+                        "heading_path": str(source.get("heading_path") or "")[:240],
+                        "excerpt_offset": source.get("content_offset", 0),
+                        "excerpt_truncated": len(content) > 950,
+                    }, ensure_ascii=False, separators=(",", ":")),
+                    basis_message_ids=[message.message_id],
+                    unresolved="Only the quoted text is retained; use the reading ledger to reopen missing content.",
+                ))
+            if not sources:
+                checks.append(ResearchWorkingCheckModelOutput(
+                    statement="Archived runtime result " + result.tool_call_id + ": " + json.dumps(
+                        ChatContextBuilder._project_lineage(data), ensure_ascii=False)[:1000],
+                    conditions="Runtime navigation only; not scientific evidence or permission.",
+                    basis_message_ids=[message.message_id],
+                    unresolved="Use the current ledger for completed coverage and continuation.",
+                ))
+            if len(checks) >= 16:
+                checks = checks[:16]
                 break
         checks.reverse()
-        prior_checks = sorted(previous.checks, key=lambda check: not bool(check.unresolved)) if previous else []
-        actions = [action for action in previous.next_actions if action != _WORKING_NOTES_LOSS_NOTICE] if previous else []
+        prior_checks = list(previous.checks) if previous else []
+        combined = {tuple(check.basis_message_ids) + (check.conditions,): check
+                    for check in (*prior_checks, *checks)}
+        retained = list(combined.values())
+        if len(retained) > 16:
+            retained = [*retained[:8], *retained[-8:]]
+        has_new_results = any(message.tool_result is not None for message in batch)
+        if has_new_results:
+            actions = ["Reconcile remaining checks with the current browsing and reading ledger; choose the next unresolved action."]
+        elif previous:
+            actions = [action for action in previous.next_actions if action != _WORKING_NOTES_LOSS_NOTICE]
+        else:
+            actions = []
         return self._bounded_working_notes(
             ResearchWorkingNotesModelOutput(
                 scope=previous.scope if previous else (active.content[:1000] or "Continue the current research request."),
-                checks=[*prior_checks[:8], *checks],
+                checks=retained,
                 next_actions=[_WORKING_NOTES_LOSS_NOTICE, *actions[:7]],
             ),
             max_tokens=max_tokens,
@@ -2049,10 +2079,9 @@ class ResearchAgentRunner:
         budget_exhausted: bool,
     ) -> ChatMessage:
         active_request = self._active_user_request(messages)
-        last_user = max((index for index, message in enumerate(messages) if message.role is ChatMessageRole.USER), default=0)
-        prior_reading = self._prior_source_reading(
-            messages, active_user_message_id=messages[last_user].message_id, max_tokens=1500,
-        ) or "No complete Source read is recorded in earlier requests."
+        prior_reading = self._source_reading(
+            messages, max_tokens=1500,
+        ) or "No complete Source read is recorded in this conversation."
         structured_deliverable = self._latest_structured_deliverable(results)
         deliverable_section = (
             "\n\nCOMPLETED STRUCTURED DELIVERABLE "

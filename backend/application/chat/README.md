@@ -477,6 +477,13 @@ request while preserving the selected paper. An ordinary model answer does not
 complete an active execution plan: the model must continue or explicitly report
 completed, waiting_for_clarification, or scientific_refusal. One corrective
 opportunity precedes a stalled finalization; technical stops retain their reason.
+Source reading history is rebuilt from complete tool records in the current
+request and earlier requests, even after their messages are compacted. Bounded
+verbatim excerpts retain conditions, units, Source references, digests and pages.
+Fallback notes preserve paper passages rather than serialized envelope prefixes;
+omissions remain explicit and do not establish scientific absence. Attributed
+working checks remain provisional, distinct from formal Evidence or approval.
+
 Across user requests, a bounded reading summary is rebuilt from successful
 historical Source results, including versioned references, verbatim excerpts
 and explicit omissions. A new empty search cannot erase an earlier abstract

@@ -55,7 +55,9 @@ async def test_three_compactions_retain_earlier_conditions_and_new_observations(
     saved = json.loads(view.working_summary)
     assert any("orientation unknown" in check["conditions"] for check in saved["checks"])
     assert any("msg-result-third" in check["basis_message_ids"] for check in saved["checks"])
-    assert "Check tensile orientation." in saved["next_actions"]
+    # Remaining scientific uncertainty stays in checks; fallback cannot assert
+    # that an old next action is still pending after later observations.
+    assert any("ledger" in action for action in saved["next_actions"])
     assert tuple(messages[:len(original)]) == original
     assert len(model.contexts) == 1
 
@@ -205,7 +207,7 @@ def test_prior_reading_keeps_abstract_before_later_metadata_within_token_budget(
         ),)), pair[1]))
     messages = (_user("prior", "Read the abstract."), *pairs, _user("active", "Continue checking the comparison."))
     runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
-    summary = runner._prior_source_reading(messages, active_user_message_id="active", max_tokens=800)
+    summary = runner._source_reading(messages, max_tokens=800)
     assert ChatContextBuilder.estimate_tokens(summary) <= 800
     paper = json.loads(summary)["papers"][0]
     assert paper["complete_source_count"] == 21
@@ -275,7 +277,7 @@ async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
 
     assert not model.contexts
     assert set(message.message_id for message in history[:-2]).issubset(progress.compacted_message_ids)
-    assert "Raw runtime record" in progress.working_summary
+    assert "untrusted paper content" in progress.working_summary
     assert view.messages == (active, *history[-2:])
 
 
@@ -372,7 +374,7 @@ async def test_failed_compaction_keeps_archived_observations_recoverable():
     progress = _RunProgress(runner.limits)
     view = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
     assert progress.compacted_message_ids == {message.message_id for message in messages[1:3]}
-    assert "Raw runtime record" in progress.working_summary
+    assert "Runtime navigation only" in progress.working_summary
     assert "old" in progress.working_summary
     assert view.messages[0] == active
 

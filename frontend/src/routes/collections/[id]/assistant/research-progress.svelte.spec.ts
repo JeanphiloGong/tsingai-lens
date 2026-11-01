@@ -2,13 +2,24 @@ import { expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import ResearchProgress from './ResearchProgress.svelte';
 
-it('shows retry delay and context preservation as technical progress', async () => {
+it('keeps retry counts in expanded progress while the main line stays brief', async () => {
 	const screen = render(ResearchProgress, {
 		progress: { phase: 'model_retry', retry_attempt: 2, retry_delay_ms: 2500 }
 	});
-	await expect.element(screen.getByRole('status')).toHaveTextContent(/Retry 2 in 3s|3 秒后第 2 次重试/);
+	await expect.element(screen.getByRole('status')).toHaveTextContent(/Waiting for the research model|正在等待研究模型/);
+	await expect.element(screen.getByText(/Retry 2 in 3s|3 秒后第 2 次重试/)).not.toBeInTheDocument();
+	await screen.getByRole('button', { name: /Toggle research progress history|展开或收起研究进度历史/ }).click();
+	await expect.element(screen.getByText(/Retry 2 in 3s|3 秒后第 2 次重试/)).toBeVisible();
 	await screen.rerender({ progress: { phase: 'context_compaction' } });
 	await expect.element(screen.getByRole('status')).toHaveTextContent(/Preserving research progress|正在整理并保留研究进展/);
+});
+
+it('shows model cycle numbers only in the progress details', async () => {
+	const screen = render(ResearchProgress, { progress: { phase: 'model', cycle_index: 19 } });
+	await expect.element(screen.getByRole('status')).toHaveTextContent(/Planning research|正在规划研究/);
+	expect(screen.getByRole('status').element().textContent).not.toContain('19');
+	await screen.getByRole('button', { name: /Toggle research progress history|展开或收起研究进度历史/ }).click();
+	await expect.element(screen.getByRole('list', { name: /Research stage history|研究阶段历史/ })).toHaveTextContent('19');
 });
 
 it('keeps actual document and passage visible without a generated research plan', async () => {

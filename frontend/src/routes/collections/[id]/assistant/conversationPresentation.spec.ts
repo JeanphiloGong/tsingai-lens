@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage, ChatToolResult } from '../../../_shared/chatSessions';
+import type { ChatMessage, ChatToolResult, ChatTurn } from '../../../_shared/chatSessions';
 import {
 	buildChatPresentation,
 	getChatSessionActivity,
 	getTurnRecoveryState,
+	getTurnNotice,
 	getModelServiceErrorKey,
 	getRecoveredChatProgress,
 	getCurrentReadings,
@@ -66,6 +67,42 @@ describe('getTurnRecoveryState', () => {
 				}
 			})
 		).toBe('resourceLimited');
+	});
+});
+
+describe('getTurnNotice', () => {
+	const failed: ChatTurn = {
+		status: 'failed', completion_reason: null, error_code: null,
+		messages: [], warnings: [], pending_approval: null
+	};
+	it.each([
+		['provider_timeout', 'researchAgent.modelServiceTimeout'],
+		['model_unavailable', 'researchAgent.modelServiceUnavailable'],
+		['model_response_invalid', 'researchAgent.modelServiceInvalidResponse'],
+		['context_window_exceeded', 'researchAgent.contextRecoveryFailed'],
+		['private_internal_error', 'researchAgent.turnFailed']
+	])('keeps a specific safe explanation for %s', (error_code, messageKey) => {
+		expect(getTurnNotice({ ...failed, error_code })).toMatchObject({ messageKey, isError: true, canContinue: true });
+	});
+
+	it('keeps permission rejection separate from a recoverable technical failure', () => {
+		expect(getTurnNotice({ ...failed, execution_plan: {
+			plan_id: 'plan-1', plan_version: 2, status: 'permission_denied', steps: []
+		} })).toMatchObject({ messageKey: 'researchAgent.permissionDeniedDescription', isError: true, canContinue: false });
+	});
+
+	it('does not expose an old plan failure while a turn runs or awaits approval', () => {
+		const plan = { plan_id: 'plan-1', plan_version: 2, status: 'technical_failure' as const, steps: [] };
+		expect(getTurnNotice({ ...failed, status: 'approval_required', execution_plan: plan })).toBeNull();
+		expect(getTurnRecoveryState({ status: 'running', completion_reason: null, execution_plan: plan })).toBeNull();
+		expect(getTurnNotice({ ...failed, status: 'rejected', execution_plan: plan })).toBeNull();
+	});
+
+	it('does not turn successful research or scientific uncertainty into a failure', () => {
+		expect(getTurnNotice({ ...failed, status: 'completed', completion_reason: 'model_answer', warnings: ['Optional data is unavailable.'] })).toBeNull();
+		expect(getTurnNotice({ ...failed, status: 'completed', completion_reason: 'model_answer', execution_plan: {
+			plan_id: 'plan-1', plan_version: 2, status: 'scientific_refusal', steps: []
+		} })).toBeNull();
 	});
 });
 

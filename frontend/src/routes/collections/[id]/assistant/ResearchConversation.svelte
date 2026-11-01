@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { errorMessage, isApiErrorCode } from '../../../_shared/api';
+	import { errorMessage, getApiErrorReason, isApiErrorCode } from '../../../_shared/api';
 	import { authState } from '../../../_shared/authState';
 
 	import { collections } from '../../../_shared/collections';
@@ -33,7 +33,6 @@
 		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatProgress,
-		type ChatExecutionPlan,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
 		type ChatSession,
@@ -54,7 +53,6 @@
 	import {
 		getChatSessionActivity,
 		getModelServiceErrorKey,
-		getTurnRecoveryState,
 		type ChatSessionActivity
 	} from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
@@ -82,7 +80,7 @@
 	export let onSourcesChanged: () => void = () => {};
 	export let onBusyChange: (busy: boolean) => void = () => {};
 	$: onBusyChange(
-		loading || sending || deciding || revising || running || Boolean(recoveringCallId)
+		loading || sending || deciding || revising || running || Boolean(recoveringCallId || recoveryError)
 	);
 	let showHistory = false;
 	let showTree = false;
@@ -148,7 +146,7 @@
 	$: sessionNavigationDisabled =
 		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId) || renameSaving;
 	let progress: ChatProgress | null = null;
-	let settledExecutionPlan: ChatExecutionPlan | null = null;
+	let settledTurn: ChatTurn | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
@@ -167,7 +165,7 @@
 	let deciding = false;
 	let error = '';
 	let notice = '';
-	let turnRecovery: ReturnType<typeof getTurnRecoveryState> = null;
+	let turnRequestError = '';
 	let input = '';
 	let appliedReviewKey = '';
 	let pendingSourceContexts: ChatSourceContext[] = [];
@@ -655,11 +653,11 @@
 		loading = false;
 		error = '';
 		notice = '';
-		turnRecovery = null;
+		turnRequestError = '';
 		pendingApproval = null;
 		retryableDecision = null;
 		progress = null;
-		settledExecutionPlan = null;
+		settledTurn = null;
 		pendingSourceContexts = [];
 		history = [];
 		if (!userId || !activeCollectionId) return;
@@ -743,6 +741,10 @@
 
 	function scheduleRecovery() {
 		clearTimeout(recoveryTimer);
+		if ((responseSnapshot && responseSnapshot.status !== 'running') || settledTurn) {
+			recoveringCallId = null;
+			return;
+		}
 		const completed = new Set(messages.map((message) => message.tool_result?.tool_call_id));
 		recoveringCallId =
 			messages
@@ -776,25 +778,12 @@
 		)
 			return;
 		responseSnapshot = snapshot;
-		settledExecutionPlan = snapshot.status === 'running' ? null : (snapshot.progress.execution_plan ?? null);
+		settledTurn = null;
+		running = snapshot.status === 'running';
+		recoveryError = '';
 		streamingText = snapshot.content;
 		progress = snapshot.progress;
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
-		turnRecovery = getTurnRecoveryState(snapshot);
-		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
-		else if (snapshot.status === 'failed')
-			error = turnErrorMessage(snapshot.error_code);
-		else if (turnRecovery && !['technicalFailure', 'permissionDenied'].includes(turnRecovery))
-			notice = recoveryDescription(turnRecovery);
-	}
-
-	function recoveryDescription(state: typeof turnRecovery) {
-		return state ? $t(`researchAgent.${state}Description`) : '';
-	}
-
-	function turnErrorMessage(errorCode: string | null | undefined) {
-		const key = getModelServiceErrorKey(errorCode);
-		return key ? $t(key) : $t('researchAgent.turnFailed');
 	}
 
 	function acceptTrajectory(trajectory: ChatTrajectory) {
@@ -806,12 +795,16 @@
 		running = Boolean(trajectory.running || trajectory.response?.status === 'running');
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
+		recoveryError = '';
+		turnRequestError = '';
 		retryableDecision = trajectory.retryable_decision ?? null;
-		if (trajectory.response) acceptSnapshot(trajectory.response);
+		if (trajectory.response) {
+			acceptSnapshot(trajectory.response);
+			running = responseSnapshot?.status === 'running';
+		}
 		else {
 			responseSnapshot = null;
-			settledExecutionPlan = null;
-			turnRecovery = null;
+			settledTurn = null;
 		}
 		if (!running) void refreshSessionTitle();
 	}
@@ -849,7 +842,7 @@
 				recoveryError = $t('researchAgent.responseDisconnected');
 			}
 		} catch (err) {
-			if (current()) recoveryError = errorMessage(err);
+			if (current() && running) recoveryError = errorMessage(err);
 		} finally {
 			if (current()) {
 				updatesController = null;
@@ -859,7 +852,7 @@
 	}
 
 	async function refreshRecovery() {
-		if (!session || (!recoveringCallId && !running) || recoveryLoading) return;
+		if (!session || (!recoveringCallId && !running && !recoveryError) || recoveryLoading) return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		const activeSession = session;
@@ -1138,7 +1131,7 @@
 			running ||
 			pendingApproval ||
 			retryableDecision ||
-			recoveringCallId
+			(recoveringCallId || recoveryError)
 		)
 			return false;
 		const ownerCollectionId = collectionId;
@@ -1211,7 +1204,7 @@
 			running ||
 			pendingApproval ||
 			retryableDecision ||
-			recoveringCallId
+			(recoveringCallId || recoveryError)
 		)
 			return;
 		const isRevision = revisionSources !== undefined;
@@ -1278,7 +1271,7 @@
 		};
 		messages = [...messages, optimisticMessage, streamingMessage];
 		responseSnapshot = null;
-		settledExecutionPlan = null;
+		settledTurn = null;
 		streamingText = '';
 		if (!isRevision) input = '';
 		sending = true;
@@ -1288,7 +1281,8 @@
 
 		error = '';
 		notice = '';
-		turnRecovery = null;
+		turnRequestError = '';
+		recoveryError = '';
 		const acknowledgeSubmission = () => {
 			if (!submitting) return;
 			submitting = false;
@@ -1353,10 +1347,12 @@
 			if (receivedResponse?.status === 'running') {
 				responseSnapshot = { ...receivedResponse, content: streamingText };
 			}
+			let reconciled = false;
 			try {
 				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				acceptTrajectory(trajectory);
+				reconciled = true;
 				const persistedMessage = messages
 					.slice(previousMessageCount)
 					.find((message) => message.role === 'user' && message.content === text);
@@ -1371,13 +1367,16 @@
 				scheduleRecovery();
 			} catch {
 				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = messages.filter(
-					(message) => ![optimisticId, streamingId].includes(message.message_id)
-				);
+				messages = messages.filter((message) => message.message_id !== streamingId);
+				if (!responseSnapshot && streamingText.trim())
+					messages = [...messages, { ...streamingMessage, content: streamingText }];
 				if (!isRevision) input = draft;
 			}
-			if (running) recoveryError = errorMessage(err);
-			else if (!error) error = errorMessage(err);
+			const key = getModelServiceErrorKey(getApiErrorReason(err));
+			if (key) turnRequestError = $t(key);
+			if ((!reconciled || running) && (!responseSnapshot || responseSnapshot.status === 'running'))
+				recoveryError = errorMessage(err);
+			else if (!responseSnapshot && !pendingApproval && !key) turnRequestError = errorMessage(err);
 		} finally {
 			cancelTextFrame();
 			signal?.removeEventListener('abort', cancelTextFrame);
@@ -1473,6 +1472,8 @@
 	) {
 		running = false;
 		responseSnapshot = null;
+		settledTurn = turn;
+		recoveryError = '';
 		const prior = localMessageIds.length
 			? messages.filter((message) => !localMessageIds.includes(message.message_id))
 			: messages;
@@ -1480,20 +1481,8 @@
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
 		retryableDecision = null;
-		settledExecutionPlan = turn.execution_plan ?? null;
-		turnRecovery = getTurnRecoveryState(turn);
 		if (turn.status === 'rejected') {
 			notice = $t(rejectionNoticeKey(decidedToolName));
-		}
-		if (turn.status === 'failed') {
-			error = turnErrorMessage(turn.error_code);
-		}
-		if (
-			turn.status === 'completed' &&
-			turnRecovery &&
-			!['technicalFailure', 'permissionDenied'].includes(turnRecovery)
-		) {
-			notice = recoveryDescription(turnRecovery);
 		}
 		if (session) {
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
@@ -1739,11 +1728,9 @@
 				</button>
 			</div>
 		{/if}
-		{#if error || modelConnectionsError || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
+		{#if (error && session && !pendingApproval) || modelConnectionsError}
 			<div class="status status-error" role="alert">
-				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
-				{#if turnRecovery === 'permissionDenied'}<strong>{$t('researchAgent.permissionDenied')}</strong>{/if}
-				<span>{turnRecovery ? recoveryDescription(turnRecovery) : error || modelConnectionsError}</span>
+				<span>{error || modelConnectionsError}</span>
 				{#if failedSessionId !== null}
 					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
 						{$t('researchAgent.retrySession')}
@@ -1753,16 +1740,8 @@
 		{/if}
 		{#if notice}
 			<div class="status status-notice" role="status">
-				{#if turnRecovery}<strong>{$t(`researchAgent.${turnRecovery}`)}</strong>{/if}
 				<span>{notice}</span>
 			</div>
-		{/if}
-		{#if turnRecovery && turnRecovery !== 'permissionDenied' && session && !checkpointId && !branchDraft && !running && !pendingApproval && !retryableDecision}
-			<button class="continue-research" type="button"
-				disabled={loading || sending || deciding || revising || Boolean(recoveringCallId)}
-				on:click={() => sendMessage($t('researchAgent.continueRequest'))}>
-				<ArrowRight size={16} aria-hidden="true" />{$t('researchAgent.continueResearch')}
-			</button>
 		{/if}
 		<MessageTimeline
 			{collectionId}
@@ -1781,7 +1760,13 @@
 			pendingApproval={checkpointId ? null : pendingApproval}
 			progress={checkpointId ? null : progress}
 			progressHistory={checkpointId ? [] : progressHistory}
-			executionPlan={checkpointId ? null : settledExecutionPlan}
+			settledTurn={checkpointId ? null : settledTurn}
+			requestError={checkpointId ? '' : turnRequestError}
+			approvalError={checkpointId ? '' : error}
+			loadError={!session && failedSessionId !== null ? error : ''}
+			onRetrySession={() => loadSession(failedSessionId ?? '')}
+			onContinue={session && !checkpointId && !branchDraft && !running && !pendingApproval && !retryableDecision
+				? () => sendMessage($t('researchAgent.continueRequest')) : undefined}
 			recoveringCallId={checkpointId ? null : recoveringCallId}
 			recoveryLoading={!checkpointId && recoveryLoading}
 			recoveryError={checkpointId ? '' : recoveryError}
@@ -1842,7 +1827,7 @@
 					deciding ||
 					Boolean(pendingApproval) ||
 					Boolean(retryableDecision) ||
-					Boolean(recoveringCallId)}
+					Boolean(recoveringCallId || recoveryError)}
 				pendingSourceContexts={checkpointId ? [] : pendingSourceContexts}
 				hasExtraContext={!checkpointId && selectedPapers.length > 0}
 				onInput={handleComposerInput}
@@ -2131,22 +2116,6 @@
 		font-size: 13px;
 		overflow-wrap: anywhere;
 	}
-	.status strong { display: block; margin-bottom: 4px; }
-	.continue-research {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		align-self: center;
-		margin-top: 8px;
-		padding: 7px 12px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		cursor: pointer;
-	}
-	.continue-research:disabled { opacity: 0.5; cursor: default; }
-
 	.status-error {
 		display: flex;
 		flex-wrap: wrap;
@@ -2193,7 +2162,6 @@
 	}
 	.decision-recovery button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 	.decision-recovery button:disabled { cursor: not-allowed; opacity: 0.55; }
-
 
 	@media (prefers-reduced-motion: reduce) {
 		:global(.research-agent *),

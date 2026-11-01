@@ -4,6 +4,7 @@ import { render } from 'vitest-browser-svelte';
 import { authState } from '../../../_shared/authState';
 import { fetchCurrentSession, login, logout } from '../../../_shared/auth';
 import { collections } from '../../../_shared/collections';
+import { language } from '../../../_shared/i18n';
 
 import type {
 	ChatMessage,
@@ -322,6 +323,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			{ connection_id: 'lab-b', display_name: 'Lab B', model: 'model-b' }
 		];
 		localStorage.clear();
+		language.set('en');
 		sessionStorage.clear();
 		collections.set([]);
 		authState.set({
@@ -468,7 +470,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
 		const composer = browserPage.getByLabelText('Message', { exact: true });
 		await send('Compare the supplied evidence.', composer);
-		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('The model service is temporarily unavailable. Please try again later.');
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('The model service is temporarily unavailable. Contact an administrator or try again later.');
 		await expect.element(picker).toHaveTextContent('Lab B');
 		await expect.element(composer).toHaveValue('Compare the supplied evidence.');
 		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
@@ -617,7 +619,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(composer).toHaveValue('Please only check the test conditions first.');
 	});
 
-	it('keeps received text through a failed stream and failed recovery read, then resumes once', async () => {
+	it.each([true, false])('keeps received text through a failed stream and failed recovery read, then resumes once (snapshot=%s)', async (withSnapshot) => {
 		installApi();
 		const fallback = fetchMock.getMockImplementation()!;
 		const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
@@ -644,7 +646,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			branches: [],
 			branch_draft: null,
 			running: true,
-			response: snapshot
+			response: withSnapshot ? snapshot : undefined
 		};
 		let offline = false;
 		let recovering = false;
@@ -704,7 +706,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(answer).toHaveTextContent(partial);
 		offline = true;
 		output.error(new TypeError('Connection lost'));
-		await expect.element(answer.getByRole('alert')).toBeVisible();
+		await expect.element(browserPage.getByTestId('research-recovery')).toHaveTextContent('Connection lost.');
+		expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+		expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(1);
 		await expect.element(answer).toHaveTextContent(partial);
 		offline = false;
 		recovering = true;
@@ -1461,7 +1465,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				readFails = true;
 				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
 				await expect
-					.element(browserPage.getByText('Recovery connection lost', { exact: true }))
+					.element(browserPage.getByText('Connection lost. The background task may still be running. Check the saved result before sending again.', { exact: true }))
 					.toBeVisible();
 				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 				readFails = false;
@@ -2615,7 +2619,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.'
+					'This turn reached its time, tool or model budget. You can continue the unfinished research.'
 				)
 			)
 			.toBeInTheDocument();
@@ -2629,7 +2633,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 	it.each([
 		['completed', 'resource_budget', null, 'Run resource limit reached'],
-		['failed', null, 'model_unavailable', 'Technical failure']
+		['failed', null, 'model_unavailable', 'The model service is temporarily unavailable. Contact an administrator or try again later.']
 	] as const)('restores %s recovery without an execution plan or warnings', async (status, reason, errorCode, title) => {
 		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		installApi({ trajectory: {
@@ -2657,6 +2661,133 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Run resource limit reached', { exact: true })).not.toBeInTheDocument();
 	});
+
+	for (const embedded of [false, true]) {
+		it.each([320, 768, 1024, 1440])(`keeps a failure and its action inside the conversation at %spx (embedded=${embedded})`, async (width) => {
+			await browserPage.viewport(width, 900);
+			try {
+				localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
+				installApi({ trajectory: {
+					items: [message('question', 'user', 'Compare the tensile conditions.')], feedback: [], pending_approval: null,
+					response: {
+						response_id: 'failed-response', sequence: 1, status: 'failed', error_code: 'provider_timeout',
+						started_at: createdAt, updated_at: createdAt, completion_reason: null, warnings: [],
+						content: 'The reported test temperatures differ.', message_id: 'partial', message_created_at: createdAt,
+						progress: { phase: 'terminal' }, checkpoint_message_id: 'question'
+					}
+				} });
+				render(Conversation, { embedded });
+				const notice = browserPage.getByTestId('turn-notice');
+				await expect.element(notice).toBeVisible();
+				await expect.element(notice.getByRole('button', { name: 'Continue research' })).toBeEnabled();
+				const bounds = notice.element().getBoundingClientRect();
+				expect(bounds.left).toBeGreaterThanOrEqual(0);
+				expect(bounds.right).toBeLessThanOrEqual(width);
+				expect(notice.element().scrollWidth).toBeLessThanOrEqual(Math.ceil(bounds.width));
+			} finally { await browserPage.viewport(1280, 720); }
+		});
+
+		for (const locale of ['en', 'zh'] as const) {
+			it(`keeps session load failures in the conversation area (embedded=${embedded}, locale=${locale})`, async () => {
+				language.set(locale);
+				installApi();
+				const fallback = fetchMock.getMockImplementation()!;
+				let failed = true;
+				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+					if (failed && requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'POST')
+						return Promise.reject(new TypeError('Offline'));
+					return fallback(input, init);
+				});
+				render(Conversation, { embedded });
+				await expect.element(browserPage.getByRole('alert')).toHaveTextContent(locale === 'en' ? 'Conversation could not be loaded' : '对话加载失败');
+				expect(document.querySelector('.message-list [role="alert"]')).not.toBeNull();
+				expect(document.querySelector('.welcome-state')).toBeNull();
+				failed = false;
+				await browserPage.getByRole('button', { name: locale === 'en' ? 'Retry conversation' : '重试加载会话' }).click();
+				await expect.element(browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true })).toBeEnabled();
+				await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+			});
+
+			it.each([false, true])(`localizes a service failure before a snapshot exists (embedded=${embedded}, locale=${locale}, recovery unavailable=%s)`, async (unavailable) => {
+				language.set(locale);
+				installApi();
+				const fallback = fetchMock.getMockImplementation()!;
+				let submitted = false;
+				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+					if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+						submitted = true;
+						return Promise.resolve(new Response('event: error\ndata: {"code":"provider_timeout","message":"Provider timeout details"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+					}
+					if (submitted && unavailable && requestPath(input).endsWith('/messages'))
+						return Promise.reject(new TypeError('Offline'));
+					return fallback(input, init);
+				});
+				render(Conversation, { embedded });
+				const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true });
+				await expect.element(composer).toBeEnabled();
+				await composer.fill('Compare the tensile conditions.');
+				await browserPage.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true }).click();
+				await expect.element(browserPage.getByTestId(unavailable ? 'research-recovery' : 'turn-notice')).toHaveTextContent(locale === 'en' ? 'The model service timed out.' : '模型服务响应超时');
+				expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+			});
+
+			for (const restored of [false, true]) {
+				it.each([
+					['failed', 'provider_timeout', 'The model service timed out.', '模型服务响应超时'],
+					['failed', 'model_unavailable', 'The model service is temporarily unavailable.', '模型服务暂时不可用'],
+					['interrupted', null, 'Generation was interrupted.', '回复生成已中断']
+				] as const)(`preserves the specific %s / %s reason (embedded=${embedded}, locale=${locale}, restored=${restored})`, async (status, errorCode, english, chinese) => {
+					language.set(locale);
+					if (restored) localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
+					const items = [
+						message('saved-question', 'user', 'Compare the tensile conditions.'),
+						message('unfinished-read', 'assistant', '', {
+							tool_calls: [{ tool_call_id: 'read-1', name: 'read_source', arguments: {}, position: 0 }]
+						})
+					];
+					const partial = 'The test temperatures have not yet been checked.';
+					const response: ChatResponseSnapshot = {
+						response_id: 'failed-response', sequence: 3, started_at: createdAt, updated_at: createdAt,
+						status, completion_reason: null, error_code: errorCode, warnings: [],
+						message_id: 'partial-answer', message_created_at: createdAt, content: partial,
+						progress: { phase: 'terminal' }, checkpoint_message_id: 'saved-question'
+					};
+					installApi({
+						trajectory: { items, pending_approval: null, feedback: [], response },
+						messageTurn: status === 'failed' ? {
+							status, completion_reason: null, error_code: errorCode, warnings: [],
+							pending_approval: null, messages: [...items, message('partial-answer', 'assistant', partial)]
+						} : undefined
+					});
+					if (!restored && status === 'interrupted') {
+						const fallback = fetchMock.getMockImplementation()!;
+						fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+							if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST')
+								return Promise.resolve(new Response(`event: snapshot\ndata: ${JSON.stringify(response)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } }));
+							return fallback(input, init);
+						});
+					}
+					render(Conversation, { embedded });
+					const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true });
+					await expect.element(composer).toBeEnabled();
+					if (!restored) {
+						await composer.fill('Compare the tensile conditions.');
+						await browserPage.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true }).click();
+					}
+					const notice = browserPage.getByTestId('turn-notice');
+					await expect.element(notice).toHaveTextContent(locale === 'en' ? english : chinese);
+					await expect.element(browserPage.getByText(partial)).toBeVisible();
+					await expect.element(notice.getByRole('button', { name: locale === 'en' ? 'Continue research' : '继续研究' })).toBeEnabled();
+					expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+					expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(0);
+					expect(notice.element().textContent).not.toContain('researchAgent.');
+					expect(document.querySelectorAll('.retained-results')).toHaveLength(1);
+					expect(document.querySelector('.message-list')!.contains(notice.element())).toBe(true);
+				}
+				);
+			}
+		}
+	}
 
 	it('allows a second question after the first turn is persisted', async () => {
 		installApi({

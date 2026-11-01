@@ -704,17 +704,56 @@ arguments require a new proposal and a new tool call.
 ### Partial Completion And Failure
 
 Completed turns carry `completion_reason`: `model_answer`, `resource_budget`,
-`no_progress`, or `emergency_ceiling`. Non-empty `warnings` produce a
-non-blocking notice while retaining the answer and allowing the next question.
+`no_progress`, or `emergency_ceiling`. The completion reason and persisted plan
+disposition determine whether a turn needs a recovery notice. Auxiliary warnings
+alone do not turn a successful answer into a failed or resource-limited turn;
+capability warnings remain with the affected activity or artifact.
 A budget stop is not a failed research conclusion; the answer distinguishes
 inspected Sources, unread scope, technical failures, and scientific uncertainty.
+
+Each problem has one primary presentation location, shared by the independent
+Assistant route and the embedded paper-reader conversation:
+
+| Situation | Location | Information and action |
+| --- | --- | --- |
+| Conversation cannot be loaded | Conversation area, replacing the welcome state | Load failure and retry the selected conversation |
+| Generation or Source reading | Current answer's progress area | Brief current activity; expand for stage history, cycles, and retry counts |
+| Connection lost, background outcome unconfirmed | After the current answer | Keep received text and offer Check result |
+| Write awaiting approval | Existing approval panel | Exact operation, Approve, and Reject |
+| Turn failed or stopped early | After the current answer | Specific reason and Continue research when permitted |
+| Upload, feedback, or rename fails | The affected operation | Its local error and retry/edit controls |
+
+`ResearchConversation.svelte` owns requests, response snapshots, and operation
+execution. It retains the final turn when it arrives directly; reopening uses
+the persisted response snapshot. `conversationPresentation.ts` derives the
+terminal notice from either representation using the same completion and error
+rules. The component does not store separate translated failure and recovery
+descriptions for that snapshot. `MessageTimeline.svelte` renders the notice and
+its action after the current answer, including turns without an assistant text
+message. A later question clears that notice. Looking at a previous checkpoint
+does not show the latest turn's recovery controls.
+
+`sending`, `running`, and `deciding` continue to represent different work:
+an open browser request, a backend task, and a submitted approval decision.
+Losing a connection does not establish that the backend failed or that no
+scientific evidence exists. Check result reads the existing trajectory with
+`GET /chat-sessions/{session_id}/messages` and may reconnect its event stream;
+it never resends the question or repeats an approval. Even when the first
+response snapshot has not arrived, a failed stream and failed recovery read
+leave received text visible until the saved result can be checked. Confirmed
+terminal responses stop polling incomplete tool requests from that turn.
 
 Provider, capability, and finalization failures remain visible and distinct from
 scientific absence. A successful capability that finds no published Evidence
 is not rendered as a technical error. Model-service failures such as
 `model_unavailable`, `provider_timeout`, and `model_response_invalid` are shown
-as a service status message that directs the researcher to contact an
-administrator or try again later; retrieved research results remain available.
+with their specific unavailable, timeout, or invalid-response explanation;
+an interrupted generation has its own explanation. A generic failure is used
+only when no recognized reason is available. The same notice explains once
+that received answers and results remain available, rather than repeating this
+in every error translation. Permission denial offers no automatic Continue
+research action; the researcher must adjust permissions or choose a permitted
+step. Approval and upload/feedback/rename errors remain independent feedback.
 Unknown internal failure codes are kept out of the browser message, while
 capability and Source read failures remain attached to their individual
 operations.
@@ -771,6 +810,14 @@ The focused browser suite covers:
     preparation-pending papers;
 20. Objective drafts and other reviewable research results kept visible as
     standalone artifacts while the underlying tool mechanics stay secondary.
+21. specific timeout, model-service failure, and interruption explanations in
+    English and Chinese, both immediately and after reopening, in both Chat
+    entrypoints;
+22. one connection-recovery notice with preserved partial text, including a
+    stream without an initial snapshot; Check result queries without repeating
+    the original message;
+23. retry counts and model cycles available in expanded progress details while
+    the current activity stays brief.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

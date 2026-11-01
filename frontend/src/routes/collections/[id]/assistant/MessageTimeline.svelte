@@ -6,14 +6,15 @@
 	import {
 		buildChatPresentation,
 		getRecoveredChatProgress,
-		getCurrentReadings
+		getCurrentReadings,
+		getTurnNotice
 	} from './conversationPresentation';
-	import { RotateCw } from '@lucide/svelte';
+	import { ArrowRight, RotateCw } from '@lucide/svelte';
 	import type {
 		ChatMessage,
 		ChatToolCall,
 		ChatProgress,
-		ChatExecutionPlan,
+		ChatTurn,
 		ChatResponseSnapshot
 	} from '../../../_shared/chatSessions';
 	import type {
@@ -42,7 +43,7 @@
 		deciding ||
 		running ||
 		Boolean(pendingApproval) ||
-		Boolean(recoveringCallId);
+		Boolean(recoveringCallId || recoveryError);
 	$: questionsByAnswer = (() => {
 		let question: ChatMessage | undefined;
 		const questions = new SvelteMap<string, ChatMessage>();
@@ -79,7 +80,17 @@
 	export let collectionId = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
-	export let executionPlan: ChatExecutionPlan | null = null;
+	export let settledTurn: ChatTurn | null = null;
+	$: currentTurn = responseSnapshot ?? settledTurn;
+	$: turnNotice = getTurnNotice(currentTurn);
+	$: executionPlan = currentTurn && currentTurn.status !== 'running'
+		? ('progress' in currentTurn ? currentTurn.progress.execution_plan : currentTurn.execution_plan)
+		: null;
+	export let requestError = '';
+	export let approvalError = '';
+	export let loadError = '';
+	export let onRetrySession: () => void = () => {};
+	export let onContinue: (() => void) | undefined = undefined;
 	export let loading = false;
 	export let sending = false;
 	export let deciding = false;
@@ -89,7 +100,8 @@
 	export let onRefreshRecovery: () => void = () => {};
 	let now = Date.now();
 	$: recovering =
-		!loading && !sending && !pendingApproval && (running || Boolean(recoveringCallId));
+		!loading && !sending && !pendingApproval &&
+		!turnNotice && (running || Boolean(recoveringCallId) || Boolean(recoveryError));
 	$: recoveredProgress = {
 		...getRecoveredChatProgress(messages, now),
 		...(responseSnapshot?.status === 'running'
@@ -99,8 +111,7 @@
 					// from the browser wall clock makes stale or skewed timestamps look active.
 					elapsed_ms: responseSnapshot.progress.elapsed_ms ?? 0
 				}
-			: {}),
-		...(recoveryError ? { phase: 'reconnecting' } : {})
+			: {})
 	};
 	$: responseMessage =
 		responseSnapshot?.message_id &&
@@ -118,7 +129,9 @@
 				}
 			: null;
 	$: showRecoveryRow =
-		recovering && !responseMessage && (!responseSnapshot || responseSnapshot.status === 'running');
+		recovering && !responseMessage &&
+		!messages.some((message) => message.message_id.startsWith('local-stream-')) &&
+		(!responseSnapshot || responseSnapshot.status === 'running');
 	$: showReadingRow =
 		sending &&
 		!responseMessage &&
@@ -252,6 +265,12 @@
 				<div class="empty-state" role="status">
 					<h3>{$t('researchAgent.loading')}</h3>
 				</div>
+			{:else if loadError}
+				<div class="empty-state" role="alert">
+					<h3>{$t('researchAgent.sessionLoadFailed')}</h3>
+					<p>{loadError}</p>
+					<button type="button" on:click={onRetrySession}>{$t('researchAgent.retrySession')}</button>
+				</div>
 			{:else if messages.length === 0 && !recovering && !responseMessage}
 				<div class="empty-state welcome-state">
 					<div class="welcome-avatar" aria-hidden="true">AI</div>
@@ -294,34 +313,22 @@
 								onRegenerate={questionsByAnswer.has(item.message.message_id)
 									? () => void onRevise(questionsByAnswer.get(item.message.message_id)!)
 									: undefined}
-								streaming={(item.message.message_id.startsWith('local-stream-') && sending) ||
+								streaming={(item.message.message_id.startsWith('local-stream-') && (sending || recovering)) ||
 									(item.message.message_id === responseMessage?.message_id &&
 										responseSnapshot?.status === 'running')}
 								incomplete={item.message.message_id === responseMessage?.message_id}
 								feedbackState={feedbackByMessage[item.message.message_id]}
 								{onFeedback}
-								streamingText={sending ? streamingText : (responseSnapshot?.content ?? '')}
+								streamingText={sending || !responseSnapshot ? streamingText : responseSnapshot.content}
 								progress={sending
 									? progress
-									: responseMessage && responseSnapshot?.status === 'running'
+									: (responseMessage && responseSnapshot?.status === 'running') ||
+										(item.message.message_id.startsWith('local-stream-') && recovering)
 										? recoveredProgress
 										: null}
 								{progressHistory}
 								{readings}
-							>
-								{#if item.message.message_id === responseMessage?.message_id && recovering}
-									<div class="recovery-controls" data-testid="research-recovery">
-										{#if recoveryError}<p class="recovery-error" role="alert">
-												{recoveryError}
-											</p>{/if}
-										<IconButton
-											label={$t('researchAgent.checkResult')}
-											disabled={recoveryLoading}
-											onClick={onRefreshRecovery}><RotateCw size={14} /></IconButton
-										>
-									</div>
-								{/if}
-							</AssistantMessage>{/if}
+							/>{/if}
 					{:else}<ResearchActivity
 							{item}
 						/>{#each item.artifacts as artifact (artifact.toolCallId)}<ResearchArtifact
@@ -334,26 +341,49 @@
 				<ResearchProgress progress={{ phase: 'terminal', execution_plan: executionPlan }} active={false} />
 			{/if}
 			{#if pendingApproval}
-				<ApprovalPanel call={pendingApproval} {collectionId} {deciding} onDecide={decide} />
+				<ApprovalPanel call={pendingApproval} {collectionId} {deciding} onDecide={decide}>
+					{#if approvalError}
+						<div class="turn-notice failed" role="alert">
+							<p>{approvalError}</p>
+							<button type="button" disabled={deciding} on:click={onRetrySession}>{$t('researchAgent.retrySession')}</button>
+						</div>
+					{/if}
+				</ApprovalPanel>
 			{/if}
 			{#if showRecoveryRow || showReadingRow}
 				<AssistantMessage
 					message={recoveryMessage}
 					recovering={showRecoveryRow}
 					streaming={showReadingRow}
+					{streamingText}
 					progress={showReadingRow ? progress : recoveredProgress}
 					{readings}
 					{onFeedback}
+				/>
+			{/if}
+			{#if !loading && !loadError && !pendingApproval && (turnNotice || requestError || recovering)}
+				<div
+					class="turn-notice"
+					class:failed={turnNotice?.isError || Boolean(requestError || recoveryError)}
+					role={turnNotice?.isError || requestError || recoveryError ? 'alert' : 'status'}
+					data-testid={recovering ? 'research-recovery' : 'turn-notice'}
 				>
-					{#if showRecoveryRow}<div class="recovery-controls" data-testid="research-recovery">
-							{#if recoveryError}<p class="recovery-error" role="alert">{recoveryError}</p>{/if}
-							<IconButton
-								label={$t('researchAgent.checkResult')}
-								disabled={recoveryLoading}
-								onClick={onRefreshRecovery}><RotateCw size={14} /></IconButton
-							>
-						</div>{/if}
-				</AssistantMessage>
+					{#if turnNotice}
+						{#if turnNotice.titleKey}<strong>{$t(turnNotice.titleKey)}</strong>{/if}
+						<p>{$t(turnNotice.messageKey)}</p>
+						<p class="retained-results">{$t('researchAgent.resultsRetained')}</p>
+						{#if turnNotice.canContinue && onContinue}
+							<button type="button" disabled={actionsDisabled} on:click={onContinue}>
+								<ArrowRight size={16} aria-hidden="true" />{$t('researchAgent.continueResearch')}
+							</button>
+						{/if}
+					{:else if recovering}
+						{#if requestError || recoveryError}<p>{requestError || $t('researchAgent.responseDisconnected')}</p>{/if}
+						<button type="button" disabled={recoveryLoading} on:click={onRefreshRecovery}>
+							<RotateCw size={14} aria-hidden="true" />{$t('researchAgent.checkResult')}
+						</button>
+					{:else}<p>{requestError}</p>{/if}
+				</div>
 			{/if}
 		</div>
 	</div>
@@ -367,19 +397,27 @@
 </div>
 
 <style>
-	.recovery-controls {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 12px;
+	.turn-notice {
+		margin: 0 0 18px 48px;
 		color: var(--text-secondary);
 		font-size: 13px;
 		overflow-wrap: anywhere;
 	}
-	.recovery-error {
-		margin: 4px 0 0;
-		flex: 1;
+	.turn-notice.failed {
 		color: var(--danger-text);
+	}
+	.turn-notice p { margin: 4px 0 8px; }
+	.turn-notice .retained-results { color: var(--text-secondary); }
+	.turn-notice button, .empty-state button {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		cursor: pointer;
 	}
 	.timeline {
 		position: relative;

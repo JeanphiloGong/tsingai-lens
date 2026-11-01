@@ -14,6 +14,8 @@ export function getTurnRecoveryState(
 		progress?: Pick<ChatProgress, 'execution_plan'>;
 	}
 ): RecoveryState {
+	if (turn.status === 'running' || turn.status === 'approval_required' || turn.status === 'rejected')
+		return null;
 	const plan = turn.execution_plan ?? turn.progress?.execution_plan ?? null;
 	if (plan?.status === 'permission_denied') return 'permissionDenied';
 	if (plan?.status === 'stalled') return 'noProgress';
@@ -48,6 +50,27 @@ export function getModelServiceErrorKey(errorCode: string | null | undefined): s
 		default:
 			return null;
 	}
+}
+
+/** Derive one terminal notice from the current turn, including restored snapshots. */
+export function getTurnNotice(turn: ChatTurn | ChatResponseSnapshot | null) {
+	if (!turn) return null;
+	const recovery = getTurnRecoveryState(turn);
+	if (!recovery) return null;
+	const specificReason = getModelServiceErrorKey(turn.error_code);
+	const messageKey = specificReason ??
+		(turn.status === 'interrupted'
+			? 'researchAgent.responseInterrupted'
+			: recovery === 'technicalFailure'
+				? 'researchAgent.turnFailed'
+				: `researchAgent.${recovery}Description`);
+	return {
+		messageKey,
+		titleKey: recovery === 'technicalFailure' || specificReason || turn.status === 'interrupted'
+			? null : `researchAgent.${recovery}`,
+		isError: Boolean(specificReason) || recovery === 'technicalFailure' || recovery === 'permissionDenied',
+		canContinue: recovery !== 'permissionDenied'
+	};
 }
 
 const completeCitationMarker = /\[\[cite:[^\]\r\n]+\]\]/g;

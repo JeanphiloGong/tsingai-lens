@@ -1,4 +1,4 @@
-import { buildApiUrl, requestJson, throwApiError } from './api';
+import { ApiError, buildApiUrl, requestJson, throwApiError } from './api';
 
 export type ChatResourceRef = {
 	resource_type: string;
@@ -537,7 +537,7 @@ async function readChatEvents(
 				payload && typeof payload === 'object' && 'message' in payload
 					? String(payload.message)
 					: 'The research response could not be completed.';
-			throw new Error(message);
+			throw new ApiError(200205, message, payload);
 		}
 	};
 

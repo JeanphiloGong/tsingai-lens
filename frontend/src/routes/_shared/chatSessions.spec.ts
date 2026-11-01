@@ -87,6 +87,17 @@ describe('answer feedback requests', () => {
 });
 
 describe('chat stream lifecycle', () => {
+	it('retains a streamed failure code so the conversation can localize its reason', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			'event: error\ndata: {"code":"provider_timeout","message":"Provider timeout details"}\n\n',
+			{ headers: { 'Content-Type': 'text/event-stream' } }
+		));
+		try {
+			await expect(streamChatMessage('chat_1', 'Compare the papers', () => {})).rejects.toMatchObject({
+				code: 200205, data: { code: 'provider_timeout' }
+			});
+		} finally { fetch.mockRestore(); }
+	});
 	it('rejects a JSON business error before the SSE stream starts', async () => {
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
 			JSON.stringify({ code: 200204, message: 'Resolve the pending action.', data: { code: 'chat_tool_approval_pending' }, meta: null }),

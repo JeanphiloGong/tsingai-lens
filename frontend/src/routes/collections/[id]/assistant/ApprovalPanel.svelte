@@ -161,6 +161,7 @@
 			</dl>
 		</details>
 	{/if}
+	<slot />
 	<div class="approval-actions">
 		<button class="reject" type="button" disabled={deciding} on:click={() => onDecide('rejected')}>
 			<X size={15} />{$t('researchAgent.approval.reject')}

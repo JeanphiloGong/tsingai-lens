@@ -1270,7 +1270,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
 
         async def respond(self, **kwargs):
             self.calls += 1
-            if ending == "timeout" and self.calls == 3:
+            if ending == "timeout" and self.calls == 2:
                 try:
                     await asyncio.Event().wait()
                 finally:
@@ -1327,7 +1327,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
         assert result["completion_reason"] == "resource_budget"
         assert result["warnings"]
         assert "Paper B remains unread" in result["messages"][-1].content
-    assert model.calls == 3  # Discovery, exact Source read, then answer or timeout.
+    assert model.calls == 2  # The initially available Source read, then answer or timeout.
     persisted = await service.list_messages_for_user(session.session_id, "user-1")
     source_results = [
         message.tool_result
@@ -1355,7 +1355,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
     )
     assert resumed["status"] == "completed"
     assert "Paper B" in resumed["messages"][-1].content
-    assert len(await read_tool_results(repository, session.session_id)) == 2
+    assert len(await read_tool_results(repository, session.session_id)) == 1
 
 
 async def test_chat_session_service_approves_exact_write_and_resumes(

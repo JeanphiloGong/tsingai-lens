@@ -222,12 +222,18 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         {"question": "How does energy input affect grain morphology?"}
     ]
     assert trajectory.json()["data"]["pending_approval"] is None
-    assert model.all_tool_spec_names[0] == ("discover_research_tools",)
+    assert model.all_tool_spec_names[0] == (
+        "get_collection_context",
+        "update_execution_plan",
+        "discover_research_tools",
+    )
     assert any(
         "create_objective_candidate" in names for names in model.all_tool_spec_names
     )
     assert model.all_tool_spec_names[-1] == (
+        "get_collection_context",
         "create_objective_candidate",
+        "update_execution_plan",
         "discover_research_tools",
     )
     # A successful write does not hide the capability by name. The same
@@ -236,8 +242,6 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "user",
         "assistant",
         "user",
-        "assistant",
-        "tool",
         "assistant",
         "tool",
         "assistant",

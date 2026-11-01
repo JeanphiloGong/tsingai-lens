@@ -509,6 +509,12 @@ class _RunProgress:
             # not justify another model cycle over the same list.
             for key in ("query", "offset", "page", "limit", "next_offset"):
                 data.pop(key, None)
+        successful_discovery = call.name == "discover_research_tools" and result.status is ToolResultStatus.SUCCEEDED
+        if successful_discovery:
+            # Reordering the same definitions does not advance the investigation.
+            for key in ("loaded_tool_names", "deferred_tool_names"):
+                data[key] = sorted(data.get(key, ()))
+            data["tools"] = sorted(data.get("tools", ()), key=lambda item: item["name"])
         # Coverage is runtime metadata added after this observation and must not
         # make an otherwise identical batch look like new source content.
         data.pop("source_coverage", None)
@@ -527,7 +533,7 @@ class _RunProgress:
             "error_code": result.error_code,
             "warnings": result.warnings,
         }
-        if not has_source_observation and not normalized_paper_list:
+        if not has_source_observation and not normalized_paper_list and not successful_discovery:
             # Distinct failed or empty searches must keep their requested scope.
             payload["arguments"] = dict(call.arguments)
         digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

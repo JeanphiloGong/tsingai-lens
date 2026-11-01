@@ -1,5 +1,4 @@
 from dataclasses import replace
-import json
 
 import pytest
 
@@ -9,7 +8,7 @@ from application.chat import (
 )
 from application.chat.agent_runner import _RunProgress
 from application.chat.capability_policy import _section_reading_progress
-from domain.chat import ChatResourceRef, ToolRisk
+from domain.chat import ChatResourceRef, ChatToolCall, ChatToolResult, ToolResultStatus, ToolRisk
 from tests.unit.application.test_research_agent_runner import (
     _Capability, _Model, _QuestionArguments, _context,
 )
@@ -20,20 +19,20 @@ def anyio_backend():
     return "asyncio"
 
 
-def test_collection_search_candidates_enter_ledger_without_becoming_exact_reads():
-    from application.chat.capability_policy import stage_instruction
-
-    instruction = stage_instruction(("inspect_document_sources",), [], successful_results={
-        "search_sources": [{"document_ids": None, "matches": [
-            {"document_id": "paper-A", "source_ref": "methods"},
-            {"document_id": "paper-A", "source_ref": "results"},
-            {"document_id": "paper-B", "source_ref": "results"},
-        ]}],
-    })
-    ledger = json.loads(instruction[instruction.index("{"):])["reading_ledger"]
-    assert [item["document_id"] for item in ledger] == ["paper-A", "paper-B"]
-    assert all(item["completely_read_passages"] == 0 for item in ledger)
-    assert all(item["outline_status"] == "not_inspected" for item in ledger)
+def test_discovery_reordering_is_not_new_progress():
+    progress = _RunProgress(AgentRunLimits())
+    for order, expected in ((["read_source", "inspect_table"], True),
+                            (["inspect_table", "read_source"], False),
+                            (["read_source", "search_sources"], True)):
+        call = ChatToolCall.requested(
+            tool_call_id="discovery", session_id="chat", assistant_message_id="assistant",
+            name="discover_research_tools", arguments={"tool_names": order}, risk=ToolRisk.READ,
+        )
+        data = {"loaded_tool_names": order, "deferred_tool_names": [],
+                "source_inspection_required": True, "tools": [{"name": name} for name in order]}
+        result = ChatToolResult(call.tool_call_id, ToolResultStatus.SUCCEEDED, data=data)
+        assert progress.observe(call, result) is expected
+        assert result.data["loaded_tool_names"] == order
 
 
 def test_section_read_keeps_the_full_outline_and_unread_results():

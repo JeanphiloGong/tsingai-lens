@@ -341,6 +341,9 @@ class _RunProgress:
     working_summary: str = ""
     compacted_message_ids: set[str] = field(default_factory=set)
     read_batch_tokens: int = 12_000
+    source_content_chars: int = 0
+    source_batch_count: int = 0
+    empty_source_batch_count: int = 0
     compaction_attempts: int = 0
     context_token_limit: int = 0
     context_recovery_attempts: int = 0
@@ -468,6 +471,13 @@ class _RunProgress:
 
     def observe(self, call: ChatToolCall, result: ChatToolResult) -> bool:
         data = dict(result.data)
+        # Transfer volume is diagnostic; it is not unique scientific evidence.
+        passages = (data,) if "content" in data else data.get("sources", ())
+        if result.status is ToolResultStatus.SUCCEEDED and passages:
+            chars = sum(len(item.get("content", "")) for item in passages)
+            self.source_content_chars += chars
+            self.source_batch_count += 1
+            self.empty_source_batch_count += int(chars == 0)
         has_source_observation = (
             result.status is ToolResultStatus.SUCCEEDED
             and any(ref.resource_type == "source" for ref in result.resource_refs)
@@ -591,6 +601,14 @@ class _RunProgress:
             "requested_tool_count": self.requested_tool_calls,
             "executed_tool_count": self.executed_tool_calls,
             "new_resource_reference_count": new_resources,
+            "source_content_chars": self.source_content_chars,
+            "source_batch_count": self.source_batch_count,
+            "empty_source_batch_count": self.empty_source_batch_count,
+            "read_batch_tokens": self.read_batch_tokens,
+            "remaining_seconds": (
+                round(self.remaining_seconds(), 3)
+                if self.limits.max_elapsed_seconds is not None else None
+            ),
             "observation_digest_changed": self.consecutive_no_progress == 0,
             "elapsed_ms": round((self.restored_elapsed_seconds + max(0.0, monotonic() - self.started_at)) * 1000),
             "model_cycles": self.model_cycles,

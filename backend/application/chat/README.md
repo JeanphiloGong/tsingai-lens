@@ -570,6 +570,14 @@ Evidence, permission, or a Finding.
 
 ## Key Areas
 
+Cycle diagnostics and response snapshots include the successful Source-content
+character count, nonempty Source-entry batch count, batches containing entries
+but no body text, reading-token allowance, and remaining request time alongside
+the stop reason. These counters reset per runner invocation and measure transfer
+volume: repeated reads count repeatedly and are not independent scientific
+evidence. Empty entry lists do not count as batches. Diagnostics contain counts,
+not raw Source text; an unlimited time budget is recorded as `null`.
+
 - `session_service.py`: `ChatSessionService` owns session reads, source-context
   validation, turn persistence, streaming, and approval execution. The current
   app owns its runner, model-call observer, and active stream tasks. Its shutdown

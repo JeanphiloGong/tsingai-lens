@@ -399,6 +399,14 @@ class _RunProgress:
             return float("inf")
         return max(0.0, self.limits.max_elapsed_seconds - elapsed)
 
+    def remaining_research_seconds(self) -> float:
+        # Reserve part of the same deadline; do not extend the total request.
+        if self.limits.max_elapsed_seconds is None:
+            return self.remaining_seconds()
+        reserve = min(self.limits.max_finalization_seconds,
+                      self.limits.max_elapsed_seconds * 0.2)
+        return max(0.0, self.remaining_seconds() - reserve)
+
     def restore_persisted_progress(self, payload: Mapping[str, Any] | None) -> None:
         """Continue one research request with its persisted runtime budget."""
         if not payload:
@@ -453,7 +461,7 @@ class _RunProgress:
         if (self.limits.emergency_max_model_cycles is not None
                 and self.model_cycles >= self.limits.emergency_max_model_cycles):
             return AgentCompletionReason.EMERGENCY_CEILING
-        if (self.remaining_seconds() <= 0
+        if (self.remaining_research_seconds() <= 0
                 or self.model_allowance_exhausted()
                 or (self.limits.max_tool_calls is not None
                     and self.executed_tool_calls >= self.limits.max_tool_calls)):
@@ -605,6 +613,8 @@ class _RunProgress:
             "source_content_chars": self.source_content_chars,
             "source_batch_count": self.source_batch_count,
             "empty_source_batch_count": self.empty_source_batch_count,
+            "remaining_research_seconds": (round(self.remaining_research_seconds(), 3)
+                                           if self.limits.max_elapsed_seconds is not None else None),
             "read_batch_tokens": self.read_batch_tokens,
             "deferred_read_calls": self.deferred_read_calls,
             "remaining_seconds": (
@@ -1010,7 +1020,7 @@ class ResearchAgentRunner:
                         ),
                     )
                 except ModelResponseError as exc:
-                    if exc.reason == "model_allowance_exhausted" or progress.remaining_seconds() <= 0:
+                    if exc.reason == "model_allowance_exhausted" or progress.remaining_research_seconds() <= 0:
                         return await self._finalize_with_current_evidence(
                             AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
                             checkpoint=checkpoint, text_delta_callback=text_delta_callback,
@@ -1031,7 +1041,7 @@ class ResearchAgentRunner:
                         exc.retryable
                         and not exc.partial_content
                         and progress.retry_count < self.limits.max_model_retries
-                        and progress.remaining_seconds() > 0
+                        and progress.remaining_research_seconds() > 0
                     ):
                         response_retries += 1
                         progress.retry_count += 1
@@ -1040,7 +1050,7 @@ class ResearchAgentRunner:
                                           "transient_provider_error"}:
                             non_streaming_retry = True
                         backoff = 0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1)
-                        delay = min(max(backoff, exc.retry_after_seconds or 0.0), progress.remaining_seconds())
+                        delay = min(max(backoff, exc.retry_after_seconds or 0.0), progress.remaining_research_seconds())
                         progress.trace(
                             context,
                             phase="model_retry",
@@ -1099,7 +1109,7 @@ class ResearchAgentRunner:
                         execution_plan=progress.execution_plan,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    if progress.remaining_seconds() <= 0:
+                    if progress.remaining_research_seconds() <= 0:
                         return await self._finalize_with_current_evidence(
                             AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
                             checkpoint=checkpoint, text_delta_callback=text_delta_callback,
@@ -1436,7 +1446,7 @@ class ResearchAgentRunner:
                 if (exc.reason != "context_window_exceeded" or exc.partial_content
                         or progress.context_recovery_attempts >= max_context_recoveries
                         or progress.retry_count >= self.limits.max_model_retries
-                        or progress.remaining_seconds() <= 0
+                        or (progress.remaining_seconds() if finalizing else progress.remaining_research_seconds()) <= 0
                         or (not finalizing and progress.stop_before_model() is not None)):
                     raise
                 previous_limit = self._effective_context_tokens(progress)
@@ -1463,7 +1473,8 @@ class ResearchAgentRunner:
         *,
         finalizing: bool = False,
     ) -> ModelTurn:
-        timeout = min(progress.remaining_seconds(), self.limits.max_request_seconds)
+        timeout = min(progress.remaining_seconds() if finalizing else progress.remaining_research_seconds(),
+                      self.limits.max_request_seconds)
         output_limit = self.limits.max_model_output_tokens
         if self.limits.max_model_tokens is not None:
             output_limit = min(output_limit, self.limits.max_model_tokens - progress.model_tokens)
@@ -1606,7 +1617,7 @@ class ResearchAgentRunner:
             if (
                 len(units) > max_model_compaction_units
                 or bool(progress.compacted_message_ids)
-                or progress.remaining_seconds() <= min_seconds_for_model_compaction
+                or progress.remaining_research_seconds() <= min_seconds_for_model_compaction
             ):
                 batch = [message for unit in units for message in unit]
                 summary = self._fallback_working_notes(
@@ -1859,17 +1870,21 @@ class ResearchAgentRunner:
             if progress.remaining_seconds() <= 0:
                 raise TimeoutError("research turn deadline reached")
             turn = await self._model_turn(
-                (*messages, instruction), (), progress, text_delta_callback, finalizing=True,
+                (*messages, instruction), (), progress, None, finalizing=True,
                 active_user_message_id=next(
                     message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                 ),
             )
+            if turn.content.lstrip().lower().startswith((
+                "<tool_call", "<function_calls", "<invoke",
+            )) or "</undefined>" in turn.content.lower():
+                raise ValueError("final answer contains a tool invocation envelope")
             if turn.tool_calls or not turn.content:
                 raise ValueError("final answer must be answer-only")
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Research Agent final answer failed exception_type=%s",
-                type(exc).__name__,
+                "Research Agent final answer failed exception_type=%s reason=%s remaining_seconds=%.3f",
+                type(exc).__name__, getattr(exc, "reason", None), progress.remaining_seconds(),
             )
             if progress.remaining_seconds() > 0:
                 write_completion = await self._complete_after_successful_write_response_failure(
@@ -1929,6 +1944,8 @@ class ResearchAgentRunner:
                 results=results,
             )
         )
+        if text_delta_callback is not None:
+            text_delta_callback(turn.content)
         permission_error = _permission_denial_code(results)
         terminal_status = AgentRunStatus.FAILED if permission_error else AgentRunStatus.COMPLETED
         progress.trace(
@@ -2218,7 +2235,7 @@ class ResearchAgentRunner:
                             arguments=validated_arguments.get(call.tool_call_id),
                             max_result_tokens=max(512, progress.read_batch_tokens // len(requested)),
                         ),
-                        timeout=min(progress.remaining_seconds(), self.limits.max_request_seconds),
+                        timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds),
                     )
                 except TimeoutError:
                     return self._failure(call, "capability_timeout", "The Source or action could not be completed in this turn.")
@@ -2724,7 +2741,7 @@ class ResearchAgentRunner:
                     handler,
                     arguments=arguments,
                 ),
-                timeout=min(progress.remaining_seconds(), self.limits.max_request_seconds),
+                timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds),
             )
         except TimeoutError:
             return self._failure(

@@ -591,8 +591,12 @@ not raw Source text; an unlimited time budget is recorded as `null`.
   why work stopped: a model answer, resource budget, repeated observations, or
   the emergency cycle ceiling. One private request path enforces model
   deadlines and output allowances for both decisions and answer-only
-  finalization. Technical limits permit finalization with scope warnings only
-  while turn time remains. A response or finalization failure remains a failure
+  finalization. With a finite total deadline, research uses at most 80% of it;
+  the reserve is capped by the finalization allowance. Decisions, retries,
+  compaction and tools stop at that research deadline, leaving time to explain
+  partial results within the same total time. Answer-only finalization is
+  validated before streaming; tool invocation envelopes are not displayed as
+  completed answers. A response or finalization failure remains a failure
   even when an approved durable write in the current continuation already has a
   matching successful result. The runner checkpoints a short deterministic
   confirmation that the saved result remains authoritative, while preserving the

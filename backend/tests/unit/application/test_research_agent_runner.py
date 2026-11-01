@@ -819,9 +819,9 @@ async def test_request_timeout_is_independent_from_prior_active_turn_time(monkey
     ),))
     now[0] = 200
     await runner._respond(context, (), progress, None)
-    now[0] = 550
+    now[0] = 450
     await runner._respond(context, (), progress, None)
-    assert [timeout for timeout, _ in model.request_limits] == [180, 50]
+    assert [timeout for timeout, _ in model.request_limits] == [180, 30]
 
 
 def test_stage_hint_keeps_all_draft_references_without_copying_full_payloads():
@@ -903,7 +903,7 @@ async def test_new_source_pages_and_revised_source_content_remain_progress() -> 
     assert len(_results_for(result, read.spec.name)) == 3
 
 
-async def test_timed_out_model_is_cancelled_without_starting_finalization() -> None:
+async def test_timed_out_decision_and_summary_respect_total_deadline() -> None:
     cancelled = asyncio.Event()
 
     class SlowModel:
@@ -928,7 +928,7 @@ async def test_timed_out_model_is_cancelled_without_starting_finalization() -> N
     assert result.status is AgentRunStatus.COMPLETED
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
     assert result.error_code is None
-    assert model.calls == 1
+    assert model.calls == 2
     assert cancelled.is_set()
     assert deltas == []
 
@@ -1081,7 +1081,7 @@ async def test_finalization_timeout_cancels_the_only_summary_request() -> None:
     assert _results_for(result, read.spec.name)[0].status is ToolResultStatus.SUCCEEDED
 
 
-async def test_read_deadline_preserves_successes_without_starting_a_summary(monkeypatch) -> None:
+async def test_read_deadline_preserves_successes_and_attempts_summary(monkeypatch) -> None:
     cancelled = asyncio.Event()
     clock = agent_runner_module.monotonic
     reads_started_at = None
@@ -1107,17 +1107,17 @@ async def test_read_deadline_preserves_successes_without_starting_a_summary(monk
     read = SourceRead("test_source", ToolRisk.READ, _QuestionArguments)
     model = _Model(ModelTurn(tool_calls=tuple(
         ModelToolCall(name=read.spec.name, arguments={"question": paper}) for paper in ("paper-a", "paper-b")
-    )))
+    )), ModelTurn(content="Paper A read; paper B timed out; continue the missing check."))
     result = await ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_elapsed_seconds=0.02),
+        limits=AgentRunLimits(max_elapsed_seconds=0.5),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
 
     assert result.error_code is None
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
     assert result.warnings
     assert cancelled.is_set()
-    assert len(model.contexts) == 1
+    assert len(model.contexts) == 2
     read_results = _results_for(result, read.spec.name)
     assert read_results[0].status is ToolResultStatus.SUCCEEDED
     assert read_results[1].error_code == "capability_timeout"
@@ -3407,7 +3407,7 @@ async def test_approval_resume_inherits_time_and_model_budget(
         claimed_call=approved,
         progress_callback=events.append,
         continuation_progress={
-            "elapsed_ms": 9_500,
+            "elapsed_ms": 7_500,
             "model_cycles": 1,
             "model_tokens": 90,
             "prompt_tokens": 70,

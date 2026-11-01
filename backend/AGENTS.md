@@ -239,6 +239,43 @@ Defining this relationship needs no conversion helper or serialization layer.
 Database decoding stays in the repository implementation, and HTTP formatting
 stays at the controller boundary; neither belongs in this result definition.
 
+### Direct Calls and Temporary Operation Data
+
+- A controller may call a concrete repository directly for a simple query when
+  authentication and required user or collection scope are enforced. Do not add
+  a service method that only forwards the same arguments and result to satisfy
+  a layer diagram. Use an application operation when it owns business decisions,
+  authorization beyond the query scope, transactions, or multiple effects.
+- Prefer explicit method parameters and local variables for temporary call
+  data. Do not add an Input, Outcome, Command, DTO, or Record dataclass merely to
+  pass fields to the next method. A separate type remains appropriate for real
+  invariants, a distinct contract, a useful query projection, or an independent
+  lifecycle; persistence alone does not decide whether a model is needed.
+- Keep a needed model beside the implementation that owns its meaning. Sharing
+  a type across callers does not by itself require a new `models.py`,
+  `contracts.py`, mapper, or model layer. Identify its owner and actual consumers
+  before extracting it, and follow the ownership rules above for domain,
+  repository, and HTTP models.
+- Model clients may implement an application-owned model contract. They should
+  not import repository-only input or result types merely to pass configuration
+  or report audit events. The caller reads configuration and supplies the
+  required fields or SDK client; the application observer constructs persisted
+  audit records. For Chat audit, keep `ChatModelCall` in `chat_repository.py`
+  and pass fields directly through `start(...)` and `finish(...)`, without
+  recreating `ModelCallInput` or `ModelCallOutcome`.
+- Do not introduce a Protocol or base class solely to replace a removed transfer
+  model. Retain an existing callback or a small behavior contract when an actual
+  caller requires it; do not duplicate its arguments in another data object.
+- Name helpers for their actual operation and effects. Use the existing
+  constructor when it already creates the required object. A `from_*` or
+  `for_*` name is acceptable when its behavior is clear, but do not hide
+  repository reads, credential resolution, and client creation behind a vague
+  conversion name or a factory that merely forwards to the constructor.
+- When simplifying a call chain, update its real callers, test doubles, imports,
+  and exports together. Preserve persisted formats, request digests, status and
+  error semantics, cancellation, and completion idempotency; verify the affected
+  path rather than keeping compatibility forwarding or obsolete models.
+
 ## 12 Golden Rules (Why / How / Check)
 
 1. Keep handlers thin and ownership clear.

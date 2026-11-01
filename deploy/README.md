@@ -1,8 +1,8 @@
 # TsingAI-Lens Deploy Bundle
 
 This directory is the minimal self-hosted runtime bundle for Lens. It runs the
-published Lens images with one internal PostgreSQL service and four internal
-analysis Worker services.
+published Lens images with one internal PostgreSQL service, three research
+Workers and four feedback analysis Workers.
 
 This is the repository's only Docker Compose entrypoint. For source-tree
 development, use the module-local instructions in
@@ -215,11 +215,12 @@ Application startup never creates or changes database schema.
 ./scripts/lens ps
 ```
 
-`./scripts/lens up` starts the backend, frontend, PostgreSQL, and the four
-analysis Workers together. The Workers are long-running processes built from
-the backend image; they do not expose HTTP ports and are not started by a Chat
-request. The backend only records a pending `analysis_jobs` row, and the
-matching Worker claims it and writes the analysis result or dataset sample.
+`./scripts/lens up` starts the backend, frontend, PostgreSQL, three research
+Workers and four feedback analysis Workers together. The Workers are
+long-running processes built from the backend image; they do not expose HTTP
+ports. HTTP and Agent requests queue work. Research Workers prepare documents,
+discover Objectives and analyze Objectives; feedback Workers claim pending
+`analysis_jobs` and write analysis results or dataset samples.
 
 The expected service names are:
 
@@ -227,6 +228,9 @@ The expected service names are:
 postgres
 backend
 frontend
+document-preparation-worker
+objective-discovery-worker
+objective-analysis-worker
 feedback-analysis-worker
 correction-signal-analysis-worker
 tool-failure-analysis-worker
@@ -236,6 +240,9 @@ dataset-sample-worker
 Inspect a particular Worker when a job remains pending:
 
 ```bash
+./scripts/lens logs document-preparation-worker
+./scripts/lens logs objective-discovery-worker
+./scripts/lens logs objective-analysis-worker
 ./scripts/lens logs feedback-analysis-worker
 ./scripts/lens logs correction-signal-analysis-worker
 ./scripts/lens logs tool-failure-analysis-worker
@@ -274,7 +281,7 @@ http://localhost:8080
 Command mapping:
 
 - `doctor` checks Docker, Compose, password shape, PostgreSQL readiness,
-  Alembic head state, the data directory, all four analysis Workers, and
+  Alembic head state, the data directory, all seven Workers, and
   frontend/backend reachability.
 - `up` runs `docker compose up -d`.
 - `down` runs `docker compose down`.
@@ -293,12 +300,23 @@ Back up PostgreSQL and file-backed runtime data before changing versions. See
 cp -a data/backend data/backend.backup.$(date +%Y%m%d%H%M%S)
 ```
 
+Research Agent Chat requires an enabled model connection in PostgreSQL; the
+registry is not populated from `LLM_MODEL`. Follow the
+[model connection setup and recovery runbook](../backend/docs/runbooks/backend-ops.md#chat-binding-and-operational-recovery)
+to provision a connection and its referenced key in `backend.env`. The browser
+lets each new question select an enabled connection. Set
+`LENS_DEFAULT_MODEL_CONNECTION_ID` for clients that omit the choice. Finish or
+explicitly interrupt old unbound approvals before upgrading.
+
 Edit `LENS_VERSION` in `.env`, stop the application and Workers, pull the new
 images, migrate with the new backend image, and start Lens again:
 
 ```bash
 docker compose --env-file .env -f compose.yml stop \
   frontend backend \
+  document-preparation-worker \
+  objective-discovery-worker \
+  objective-analysis-worker \
   feedback-analysis-worker \
   correction-signal-analysis-worker \
   tool-failure-analysis-worker \
@@ -337,6 +355,9 @@ lens_backup_file=../lens-backups/lens-YYYYMMDDHHMMSS.dump
 test -s "$lens_backup_file"
 docker compose --env-file .env -f compose.yml stop \
   frontend backend \
+  document-preparation-worker \
+  objective-discovery-worker \
+  objective-analysis-worker \
   feedback-analysis-worker \
   correction-signal-analysis-worker \
   tool-failure-analysis-worker \

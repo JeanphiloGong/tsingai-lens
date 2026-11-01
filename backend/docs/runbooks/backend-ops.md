@@ -392,8 +392,8 @@ Before enabling registry-backed Chat, add the intended enabled connection and
 set `LENS_DEFAULT_MODEL_CONNECTION_ID` for callers that omit a choice. An omitted
 choice without a configured default fails with
 `model_connection_default_unavailable`; there is no fallback to `LLM_MODEL`.
-API clients may send an explicit selection on each new question. The current
-browser uses the configured default until the model selector is implemented.
+API clients may send an explicit selection on each new question. The browser
+lists enabled connections in the composer and sends the selected connection ID.
 Running answers and pending approvals retain the selected `connection_id` in their
 response snapshot; model-call audits record the same binding. Disabling a row
 only blocks new questions. It does not cancel generation or revoke credentials.

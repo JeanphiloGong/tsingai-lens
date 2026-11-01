@@ -530,7 +530,44 @@ class ChatContextBuilder:
         return None
 
     @staticmethod
+    def tool_result_message(result: ChatToolResult) -> dict[str, Any]:
+        """Render model context without changing the durable tool result."""
+        data = deepcopy(dict(result.data))
+        refs = list(result.resource_refs)
+        if "sources" in data and "document" in data:
+            document_id = data["document"]["document_id"]
+            hrefs = {ref.resource_id: ref.href for ref in refs if ref.resource_type == "source"}
+            for source in data["sources"]:
+                href = hrefs.get(f"{document_id}:{source['source_ref']}")
+                if href is not None:
+                    source["href"] = href
+                for key in ("source_type", "block_type", "estimated_tokens"):
+                    source.pop(key, None)
+            data.pop("source_label_to_ref", None)
+            refs = [ref for ref in refs if ref.resource_type != "source"]
+        if "papers" in data and "paper_total" in data:
+            data["papers"] = [
+                {key: value for key, value in paper.items()
+                 if key in {"document_id", "filename", "title", "status", "source_status",
+                            "document_type", "materials", "processes", "variables", "outcomes",
+                            "abstract_excerpt", "screening_limitations"}
+                 and value not in (None, "", [])}
+                for paper in data["papers"]
+            ]
+        payload = {"status": result.status, "data": data}
+        if refs:
+            payload["resource_refs"] = [asdict(ref) for ref in refs]
+        if result.warnings:
+            payload["warnings"] = list(result.warnings)
+        if result.error_code is not None:
+            payload.update(error_code=result.error_code, error_message=result.error_message)
+        return {"role": "tool", "tool_call_id": result.tool_call_id,
+                "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}
+
+    @staticmethod
     def model_message(message: ChatMessage) -> dict[str, Any]:
+        if message.role is ChatMessageRole.TOOL and message.tool_result is not None:
+            return ChatContextBuilder.tool_result_message(message.tool_result)
         content = message.content
         if message.source_contexts:
             content = (

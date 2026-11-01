@@ -7,7 +7,7 @@ from repositories.source_artifact_repository import SourceArtifactRepo
 
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -23,6 +23,7 @@ from domain.source import (
     SourceFigure,
     SourceTable,
     render_markdown_table,
+    build_source_document_tree,
 )
 from exceptions import ResourceNotFoundException
 from infra.source.artifact_bundle import source_table_payload
@@ -72,10 +73,12 @@ class InspectDocumentSourcesToolRequest(BaseModel):
     document_id: str = Field(min_length=1, max_length=240)
     query: str | None = Field(default=None, max_length=240)
     source_ref: str | None = Field(default=None, min_length=1, max_length=240)
+    section_id: str | None = Field(default=None, min_length=1, max_length=500, description="Copy the section_id from the outline; reads its complete subtree.")
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
     heading_path: str | None = Field(
         default=None,
         max_length=1000,
-        description="Exact heading_path from the document outline; omit to inspect the whole prepared document.",
+        description="Exact heading_path from the document outline. Reads that section and its subsections; omit to inspect the whole prepared document.",
     )
     source_types: list[SourceType] = Field(default_factory=list, max_length=3)
     page: int | None = Field(default=None, ge=1)
@@ -136,6 +139,7 @@ class InspectTableToolRequest(BaseModel):
 
     document_id: str = Field(min_length=1, max_length=240)
     table_ref: str = Field(min_length=1, max_length=240)
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
     row_offset: int = Field(default=0, ge=0)
     row_limit: int = Field(default=20, ge=1, le=50)
 
@@ -148,6 +152,7 @@ class ReadSourceToolRequest(BaseModel):
     document_id: str = Field(min_length=1, max_length=240)
     source_kind: ReadableSourceKind
     source_ref: str = Field(min_length=1, max_length=240)
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
     offset: int = Field(default=0, ge=0)
     limit: int = Field(
         default=_READ_SOURCE_CONTENT_LIMIT, ge=1, le=_READ_SOURCE_CONTENT_LIMIT
@@ -188,6 +193,15 @@ class ReadSourceCapability:
         if document is None:
             return await _unavailable_document_sources(
                 context, [arguments.document_id]
+            )
+
+        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        if arguments.source_version is not None and arguments.source_version != source_version:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="source_version_changed",
+                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
+                data={"document_id": document.document_id, "source_version": source_version},
             )
 
         source = self._source_record(document, arguments)
@@ -310,7 +324,9 @@ class ReadSourceCapability:
                     "Continue at next_offset before treating this Source as completely read.",
                 ),
             )
-        return result
+        return replace(result, data={**result.data, "source_version": source_version,
+            "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                             "offset": result.data["next_offset"]} if result.data["next_offset"] is not None else None})
 
     @staticmethod
     def _source_record(
@@ -551,6 +567,15 @@ class InspectTableCapability:
             return await _unavailable_document_sources(
                 context, [arguments.document_id]
             )
+        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        if arguments.source_version is not None and arguments.source_version != source_version:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="source_version_changed",
+                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
+                data={"document_id": document.document_id, "source_version": source_version},
+            )
+
         table = next(
             (item for item in document.tables if item.table_id == arguments.table_ref),
             None,
@@ -673,6 +698,8 @@ class InspectTableCapability:
                 "document_id": document.document_id,
                 "document_title": document.title,
                 "table_ref": table.table_id,
+                "source_version": source_version,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version, "row_offset": next_row_offset} if next_row_offset is not None else None,
                 "caption": table.caption_text,
                 "page": table.page,
                 "heading_path": table.heading_path,
@@ -758,6 +785,15 @@ class InspectDocumentSourcesCapability:
                 context, [arguments.document_id]
             )
 
+        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        if arguments.source_version is not None and arguments.source_version != source_version:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="source_version_changed",
+                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
+                data={"document_id": document.document_id, "source_version": source_version},
+            )
+
         sources = [
             *(
                 self._text_source(block)
@@ -808,16 +844,41 @@ class InspectDocumentSourcesCapability:
                 section["pages"].append(source["page"])
             if source["source_type"] not in section["source_types"]:
                 section["source_types"].append(source["source_type"])
+        tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables,
+                                          figures=document.figures, collection_id=context.collection_id)
+        section_nodes = {node.node_id: node for node in tree.nodes.values()
+                         if node.node_type in {"section", "references_section"}}
+        for heading, section in sections.items():
+            node = next((node for node in section_nodes.values() if " > ".join(node.heading_path) == heading), None)
+            section["section_id"] = node.node_id if node else None
+        selected_refs = None
+        if arguments.section_id is not None:
+            if arguments.section_id not in section_nodes:
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                    error_code="section_not_found", error_message="Copy an exact section_id from the current outline.",
+                    data={"document_id": document.document_id, "source_version": source_version,
+                          "document_outline": list(sections.values())[:80]},
+                )
+            selected_refs = set()
+            pending = [arguments.section_id]
+            while pending:
+                node = tree.nodes[pending.pop()]
+                if node.source_ref_id is not None:
+                    selected_refs.add(node.source_ref_id)
+                pending.extend(node.child_ids)
         selected_types = set(arguments.source_types)
         matches = [
             item
             for item in sources
-            if (not selected_types or item["source_type"] in selected_types)
+            if (selected_refs is None or item["source_ref"] in selected_refs)
+            and (not selected_types or item["source_type"] in selected_types)
             and (arguments.page is None or item["page"] == arguments.page)
             and (
                 arguments.heading_path is None
                 or " ".join((item["heading_path"] or "").split())
                 == arguments.heading_path
+                or " ".join((item["heading_path"] or "").split()).startswith(arguments.heading_path + " > ")
             )
             and (
                 arguments.source_ref is None
@@ -829,8 +890,13 @@ class InspectDocumentSourcesCapability:
         # Size the complete tool envelope once, including locators and warnings.
         outline = list(sections.values())[:80]
         if arguments.heading_path is not None:
-            outline = ([sections[arguments.heading_path]]
-                       if arguments.heading_path in sections else [])
+            outline = [section for heading, section in sections.items()
+                       if heading == arguments.heading_path
+                       or heading.startswith(arguments.heading_path + " > ")][:80]
+        if arguments.section_id is not None:
+            outline = [section for section in outline if section["first_source_ref"] in selected_refs]
+        continuation_args = arguments.model_dump(exclude_none=True, exclude={"offset", "limit"})
+        continuation_args["source_version"] = source_version
         visible = list(matches[arguments.offset : arguments.offset + arguments.limit])
         next_offset = arguments.offset + len(visible)
         if next_offset >= len(matches):
@@ -850,6 +916,9 @@ class InspectDocumentSourcesCapability:
                     "title": document.title[:500],
                 },
                 "query": arguments.query,
+                "section_id": arguments.section_id,
+                "source_version": source_version,
+                "continuation": {**continuation_args, "offset": next_offset} if next_offset is not None else None,
                 "source_ref": arguments.source_ref,
                 "heading_path": arguments.heading_path,
                 "source_types": list(arguments.source_types),
@@ -932,6 +1001,7 @@ class InspectDocumentSourcesCapability:
                     "outline_truncated": len(sections) > len(outline),
                     "returned_source_count": len(visible),
                     "next_offset": next_offset if next_offset < len(matches) else None,
+                    "continuation": {**continuation_args, "offset": next_offset} if next_offset < len(matches) else None,
                 },
                 resource_refs=(
                     self._document_ref(context.collection_id, document.document_id),
@@ -946,30 +1016,7 @@ class InspectDocumentSourcesCapability:
     @staticmethod
     def _result_tokens(result: ChatToolResult) -> int:
         return ChatContextBuilder.estimate_tokens(
-            {
-                "role": "tool",
-                "tool_call_id": result.tool_call_id,
-                "content": json.dumps(
-                    {
-                        "tool_call_id": result.tool_call_id,
-                        "status": result.status.value,
-                        "data": result.data,
-                        "resource_refs": [
-                            {
-                                "resource_type": item.resource_type,
-                                "resource_id": item.resource_id,
-                                "href": item.href,
-                            }
-                            for item in result.resource_refs
-                        ],
-                        "warnings": list(result.warnings),
-                        "error_code": result.error_code,
-                        "error_message": result.error_message,
-                    },
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                ),
-            }
+            ChatContextBuilder.tool_result_message(result)
         )
 
     @staticmethod

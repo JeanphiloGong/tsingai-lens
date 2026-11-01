@@ -276,14 +276,24 @@ def _section_reading_progress(
         documents.add(document_id)
         if "document_outline" in result:
             outlines[document_id] = result
-        if result.get("heading_path") is not None:
-            filters = {key: result[key] for key in ("heading_path", "page", "query", "source_ref", "source_types")
+        if "offset" in result or result.get("heading_path") is not None or result.get("section_id") is not None:
+            filters = {key: result[key] for key in ("section_id", "heading_path", "page", "query", "source_ref", "source_types", "source_version")
                        if result.get(key) not in (None, "", [], ())}
-            section_batches[(document_id, json.dumps(filters, sort_keys=True))] = {
-                "arguments": {"document_id": document_id, **filters, "offset": result.get("next_offset")},
-                "last_batch_block_types": sorted({str(item.get("block_type") or item.get("source_type") or "unknown")
-                                                  for item in result.get("sources", ())}),
-            }
+            key = (document_id, json.dumps(filters, sort_keys=True))
+            entry = section_batches.setdefault(key, {"ranges": []})
+            offset = result.get("offset", 0)
+            entry["ranges"].append((offset, offset + len(result.get("sources", ()))))
+            covered = 0
+            for start, end in sorted(entry["ranges"]):
+                if start > covered:
+                    break
+                covered = max(covered, end)
+            next_offset = result.get("next_offset")
+            if "match_total" in result:
+                next_offset = None if covered == result["match_total"] else covered
+            entry["arguments"] = {**(result.get("continuation") or {"document_id": document_id, **filters}), "offset": next_offset}
+            entry["last_batch_block_types"] = sorted({str(item.get("block_type") or item.get("source_type") or "unknown")
+                                                      for item in result.get("sources", ())})
         sources.extend({**item, "document_id": document_id} for item in result.get("sources", ()))
     sources.extend(successful_results.get("read_source", ()))
     sources.extend({**item, "source_kind": "table", "source_ref": item.get("table_ref")}
@@ -315,11 +325,7 @@ def _section_reading_progress(
         for (doc, _filters), batch in section_batches.items():
             if doc != document_id or type(batch["arguments"]["offset"]) is not int:
                 continue
-            if any(section["heading_path"] == batch["arguments"]["heading_path"]
-                   and section["completely_read_passages"] >= section["available_passages"]
-                   for section in section_progress or ()):
-                continue
-            pending.append(batch)
+            pending.append({key: value for key, value in batch.items() if key != "ranges"})
         progress.append({
             "document_id": document_id,
             "outline_status": ("inspected" if overview is not None else
@@ -334,9 +340,11 @@ def _section_reading_progress(
             "pending_source_reads": [{
                 "tool_name": "inspect_table" if kind == "table" else "read_source",
                 "arguments": ({"document_id": doc, "table_ref": ref,
+                               **({"source_version": source["source_version"]} if source.get("source_version") else {}),
                                **({"row_offset": source["next_row_offset"]} if type(source.get("next_row_offset")) is int else {})}
                               if kind == "table" else
                               {"document_id": doc, "source_kind": kind, "source_ref": ref,
+                               **({"source_version": source["source_version"]} if source.get("source_version") else {}),
                                **({"offset": source["next_offset"]} if "content_offset" in source
                                   and type(source.get("next_offset")) is int else {})}),
             } for (doc, kind, ref, _digest), source in incomplete_sources.items() if doc == document_id],

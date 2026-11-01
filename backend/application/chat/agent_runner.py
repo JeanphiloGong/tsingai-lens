@@ -347,6 +347,7 @@ class _RunProgress:
     context_token_limit: int = 0
     context_recovery_attempts: int = 0
     complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
+    source_read_intervals: dict[tuple[str, ...], list[tuple[int, int]]] = field(default_factory=dict)
     model_call_observer: Any | None = None
     model_call_session_id: str | None = None
     execution_plan: ResearchExecutionPlan | None = None
@@ -547,13 +548,35 @@ class _RunProgress:
         # repeated full reads.
         has_canonical_identity = bool(completed) or any(
             isinstance(item, Mapping)
+            and bool(item.get("document_id") or result.data.get("document", {}).get("document_id"))
             and all(str(item.get(key) or "").strip() for key in
-                    ("document_id", "source_kind", "source_ref", "source_digest"))
+                    ("source_kind", "source_ref", "source_digest"))
             for item in (result.data, *(result.data.get("sources") or ()))
             if isinstance(result.data, Mapping)
         )
         if has_canonical_identity:
-            return bool(new_sources) or observation_changed
+            new_coverage = bool(new_sources)
+            for item in (result.data, *(result.data.get("sources") or ())):
+                document_id = item.get("document_id") or result.data.get("document", {}).get("document_id")
+                ref = item.get("source_ref") or item.get("table_ref")
+                if not document_id or not ref or not item.get("source_digest"):
+                    continue
+                key = (document_id, str(ref), item["source_digest"])
+                start = item.get("content_offset", item.get("row_offset", 0))
+                length = len(item.get("content", "")) if "content" in item else item.get("returned_row_count", 0)
+                if length <= 0:
+                    continue
+                intervals = self.source_read_intervals.setdefault(key, [])
+                end = start + length
+                covered = start
+                for left, right in sorted(intervals):
+                    if left > covered:
+                        break
+                    if right > covered:
+                        covered = right
+                new_coverage = new_coverage or covered < end
+                intervals.append((start, end))
+            return new_coverage
         # Older/custom read capabilities may expose only a resource reference.
         # Preserve their progress semantics without weakening canonical dedupe.
         return bool(new_resource_refs) or observation_changed

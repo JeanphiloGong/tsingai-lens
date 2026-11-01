@@ -825,8 +825,12 @@ capabilities:
   `outline_section_total` and `outline_truncated` expose outline truncation.
   This overview and `prepared_source_pages` are independent of search filters
   and describe prepared content, not the original PDF's total pages. The optional
-  exact `heading_path` filter, with `offset` and `next_offset`, supports reading
-  a section progressively. Omitting `limit` permits up to 200 complete records,
+  `section_id` selects a SourceDocumentTree section and its descendants.
+  `source_version` pins continuation to the prepared content; a changed version
+  returns `source_version_changed`. Returned `continuation` is the next complete
+  tool argument set, or null when the selection is fully returned. The
+  exact `heading_path` filter also selects that section and its descendant headings;
+  `offset` and `next_offset` support reading the selected subtree progressively. Omitting `limit` permits up to 200 complete records,
   packed to the current context allowance; explicit `limit` remains a record cap.
   `batch_token_budget` and `returned_source_count` describe the actual batch.
   An oversized first Source is returned without text and with

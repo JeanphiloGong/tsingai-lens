@@ -151,3 +151,33 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
     assert all(source["content"] for source in result.data["sources"])
     assert result.data["next_offset"] is None
     assert capability._result_tokens(result) <= 2000
+
+
+@pytest.mark.anyio
+async def test_parent_section_reads_its_subsections_without_unrelated_sections(monkeypatch):
+    headings = ("2 Methods", "2 Methods > 2.1 Powder", "2 Methods > 2.2 Printing",
+                "2 Methods appendix", "3 Results")
+    document = SourceDocument(
+        document_id="paper", document_order=0, title="IN718 experiment", text="",
+        blocks=tuple(SourceBlock(
+            block_id=f"b{i}", document_id="paper", block_type="paragraph",
+            text=f"Complete content for {heading}.", block_order=i, heading_path=heading,
+        ) for i, heading in enumerate(headings)),
+    )
+    monkeypatch.setattr(document_sources.collection_service, "get_collection_for_user", AsyncMock())
+    monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
+        read_document=AsyncMock(return_value=document),
+    ))
+    capability = InspectDocumentSourcesCapability()
+    seen = []
+    offset = 0
+    while True:
+        result = await capability.execute(
+            CapabilityExecutionContext("chat", "user", "col", "call"),
+            InspectDocumentSourcesToolRequest(document_id="paper", heading_path="2 Methods", offset=offset, limit=2),
+        )
+        seen.extend(source["source_ref"] for source in result.data["sources"])
+        offset = result.data["next_offset"]
+        if offset is None:
+            break
+    assert seen == ["b0", "b1", "b2"]

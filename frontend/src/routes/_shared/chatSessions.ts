@@ -145,6 +145,8 @@ export type ChatTrajectory = {
 };
 
 export type ChatResponseSnapshot = {
+	model_connection_id?: string | null;
+	model_connection_name?: string | null;
 	response_id: string;
 	sequence: number;
 	started_at: string;
@@ -405,6 +407,18 @@ export async function setChatMessageFeedback(
 	return data as ChatMessageFeedback;
 }
 
+export type ModelConnectionChoice = {
+	connection_id: string;
+	display_name: string;
+	model: string;
+};
+
+export async function fetchModelConnections(signal?: AbortSignal) {
+	return (await requestJson('/model-connections', { signal, method: 'GET' })) as {
+		items: ModelConnectionChoice[];
+	};
+}
+
 export async function streamChatMessage(
 	sessionId: string,
 	message: string,
@@ -414,7 +428,8 @@ export async function streamChatMessage(
 	signal?: AbortSignal,
 	branchRevision = false,
 	onSnapshot?: (snapshot: ChatResponseSnapshot) => void,
-	onTrajectory?: (trajectory: ChatTrajectory) => void
+	onTrajectory?: (trajectory: ChatTrajectory) => void,
+	modelConnectionId?: string
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		signal,
@@ -426,6 +441,7 @@ export async function streamChatMessage(
 		},
 		body: JSON.stringify({
 			message,
+			...(modelConnectionId ? { model_connection_id: modelConnectionId } : {}),
 			...(branchRevision ? { branch_revision: true } : {}),
 			...(sourceContexts.length ? { source_contexts: sourceContexts } : {})
 		})

@@ -43,7 +43,18 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 });
 
 vi.mock('$app/stores', () => ({ page: pageStore }));
+let modelDirectoryRequests = 0;
+let modelDirectoryStatus = 200;
+let modelDirectoryItems = [
+	{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' },
+	{ connection_id: 'lab-b', display_name: 'Lab B', model: 'model-b' }
+];
+
 vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+	if (requestPath(input) === '/api/v1/model-connections') {
+		modelDirectoryRequests += 1;
+		return Promise.resolve(jsonResponse({ items: modelDirectoryItems }, modelDirectoryStatus, 'Service temporarily unavailable.'));
+	}
 	if (requestPath(input).endsWith('/permissions')) {
 		return Promise.resolve(
 			jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 })
@@ -304,6 +315,12 @@ async function send(text: string, composer?: Awaited<ReturnType<typeof renderRea
 
 describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
+		modelDirectoryRequests = 0;
+		modelDirectoryStatus = 200;
+		modelDirectoryItems = [
+			{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' },
+			{ connection_id: 'lab-b', display_name: 'Lab B', model: 'model-b' }
+		];
 		localStorage.clear();
 		sessionStorage.clear();
 		collections.set([]);
@@ -316,6 +333,150 @@ describe('collections/[id]/assistant Research Agent', () => {
 			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
+	});
+
+
+
+	it.each([false, true])('model selection in embedded=%s sends one chosen ID', async (embedded) => {
+		installApi({ messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [], pending_approval: null, error_code: null } });
+		render(Conversation, { embedded });
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await expect.element(picker).toHaveTextContent('Lab A');
+		const actions = document.querySelector('.composer-actions')!;
+		expect(actions.firstElementChild).toBe(document.querySelector('.model-picker'));
+		expect(actions.lastElementChild).toContainElement(browserPage.getByRole('button', { name: 'Send', exact: true }).element());
+		await picker.click();
+		await expect.element(browserPage.getByRole('button', { name: 'Lab A', exact: true })).toHaveAttribute('aria-pressed', 'true');
+		expect(document.querySelector('.model-picker')?.textContent).not.toMatch(/model-a|model-b/);
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		await expect.element(picker).toHaveTextContent('Lab B');
+		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
+		await expect.element(picker).toHaveFocus();
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send('Compare the supplied evidence.', composer);
+		await expect.poll(() => fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST').length).toBe(1);
+		const sent = fetchMock.mock.calls.find(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		expect(JSON.parse(String(sent?.[1]?.body)).model_connection_id).toBe('lab-b');
+	});
+
+	it('shows an empty directory only inside the picker', async () => {
+		modelDirectoryItems = [];
+		installApi();
+		render(Conversation);
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await picker.click();
+		await expect.element(browserPage.getByRole('group', { name: 'Model' })).toHaveTextContent('No models configured.');
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		expect(fetchMock.mock.calls.some(([input, init]) => requestMethod(input, init) === 'POST' && requestPath(input).endsWith('/messages'))).toBe(false);
+	});
+
+	it('uses the existing error area if the directory request fails', async () => {
+		modelDirectoryStatus = 200205;
+		installApi();
+		render(Conversation);
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('Service temporarily unavailable.');
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		expect(document.querySelector('.model-picker-refresh')).toBeNull();
+	});
+
+	it.each([false, true])('reports a failed selected model at send time in embedded=%s', async (embedded) => {
+		installApi();
+		const fallback = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+				return Promise.resolve(new Response('event: error\ndata: {"code":"model_unavailable","message":"The model service is temporarily unavailable. Please try again later."}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+			}
+			return fallback(input, init);
+		});
+		render(Conversation, { embedded });
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await expect.element(picker).toHaveTextContent('Lab A');
+		await picker.click();
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await send('Compare the supplied evidence.', composer);
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('The model service is temporarily unavailable. Please try again later.');
+		await expect.element(picker).toHaveTextContent('Lab B');
+		await expect.element(composer).toHaveValue('Compare the supplied evidence.');
+		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		expect(posts).toHaveLength(1);
+		expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-b');
+		expect(modelDirectoryRequests).toBe(1);
+	});
+
+	it('supports keyboard selection, Escape and outside dismissal', async () => {
+		installApi();
+		const composer = await renderReady();
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await expect.element(picker).toHaveTextContent('Lab A');
+		await userEvent.click(picker);
+		await userEvent.keyboard('{Escape}');
+		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
+		await expect.element(picker).toHaveFocus();
+		await userEvent.keyboard('{Enter}{Tab}{Tab}{Enter}');
+		await expect.element(picker).toHaveTextContent('Lab B');
+		await expect.element(picker).toHaveFocus();
+		await picker.click();
+		await composer.click();
+		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
+	});
+
+	it.each([false, true])('fits long names above a narrow composer in embedded=%s', async (embedded) => {
+		const longName = 'Research comparison service with a long configured name';
+		modelDirectoryItems[0].display_name = longName;
+		await browserPage.viewport(390, 844);
+		try {
+			installApi();
+			render(Conversation, { embedded });
+			const picker = browserPage.getByTitle('Model', { exact: true });
+			await expect.element(picker).toHaveTextContent(longName);
+			await picker.click();
+			const shell = document.querySelector('.composer-shell')!.getBoundingClientRect();
+			const menu = document.querySelector('.model-picker-menu')!.getBoundingClientRect();
+			expect(menu.left).toBeGreaterThanOrEqual(shell.left);
+			expect(menu.right).toBeLessThanOrEqual(shell.right);
+			expect(menu.bottom).toBeLessThan(shell.top);
+			expect(document.querySelector('.composer-toolbar')!.scrollWidth).toBeLessThanOrEqual(Math.ceil(shell.width));
+		} finally {
+			await browserPage.viewport(1280, 720);
+		}
+	});
+
+	it('changing the selection during generation preserves the active request', async () => {
+		installApi();
+		const fallback = fetchMock.getMockImplementation()!;
+		const snapshot: ChatResponseSnapshot = {
+			response_id: 'active-answer', sequence: 1, started_at: createdAt, updated_at: createdAt,
+			status: 'running', message_id: 'active-message', message_created_at: createdAt, content: '',
+			progress: { phase: 'responding' }, checkpoint_message_id: null,
+			completion_reason: null, error_code: null, warnings: [],
+			model_connection_id: 'lab-a', model_connection_name: 'Lab A'
+		};
+		let output!: ReadableStreamDefaultController<Uint8Array>;
+		const event = (name: string, data: unknown) => new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+				return Promise.resolve(new Response(new ReadableStream({ start(controller) {
+					output = controller;
+					controller.enqueue(event('snapshot', snapshot));
+				} }), { headers: { 'Content-Type': 'text/event-stream' } }));
+			}
+			return fallback(input, init);
+		});
+		await send('Compare the supplied evidence.');
+		await browserPage.getByTitle('Model', { exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		await expect.element(browserPage.getByTitle('Model', { exact: true })).toHaveTextContent('Lab B');
+		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		expect(posts).toHaveLength(1);
+		expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-a');
+		expect(posts[0][1]?.signal?.aborted).toBe(false);
+		output.enqueue(event('turn', { status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null, messages: [] }));
+		output.close();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		expect(document.querySelector('.model-connection-next')).toBeNull();
+		expect(document.querySelector('.model-connection-used')).toBeNull();
 	});
 
 	it('uses the current Collection name as metadata arrives and keeps empty conversations unframed', async () => {
@@ -348,7 +509,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await userEvent.keyboard('{Enter}');
 		await expect.element(composer).toHaveValue('/permissions');
 		await userEvent.keyboard('{Enter}');
-		await expect.element(browserPage.getByRole('combobox')).toBeVisible();
+		await expect.element(browserPage.getByRole('combobox', { name: /^Mode\b/ })).toBeVisible();
 		await composer.fill('/missing');
 		await userEvent.keyboard('{Enter}');
 		await expect
@@ -2239,6 +2400,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			})
 			.toEqual({
 				message: 'What does this result support?',
+				model_connection_id: 'lab-a',
 				source_contexts: [sourceContext]
 			});
 		await expect

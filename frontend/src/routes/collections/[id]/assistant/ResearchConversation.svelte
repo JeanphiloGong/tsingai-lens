@@ -10,6 +10,7 @@
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
+		fetchModelConnections,
 		deleteChatSession,
 		setChatSessionPin,
 		setChatSessionTitle,
@@ -40,7 +41,8 @@
 		type ChatToolCall,
 		type ChatTurn,
 		type ChatTree,
-		type ChatTreeNode
+		type ChatTreeNode,
+		type ModelConnectionChoice
 	} from '../../../_shared/chatSessions';
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
@@ -69,7 +71,8 @@
 		ArrowRight,
 		Pin,
 		PinOff,
-		ChevronDown
+		ChevronDown,
+		Check
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -148,6 +151,16 @@
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
+	let modelConnections: ModelConnectionChoice[] = [];
+	let selectedModelConnectionId = '';
+	let modelPicker: HTMLDetailsElement | null = null;
+	$: selectedModelConnectionName = modelConnections.find(
+		(item) => item.connection_id === selectedModelConnectionId
+	)?.display_name ?? '';
+	let modelConnectionsOwner = '';
+	let modelConnectionsLoading = false;
+	let modelConnectionsError = '';
+	let modelConnectionsController: AbortController | null = null;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -173,6 +186,7 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		modelConnectionsController?.abort();
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
 		sessionController?.abort();
@@ -193,6 +207,15 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
+	$: if (browser && userId !== modelConnectionsOwner) {
+		modelConnectionsOwner = userId;
+		modelConnectionsController?.abort();
+		modelConnections = [];
+		selectedModelConnectionId = '';
+		modelConnectionsLoading = false;
+		modelConnectionsError = '';
+		if (userId) void loadModelConnections();
+	}
 	$: if (sourceContextVersion && userId && collectionId) {
 		refreshPendingSources();
 	}
@@ -531,6 +554,35 @@
 			)
 		) {
 			historyTimer = setTimeout(() => void refreshHistoryActivities(), 5000);
+		}
+	}
+
+	function selectModelConnection(connectionId: string) {
+		selectedModelConnectionId = connectionId;
+		if (modelPicker) {
+			modelPicker.open = false;
+			modelPicker.querySelector('summary')?.focus();
+		}
+	}
+
+	async function loadModelConnections() {
+		modelConnectionsController?.abort();
+		const controller = new AbortController();
+		modelConnectionsController = controller;
+		const owner = userId;
+		modelConnectionsLoading = true;
+		modelConnectionsError = '';
+		try {
+			const result = await fetchModelConnections(controller.signal);
+			if (destroyed || owner !== userId || controller.signal.aborted) return;
+			modelConnections = result.items;
+			selectedModelConnectionId = result.items[0]?.connection_id ?? '';
+		} catch (err) {
+			if (!controller.signal.aborted && owner === userId && !destroyed) {
+				modelConnectionsError = errorMessage(err);
+			}
+		} finally {
+			if (modelConnectionsController === controller) modelConnectionsLoading = false;
 		}
 	}
 
@@ -1140,6 +1192,8 @@
 			error = $t('researchAgent.paperScope.tooLong');
 			return;
 		}
+		const modelConnectionId = selectedModelConnectionId;
+		if (!modelConnectionId) return;
 		const activeSession = session;
 		const activeCollectionId = collectionId;
 		const generation = sessionGeneration;
@@ -1242,7 +1296,8 @@
 					pendingText = '';
 					acceptTrajectory(trajectory);
 					acknowledgeSubmission();
-				}
+				},
+				modelConnectionId
 			);
 			if (!isCurrentSession(generation, activeCollectionId)) return;
 			cancelTextFrame();
@@ -1482,6 +1537,16 @@
 </script>
 
 <svelte:window
+	on:keydown={(event) => {
+		if (event.key === 'Escape' && modelPicker?.open && modelPicker.contains(event.target as Node)) {
+			event.preventDefault();
+			modelPicker.open = false;
+			modelPicker.querySelector('summary')?.focus();
+		}
+	}}
+	on:pointerdown={(event) => {
+		if (modelPicker?.open && !modelPicker.contains(event.target as Node)) modelPicker.open = false;
+	}}
 	on:focus={() => void refreshHistoryActivities()}
 	on:storage={(event) => {
 		if (event.key === historyStorageKey()) void refreshHistoryActivities();
@@ -1620,11 +1685,11 @@
 					sessionId={session.session_id}
 				/>{/key}
 		{/if}
-		{#if error || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
+		{#if error || modelConnectionsError || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
 			<div class="status status-error" role="alert">
 				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
 				{#if turnRecovery === 'permissionDenied'}<strong>{$t('researchAgent.permissionDenied')}</strong>{/if}
-				<span>{turnRecovery ? recoveryDescription(turnRecovery) : error}</span>
+				<span>{turnRecovery ? recoveryDescription(turnRecovery) : error || modelConnectionsError}</span>
 				{#if failedSessionId !== null}
 					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
 						{$t('researchAgent.retrySession')}
@@ -1712,6 +1777,8 @@
 				{input}
 				{sending}
 				disabled={!session ||
+					!selectedModelConnectionId ||
+					modelConnectionsLoading ||
 					loading ||
 					revising ||
 					running ||
@@ -1729,6 +1796,32 @@
 				onRemovePendingSourceContexts={removePendingSourceContexts}
 				onClearPendingSourceContexts={clearPendingSources}
 			>
+				<details
+					slot="model-picker"
+					class="model-picker"
+					bind:this={modelPicker}
+					data-testid="model-connection-picker"
+					on:focusout={(event) => {
+						if (modelPicker && event.relatedTarget instanceof Node && !modelPicker.contains(event.relatedTarget)) modelPicker.open = false;
+					}}
+				>
+					<summary title={$t('researchAgent.modelConnectionLabel')}>
+						<span class="sr-only">{$t('researchAgent.modelConnectionLabel')}: </span>
+						<span class="model-picker-name">{selectedModelConnectionName || $t('researchAgent.modelConnectionLabel')}</span>
+						<ChevronDown size={14} aria-hidden="true" />
+					</summary>
+					<div class="model-picker-menu" role="group" aria-label={$t('researchAgent.modelConnectionLabel')}>
+						{#if !modelConnectionsLoading && !modelConnections.length}<p>{$t('researchAgent.modelConnectionEmpty')}</p>{/if}
+						<div class="model-picker-options">
+							{#each modelConnections as item (item.connection_id)}
+								<button type="button" disabled={modelConnectionsLoading} aria-pressed={item.connection_id === selectedModelConnectionId} on:click={() => selectModelConnection(item.connection_id)}>
+									<span>{item.display_name}</span>
+									{#if item.connection_id === selectedModelConnectionId}<Check size={15} aria-hidden="true" />{/if}
+								</button>
+							{/each}
+						</div>
+					</div>
+				</details>
 				{#if !checkpointId && pendingSourceContexts.length}
 					<label class="related-sources"
 						><input
@@ -1957,6 +2050,23 @@
 		background: var(--bg-page);
 	}
 
+	.model-picker { min-width: 0; max-width: 100%; }
+	.model-picker summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 8px; border-radius: 8px; color: var(--text-secondary); cursor: pointer; list-style: none; font-size: 13px; }
+	.model-picker summary::-webkit-details-marker { display: none; }
+	.model-picker summary:hover, .model-picker[open] summary { background: var(--bg-subtle); color: var(--text-primary); }
+	.model-picker-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.model-picker summary :global(svg) { flex: 0 0 auto; }
+	.model-picker .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+	.model-picker-menu { position: absolute; z-index: 30; right: 10px; bottom: calc(100% + 8px); width: min(280px, calc(100% - 20px)); box-sizing: border-box; padding: 8px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-card); color: var(--text-primary); }
+	.model-picker-options { display: grid; gap: 2px; max-height: 224px; overflow-y: auto; }
+	.model-picker-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+	.model-picker-menu button span { min-width: 0; overflow-wrap: anywhere; }
+	.model-picker-menu button :global(svg) { flex: 0 0 auto; }
+	.model-picker-menu button:hover { background: var(--bg-subtle); }
+	.model-picker-menu button[aria-pressed='true'] { background: var(--brand-soft); color: var(--brand-primary); }
+	.model-picker-menu p { margin: 4px 8px 10px; font-size: 13px; line-height: 1.5; }
+	.model-picker summary:focus-visible, .model-picker-menu button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
+	.model-picker-menu button:disabled { cursor: not-allowed; opacity: 0.55; }
 	.status {
 		width: min(calc(100% - 64px), 900px);
 		margin: 12px auto 0;

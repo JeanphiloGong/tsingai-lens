@@ -418,6 +418,8 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		researchAgent: {
+			modelConnectionLabel: 'Model',
+			modelConnectionEmpty: 'No models configured.',
 			title: 'Research Agent',
 			retrySession: 'Retry conversation',
 			awaitingResult: 'Awaiting the saved research result',
@@ -4004,6 +4006,8 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		researchAgent: {
+			modelConnectionLabel: '模型',
+			modelConnectionEmpty: '暂无配置的模型。',
 			title: '研究 Agent',
 			retrySession: '重试加载会话',
 			awaitingResult: '研究结果尚未确认',

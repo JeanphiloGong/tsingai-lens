@@ -94,6 +94,7 @@ the comparison workspace or become a second scientific fact store.
 The route uses only same-origin endpoints:
 
 ```text
+GET  /api/v1/model-connections
 POST /api/v1/chat-sessions
 GET  /api/v1/chat-sessions/{session_id}
 GET  /api/v1/chat-sessions/{session_id}/messages
@@ -105,6 +106,22 @@ POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 GET  /api/v1/collections/{collection_id}/agent-permissions
 PUT  /api/v1/collections/{collection_id}/agent-permissions
 ```
+
+Both Chat entrypoints render the shared model picker inside the composer, just
+before Send. The trigger and choices show configured display names only; the
+selected choice has a checkmark. Load enabled choices from the authenticated
+same-origin directory and include the selected connection ID when sending a
+question. Changing the selection does not cancel or repeat an active request.
+GET event reconnects carry no model selection. Account changes cancel the old
+directory request and clear its choices.
+
+The directory lists configured choices; it does not test provider health. There
+is no preflight provider request, refresh control, answer-source label or notice
+about the next question. Actual send failures use the existing Chat error and
+result-preservation flow, without clearing the selected model or switching to
+another one. An empty directory is explained inside the picker, and directory
+request failures use the existing error area. A selection must exist before
+sending; initial directory loading does not imply a model health check.
 
 The composer also exposes an explicit PDF-paper upload action for the current
 Collection. It calls the same `POST /collections/{collection_id}/documents`

@@ -470,13 +470,6 @@
 			</div>
 		{/if}
 		<div class="composer-shell">
-			<IconButton
-				className="add-papers"
-				label={$t('researchAgent.upload.add')}
-				tooltipAlign="start"
-				disabled={uploadBusy}
-				onClick={() => uploadInput?.click()}>+</IconButton
-			>
 			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
 			<textarea
 				id="research-agent-message"
@@ -491,14 +484,26 @@
 				on:input={(event) => handleInput((event.currentTarget as HTMLTextAreaElement).value)}
 				on:keydown={handleComposerKeydown}
 			></textarea>
-			<IconButton
-				className="send-message"
-				type="submit"
-				variant="primary"
-				tooltipAlign="end"
-				label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-				disabled={disabled || !input.trim()}>&uarr;</IconButton
-			>
+			<div class="composer-toolbar">
+				<IconButton
+					className="add-papers"
+					label={$t('researchAgent.upload.add')}
+					tooltipAlign="start"
+					disabled={uploadBusy}
+					onClick={() => uploadInput?.click()}>+</IconButton
+				>
+				<div class="composer-actions">
+					<slot name="model-picker" />
+					<IconButton
+						className="send-message"
+						type="submit"
+						variant="primary"
+						tooltipAlign="end"
+						label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+						disabled={disabled || !input.trim()}>&uarr;</IconButton
+					>
+				</div>
+			</div>
 		</div>
 	</div>
 </form>
@@ -604,9 +609,9 @@
 	}
 
 	.composer-shell {
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto;
-		align-items: end;
+		position: relative;
+		display: flex;
+		flex-direction: column;
 		gap: 8px;
 		min-height: 56px;
 		padding: 8px 10px 8px 10px;
@@ -617,6 +622,22 @@
 		transition:
 			border-color 140ms ease,
 			box-shadow 140ms ease;
+	}
+
+	.composer-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		min-width: 0;
+	}
+
+	.composer-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+		max-width: calc(100% - 44px);
 	}
 
 	.composer-shell:focus-within {

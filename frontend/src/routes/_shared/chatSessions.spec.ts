@@ -4,6 +4,8 @@ import {
 	formatChatElapsed,
 	getChatProgressActions,
 	streamChatMessage,
+	streamChatUpdates,
+	fetchModelConnections,
 	setChatMessageFeedback,
 	deleteChatSession,
 	setChatSessionPin,
@@ -255,5 +257,28 @@ describe('chat progress presentation helpers', () => {
 		expect(appendChatProgress([initial], updated)).toHaveLength(2);
 		const terminal = { ...updated, execution_plan: { ...updated.execution_plan!, plan_version: 1 } };
 		expect(appendChatProgress([initial], terminal)).toHaveLength(2);
+	});
+});
+
+
+describe('model connection selection', () => {
+	it('sends the connection only on a new question and keeps reconnect read-only', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('event: turn\ndata: {"status":"completed","messages":[],"warnings":[],"completion_reason":"model_answer"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+		try {
+			await streamChatMessage('chat_1', 'Compare papers', () => {}, [], undefined, undefined, false, undefined, undefined, 'lab-b');
+			expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).model_connection_id).toBe('lab-b');
+			fetch.mockResolvedValueOnce(new Response('', { headers: { 'Content-Type': 'text/event-stream' } }));
+			await streamChatUpdates('chat_1', 'response_1', () => {}, () => {});
+			expect(String(fetch.mock.calls[1][0])).toBe('/api/v1/chat-sessions/chat_1/events?response_id=response_1');
+			expect(fetch.mock.calls[1][1]?.body).toBeUndefined();
+		} finally { fetch.mockRestore(); }
+	});
+
+	it('reads only the same-origin model directory', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: { items: [] }, meta: null })));
+		try {
+			await expect(fetchModelConnections()).resolves.toEqual({ items: [] });
+			expect(fetch.mock.calls[0][0]).toBe('/api/v1/model-connections');
+		} finally { fetch.mockRestore(); }
 	});
 });

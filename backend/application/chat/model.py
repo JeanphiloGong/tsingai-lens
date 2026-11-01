@@ -73,7 +73,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.8"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.9"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -326,6 +326,10 @@ RESEARCH_TOOL_ROUTING = """TOOL DECISION PATH
    a later Objective analysis creates selections and cross-paper comparisons.
 Return either a final answer with no calls, an ordered batch of independent
 reads, or one draft/write call. Never mix reads with a draft/write in one batch.
+The runtime may accept only the first calls of an oversized independent read batch
+so each Source result has room for body text. Only calls present in the returned
+trajectory executed. Continue any omitted checks using the exact arguments in the
+runtime note; do not claim an omitted call ran.
 An answer with no calls ends the turn; announcing a future inspection is not
 completion when a needed read is available now.
 """

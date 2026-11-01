@@ -341,6 +341,7 @@ class _RunProgress:
     working_summary: str = ""
     compacted_message_ids: set[str] = field(default_factory=set)
     read_batch_tokens: int = 12_000
+    deferred_read_calls: int = 0
     source_content_chars: int = 0
     source_batch_count: int = 0
     empty_source_batch_count: int = 0
@@ -605,6 +606,7 @@ class _RunProgress:
             "source_batch_count": self.source_batch_count,
             "empty_source_batch_count": self.empty_source_batch_count,
             "read_batch_tokens": self.read_batch_tokens,
+            "deferred_read_calls": self.deferred_read_calls,
             "remaining_seconds": (
                 round(self.remaining_seconds(), 3)
                 if self.limits.max_elapsed_seconds is not None else None
@@ -2031,8 +2033,19 @@ class ResearchAgentRunner:
         completed_results: tuple[ChatToolResult, ...] | list[ChatToolResult] = (),
     ) -> tuple[tuple[ChatToolCall, Any], ...]:
         max_tool_calls_per_response = 32
+        context_sized_reads = (
+            any(item.name in {"read_source", "inspect_document_sources", "inspect_table"}
+                for item in turn.tool_calls)
+            and all((handler := self.capabilities.get(item.name)) is not None
+                    and handler.spec.risk is ToolRisk.READ for item in turn.tool_calls)
+        )
+        batch_limit = (
+            min(max_tool_calls_per_response, max(1, progress.read_batch_tokens // 4096))
+            if context_sized_reads else max_tool_calls_per_response
+        )
         assistant_message_id = progress.response_message_id
         requested = []
+        deferred_reads = []
         seen_requests: set[tuple[str, str]] = set()
         completed_write_requests = self._completed_write_request_keys(
             messages,
@@ -2063,11 +2076,12 @@ class ResearchAgentRunner:
                     model_call.name,
                 )
                 continue
-            if len(requested) >= max_tool_calls_per_response:
-                logger.warning(
-                    "Research Agent tool batch truncated requested=%d retained=%d limit=%d",
-                    len(turn.tool_calls), len(requested), max_tool_calls_per_response,
-                )
+            if len(requested) >= batch_limit:
+                if context_sized_reads:
+                    deferred_reads.append({"name": model_call.name, "arguments": arguments})
+                    seen_requests.add(request_key)
+                    continue
+                logger.warning("Research Agent tool batch reached limit=%d", batch_limit)
                 break
             seen_requests.add(request_key)
             registered = self.capabilities.get(model_call.name)
@@ -2078,12 +2092,20 @@ class ResearchAgentRunner:
                 risk=registered.spec.risk if registered else ToolRisk.UNKNOWN,
             )
             requested.append((call, registered if model_call.name in allowed_names else None))
-        if requested or turn.content:
+        content = turn.content
+        if deferred_reads:
+            progress.deferred_read_calls += len(deferred_reads)
+            content += (
+                "\nRuntime note: these reads have NOT executed. "
+                "Continue the still-relevant checks using these exact arguments:\n"
+                + json.dumps(deferred_reads, ensure_ascii=True)
+            )
+        if requested or content:
             messages.append(
                 ChatMessage.assistant_tool_calls(
                     message_id=assistant_message_id,
                     session_id=context.session_id,
-                    content=turn.content,
+                    content=content,
                     tool_calls=tuple(ChatToolRequest(
                         tool_call_id=call.tool_call_id,
                         name=call.name,

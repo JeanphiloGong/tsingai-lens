@@ -231,9 +231,12 @@ section from its offset, or reduce parallel requests when the result allowance
 only fits headings; a successful heading read does not complete a Methods check.
 Source placeholders also remain pending after the last section page; their
 exact text/table reader clears them only when whole-source coverage is recorded.
-Section reads retain all outline headings, pages and counts, while repeating
-detailed size and locator metadata only for the selected section to leave room
-for its body. Final result-size checks still enforce the supplied context budget.
+Section reads return the selected section's outline and size the complete result
+once, including Source locators, warnings and pagination. Oversized passages
+remain explicitly unread with an exact-reader instruction. Independent body-read
+batches are sized to the available context; deferred calls keep their exact
+arguments in a runtime note and are never recorded as executed. This changes the
+batch size, not the number of papers a research task may inspect.
 
 The comparison instructions apply these checks to ordinary paper comparisons as
 well as Finding corrections: inspect available material/feedstock, fabrication,

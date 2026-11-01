@@ -826,49 +826,12 @@ class InspectDocumentSourcesCapability:
             and self._matches_query(item, arguments.query)
         ]
         # Keep complete passages together. Reserve space for the outline,
-        # Source locators, result framing, and continuation metadata.
+        # Size the complete tool envelope once, including locators and warnings.
         outline = list(sections.values())[:80]
         if arguments.heading_path is not None:
-            # A section read needs body space; retain every section's coverage
-            # but repeat detailed size/locator metadata only for the requested one.
-            outline = [
-                (
-                    section
-                    if section["heading_path"] == arguments.heading_path
-                    else {
-                        key: section[key]
-                        for key in ("heading_path", "pages", "source_count")
-                    }
-                )
-                for section in outline
-            ]
-        framing_tokens = 900 if arguments.heading_path is not None else 1800
-        remaining_tokens = max(
-            256,
-            context.max_result_tokens
-            - ChatContextBuilder.estimate_tokens(outline)
-            - framing_tokens,
-        )
-        visible = []
-        for source in matches[arguments.offset : arguments.offset + arguments.limit]:
-            cost = (
-                ChatContextBuilder.estimate_tokens(
-                    json.dumps(source, ensure_ascii=True)
-                )
-                + 250
-            )
-            if cost > remaining_tokens:
-                if not visible:
-                    preview = dict(source)
-                    preview["content"] = ""
-                    preview["content_truncated"] = True
-                    preview["reading_note"] = (
-                        "This Source exceeds this batch. Read its exact source_ref with read_source or inspect_table."
-                    )
-                    visible.append(preview)
-                break
-            visible.append(source)
-            remaining_tokens -= cost
+            outline = ([sections[arguments.heading_path]]
+                       if arguments.heading_path in sections else [])
+        visible = list(matches[arguments.offset : arguments.offset + arguments.limit])
         next_offset = arguments.offset + len(visible)
         if next_offset >= len(matches):
             next_offset = None
@@ -878,18 +841,6 @@ class InspectDocumentSourcesCapability:
             self._source_ref(context.collection_id, document.document_id, item)
             for item in visible
         )
-        warnings: list[str] = []
-        if not matches:
-            warnings.append(
-                "No prepared Source matched these filters; this is not evidence that "
-                "the scientific result is absent from the paper."
-            )
-        omitted = len(matches) - len(visible) - arguments.offset
-        if omitted > 0:
-            warnings.append(
-                f"{omitted} additional matching Source record(s) were omitted from "
-                "this bounded page."
-            )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
@@ -914,7 +865,7 @@ class InspectDocumentSourcesCapability:
                 ),
                 "document_outline": outline,
                 "outline_section_total": len(sections),
-                "outline_truncated": len(sections) > 80,
+                "outline_truncated": len(sections) > len(outline),
                 "coverage_note": (
                     "This outline describes prepared Sources, not the original PDF's total pages "
                     "or a completed scientific review. When outline_truncated is false, it lists "
@@ -936,10 +887,19 @@ class InspectDocumentSourcesCapability:
                 "support_is_evidence": False,
             },
             resource_refs=tuple(refs),
-            warnings=tuple(warnings),
         )
 
-        while self._result_tokens(result) > context.max_result_tokens - 192:
+        while True:
+            result = replace(result, warnings=tuple([
+                *(["No prepared Source matched these filters; this is not evidence of scientific absence."]
+                  if not matches else []),
+                *(["Continue with next_offset for additional matching Sources."]
+                  if result.data["next_offset"] is not None else []),
+                *(["An oversized Source is listed without its content; read it separately."]
+                  if any(source["content_truncated"] for source in visible) else []),
+            ]))
+            if self._result_tokens(result) <= context.max_result_tokens:
+                return result
             if len(visible) > 1:
                 visible.pop()
             elif outline:
@@ -983,33 +943,6 @@ class InspectDocumentSourcesCapability:
                     ),
                 ),
             )
-        return replace(
-            result,
-            warnings=tuple(
-                [
-                    *(
-                        [
-                            "No prepared Source matched these filters; this is not evidence of scientific absence."
-                        ]
-                        if not matches
-                        else []
-                    ),
-                    *(
-                        ["Continue with next_offset for additional matching Sources."]
-                        if result.data["next_offset"] is not None
-                        else []
-                    ),
-                    *(
-                        [
-                            "An oversized Source is listed without its content; read it separately."
-                        ]
-                        if any(source["content_truncated"] for source in visible)
-                        else []
-                    ),
-                ]
-            ),
-        )
-
     @staticmethod
     def _result_tokens(result: ChatToolResult) -> int:
         return ChatContextBuilder.estimate_tokens(

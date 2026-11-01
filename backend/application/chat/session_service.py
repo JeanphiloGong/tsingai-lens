@@ -1678,6 +1678,11 @@ class ChatSessionService:
                         user_message=message,
                         source_contexts=source_contexts,
                         permission_mode=permission_mode,
+                        context_checkpoint=(
+                            prior_snapshot.progress.get("context_checkpoint")
+                            if prior_snapshot is not None and prior_snapshot.status != "running"
+                            else None
+                        ),
                     )
                 while result.pending_approval is not None:
                     pending = result.pending_approval

@@ -726,14 +726,43 @@ class ResearchAgentRunner:
         ]
         active_user_message_id = messages[-1].message_id
         progress.active_user_message_id = active_user_message_id
-        if (
-            context_checkpoint
-            and context_checkpoint.get("user_message_id") == active_user_message_id
-            and set(context_checkpoint.get("compacted_message_ids", ())).issubset(
-                message.message_id for message in previous_messages
-            )
-        ):
-            progress.restore_persisted_progress({"context_checkpoint": context_checkpoint})
+        prior_ids = {message.message_id for message in previous_messages}
+        prior_user_id = next((message.message_id for message in reversed(previous_messages)
+                              if message.role is ChatMessageRole.USER), None)
+        if (context_checkpoint and prior_user_id is not None
+                and context_checkpoint.get("user_message_id") == prior_user_id
+                and all(message.session_id == context.session_id for message in previous_messages)):
+            try:
+                notes = ResearchWorkingNotesModelOutput.model_validate_json(
+                    context_checkpoint.get("working_summary", ""))
+                if any(set(check.basis_message_ids) - prior_ids for check in notes.checks):
+                    raise ValueError("historical note cites an unknown message")
+            except (ValueError, TypeError):
+                logger.warning("Ignoring invalid historical notes; full trajectory remains available")
+            else:
+                progress.working_summary = notes.model_copy(update={
+                    "scope": "Historical observations only; the current user request determines scope.",
+                    "next_actions": [],
+                }).model_dump_json()
+        prior_plan = (ResearchExecutionPlan.from_messages(messages=previous_messages)
+                      if prior_user_id is not None else None)
+        if (prior_plan is not None and prior_plan.model_status is ResearchExecutionStatus.IN_PROGRESS
+                and prior_user_id is not None
+                and all(message.session_id == context.session_id for message in previous_messages)):
+            pending = [step["action"] for step in prior_plan.steps if step["status"] != "completed"]
+            if pending:
+                notes = (ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)
+                         if progress.working_summary else ResearchWorkingNotesModelOutput(
+                             scope="Historical context; the current user request determines scope.",
+                             checks=[], next_actions=[]))
+                pending_check = ResearchWorkingCheckModelOutput(
+                    statement=("Unfinished previous request: " + "; ".join(pending))[:1200],
+                    conditions="Runtime work only; not scientific evidence.",
+                    basis_message_ids=[prior_user_id], unresolved=prior_plan.explanation[:1000])
+                progress.working_summary = notes.model_copy(update={
+                    "checks": [*notes.checks[:15], pending_check], "next_actions": [],
+                }).model_dump_json()
+        # New requests retain raw history and receive fresh counters and plan scope.
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
         progress.refresh_execution_plan(messages)
@@ -1679,6 +1708,9 @@ class ResearchAgentRunner:
                 raise ValueError("compaction cannot request tools")
             notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
             allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
+            if progress.working_summary:
+                previous = ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)
+                allowed_ids.update(identity for check in previous.checks for identity in check.basis_message_ids)
             if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
                 raise ValueError("working note cites an unobserved message")
             if progress.working_summary:

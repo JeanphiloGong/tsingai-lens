@@ -148,11 +148,10 @@ class ChatContextBuilder:
         )
         if active_user_message_id is not None and active_index is None:
             raise ValueError("active user message is missing from context")
-        # Runner instructions follow the real user message and are transient.
+        # Preserve researcher inputs exactly; tool observations may be compacted.
         pinned = {
             i for i, unit in enumerate(units)
-            if active_index is not None and i >= active_index
-            and unit[0].role is ChatMessageRole.USER
+            if unit[0].role is ChatMessageRole.USER
         }
         selected = set(pinned)
         char_count = sum(self._size(message) for i in pinned for message in units[i])
@@ -176,22 +175,6 @@ class ChatContextBuilder:
             min(self.max_summary_chars, self.max_chars - char_count)
             if needs_rollover else 0
         )
-        # Keep recent user choices verbatim before filling the window with tool output.
-        user_budget = min(1500, max_input_tokens // 6)
-        for i in range((active_index or 0) - 1, -1, -1):
-            if units[i][0].role is not ChatMessageRole.USER:
-                continue
-            size = self._size(units[i][0])
-            tokens = self.estimate_tokens(self.model_message(units[i][0]))
-            if (tokens > user_budget or char_count + size > self.max_chars - summary_budget
-                    or message_count + 1 > self.max_messages - 2
-                    or token_count + tokens > max_input_tokens):
-                break
-            selected.add(i)
-            char_count += size
-            message_count += 1
-            token_count += tokens
-            user_budget -= tokens
         for i in range(len(units) - 1, -1, -1):
             if i in selected:
                 continue

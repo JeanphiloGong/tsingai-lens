@@ -813,6 +813,12 @@ capabilities:
   are normal navigation results, not warnings or scientific absence. Source
   read failures are isolated to the affected paper so other page results remain
   usable;
+- `search_sources` searches prepared content in the current collection when
+  `document_ids` is omitted; explicit IDs narrow that scope. `match_mode` is
+  `any` terms, `all` terms across a paper, or an exact `phrase`. Results rank
+  papers by matched terms and title matches, then passages by matched terms.
+  Hit-centered excerpts include character offsets, section IDs and exact
+  `read_arguments`; these navigation previews are not scientific Evidence.
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
   bounded table Markdown, and figure captions through exact or focused,
   paginated Source filters. Each Source includes a digest of its complete

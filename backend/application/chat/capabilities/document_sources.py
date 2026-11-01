@@ -107,7 +107,8 @@ class InspectDocumentSourcesToolRequest(BaseModel):
 class SearchSourcesToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    document_ids: list[str] = Field(min_length=1, max_length=20)
+    document_ids: list[str] | None = Field(default=None, min_length=1, description="Omit to search the current collection; supply IDs to narrow it.")
+    match_mode: Literal["any", "all", "phrase"] = Field(default="any", description="Case-insensitive terms; all requires every term somewhere in the same paper, phrase requires an exact phrase.")
     query: str = Field(min_length=1, max_length=240)
     source_types: list[SourceType] = Field(default_factory=list, max_length=3)
     offset: int = Field(default=0, ge=0)
@@ -115,7 +116,9 @@ class SearchSourcesToolRequest(BaseModel):
 
     @field_validator("document_ids")
     @classmethod
-    def _unique_document_ids(cls, values: list[str]) -> list[str]:
+    def _unique_document_ids(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
         normalized = [value.strip() for value in values]
         if any(not value for value in normalized):
             raise ValueError("document IDs cannot be empty")
@@ -400,8 +403,10 @@ class SearchSourcesCapability:
     spec = ToolSpec(
         name="search_sources",
         description=(
-            "Search exact phrases or terms across prepared Sources in an explicit "
-            "paper scope. Results are bounded, paginated navigation candidates with "
+            "Search the current collection for paper content; omit document_ids for the whole collection. "
+            "Use match_mode to match any terms, all terms across a paper, or an exact phrase. "
+            "Returns ranked papers and passages around actual hits with exact reading arguments. "
+            "Results are bounded, paginated navigation candidates with "
             "canonical Source digests. A match is not Evidence and does not prove "
             "relevance; inspect the exact Source before making a scientific judgment."
         ),
@@ -420,18 +425,19 @@ class SearchSourcesCapability:
             context.user_id,
         )
         try:
-            documents = await SourceArtifactRepo.read_documents(
-                context.collection_id,
-                tuple(arguments.document_ids),
+            documents = (
+                await SourceArtifactRepo.read_collection_documents(context.collection_id)
+                if arguments.document_ids is None else
+                await SourceArtifactRepo.read_documents(context.collection_id, tuple(arguments.document_ids))
             )
         except FileNotFoundError:
             return await _unavailable_document_sources(
-                context, arguments.document_ids
+                context, arguments.document_ids or []
             )
         documents_by_id = {document.document_id: document for document in documents}
         missing = [
             document_id
-            for document_id in arguments.document_ids
+            for document_id in arguments.document_ids or []
             if document_id not in documents_by_id
         ]
         if missing:
@@ -441,8 +447,17 @@ class SearchSourcesCapability:
 
         selected_types = set(arguments.source_types)
         matches: list[dict[str, Any]] = []
-        for document_id in arguments.document_ids:
-            document = documents_by_id[document_id]
+        terms = list(dict.fromkeys(arguments.query.casefold().split()))
+        paper_scores: dict[str, tuple[int, int]] = {}
+        for document in documents:
+            document_id = document.document_id
+            source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables, figures=document.figures)
+            sections = {" > ".join(node.heading_path): node.node_id for node in tree.nodes.values()
+                        if node.node_type in {"section", "references_section"}}
+            paper_terms = {term for term in terms if term in document.title.casefold()}
+            title_terms = len(paper_terms)
+            paper_start = len(matches)
             candidates = (
                 *(
                     (InspectDocumentSourcesCapability._text_source(block), block.text)
@@ -476,24 +491,36 @@ class SearchSourcesCapability:
                 searchable_item = {**item, "content": canonical_content}
                 if selected_types and item["source_type"] not in selected_types:
                     continue
-                if not InspectDocumentSourcesCapability._matches_query(
-                    searchable_item,
-                    arguments.query,
-                ):
+                searchable = " ".join(str(searchable_item.get(key) or "") for key in ("heading_path", "caption", "figure_label", "content")).casefold()
+                matched = [term for term in terms if term in searchable]
+                paper_terms.update(matched)
+                if not matched or (arguments.match_mode == "phrase" and arguments.query.casefold() not in searchable):
                     continue
-                content, truncated = InspectDocumentSourcesCapability._bounded(
-                    canonical_content,
-                    limit=_SEARCH_CONTENT_LIMIT,
-                )
-                matches.append(
-                    {
-                        **item,
-                        "document_id": document.document_id,
-                        "document_title": document.title[:500],
-                        "content": content,
-                        "content_truncated": truncated,
-                    }
-                )
+                positions = [canonical_content.casefold().find(term) for term in matched]
+                positions = [position for position in positions if position >= 0]
+                offset = max(0, min(positions) - 160) if positions else 0
+                content = canonical_content[offset:offset + _SEARCH_CONTENT_LIMIT]
+                matches.append({
+                    **item, "document_id": document_id, "document_title": document.title[:500],
+                    "content": content, "content_offset": offset,
+                    "content_truncated": offset > 0 or offset + len(content) < len(canonical_content),
+                    "matched_terms": matched, "section_id": sections.get(item.get("heading_path")),
+                    "source_version": source_version, "support_is_evidence": False,
+                    "read_arguments": {"document_id": document_id, "source_kind": item["source_kind"],
+                                       "source_ref": item["source_ref"], "source_version": source_version},
+                })
+            if arguments.match_mode == "all" and len(paper_terms) != len(terms):
+                del matches[paper_start:]
+                continue
+            paper_scores[document_id] = (len(paper_terms), title_terms)
+        matches.sort(key=lambda item: (*paper_scores[item["document_id"]], len(item["matched_terms"])), reverse=True)
+        papers = []
+        for document_id in sorted(paper_scores, key=paper_scores.get, reverse=True):
+            hits = [item for item in matches if item["document_id"] == document_id]
+            if hits:
+                papers.append({"document_id": document_id, "title": documents_by_id[document_id].title[:500],
+                               "matching_source_count": len(hits),
+                               "matched_terms": sorted({term for item in hits for term in item["matched_terms"]})})
 
         visible = matches[arguments.offset : arguments.offset + arguments.limit]
         next_offset = arguments.offset + len(visible)
@@ -515,7 +542,9 @@ class SearchSourcesCapability:
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
-                "document_ids": list(arguments.document_ids),
+                "document_ids": arguments.document_ids,
+                "match_mode": arguments.match_mode,
+                "papers": papers[:100],
                 "source_types": list(arguments.source_types),
                 "match_total": len(matches),
                 "offset": arguments.offset,

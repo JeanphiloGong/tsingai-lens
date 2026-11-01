@@ -83,7 +83,11 @@ async def test_current_and_previous_turn_facts_survive_repeated_fallback_compact
     active=ChatMessage.user(message_id='user',session_id='chat',content='Compare only the reported IN718 measurements. Orientation unknown.',created_at='2026-11-01')
     messages=[active,*pair('Methods','As-built IN718; P=250 W, V=700 mm/s; test at 650 C. Orientation not reported.'),
               *pair('Results','The matching as-built specimen elongation was 17%; density was 99.92%.')]
-    runner=ResearchAgentRunner(model=object(),capabilities=CapabilityRegistry(()),context_builder=ChatContextBuilder(max_messages=3))
+    from application.chat.model import ModelResponseError
+    class UnavailableCompaction:
+        async def respond(self, **kwargs):
+            raise ModelResponseError("Compaction format unavailable", reason="invalid_response_shape", retryable=False)
+    runner=ResearchAgentRunner(model=UnavailableCompaction(),capabilities=CapabilityRegistry(()),context_builder=ChatContextBuilder(max_messages=3))
     progress=_RunProgress(runner.limits,restored_elapsed_seconds=190)
     for i in range(3):
         messages.extend(pair(f'other{i}','A different measurement with no orientation value.'))

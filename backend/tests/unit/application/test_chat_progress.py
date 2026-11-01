@@ -8,8 +8,11 @@ from application.chat.agent_runner import (
 )
 from application.chat import session_service as chat_session_service
 from repositories.chat_repository import ChatRepository
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
 from tests.support.postgres import seed_collection
 from tests.unit.application.test_chat_session_service import _Model, _service
+
+pytestmark = pytest.mark.usefixtures("scripted_chat_runner")
 
 
 @pytest.fixture

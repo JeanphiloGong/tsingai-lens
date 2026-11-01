@@ -156,6 +156,8 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 ) -> None:
     checker = _load_module()
 
+    monkeypatch.setenv("LENS_DATABASE_URL", "postgresql+psycopg://fixture@localhost/lens_test")
+
     findings = [
         Finding(
             collection_id="col-test",

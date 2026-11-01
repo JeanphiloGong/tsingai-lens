@@ -20,6 +20,7 @@ def anyio_backend():
 @pytest.mark.parametrize("load", [_load_exporter_module, _load_trace_module])
 @pytest.mark.parametrize("experiment_backed", [False, True])
 async def test_exports_include_complete_fixed_results(load, experiment_backed, monkeypatch):
+    monkeypatch.setenv("LENS_DATABASE_URL", "postgresql+psycopg://fixture@localhost/lens_test")
     module = load()
     seed = _PublishedObjectiveRepository()
     (evidence,), _ = await seed.list_evidence()

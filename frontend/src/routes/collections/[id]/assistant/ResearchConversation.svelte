@@ -1705,7 +1705,7 @@
 				/>{/key}
 		{/if}
 		{#if retryableDecision && !checkpointId}
-			<div class="status status-notice" role="status" data-testid="decision-recovery">
+			<div class="status status-notice decision-recovery" role="status" data-testid="decision-recovery">
 				<span>{$t(retryableDecision.status === 'approved' ? 'researchAgent.savedApprovalWaiting' : 'researchAgent.savedRejectionWaiting')}</span>
 				<button type="button" disabled={deciding || loading || running} on:click={retryDecision}>
 					{$t(retryableDecision.status === 'approved' ? 'researchAgent.retryApprovedDecision' : 'researchAgent.retryRejectedDecision')}
@@ -2146,6 +2146,27 @@
 		background: var(--warning-bg);
 		color: var(--warning-text);
 	}
+	.decision-recovery {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.decision-recovery span { flex: 1 1 16rem; }
+	.decision-recovery button {
+		flex: 0 0 auto;
+		padding: 6px 10px;
+		border: 1px solid currentColor;
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+	.decision-recovery button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
+	.decision-recovery button:disabled { cursor: not-allowed; opacity: 0.55; }
+
 
 	@media (prefers-reduced-motion: reduce) {
 		:global(.research-agent *),

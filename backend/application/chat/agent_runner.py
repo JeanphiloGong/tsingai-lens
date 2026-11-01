@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from domain.chat import ChatToolRequest
+
 import json
 import logging
-import traceback
 from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
-from email.utils import parsedate_to_datetime
 from hashlib import sha256
 from math import isfinite
 from random import uniform
@@ -47,7 +47,6 @@ from application.chat.model import (
     ResearchWorkingNotesModelOutput,
 )
 from application.core.structured_extraction.json_support import extract_json_object
-from application.repositories.chat_repository import ModelCallObserver
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -59,35 +58,15 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
+from exceptions import (
+    PermissionDeniedException,
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 from utils.logger import get_request_id
 
 logger = logging.getLogger(__name__)
-
-_ACTIONABLE_CAPABILITY_EXCEPTIONS = (
-    ValueError,
-    FileNotFoundError,
-    LookupError,
-    PermissionError,
-)
-_SENSITIVE_ERROR_MARKERS = (
-    "password",
-    "secret",
-    "api_key",
-    "apikey",
-    "access_token",
-    "authorization",
-    "bearer",
-)
-
-
-def _safe_capability_error_message(exc: BaseException) -> str:
-    """Keep domain validation details while hiding arbitrary internal errors."""
-    if not isinstance(exc, _ACTIONABLE_CAPABILITY_EXCEPTIONS):
-        return "The capability raised an internal error. Review the request and retry."
-    detail = " ".join(str(exc).split())[:500]
-    if not detail or any(marker in detail.casefold() for marker in _SENSITIVE_ERROR_MARKERS):
-        return "The capability rejected the request. Review the arguments and retry."
-    return detail
 
 _TrajectoryCheckpoint = Callable[
     [
@@ -98,146 +77,11 @@ _TrajectoryCheckpoint = Callable[
     Awaitable[None],
 ]
 
-_MAX_TOOL_CALLS_PER_RESPONSE = 32
-# Token estimates use a local tokenizer while the provider counts its own
-# serialized request. Keep a small provider-side margin so compaction cannot
-# fill the entire advertised window before output tokens and framing are added.
-_CONTEXT_SAFETY_MARGIN_TOKENS = 4_096
-# A long trajectory can contain one protocol unit per Source page plus large
-# structured write results. Sending each omitted unit to the model for a
-# runtime summary makes recovery compete with the actual research request.
-# Keep model-authored notes for short histories and use the bounded archive
-# record for longer histories; exact Sources remain available through the
-# deterministic prior-reading projection.
-_MAX_MODEL_COMPACTION_UNITS = 8
-_MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION = 120.0
-_SAFE_DIAGNOSTIC_EXCEPTION_TYPES = (
-    AttributeError,
-    IndexError,
-    KeyError,
+_WORKING_NOTES_LOSS_NOTICE = (
+    "Some archived details are omitted or truncated in these notes. "
+    "Full records remain in the trajectory; reopen exact Sources for missing details."
 )
-_MAX_SAFE_EXCEPTION_MESSAGE_LENGTH = 240
 
-
-def _exception_text(exc: BaseException) -> str:
-    try:
-        return " ".join(str(exc).split())
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _safe_exception_message(exc: BaseException) -> str | None:
-    """Keep a short structural error hint without provider or credential text."""
-    if not isinstance(exc, _SAFE_DIAGNOSTIC_EXCEPTION_TYPES):
-        return None
-    message = _exception_text(exc)
-    normalized = message.casefold()
-    if (
-        not message
-        or any(marker in normalized for marker in _SENSITIVE_ERROR_MARKERS)
-        or "http://" in normalized
-        or "https://" in normalized
-    ):
-        return None
-    return message[:_MAX_SAFE_EXCEPTION_MESSAGE_LENGTH]
-
-
-def _failure_site(exc: BaseException) -> str | None:
-    if exc.__traceback__ is None:
-        return None
-    frame = traceback.extract_tb(exc.__traceback__)[-1]
-    filename = frame.filename.rsplit("/", 1)[-1]
-    return f"{filename}:{frame.lineno}:{frame.name}"
-
-
-def _provider_failure_details(exc: BaseException) -> dict[str, Any]:
-    """Classify failures with bounded diagnostics and no provider bodies."""
-    chain: list[BaseException] = []
-    current: BaseException | None = exc
-    while current is not None and all(current is not item for item in chain):
-        chain.append(current)
-        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
-    status = None
-    retry_after_seconds: float | None = None
-    codes: set[str] = set()
-    has_code_field = False
-    names = {base.__name__ for item in chain for base in type(item).__mro__}
-    for item in chain:
-        value = getattr(item, "status_code", None)
-        if value is None:
-            value = getattr(getattr(item, "response", None), "status_code", None)
-        if status is None and type(value) is int and 100 <= value <= 599:
-            status = value
-        headers = getattr(getattr(item, "response", None), "headers", None)
-        if headers is None:
-            headers = getattr(item, "headers", None)
-        if isinstance(headers, Mapping):
-            raw_retry_after = headers.get("retry-after") or headers.get("Retry-After")
-            try:
-                parsed_retry_after = float(raw_retry_after)
-            except (TypeError, ValueError):
-                try:
-                    parsed_retry_after = max(0.0, (parsedate_to_datetime(str(raw_retry_after)) - datetime.now(timezone.utc)).total_seconds())
-                except (TypeError, ValueError, OverflowError):
-                    parsed_retry_after = None
-            if parsed_retry_after is not None and isfinite(parsed_retry_after) and parsed_retry_after >= 0:
-                retry_after_seconds = parsed_retry_after
-        body = getattr(item, "body", None)
-        error = body.get("error", body) if isinstance(body, Mapping) else {}
-        if isinstance(error, Mapping):
-            has_code_field = has_code_field or error.get("code") is not None
-            codes.update(value for key in ("code", "type")
-                         if isinstance(value := error.get(key), str))
-    timeout = bool(names.intersection({"TimeoutError", "TimeoutException", "APITimeoutError"}))
-    transport = timeout or bool(names.intersection({
-        "ConnectionError", "TransportError", "APIConnectionError",
-    }))
-    if codes.intersection({"insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"}):
-        retryable, reason = False, "quota_exhausted"
-    elif status is not None:
-        retryable = status in {408, 429} or status >= 500
-        reason = "provider_timeout" if status == 408 else "http_status"
-    elif transport:
-        retryable, reason = True, "provider_timeout" if timeout else "transport_error"
-    elif codes.intersection({"rate_limit_exceeded", "server_error", "internal_server_error",
-                             "overloaded_error", "temporarily_unavailable"}):
-        retryable, reason = True, "transient_provider_error"
-    else:
-        # Some compatible providers emit an SDK APIError inside a successful
-        # HTTP stream without a status or code. Bound its retry as a transport
-        # failure; never apply this rule to arbitrary application exceptions.
-        retryable, reason = (
-            (True, "transient_provider_error")
-            if any(base.__name__ == "APIError" and base.__module__.startswith("openai")
-                   for item in chain for base in type(item).__mro__) and not has_code_field
-            else (False, "unclassified_provider_error")
-        )
-    raw_message = _exception_text(exc)
-    fingerprint = sha256(
-        f"{type(exc).__name__}\x00{raw_message}".encode("utf-8", "replace")
-    ).hexdigest()[:16]
-    return {
-        "exception_type": type(exc).__name__,
-        "exception_chain": [type(item).__name__ for item in chain],
-        "failure_site": _failure_site(exc),
-        "message": _safe_exception_message(exc),
-        "message_fingerprint": fingerprint,
-        "http_status": status,
-        "retry_after_seconds": retry_after_seconds,
-        "retryable": retryable,
-        "reason": reason,
-    }
-_FINAL_ANSWER_INSTRUCTION = (
-    "The bounded research-reading budget is now exhausted. Give the researcher "
-    "the best useful final answer supported by the completed trajectory. State "
-    "what was inspected, what remains unread or failed, the scientific "
-    "uncertainty, and one practical next step. Do not request another tool and "
-    "do not mention internal budgets, tool schemas, or hidden reasoning. A paper "
-    "identity survey or a search match is not an exact Source read. Do not claim "
-    "that a paper was read unless the reading ledger below records an exact Source. "
-    "If the researcher requested more papers than the collection contains, state "
-    "the actual collection total and do not invent missing or unread papers."
-)
 _INCOMPLETE_SCOPE_WARNING = (
     "The answer covers only inspected Sources; unread or failed work remains unresolved."
 )
@@ -315,8 +159,6 @@ def _research_plan_status(
         if completion_reason is AgentCompletionReason.NO_PROGRESS:
             return ResearchExecutionStatus.STALLED
         return ResearchExecutionStatus.RESOURCE_LIMITED
-    if completion_reason is AgentCompletionReason.MODEL_ANSWER and model_status is ResearchExecutionStatus.IN_PROGRESS:
-        return ResearchExecutionStatus.COMPLETED
     return model_status
 
 
@@ -421,18 +263,6 @@ class ResearchExecutionPlan:
             ),
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "plan_id": self.plan_id,
-            "plan_version": self.version,
-            "request": self.request,
-            "status": self.status.value,
-            "model_status": self.model_status.value,
-            "explanation": self.explanation,
-            "steps": [dict(step) for step in self.steps],
-            "blocking_reason": self.blocking_reason,
-        }
-
 
 @dataclass(frozen=True)
 class AgentRunLimits:
@@ -449,22 +279,41 @@ class AgentRunLimits:
     emergency_max_model_cycles: int | None = 64
     max_model_retries: int = 5
     max_request_seconds: float = 180.0
-    max_context_tokens: int = 65_536
+    max_context_tokens: int = 200_000
     max_parallel_reads: int = 4
     max_model_output_tokens: int = 16_384
     max_finalization_seconds: float = 300.0
     max_finalization_output_tokens: int = 8_192
 
     def __post_init__(self) -> None:
-        for name, value in vars(self).items():
-            if value is None and name in {
-                "max_elapsed_seconds", "max_tool_calls", "max_model_tokens", "emergency_max_model_cycles",
-            }:
-                continue
+        for name, value in (
+            ("max_tool_calls", self.max_tool_calls),
+            ("max_model_tokens", self.max_model_tokens),
+            ("emergency_max_model_cycles", self.emergency_max_model_cycles),
+        ):
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError(f"{name} must be a positive integer")
+        for name, value in (
+            ("max_consecutive_no_progress", self.max_consecutive_no_progress),
+            ("max_model_retries", self.max_model_retries),
+            ("max_context_tokens", self.max_context_tokens),
+            ("max_parallel_reads", self.max_parallel_reads),
+            ("max_model_output_tokens", self.max_model_output_tokens),
+            ("max_finalization_output_tokens", self.max_finalization_output_tokens),
+        ):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.max_elapsed_seconds is not None and (
+            isinstance(self.max_elapsed_seconds, bool)
+            or not isfinite(self.max_elapsed_seconds) or self.max_elapsed_seconds <= 0
+        ):
+            raise ValueError("max_elapsed_seconds must be finite and positive")
+        for name, value in (
+            ("max_request_seconds", self.max_request_seconds),
+            ("max_finalization_seconds", self.max_finalization_seconds),
+        ):
             if isinstance(value, bool) or not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-            if not name.endswith("_seconds") and not isinstance(value, int):
-                raise ValueError(f"{name} must be an integer")
 
 
 @dataclass
@@ -490,9 +339,16 @@ class _RunProgress:
     working_summary: str = ""
     compacted_message_ids: set[str] = field(default_factory=set)
     read_batch_tokens: int = 12_000
+    deferred_read_calls: int = 0
+    source_content_chars: int = 0
+    source_batch_count: int = 0
+    empty_source_batch_count: int = 0
     compaction_attempts: int = 0
+    context_token_limit: int = 0
+    context_recovery_attempts: int = 0
     complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
-    model_call_observer: ModelCallObserver | None = None
+    source_read_intervals: dict[tuple[str, ...], list[tuple[int, int]]] = field(default_factory=dict)
+    model_call_observer: Any | None = None
     model_call_session_id: str | None = None
     execution_plan: ResearchExecutionPlan | None = None
     plan_update_available: bool = True
@@ -504,18 +360,31 @@ class _RunProgress:
     ) -> None:
         self.execution_plan = ResearchExecutionPlan.from_messages(messages=tuple(messages))
 
-    def accept_plan_update(self, result: ChatToolResult) -> bool:
-        """Allow one changed plan between observations without clearing a stall."""
-        if result.status is not ToolResultStatus.SUCCEEDED or not self.plan_update_available:
+    def accept_plan_update(self, result: ChatToolResult, *, request: ChatMessage) -> bool:
+        """Apply the successful tool result without replaying the trajectory."""
+        if result.status is not ToolResultStatus.SUCCEEDED:
             return False
-        candidate_steps = tuple(dict(step) for step in result.data.get("steps", ()))
-        if self.execution_plan is not None and (
-            self.execution_plan.steps == candidate_steps
-            and self.execution_plan.model_status.value == result.data["status"]
-        ):
-            return False
-        self.plan_update_available = False
-        return True
+        candidate_steps = tuple(dict(step) for step in result.data["steps"])
+        model_status = ResearchExecutionStatus(result.data["status"])
+        changed = self.execution_plan is None or (
+            self.execution_plan.steps != candidate_steps
+            or self.execution_plan.model_status is not model_status
+        )
+        self.execution_plan = ResearchExecutionPlan(
+            plan_id=sha256(f"{request.session_id}\x00{request.message_id}".encode()).hexdigest()[:20],
+            version=self.execution_plan.version + 1 if self.execution_plan else 1,
+            request=request.content[:4_000], status=model_status,
+            steps=candidate_steps, model_status=model_status,
+            explanation=result.data["explanation"],
+            blocking_reason=result.data["explanation"] if model_status in {
+                ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
+                ResearchExecutionStatus.SCIENTIFIC_REFUSAL,
+            } else None,
+        )
+        accepted = changed and self.plan_update_available
+        if accepted:
+            self.plan_update_available = False
+        return accepted
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -528,6 +397,14 @@ class _RunProgress:
         if self.limits.max_elapsed_seconds is None:
             return float("inf")
         return max(0.0, self.limits.max_elapsed_seconds - elapsed)
+
+    def remaining_research_seconds(self) -> float:
+        # Reserve part of the same deadline; do not extend the total request.
+        if self.limits.max_elapsed_seconds is None:
+            return self.remaining_seconds()
+        reserve = min(self.limits.max_finalization_seconds,
+                      self.limits.max_elapsed_seconds * 0.2)
+        return max(0.0, self.remaining_seconds() - reserve)
 
     def restore_persisted_progress(self, payload: Mapping[str, Any] | None) -> None:
         """Continue one research request with its persisted runtime budget."""
@@ -546,7 +423,7 @@ class _RunProgress:
         self.restored_elapsed_seconds = elapsed_ms / 1000.0
         for name in (
             "model_cycles", "model_tokens", "prompt_tokens", "completion_tokens",
-            "unreported_model_calls", "retry_count",
+            "unreported_model_calls", "retry_count", "context_token_limit", "context_recovery_attempts",
         ):
             setattr(self, name, max(0, int(number(name))))
         # A continuation is a new runtime slice.  A failed compaction must not
@@ -579,16 +456,17 @@ class _RunProgress:
             and self.model_cycles >= self.limits.emergency_max_model_cycles
         )
 
-    def stop_before_model(self) -> AgentCompletionReason | None:
+    def stop_before_model(self, *, allow_no_progress_recovery: bool = False) -> AgentCompletionReason | None:
         if (self.limits.emergency_max_model_cycles is not None
                 and self.model_cycles >= self.limits.emergency_max_model_cycles):
             return AgentCompletionReason.EMERGENCY_CEILING
-        if (self.remaining_seconds() <= 0
+        if (self.remaining_research_seconds() <= 0
                 or self.model_allowance_exhausted()
                 or (self.limits.max_tool_calls is not None
                     and self.executed_tool_calls >= self.limits.max_tool_calls)):
             return AgentCompletionReason.RESOURCE_BUDGET
-        if self.consecutive_no_progress >= self.limits.max_consecutive_no_progress:
+        if (self.consecutive_no_progress >= self.limits.max_consecutive_no_progress
+                and not allow_no_progress_recovery):
             return AgentCompletionReason.NO_PROGRESS
         return None
 
@@ -602,6 +480,13 @@ class _RunProgress:
 
     def observe(self, call: ChatToolCall, result: ChatToolResult) -> bool:
         data = dict(result.data)
+        # Transfer volume is diagnostic; it is not unique scientific evidence.
+        passages = (data,) if "content" in data else data.get("sources", ())
+        if result.status is ToolResultStatus.SUCCEEDED and passages:
+            chars = sum(len(item.get("content", "")) for item in passages)
+            self.source_content_chars += chars
+            self.source_batch_count += 1
+            self.empty_source_batch_count += int(chars == 0)
         has_source_observation = (
             result.status is ToolResultStatus.SUCCEEDED
             and any(ref.resource_type == "source" for ref in result.resource_refs)
@@ -624,6 +509,12 @@ class _RunProgress:
             # not justify another model cycle over the same list.
             for key in ("query", "offset", "page", "limit", "next_offset"):
                 data.pop(key, None)
+        successful_discovery = call.name == "discover_research_tools" and result.status is ToolResultStatus.SUCCEEDED
+        if successful_discovery:
+            # Reordering the same definitions does not advance the investigation.
+            for key in ("loaded_tool_names", "deferred_tool_names"):
+                data[key] = sorted(data.get(key, ()))
+            data["tools"] = sorted(data.get("tools", ()), key=lambda item: item["name"])
         # Coverage is runtime metadata added after this observation and must not
         # make an otherwise identical batch look like new source content.
         data.pop("source_coverage", None)
@@ -642,7 +533,7 @@ class _RunProgress:
             "error_code": result.error_code,
             "warnings": result.warnings,
         }
-        if not has_source_observation and not normalized_paper_list:
+        if not has_source_observation and not normalized_paper_list and not successful_discovery:
             # Distinct failed or empty searches must keep their requested scope.
             payload["arguments"] = dict(call.arguments)
         digest = sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -654,6 +545,16 @@ class _RunProgress:
         self.complete_source_identities.update(completed)
         new_resource_refs = self.resource_refs - previous_resource_refs
         observation_changed = len(self.seen_observations) > previous
+        if call.name == "search_sources" and result.status is ToolResultStatus.SUCCEEDED and data.get("matches"):
+            new_hits = False
+            for match in data["matches"]:
+                hit = {key: match.get(key) for key in (
+                    "document_id", "source_kind", "source_ref", "source_digest", "content_offset", "content",
+                )}
+                hit_digest = "search_hit:" + sha256(json.dumps(hit, sort_keys=True).encode()).hexdigest()
+                new_hits |= hit_digest not in self.seen_observations
+                self.seen_observations.add(hit_digest)
+            return new_hits
         if not has_source_observation:
             if normalized_paper_list:
                 return bool(new_resource_refs)
@@ -664,13 +565,35 @@ class _RunProgress:
         # repeated full reads.
         has_canonical_identity = bool(completed) or any(
             isinstance(item, Mapping)
+            and bool(item.get("document_id") or result.data.get("document", {}).get("document_id"))
             and all(str(item.get(key) or "").strip() for key in
-                    ("document_id", "source_kind", "source_ref", "source_digest"))
+                    ("source_kind", "source_ref", "source_digest"))
             for item in (result.data, *(result.data.get("sources") or ()))
             if isinstance(result.data, Mapping)
         )
         if has_canonical_identity:
-            return bool(new_sources) or observation_changed
+            new_coverage = bool(new_sources)
+            for item in (result.data, *(result.data.get("sources") or ())):
+                document_id = item.get("document_id") or result.data.get("document", {}).get("document_id")
+                ref = item.get("source_ref") or item.get("table_ref")
+                if not document_id or not ref or not item.get("source_digest"):
+                    continue
+                key = (document_id, str(ref), item["source_digest"])
+                start = item.get("content_offset", item.get("row_offset", 0))
+                length = len(item.get("content", "")) if "content" in item else item.get("returned_row_count", 0)
+                if length <= 0:
+                    continue
+                intervals = self.source_read_intervals.setdefault(key, [])
+                end = start + length
+                covered = start
+                for left, right in sorted(intervals):
+                    if left > covered:
+                        break
+                    if right > covered:
+                        covered = right
+                new_coverage = new_coverage or covered < end
+                intervals.append((start, end))
+            return new_coverage
         # Older/custom read capabilities may expose only a resource reference.
         # Preserve their progress semantics without weakening canonical dedupe.
         return bool(new_resource_refs) or observation_changed
@@ -703,7 +626,18 @@ class _RunProgress:
                 termination_reason,
             )
         execution_plan_record = (
-            self.execution_plan.to_record() if self.execution_plan is not None else None
+            {
+                "plan_id": self.execution_plan.plan_id,
+                "plan_version": self.execution_plan.version,
+                "request": self.execution_plan.request,
+                "status": self.execution_plan.status.value,
+                "model_status": self.execution_plan.model_status.value,
+                "explanation": self.execution_plan.explanation,
+                "steps": [dict(step) for step in self.execution_plan.steps],
+                "blocking_reason": self.execution_plan.blocking_reason,
+            }
+            if self.execution_plan is not None
+            else None
         )
         log_payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
@@ -714,6 +648,17 @@ class _RunProgress:
             "requested_tool_count": self.requested_tool_calls,
             "executed_tool_count": self.executed_tool_calls,
             "new_resource_reference_count": new_resources,
+            "source_content_chars": self.source_content_chars,
+            "source_batch_count": self.source_batch_count,
+            "empty_source_batch_count": self.empty_source_batch_count,
+            "remaining_research_seconds": (round(self.remaining_research_seconds(), 3)
+                                           if self.limits.max_elapsed_seconds is not None else None),
+            "read_batch_tokens": self.read_batch_tokens,
+            "deferred_read_calls": self.deferred_read_calls,
+            "remaining_seconds": (
+                round(self.remaining_seconds(), 3)
+                if self.limits.max_elapsed_seconds is not None else None
+            ),
             "observation_digest_changed": self.consecutive_no_progress == 0,
             "elapsed_ms": round((self.restored_elapsed_seconds + max(0.0, monotonic() - self.started_at)) * 1000),
             "model_cycles": self.model_cycles,
@@ -724,6 +669,8 @@ class _RunProgress:
             "remaining_retry_budget": max(0, self.limits.max_model_retries - self.retry_count),
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
+            "context_token_limit": self.context_token_limit,
+            "context_recovery_attempts": self.context_recovery_attempts,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
             "execution_plan": (
                 {
@@ -758,7 +705,7 @@ class AgentRunResult:
     warnings: tuple[str, ...] = ()
     pending_approval: ChatToolCall | None = None
     error_code: str | None = None
-    execution_plan: Mapping[str, Any] | None = field(init=False)
+    execution_plan: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status is AgentRunStatus.COMPLETED:
@@ -766,14 +713,6 @@ class AgentRunResult:
                 raise ValueError("completed run requires a reason and no error code")
         elif self.completion_reason is not None:
             raise ValueError("only completed runs have a completion reason")
-        plan = ResearchExecutionPlan.from_messages(
-            messages=self.messages,
-            run_status=self.status,
-            completion_reason=self.completion_reason,
-            error_code=self.error_code,
-            pending_approval=self.pending_approval,
-        )
-        object.__setattr__(self, "execution_plan", plan.to_record() if plan is not None else None)
 
 class ResearchAgentRunner:
     def __init__(
@@ -801,7 +740,7 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
+        model_call_observer: Any | None = None,
         context_checkpoint: Mapping[str, Any] | None = None,
     ) -> AgentRunResult:
         # Normalize the caller policy before creating any trajectory state. A
@@ -827,14 +766,43 @@ class ResearchAgentRunner:
         ]
         active_user_message_id = messages[-1].message_id
         progress.active_user_message_id = active_user_message_id
-        if (
-            context_checkpoint
-            and context_checkpoint.get("user_message_id") == active_user_message_id
-            and set(context_checkpoint.get("compacted_message_ids", ())).issubset(
-                message.message_id for message in previous_messages
-            )
-        ):
-            progress.restore_persisted_progress({"context_checkpoint": context_checkpoint})
+        prior_ids = {message.message_id for message in previous_messages}
+        prior_user_id = next((message.message_id for message in reversed(previous_messages)
+                              if message.role is ChatMessageRole.USER), None)
+        if (context_checkpoint and prior_user_id is not None
+                and context_checkpoint.get("user_message_id") == prior_user_id
+                and all(message.session_id == context.session_id for message in previous_messages)):
+            try:
+                notes = ResearchWorkingNotesModelOutput.model_validate_json(
+                    context_checkpoint.get("working_summary", ""))
+                if any(set(check.basis_message_ids) - prior_ids for check in notes.checks):
+                    raise ValueError("historical note cites an unknown message")
+            except (ValueError, TypeError):
+                logger.warning("Ignoring invalid historical notes; full trajectory remains available")
+            else:
+                progress.working_summary = notes.model_copy(update={
+                    "scope": "Historical observations only; the current user request determines scope.",
+                    "next_actions": [],
+                }).model_dump_json()
+        prior_plan = (ResearchExecutionPlan.from_messages(messages=previous_messages)
+                      if prior_user_id is not None else None)
+        if (prior_plan is not None and prior_plan.model_status is ResearchExecutionStatus.IN_PROGRESS
+                and prior_user_id is not None
+                and all(message.session_id == context.session_id for message in previous_messages)):
+            pending = [step["action"] for step in prior_plan.steps if step["status"] != "completed"]
+            if pending:
+                notes = (ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)
+                         if progress.working_summary else ResearchWorkingNotesModelOutput(
+                             scope="Historical context; the current user request determines scope.",
+                             checks=[], next_actions=[]))
+                pending_check = ResearchWorkingCheckModelOutput(
+                    statement=("Unfinished previous request: " + "; ".join(pending))[:1200],
+                    conditions="Runtime work only; not scientific evidence.",
+                    basis_message_ids=[prior_user_id], unresolved=prior_plan.explanation[:1000])
+                progress.working_summary = notes.model_copy(update={
+                    "checks": [*notes.checks[:15], pending_check], "next_actions": [],
+                }).model_dump_json()
+        # New requests retain raw history and receive fresh counters and plan scope.
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
         progress.refresh_execution_plan(messages)
@@ -860,7 +828,7 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
+        model_call_observer: Any | None = None,
         continuation_progress: Mapping[str, Any] | None = None,
     ) -> AgentRunResult:
         progress = _RunProgress(
@@ -929,8 +897,19 @@ class ResearchAgentRunner:
             )
         calls[-1] = call
         results.append(result)
-        messages.append(self._result_message(context, result))
-        progress.refresh_execution_plan(messages)
+        messages.append(
+            ChatMessage(
+                message_id=ResearchAgentRunner._message_id(),
+                session_id=context.session_id,
+                role=ChatMessageRole.TOOL,
+                content=json.dumps(
+                    asdict(result), ensure_ascii=True, separators=(",", ":")
+                ),
+                created_at=_now_iso(),
+                tool_call_id=result.tool_call_id,
+                tool_result=result,
+            )
+        )
         await self._checkpoint(checkpoint, messages, calls, results)
         return await self._continue(
             context,
@@ -956,7 +935,7 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
+        model_call_observer: Any | None = None,
         continuation_progress: Mapping[str, Any] | None = None,
         permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AgentRunResult:
@@ -984,7 +963,19 @@ class ResearchAgentRunner:
             next_calls.append(tool_call)
         if not any(item.tool_call_id == tool_result.tool_call_id for item in next_results):
             next_results.append(tool_result)
-        messages.append(self._result_message(context, tool_result))
+        messages.append(
+            ChatMessage(
+                message_id=ResearchAgentRunner._message_id(),
+                session_id=context.session_id,
+                role=ChatMessageRole.TOOL,
+                content=json.dumps(
+                    asdict(tool_result), ensure_ascii=True, separators=(",", ":")
+                ),
+                created_at=_now_iso(),
+                tool_call_id=tool_result.tool_call_id,
+                tool_result=tool_result,
+            )
+        )
         progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, next_calls, next_results)
         return await self._continue(
@@ -1010,8 +1001,15 @@ class ResearchAgentRunner:
         permission_mode: ToolPermissionMode | str,
         progress: _RunProgress,
     ) -> AgentRunResult:
+        disposition_retries = 0
+        stall_recovery_attempted = False
         while True:
             stop_reason = progress.stop_before_model()
+            recovering_stall = stop_reason is AgentCompletionReason.NO_PROGRESS and not stall_recovery_attempted
+            if recovering_stall:
+                stall_recovery_attempted = True
+                progress.trace(context, phase="no_progress_recovery")
+                stop_reason = None
             if stop_reason is not None:
                 return await self._finalize_with_current_evidence(
                     stop_reason, progress, context, messages, calls, results,
@@ -1020,7 +1018,7 @@ class ResearchAgentRunner:
             response_retries = 0
             non_streaming_retry = False
             while True:
-                stop_reason = progress.stop_before_model()
+                stop_reason = progress.stop_before_model(allow_no_progress_recovery=recovering_stall)
                 if stop_reason is not None:
                     return await self._finalize_with_current_evidence(
                         stop_reason, progress, context, messages, calls, results,
@@ -1055,10 +1053,16 @@ class ResearchAgentRunner:
                         ",".join(tool_names) or "none",
                     )
                     decision_messages = tuple(messages)
+                    successful = capability_policy.active_successful_results_by_name(messages)
+                    # Browsing identities remain usable when the researcher continues
+                    # a request; scientific prerequisites still use their original scope.
+                    successful["browse_collection_papers"] = capability_policy._successful_results_by_name(messages).get(
+                        "browse_collection_papers", []
+                    )
                     stage_content = capability_policy.stage_instruction(
                         tool_names,
                         calls,
-                        successful_results=capability_policy.active_successful_results_by_name(messages),
+                        successful_results=successful,
                         prior_experiment_draft=next(iter(reversed(
                             capability_policy._successful_results_by_name(messages).get("propose_paper_experiment_draft", ())
                         )), None),
@@ -1088,20 +1092,41 @@ class ResearchAgentRunner:
                                 budget_exhausted=False,
                             ),
                         )
-                    turn = await self._respond(
-                        replace(
-                            await self._prepare_model_context(
-                                decision_messages, tool_specs, progress, active_user_message_id=next(
-                                    message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
-                                ),
-                            ),
-                            require_tool_call=False,
+                    active_plan = (progress.execution_plan is not None
+                                   and progress.execution_plan.model_status is ResearchExecutionStatus.IN_PROGRESS)
+                    if active_plan and disposition_retries:
+                        decision_messages = (*decision_messages, ChatMessage.user(
+                            message_id=self._message_id(), session_id=context.session_id,
+                            content=("The current execution plan is still in progress. Continue the available "
+                                     "checks, or update_execution_plan to completed, waiting_for_clarification, "
+                                     "or scientific_refusal before a final answer. Do not only announce a "
+                                     "future read. Unknown evidence may justify a limited answer; a tool "
+                                     "failure is not scientific absence."), created_at=_now_iso()))
+                    if recovering_stall:
+                        decision_messages = (*decision_messages, ChatMessage.user(
+                            message_id=self._message_id(), session_id=context.session_id,
+                            content=(
+                                "[STALLED EXECUTION: CORRECTION]\n"
+                                "The requested work remains incomplete: the recent action batches produced "
+                                "no new observations. Tools remain available "
+                                "for this correction. Resolve an unfinished check with an available operation "
+                                "instead of rediscovering loaded tools, repeating an already-read page, or "
+                                "restating the plan. Use the reading ledger for known sections and pending reads. "
+                                "If no useful operation remains, record the actual plan disposition and explain "
+                                "the evidence gap. Recent actions:\n"
+                                + json.dumps([{"tool": call.name, "arguments": dict(call.arguments),
+                                               "status": call.status} for call in calls[-3:]], ensure_ascii=False)
+                            ), created_at=_now_iso()))
+                    turn = await self._model_turn(
+                        decision_messages, tool_specs, progress,
+                        None if non_streaming_retry or active_plan else text_delta_callback,
+                        active_user_message_id=next(
+                            message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                         ),
-                        tool_specs, progress,
-                        None if non_streaming_retry else text_delta_callback,
+                        allow_no_progress_recovery=recovering_stall,
                     )
                 except ModelResponseError as exc:
-                    if exc.reason == "model_allowance_exhausted":
+                    if exc.reason == "model_allowance_exhausted" or progress.remaining_research_seconds() <= 0:
                         return await self._finalize_with_current_evidence(
                             AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
                             checkpoint=checkpoint, text_delta_callback=text_delta_callback,
@@ -1122,19 +1147,22 @@ class ResearchAgentRunner:
                         exc.retryable
                         and not exc.partial_content
                         and progress.retry_count < self.limits.max_model_retries
-                        and progress.remaining_seconds() > 0
+                        and progress.remaining_research_seconds() > 0
                     ):
                         response_retries += 1
                         progress.retry_count += 1
-                        if exc.reason in {"invalid_stream", "stream_tool_arguments_missing"}:
+                        if exc.reason in {"invalid_stream", "stream_tool_arguments_missing",
+                                          "http_status", "provider_timeout", "transport_error",
+                                          "transient_provider_error"}:
                             non_streaming_retry = True
-                        delay = min(0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1),
-                                    progress.remaining_seconds())
+                        backoff = 0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1)
+                        delay = min(max(backoff, exc.retry_after_seconds or 0.0), progress.remaining_research_seconds())
                         progress.trace(
                             context,
                             phase="model_retry",
                             retry_attempt=response_retries,
                             retry_reason=exc.reason,
+                            http_status=exc.http_status,
                             retry_delay_ms=round(delay * 1000),
                         )
                         logger.info(
@@ -1169,20 +1197,25 @@ class ResearchAgentRunner:
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
                     error_code = _permission_denial_code(results) or (
-                        exc.reason if exc.reason.startswith(("research_", "context_"))
-                        else "model_response_invalid"
+                        exc.reason if exc.reason.startswith(("research_", "context_")) or exc.reason == "provider_timeout"
+                        else "model_unavailable" if exc.reason in {
+                            "http_status", "transport_error", "quota_exhausted",
+                            "transient_provider_error", "unclassified_provider_error",
+                        } else "model_response_invalid"
                     )
                     progress.trace(context, phase="terminal", termination_reason=error_code,
-                                   run_status=AgentRunStatus.FAILED)
+                                   run_status=AgentRunStatus.FAILED,
+                                   retry_reason=exc.reason, http_status=exc.http_status)
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
                         calls,
                         results,
                         error_code,
+                        execution_plan=progress.execution_plan,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    if progress.remaining_seconds() <= 0:
+                    if progress.remaining_research_seconds() <= 0:
                         return await self._finalize_with_current_evidence(
                             AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
                             checkpoint=checkpoint, text_delta_callback=text_delta_callback,
@@ -1191,41 +1224,10 @@ class ResearchAgentRunner:
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
                     )
-                    failure = _provider_failure_details(exc)
                     logger.warning(
-                        "Research Agent model call failed model=%s details=%s",
-                        model_name, json.dumps(failure, separators=(",", ":")),
+                        "Research Agent model call failed model=%s exception_type=%s",
+                        model_name, type(exc).__name__,
                     )
-                    if (
-                        failure["retryable"]
-                        and progress.retry_count < self.limits.max_model_retries
-                        and progress.remaining_seconds() > 0
-                    ):
-                        response_retries += 1
-                        progress.retry_count += 1
-                        # A provider can reject only the SSE transport while
-                        # accepting the same request as a normal completion.
-                        # Retry once without streaming before consuming the
-                        # remaining provider budget.
-                        non_streaming_retry = True
-                        retry_after = failure.get("retry_after_seconds")
-                        backoff = 0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1)
-                        delay = min(max(backoff, float(retry_after or 0.0)), progress.remaining_seconds())
-                        progress.trace(
-                            context,
-                            phase="model_retry",
-                            retry_attempt=response_retries,
-                            retry_reason=failure["reason"], http_status=failure["http_status"],
-                            retry_delay_ms=round(delay * 1000),
-                        )
-                        logger.info(
-                            "Retrying Research Agent provider response model=%s "
-                            "attempt=%d",
-                            model_name,
-                            response_retries + 1,
-                        )
-                        await sleep(delay)
-                        continue
                     write_completion = await self._complete_after_successful_write_response_failure(
                         context,
                         messages,
@@ -1234,11 +1236,10 @@ class ResearchAgentRunner:
                         progress,
                         checkpoint=checkpoint,
                         phase="terminal",
-                        technical_reason=failure["reason"],
+                        technical_reason="unclassified_provider_error",
                     )
                     if write_completion is not None:
                         return write_completion
-                    provider_timeout = failure["reason"] == "provider_timeout"
                     messages.append(
                         self._assistant(
                             context,
@@ -1254,10 +1255,8 @@ class ResearchAgentRunner:
                         context,
                         phase="terminal",
                         run_status=AgentRunStatus.FAILED,
-                        termination_reason=(
-                            "provider_timeout" if provider_timeout else "model_unavailable"
-                        ),
-                        retry_reason=failure["reason"], http_status=failure["http_status"],
+                        termination_reason="model_unavailable",
+                        retry_reason="unclassified_provider_error",
                     )
                     return self._result(
                         AgentRunStatus.FAILED,
@@ -1265,11 +1264,22 @@ class ResearchAgentRunner:
                         calls,
                         results,
                         _permission_denial_code(results)
-                        or ("provider_timeout" if provider_timeout else "model_unavailable"),
+                        or "model_unavailable",
+                        execution_plan=progress.execution_plan,
                     )
                 break
 
             if not turn.tool_calls:
+                if (progress.execution_plan is not None
+                        and progress.execution_plan.model_status is ResearchExecutionStatus.IN_PROGRESS
+                        and progress.stop_before_model() is None):
+                    if disposition_retries == 0:
+                        disposition_retries += 1
+                        progress.trace(context, phase="plan_disposition_required")
+                        continue
+                    return await self._finalize_with_current_evidence(
+                        AgentCompletionReason.NO_PROGRESS, progress, context, messages, calls, results,
+                        checkpoint=checkpoint, text_delta_callback=text_delta_callback)
                 progress.trace(context, phase="model", capability_names=tool_names)
                 reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
                 messages.append(
@@ -1298,6 +1308,7 @@ class ResearchAgentRunner:
                     error_code=permission_error,
                     completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
                     warnings=(_INCOMPLETE_SCOPE_WARNING,) if reason is not AgentCompletionReason.MODEL_ANSWER else (),
+                    execution_plan=progress.execution_plan,
                 )
 
             requested = self._requested_calls(
@@ -1331,6 +1342,7 @@ class ResearchAgentRunner:
                         calls,
                         results,
                         completion_reason=AgentCompletionReason.MODEL_ANSWER,
+                        execution_plan=progress.execution_plan,
                     )
                 return await self._finalize_with_current_evidence(
                     AgentCompletionReason.MODEL_ANSWER,
@@ -1347,7 +1359,7 @@ class ResearchAgentRunner:
             batch_start = len(calls)
             calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
-            stop_reason = progress.stop_before_model()
+            stop_reason = progress.stop_before_model(allow_no_progress_recovery=recovering_stall)
             budget_limited_batch = (
                 self.limits.max_tool_calls is not None
                 and progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls
@@ -1452,14 +1464,13 @@ class ResearchAgentRunner:
             elif len(requested) == 1 and capability_policy.evaluate_authorization(requested[0][0].risk).requires_approval:
                 pending = requested[0][0].require_approval()
                 calls[-1] = pending
-                progress.refresh_execution_plan(messages)
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.trace(context, phase="terminal", termination_reason="approval_required",
                                run_status=AgentRunStatus.APPROVAL_REQUIRED)
-                return AgentRunResult(
-                    status=AgentRunStatus.APPROVAL_REQUIRED,
-                    messages=tuple(messages), tool_calls=tuple(calls),
-                    tool_results=tuple(results), pending_approval=pending,
+                return self._result(
+                    AgentRunStatus.APPROVAL_REQUIRED, messages, calls, results,
+                    pending_approval=pending,
+                    execution_plan=progress.execution_plan,
                 )
             else:
                 requested = tuple((call.start(_now_iso()), handler) for call, handler in requested)
@@ -1486,15 +1497,31 @@ class ResearchAgentRunner:
                         **dict(capability_result.data), "source_coverage": coverage,
                     })
                 results.append(capability_result)
-                messages.append(self._result_message(context, capability_result))
+                messages.append(
+                    ChatMessage(
+                        message_id=ResearchAgentRunner._message_id(),
+                        session_id=context.session_id,
+                        role=ChatMessageRole.TOOL,
+                        content=json.dumps(
+                            asdict(capability_result),
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        ),
+                        created_at=_now_iso(),
+                        tool_call_id=capability_result.tool_call_id,
+                        tool_result=capability_result,
+                    )
+                )
                 if call.name == "update_execution_plan":
-                    plan_update_accepted = progress.accept_plan_update(capability_result) or plan_update_accepted
+                    plan_update_accepted = progress.accept_plan_update(
+                        capability_result, request=next(message for message in reversed(messages) if message.role is ChatMessageRole.USER),
+                    ) or plan_update_accepted
                 else:
                     progress_increased = progress.observe(call, capability_result) or progress_increased
-            progress.refresh_execution_plan(messages)
             if progress_increased:
                 progress.consecutive_no_progress = 0
                 progress.plan_update_available = True
+                stall_recovery_attempted = False
             elif not plan_update_accepted:
                 progress.consecutive_no_progress = prior_no_progress + 1
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -1508,6 +1535,56 @@ class ResearchAgentRunner:
                     checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                 )
 
+    async def _model_turn(
+        self, messages: tuple[ChatMessage, ...], tool_specs: tuple[ToolSpec, ...],
+        progress: _RunProgress, text_delta_callback: Callable[[str], None] | None,
+        *, active_user_message_id: str, finalizing: bool = False,
+        allow_no_progress_recovery: bool = False,
+    ) -> ModelTurn:
+        """Build and send one decision, shrinking only rejected context without replaying tools."""
+        max_context_recoveries = 2
+        context_shrink_ratio = 0.8
+        rejected: tuple[int, ModelResponseError] | None = None
+        while True:
+            model_context = await self._prepare_model_context(
+                messages, tool_specs, progress, active_user_message_id=active_user_message_id,
+            )
+            request_tokens = self.context_builder.estimate_tokens({
+                "messages": model_context.provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
+                "tools": [spec.model_schema() for spec in tool_specs],
+            })
+            # A smaller configured window is not enough: the actual payload must shrink.
+            try:
+                if rejected is not None and request_tokens >= rejected[0]:
+                    # Try the next smaller budget without resending the same payload.
+                    raise rejected[1]
+                return await self._respond(model_context, tool_specs, progress, text_delta_callback,
+                                           finalizing=finalizing)
+            except ModelResponseError as exc:
+                if (exc.reason != "context_window_exceeded" or exc.partial_content
+                        or progress.context_recovery_attempts >= max_context_recoveries
+                        or progress.retry_count >= self.limits.max_model_retries
+                        or (progress.remaining_seconds() if finalizing else progress.remaining_research_seconds()) <= 0
+                        or (not finalizing and progress.stop_before_model(
+                            allow_no_progress_recovery=allow_no_progress_recovery) is not None)):
+                    raise
+                previous_limit = self._effective_context_tokens(progress)
+                reduced_limit = int(min(
+                    previous_limit, request_tokens + self.limits.max_model_output_tokens,
+                ) * context_shrink_ratio)
+                if reduced_limit <= self.limits.max_model_output_tokens + 2048:
+                    raise
+                progress.context_token_limit = reduced_limit
+                progress.context_recovery_attempts += 1
+                progress.retry_count += 1
+                rejected = request_tokens, exc
+                logger.info(
+                    "Research context recovery attempt=%d previous_limit=%d context_limit=%d rejected_input_tokens=%d",
+                    progress.context_recovery_attempts, previous_limit, reduced_limit, request_tokens,
+                )
+                progress.trace(AgentContext(messages[0].session_id, "", ""), phase="context_recovery",
+                               retry_attempt=progress.context_recovery_attempts, retry_reason=exc.reason)
+
     async def _respond(
         self,
         model_context: ChatModelContext,
@@ -1517,7 +1594,8 @@ class ResearchAgentRunner:
         *,
         finalizing: bool = False,
     ) -> ModelTurn:
-        timeout = min(progress.remaining_seconds(), self.limits.max_request_seconds)
+        timeout = min(progress.remaining_seconds() if finalizing else progress.remaining_research_seconds(),
+                      self.limits.max_request_seconds)
         output_limit = self.limits.max_model_output_tokens
         if self.limits.max_model_tokens is not None:
             output_limit = min(output_limit, self.limits.max_model_tokens - progress.model_tokens)
@@ -1536,7 +1614,7 @@ class ResearchAgentRunner:
         )
         model_context = replace(
             model_context,
-            max_context_tokens=self._effective_context_tokens(),
+            max_context_tokens=self._effective_context_tokens(progress),
             model_call_observer=progress.model_call_observer,
             model_call_purpose=purpose,
             model_call_response_message_id=(
@@ -1549,12 +1627,9 @@ class ResearchAgentRunner:
             "messages": model_context.provider_messages(prompt),
             "tools": [spec.model_schema() for spec in tool_specs],
         })
-        if request_tokens + output_limit + 1024 > self.limits.max_context_tokens:
-            raise ModelResponseError("Model request exceeds its context window.",
-                                     reason="context_window_exceeded", retryable=False)
         if not model_context.compacting:
             progress.read_batch_tokens = max(1024, min(16_000,
-                self.limits.max_context_tokens - request_tokens - output_limit - 4096))
+                model_context.max_context_tokens - request_tokens - output_limit - 4096))
         arguments: dict[str, Any] = {
             "context": model_context,
             "tool_specs": tool_specs,
@@ -1580,7 +1655,14 @@ class ResearchAgentRunner:
             turn = await wait_for(self.model.respond(**arguments), timeout=timeout)
         except ModelResponseError as exc:
             progress.record_model_usage(exc.usage)
+            exc.partial_content = exc.partial_content or visible_content
             raise
+        except TimeoutError as exc:
+            progress.record_model_usage(None)
+            raise ModelResponseError(
+                "The model request timed out.", reason="provider_timeout",
+                partial_content=visible_content,
+            ) from exc
         except BaseException as exc:
             # Cancellation may prevent the provider's usage trailer from arriving.
             progress.record_model_usage(None)
@@ -1598,159 +1680,147 @@ class ResearchAgentRunner:
         progress: _RunProgress, *, active_user_message_id: str,
     ) -> ChatModelContext:
         """Compact old operations into provisional notes; the durable trajectory stays intact."""
-        execution_plan = progress.execution_plan.to_record() if progress.execution_plan else None
-        overhead = self.context_builder.estimate_tokens({
-            "messages": ChatModelContext((), execution_plan=execution_plan).provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
-            "tools": [spec.model_schema() for spec in tool_specs],
-        })
-        context_limit = self._effective_context_tokens()
-        input_budget = context_limit - self.limits.max_model_output_tokens - overhead - 2048
-        if tool_specs:
-            input_budget -= min(16_000, max(0, input_budget // 3))
-        prior_reading = self._prior_source_reading(
-            messages, active_user_message_id=active_user_message_id,
-            max_tokens=min(4500, max(256, input_budget // 8)),
+        execution_plan = (
+            {
+                "plan_id": progress.execution_plan.plan_id,
+                "plan_version": progress.execution_plan.version,
+                "request": progress.execution_plan.request,
+                "status": progress.execution_plan.status.value,
+                "model_status": progress.execution_plan.model_status.value,
+                "explanation": progress.execution_plan.explanation,
+                "steps": [dict(step) for step in progress.execution_plan.steps],
+                "blocking_reason": progress.execution_plan.blocking_reason,
+            }
+            if progress.execution_plan
+            else None
+        )
+        context_limit = self._effective_context_tokens(progress)
+        input_budget = self.context_builder.input_budget(
+            context_limit=context_limit, output_limit=self.limits.max_model_output_tokens,
+            system_prompt=RESEARCH_AGENT_SYSTEM_PROMPT,
+            tool_schemas=[spec.model_schema() for spec in tool_specs], execution_plan=execution_plan,
+        )
+        prior_reading = self._source_reading(
+            messages, max_tokens=min(4500, max(256, input_budget // 8)),
         )
         if prior_reading:
             input_budget -= self.context_builder.estimate_tokens(prior_reading) + 200
-        available = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
-        try:
-            view = self.context_builder.for_model(
-                available, active_user_message_id=active_user_message_id,
-                max_input_tokens=input_budget, working_summary=progress.working_summary,
-            )
-        except ValueError as exc:
-            raise ModelResponseError("Pinned research context exceeds the context window.",
-                                     reason="context_window_exceeded", retryable=False) from exc
-        view = replace(view, prior_reading_summary=prior_reading, execution_plan=execution_plan)
-        kept = {message.message_id for message in view.messages}
-        omitted = tuple(message for message in available if message.message_id not in kept)
+        if progress.working_summary:
+            progress.working_summary = self._bounded_working_notes(
+                ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary),
+                max_tokens=min(6000, input_budget // 3),
+            ).model_dump_json()
         active = next(message for message in messages if message.message_id == active_user_message_id)
-        units = list(self.context_builder._protocol_units(omitted))
-        while units:
+        while True:
+            available = tuple(message for message in messages
+                              if message.message_id not in progress.compacted_message_ids)
+            try:
+                view = self.context_builder.for_model(
+                    available, active_user_message_id=active_user_message_id,
+                    max_input_tokens=input_budget, working_summary=progress.working_summary,
+                )
+            except ValueError as exc:
+                raise ModelResponseError("Pinned research context exceeds the context window.",
+                                         reason="context_window_exceeded", retryable=False) from exc
+            retained = {message.message_id for message in view.messages}
+            units = [unit for unit in self.context_builder._protocol_units(available)
+                     if unit[0].message_id not in retained]
+            if not units:
+                return replace(view, max_context_tokens=context_limit,
+                               prior_reading_summary=prior_reading, execution_plan=execution_plan)
             if progress.compaction_attempts >= 3:
                 raise ModelResponseError("Research context could not be compacted without repeated retries.",
                                          reason="context_compaction_unavailable", retryable=False)
-            if (
-                len(units) > _MAX_MODEL_COMPACTION_UNITS
-                or bool(progress.compacted_message_ids)
-                or progress.remaining_seconds() <= _MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION
-            ):
-                # Long recoveries must leave time for the requested read,
-                # comparison, or write. The archive is intentionally raw
-                # runtime state, not a scientific summary or authorization.
-                archived = [message for unit in units for message in unit]
-                progress.working_summary = self._fallback_working_notes(
-                    active, archived, max_tokens=min(6000, input_budget // 3),
-                ).model_dump_json()
-                progress.compacted_message_ids.update(
-                    message.message_id for message in archived
-                )
-                progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
-                units = []
-                continue
-            batch: list[ChatMessage] = []
-            for unit in units:
-                candidate = ChatModelContext((active, *batch, *unit), compacting=True,
-                                             working_summary=progress.working_summary,
-                                             execution_plan=execution_plan,
-                                             active_user_message_id=active_user_message_id)
-                tokens = self.context_builder.estimate_tokens(candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT))
-                if tokens + 8192 + 2048 > context_limit:
-                    # A completed write may contain the full PaperExperiment
-                    # or Finding payload. Keep its durable message untouched,
-                    # but give compaction a bounded protocol copy when the
-                    # original unit alone cannot fit. This preserves tool-call
-                    # identity and resource refs without replaying scientific
-                    # payloads into the provider request.
-                    if not batch:
-                        projected = self.context_builder.compact_protocol_unit(
-                            unit,
-                            max_tokens=min(8_000, max(1_024, context_limit - 12_288)),
-                        )
-                        projected_candidate = ChatModelContext(
-                            (active, *projected), compacting=True,
-                            working_summary=progress.working_summary,
-                            execution_plan=execution_plan,
-                            active_user_message_id=active_user_message_id,
-                        )
-                        projected_tokens = self.context_builder.estimate_tokens(
-                            projected_candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT)
-                        )
-                        if projected_tokens + 8192 + 2048 <= context_limit:
-                            batch.extend(projected)
-                            continue
-                    break
-                batch.extend(unit)
-            if not batch:
-                raise ModelResponseError("One research observation exceeds the context window.",
-                                         reason="context_window_exceeded", retryable=False)
-            progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
-            compaction_messages = (active, *batch)
-            progress.compaction_attempts += 1
-            summary = None
+            notes_budget = min(6000, input_budget // 3)
             try:
-                compacted = await self._respond(
-                    ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
-                                     execution_plan=execution_plan,
-                                     active_user_message_id=active_user_message_id),
-                    (), progress, None,
+                batch = self.context_builder.compaction_batch(
+                    active, units, context_limit=context_limit,
+                    system_prompt=RESEARCH_COMPACTION_SYSTEM_PROMPT,
+                    working_summary=progress.working_summary, execution_plan=execution_plan,
                 )
-                if compacted.tool_calls:
-                    raise ValueError("compaction cannot request tools")
-                notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
-                allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
-                if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
-                    raise ValueError("working note cites an unobserved message")
-                summary = self._bounded_working_notes(
-                    notes, max_tokens=min(6000, input_budget // 3),
-                ).model_dump_json()
-            except (ModelResponseError, ValueError) as exc:
-                # Working notes are runtime memory, not scientific evidence.
-                # If the provider cannot produce the optional JSON, retain a
-                # bounded, message-ID-backed record instead of turning a
-                # formatting/provider issue into a terminal research failure.
-                logger.warning(
-                    "Research context compaction fell back to archived records reason=%s",
-                    getattr(exc, "reason", type(exc).__name__),
-                )
-                summary = self._fallback_working_notes(
-                    active, batch, max_tokens=min(6000, input_budget // 3),
-                ).model_dump_json()
-            # A successful compaction closes this failure streak. The counter
-            # guards consecutive failed attempts, not the lifetime of a long
-            # investigation; otherwise later evidence would be forced into a
-            # stale recent-only view after three successful compactions.
-            progress.compaction_attempts = 0
+            except ValueError as exc:
+                raise ModelResponseError(str(exc), reason="context_window_exceeded", retryable=False) from exc
+            summary = await self._compact_working_notes(
+                active, batch, progress, notes_budget=notes_budget, execution_plan=execution_plan,
+            )
+            # Publish notes and retired IDs together, only after building the replacement.
             progress.working_summary = summary
             progress.compacted_message_ids.update(message.message_id for message in batch)
+            progress.compaction_attempts = 0
             progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
-            units = [unit for unit in units if unit[0].message_id not in progress.compacted_message_ids]
-        view = self.context_builder.for_model(
-            tuple(message for message in messages if message.message_id not in progress.compacted_message_ids),
-            active_user_message_id=active_user_message_id, max_input_tokens=input_budget,
-            working_summary=progress.working_summary,
-        )
-        # Lineage is derived from the complete archived history, not model notes.
-        retained = {message.message_id for message in view.messages}
-        remaining = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
-        if any(unit[0].message_id not in retained for unit in self.context_builder._protocol_units(remaining)):
-            return await self._prepare_model_context(messages, tool_specs, progress,
-                                                     active_user_message_id=active_user_message_id)
-        return replace(view, max_context_tokens=context_limit,
-                       prior_reading_summary=prior_reading, execution_plan=execution_plan)
 
-    def _effective_context_tokens(self) -> int:
-        return max(1_024, self.limits.max_context_tokens - _CONTEXT_SAFETY_MARGIN_TOKENS)
-
-    def _prior_source_reading(
-        self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
-        active_user_message_id: str, max_tokens: int,
+    async def _compact_working_notes(
+        self, active: ChatMessage, batch: list[ChatMessage], progress: _RunProgress,
+        *, notes_budget: int, execution_plan: Mapping[str, Any] | None,
     ) -> str:
-        """Retain bounded reading facts across turns without granting current write authority."""
-        active_index = next(index for index, message in enumerate(messages)
-                            if message.message_id == active_user_message_id)
-        prior = messages[:active_index]
+        progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
+        compaction_messages = (active, *batch)
+        progress.compaction_attempts += 1
+        summary = None
+        try:
+            compacted = await self._respond(
+                ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
+                                 execution_plan=execution_plan,
+                                 active_user_message_id=active.message_id),
+                (), progress, None,
+            )
+            if compacted.tool_calls:
+                raise ValueError("compaction cannot request tools")
+            try:
+                notes_json = extract_json_object(compacted.content)
+            except RuntimeError as exc:
+                raise ValueError("compaction returned no JSON object") from exc
+            notes = ResearchWorkingNotesModelOutput.model_validate_json(notes_json)
+            allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
+            if progress.working_summary:
+                previous = ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)
+                allowed_ids.update(identity for check in previous.checks for identity in check.basis_message_ids)
+            if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
+                raise ValueError("working note cites an unobserved message")
+            if progress.working_summary:
+                previous = ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)
+                covered = {identity for check in notes.checks for identity in check.basis_message_ids}
+                retained = [check for check in previous.checks if not set(check.basis_message_ids) <= covered]
+                if retained:
+                    combined = [*retained, *notes.checks]
+                    if len(combined) > 16:
+                        combined = [*retained[:8], *notes.checks[-8:]]
+                        notes.next_actions = [_WORKING_NOTES_LOSS_NOTICE, *notes.next_actions[:7]]
+                    notes.checks = combined
+            summary = self._bounded_working_notes(
+                notes, max_tokens=notes_budget,
+            ).model_dump_json()
+        except (ModelResponseError, ValueError) as exc:
+            if isinstance(exc, ModelResponseError) and exc.reason not in {
+                "context_window_exceeded", "output_token_limit", "empty_response",
+                "invalid_response_shape", "reasoning_only_response", "invalid_stream",
+            }:
+                raise
+            # Working notes are runtime memory, not scientific evidence.
+            # If the provider cannot produce the optional JSON, retain a
+            # bounded, message-ID-backed record instead of turning a
+            # formatting/provider issue into a terminal research failure.
+            logger.warning(
+                "Research context compaction fell back to archived records reason=%s",
+                getattr(exc, "reason", type(exc).__name__),
+            )
+            summary = self._fallback_working_notes(
+                active, batch, max_tokens=notes_budget, working_summary=progress.working_summary,
+            ).model_dump_json()
+        return summary
+
+    def _effective_context_tokens(self, progress: _RunProgress | None = None) -> int:
+        # Local token estimates differ from the provider's serialized request.
+        provider_safety_margin_tokens = 4_096
+        configured = max(1_024, self.limits.max_context_tokens - provider_safety_margin_tokens)
+        return min(configured, progress.context_token_limit) if progress and progress.context_token_limit else configured
+
+    def _source_reading(
+        self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
+        max_tokens: int,
+    ) -> str:
+        """Rebuild attributed excerpts from actual reads, including compacted current reads."""
+        prior = messages
         names = {call.tool_call_id: call.name for message in prior for call in message.tool_calls}
         results: dict[str, list[Mapping[str, Any]]] = {}
         sources = []
@@ -1766,7 +1836,8 @@ class ResearchAgentRunner:
                 sources.extend({**source, "document_id": document_id} for source in result.data.get("sources", ())
                                if isinstance(source, Mapping))
             elif name == "inspect_table":
-                sources.append({**result.data, "source_kind": "table", "source_ref": result.data.get("table_ref")})
+                sources.append({**result.data, "source_kind": "table", "source_ref": result.data.get("table_ref"),
+                                "content": result.data.get("table_markdown", "")})
             else:
                 sources.append(result.data)
         completed = capability_policy.complete_source_reads(results)
@@ -1783,7 +1854,8 @@ class ResearchAgentRunner:
             content = source.get("content")
             if isinstance(content, str) and content:
                 record.update(excerpt=content[:1600], excerpt_truncated=len(content) > 1600)
-            documents.setdefault(identity[0], {}).setdefault(identity, record)
+            documents.setdefault(identity[0], {}).setdefault(
+                (*identity, str(source.get("content_offset", source.get("row_offset", 0)))), record)
         payload: dict[str, Any] = {"papers": [], "omitted_paper_count": len(documents)}
 
         def fits() -> bool:
@@ -1822,81 +1894,92 @@ class ResearchAgentRunner:
         self, notes: ResearchWorkingNotesModelOutput, *, max_tokens: int,
     ) -> ResearchWorkingNotesModelOutput:
         """Keep validated navigation notes within their reserved context space."""
-        checks = [ResearchWorkingCheckModelOutput(
-            statement=check.statement[:600],
-            conditions=check.conditions[:400],
-            basis_message_ids=check.basis_message_ids[:8],
-            unresolved=check.unresolved[:400],
-        ) for check in notes.checks]
-        next_actions = [str(action)[:400] for action in notes.next_actions[:8]]
-        candidate = ResearchWorkingNotesModelOutput(
-            scope=notes.scope[:1000], checks=checks, next_actions=next_actions,
-        )
-        while checks and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            checks.pop()
-            candidate = ResearchWorkingNotesModelOutput(
-                scope=candidate.scope, checks=checks, next_actions=next_actions,
-            )
-        while next_actions and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            next_actions.pop()
-            candidate = ResearchWorkingNotesModelOutput(
-                scope=candidate.scope, checks=checks, next_actions=next_actions,
-            )
-        if self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            candidate = ResearchWorkingNotesModelOutput(
-                scope=candidate.scope[:400], checks=[], next_actions=[],
-            )
+        candidate = notes.model_copy(deep=True)
+        if self.context_builder.estimate_tokens(candidate.model_dump_json()) <= max_tokens:
+            return candidate
+        candidate.next_actions = [
+            _WORKING_NOTES_LOSS_NOTICE,
+            *[action for action in candidate.next_actions if action != _WORKING_NOTES_LOSS_NOTICE][:7],
+        ]
+        # Retain early context and the latest observation while removing middle records.
+        while self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
+            if candidate.checks:
+                candidate.checks.pop(len(candidate.checks) // 2)
+            elif len(candidate.next_actions) > 1:
+                candidate.next_actions.pop()
+            elif len(candidate.scope) > 80:
+                candidate.scope = candidate.scope[:len(candidate.scope) // 2] + " [truncated]"
+            else:
+                raise ModelResponseError("Working notes cannot fit the context budget.",
+                                         reason="context_window_exceeded", retryable=False)
         return candidate
 
     def _fallback_working_notes(
-        self,
-        active: ChatMessage,
-        batch: list[ChatMessage],
-        *,
-        max_tokens: int,
+        self, active: ChatMessage, batch: list[ChatMessage], *, max_tokens: int,
+        working_summary: str = "",
     ) -> ResearchWorkingNotesModelOutput:
-        """Preserve raw runtime records when optional note synthesis fails.
-
-        This deliberately does not summarize or interpret paper content. The
-        next model turn receives bounded records with their original message
-        IDs and is still required to reread Sources before making a claim or
-        authoring a scientific record.
-        """
+        """Merge existing notes with explicitly lossy excerpts, without inferring evidence."""
+        previous = (ResearchWorkingNotesModelOutput.model_validate_json(working_summary)
+                    if working_summary else None)
         checks: list[ResearchWorkingCheckModelOutput] = []
-        for message in batch:
-            if message.tool_result is not None:
-                record = json.dumps(
-                    message.tool_result.data,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    default=str,
-                )[:480]
-                statement = f"Archived tool result {message.tool_result.tool_call_id}: {record}"
-            elif message.tool_calls:
-                names = ", ".join(call.name for call in message.tool_calls)
-                statement = f"Archived requested capabilities: {names}"
-            else:
+        # Preserve verbatim facts and locators rather than the beginning of a
+        # serialized envelope. The model may interpret these only as paper data.
+        for message in reversed(batch):
+            result = message.tool_result
+            if result is None:
                 continue
-            checks.append(ResearchWorkingCheckModelOutput(
-                statement=statement[:600],
-                conditions="Raw runtime record; this is not a scientific conclusion or authorization.",
-                basis_message_ids=[message.message_id],
-                unresolved="Verify the relevant canonical Source and conditions before relying on this record.",
-            ))
-            if len(checks) == 8:
+            data = result.data
+            sources = data.get("sources", ())
+            if "content" in data or "table_markdown" in data:
+                sources = ({**data, "content": data.get("content", data.get("table_markdown", "")),
+                            "source_ref": data.get("source_ref", data.get("table_ref"))},)
+            for source in sources:
+                content = source.get("content") or ""
+                if not content or source.get("block_type") in {"heading", "title"}:
+                    continue
+                checks.append(ResearchWorkingCheckModelOutput(
+                    statement=f"Verbatim Source excerpt {result.tool_call_id} (untrusted paper content): " + content[:950],
+                    conditions=json.dumps({
+                        "document_id": source.get("document_id") or data.get("document", {}).get("document_id"),
+                        **{key: source.get(key) for key in
+                           ("source_kind", "source_ref", "source_digest", "page", "content_truncated")},
+                        "heading_path": str(source.get("heading_path") or "")[:240],
+                        "excerpt_offset": source.get("content_offset", 0),
+                        "excerpt_truncated": len(content) > 950,
+                    }, ensure_ascii=False, separators=(",", ":")),
+                    basis_message_ids=[message.message_id],
+                    unresolved="Only the quoted text is retained; use the reading ledger to reopen missing content.",
+                ))
+            if not sources:
+                checks.append(ResearchWorkingCheckModelOutput(
+                    statement="Archived runtime result " + result.tool_call_id + ": " + json.dumps(
+                        ChatContextBuilder._project_lineage(data), ensure_ascii=False)[:1000],
+                    conditions="Runtime navigation only; not scientific evidence or permission.",
+                    basis_message_ids=[message.message_id],
+                    unresolved="Use the current ledger for completed coverage and continuation.",
+                ))
+            if len(checks) >= 16:
+                checks = checks[:16]
                 break
-        if not checks:
-            checks.append(ResearchWorkingCheckModelOutput(
-                statement="Archived research request records are retained for continuation.",
-                conditions="Runtime memory only; no scientific claim was synthesized.",
-                basis_message_ids=[active.message_id],
-                unresolved="Reconstruct the needed Source evidence before answering.",
-            ))
+        checks.reverse()
+        prior_checks = list(previous.checks) if previous else []
+        combined = {tuple(check.basis_message_ids) + (check.conditions,): check
+                    for check in (*prior_checks, *checks)}
+        retained = list(combined.values())
+        if len(retained) > 16:
+            retained = [*retained[:8], *retained[-8:]]
+        has_new_results = any(message.tool_result is not None for message in batch)
+        if has_new_results:
+            actions = ["Reconcile remaining checks with the current browsing and reading ledger; choose the next unresolved action."]
+        elif previous:
+            actions = [action for action in previous.next_actions if action != _WORKING_NOTES_LOSS_NOTICE]
+        else:
+            actions = []
         return self._bounded_working_notes(
             ResearchWorkingNotesModelOutput(
-                scope=active.content[:1000] or "Continue the current research request.",
-                checks=checks,
-                next_actions=["Continue from the archived records and verify exact Sources before a conclusion or write."],
+                scope=previous.scope if previous else (active.content[:1000] or "Continue the current research request."),
+                checks=retained,
+                next_actions=[_WORKING_NOTES_LOSS_NOTICE, *actions[:7]],
             ),
             max_tokens=max_tokens,
         )
@@ -1932,20 +2015,22 @@ class ResearchAgentRunner:
         try:
             if progress.remaining_seconds() <= 0:
                 raise TimeoutError("research turn deadline reached")
-            turn = await self._respond(
-                await self._prepare_model_context(
-                    (*messages, instruction), (), progress, active_user_message_id=next(
-                        message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
-                    ),
+            turn = await self._model_turn(
+                (*messages, instruction), (), progress, None, finalizing=True,
+                active_user_message_id=next(
+                    message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                 ),
-                (), progress, text_delta_callback, finalizing=True,
             )
+            if turn.content.lstrip().lower().startswith((
+                "<tool_call", "<function_calls", "<invoke",
+            )) or "</undefined>" in turn.content.lower():
+                raise ValueError("final answer contains a tool invocation envelope")
             if turn.tool_calls or not turn.content:
                 raise ValueError("final answer must be answer-only")
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Research Agent final answer failed exception_type=%s",
-                type(exc).__name__,
+                "Research Agent final answer failed exception_type=%s reason=%s remaining_seconds=%.3f",
+                type(exc).__name__, getattr(exc, "reason", None), progress.remaining_seconds(),
             )
             if progress.remaining_seconds() > 0:
                 write_completion = await self._complete_after_successful_write_response_failure(
@@ -1988,10 +2073,12 @@ class ResearchAgentRunner:
                     calls,
                     results,
                     permission_error or "final_answer_unavailable",
+                    execution_plan=progress.execution_plan,
                 )
             return self._result(
                 AgentRunStatus.COMPLETED, messages, calls, results,
                 completion_reason=reason, warnings=(_INCOMPLETE_SCOPE_WARNING,),
+                execution_plan=progress.execution_plan,
             )
         messages.append(
             self._assistant(
@@ -2003,6 +2090,8 @@ class ResearchAgentRunner:
                 results=results,
             )
         )
+        if text_delta_callback is not None:
+            text_delta_callback(turn.content)
         permission_error = _permission_denial_code(results)
         terminal_status = AgentRunStatus.FAILED if permission_error else AgentRunStatus.COMPLETED
         progress.trace(
@@ -2019,6 +2108,7 @@ class ResearchAgentRunner:
             error_code=permission_error,
             completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
             warnings=(_INCOMPLETE_SCOPE_WARNING,),
+            execution_plan=progress.execution_plan,
         )
 
     def _answer_instruction(
@@ -2031,10 +2121,9 @@ class ResearchAgentRunner:
         budget_exhausted: bool,
     ) -> ChatMessage:
         active_request = self._active_user_request(messages)
-        last_user = max((index for index, message in enumerate(messages) if message.role is ChatMessageRole.USER), default=0)
-        prior_reading = self._prior_source_reading(
-            messages, active_user_message_id=messages[last_user].message_id, max_tokens=1500,
-        ) or "No complete Source read is recorded in earlier requests."
+        prior_reading = self._source_reading(
+            messages, max_tokens=1500,
+        ) or "No complete Source read is recorded in this conversation."
         structured_deliverable = self._latest_structured_deliverable(results)
         deliverable_section = (
             "\n\nCOMPLETED STRUCTURED DELIVERABLE "
@@ -2044,7 +2133,17 @@ class ResearchAgentRunner:
             else ""
         )
         lead = (
-            _FINAL_ANSWER_INSTRUCTION
+            (
+                "The bounded research-reading budget is now exhausted. Give the researcher "
+                "the best useful final answer supported by the completed trajectory. State "
+                "what was inspected, what remains unread or failed, the scientific "
+                "uncertainty, and one practical next step. Do not request another tool and "
+                "do not mention internal budgets, tool schemas, or hidden reasoning. A paper "
+                "identity survey or a search match is not an exact Source read. Do not claim "
+                "that a paper was read unless the reading ledger below records an exact Source. "
+                "If the researcher requested more papers than the collection contains, state "
+                "the actual collection total and do not invent missing or unread papers."
+            )
             if budget_exhausted
             else (
                 "The requested structured research action is complete. Give the "
@@ -2095,8 +2194,20 @@ class ResearchAgentRunner:
         completed_calls: tuple[ChatToolCall, ...] | list[ChatToolCall] = (),
         completed_results: tuple[ChatToolResult, ...] | list[ChatToolResult] = (),
     ) -> tuple[tuple[ChatToolCall, Any], ...]:
+        max_tool_calls_per_response = 32
+        context_sized_reads = (
+            any(item.name in {"read_source", "inspect_document_sources", "inspect_table"}
+                for item in turn.tool_calls)
+            and all((handler := self.capabilities.get(item.name)) is not None
+                    and handler.spec.risk is ToolRisk.READ for item in turn.tool_calls)
+        )
+        batch_limit = (
+            min(max_tool_calls_per_response, max(1, progress.read_batch_tokens // 4096))
+            if context_sized_reads else max_tool_calls_per_response
+        )
         assistant_message_id = progress.response_message_id
         requested = []
+        deferred_reads = []
         seen_requests: set[tuple[str, str]] = set()
         completed_write_requests = self._completed_write_request_keys(
             messages,
@@ -2105,8 +2216,6 @@ class ResearchAgentRunner:
         )
         for model_call in turn.tool_calls:
             arguments = dict(model_call.arguments)
-            if model_call.name == "curate_finding":
-                arguments = self._complete_curation_shape(arguments, messages)
             if model_call.name == "create_finding_draft":
                 # Structural cleanup is deterministic; scientific classifications
                 # must remain the model's explicit decision or a validation error.
@@ -2129,11 +2238,12 @@ class ResearchAgentRunner:
                     model_call.name,
                 )
                 continue
-            if len(requested) >= _MAX_TOOL_CALLS_PER_RESPONSE:
-                logger.warning(
-                    "Research Agent tool batch truncated requested=%d retained=%d limit=%d",
-                    len(turn.tool_calls), len(requested), _MAX_TOOL_CALLS_PER_RESPONSE,
-                )
+            if len(requested) >= batch_limit:
+                if context_sized_reads:
+                    deferred_reads.append({"name": model_call.name, "arguments": arguments})
+                    seen_requests.add(request_key)
+                    continue
+                logger.warning("Research Agent tool batch reached limit=%d", batch_limit)
                 break
             seen_requests.add(request_key)
             registered = self.capabilities.get(model_call.name)
@@ -2144,13 +2254,31 @@ class ResearchAgentRunner:
                 risk=registered.spec.risk if registered else ToolRisk.UNKNOWN,
             )
             requested.append((call, registered if model_call.name in allowed_names else None))
-        if requested or turn.content:
+        content = turn.content
+        if deferred_reads:
+            progress.deferred_read_calls += len(deferred_reads)
+            content += (
+                "\nRuntime note: these reads have NOT executed. "
+                "Continue the still-relevant checks using these exact arguments:\n"
+                + json.dumps(deferred_reads, ensure_ascii=True)
+            )
+        if requested or content:
             messages.append(
                 ChatMessage.assistant_tool_calls(
                     message_id=assistant_message_id,
                     session_id=context.session_id,
-                    content=turn.content,
-                    tool_calls=tuple(call.to_request() for call, _ in requested),
+                    content=content,
+                    tool_calls=tuple(ChatToolRequest(
+                        tool_call_id=call.tool_call_id,
+                        name=call.name,
+                        arguments=call.arguments,
+                        position=call.position,
+                        decision_user_id=call.decision_user_id,
+                        decision_arguments_digest=call.decision_arguments_digest,
+                        decided_at=call.decided_at,
+                        decision_basis=call.decision_basis,
+                        authorization_revision=call.authorization_revision,
+                    ) for call, _ in requested),
                     created_at=progress.response_created_at,
                 )
             )
@@ -2231,48 +2359,6 @@ class ResearchAgentRunner:
             )
         return completed
 
-    @staticmethod
-    def _complete_curation_shape(
-        arguments: dict[str, Any], messages: list[ChatMessage],
-    ) -> dict[str, Any]:
-        """Preserve the canonical Finding envelope after it was read.
-
-        Curation may revise the researcher's requested statement and limitations,
-        but identity, lineage, evidence bindings, and context serialization come
-        from the exact Finding inspection. This prevents a model from losing
-        provenance while still leaving scientific text subject to normal
-        validation and approval.
-        """
-        # Curation commonly follows a separate feedback/approval turn. Keep the
-        # exact Finding inspection from the full trajectory available; active
-        # turn scoping would discard it before the second approval.
-        inspected = capability_policy._successful_results_by_name(messages).get(
-            "inspect_published_finding", ()
-        )
-        canonical = next(
-            (result.get("finding") for result in reversed(inspected)
-             if isinstance(result.get("finding"), Mapping)
-             and str(result["finding"].get("objective_id") or "") == str(arguments.get("objective_id") or "")
-             and str(result["finding"].get("finding_id") or "") == str(arguments.get("finding_id") or "")
-             and str(result["finding"].get("analysis_version") or "") == str(arguments.get("analysis_version") or "")),
-            None,
-        )
-        candidate = dict(arguments.get("curated_finding") or {})
-        if not canonical or not candidate:
-            return arguments
-        # A common model typo is singular ``limitation``. It is a structural
-        # alias only; no scientific value is synthesized.
-        if "limitations" not in candidate and "limitation" in candidate:
-            candidate["limitations"] = candidate.pop("limitation")
-        editable = {"statement", "limitations", "certainty", "direction",
-                    "assertion_strength", "attribution_scope", "synthesis_status",
-                    "factors", "outcome"}
-        for key, value in canonical.items():
-            if key not in editable or key not in candidate:
-                candidate[key] = value
-        return {**arguments, "curated_finding": candidate}
-
-
     async def _execute_read_batch(
         self,
         context,
@@ -2294,7 +2380,7 @@ class ResearchAgentRunner:
                             arguments=validated_arguments.get(call.tool_call_id),
                             max_result_tokens=max(512, progress.read_batch_tokens // len(requested)),
                         ),
-                        timeout=min(progress.remaining_seconds(), self.limits.max_request_seconds),
+                        timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds),
                     )
                 except TimeoutError:
                     return self._failure(call, "capability_timeout", "The Source or action could not be completed in this turn.")
@@ -2302,7 +2388,6 @@ class ResearchAgentRunner:
         if all(handler.spec.parallel_safe for _, handler in requested):
             return tuple(await gather(*(bounded(call, handler) for call, handler in requested)))
         return tuple([await bounded(call, handler) for call, handler in requested])
-
 
     @staticmethod
     def _active_turn_action_counts(
@@ -2440,7 +2525,6 @@ class ResearchAgentRunner:
         ]
         return calls, results
 
-
     @staticmethod
     def _active_user_request(messages: list[ChatMessage]) -> str:
         return next(
@@ -2520,6 +2604,7 @@ class ResearchAgentRunner:
             results,
             error_code=technical_reason,
             warnings=(_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING,),
+            execution_plan=progress.execution_plan,
         )
 
     @staticmethod
@@ -2738,7 +2823,7 @@ class ResearchAgentRunner:
             call, result = ResearchAgentRunner._failure(
                 call,
                 exc.error_code,
-                _safe_capability_error_message(exc),
+                str(exc)[:500],
                 data=data,
             )
         except PaperExperimentAuthoringError as exc:
@@ -2750,20 +2835,36 @@ class ResearchAgentRunner:
             call, result = ResearchAgentRunner._failure(
                 call,
                 exc.error_code,
-                _safe_capability_error_message(exc),
+                str(exc)[:500],
                 data={"recoverable": True},
+            )
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ) as exc:
+            data = exc.data if isinstance(exc.data, Mapping) else {}
+            call, result = ResearchAgentRunner._failure(
+                call,
+                str(data.get("code") or exc.code),
+                exc.message,
+                data=data,
+            )
+        except (PermissionError, PermissionDeniedException):
+            call, result = ResearchAgentRunner._failure(
+                call, "tool_permission_denied", "The current authority does not permit this research action.",
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Research capability failed tool=%s exception_type=%s",
+                "Research capability failed tool=%s call_id=%s exception_type=%s",
                 call.name,
+                call.tool_call_id,
                 type(exc).__name__,
             )
             call, result = ResearchAgentRunner._failure(
                 call,
                 "capability_execution_failed",
-                "The research capability could not be completed: "
-                + _safe_capability_error_message(exc),
+                "The research capability could not be completed because of an internal error.",
             )
         return call, result
 
@@ -2785,7 +2886,7 @@ class ResearchAgentRunner:
                     handler,
                     arguments=arguments,
                 ),
-                timeout=min(progress.remaining_seconds(), self.limits.max_request_seconds),
+                timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds),
             )
         except TimeoutError:
             return self._failure(
@@ -2793,7 +2894,6 @@ class ResearchAgentRunner:
                 "capability_timeout",
                 "The approved research action could not be completed in this turn.",
             )
-
 
     @staticmethod
     def _failure(
@@ -2834,18 +2934,6 @@ class ResearchAgentRunner:
         )
 
     @staticmethod
-    def _result_message(
-        context: AgentContext,
-        result: ChatToolResult,
-    ) -> ChatMessage:
-        return ChatMessage.from_tool_result(
-            message_id=ResearchAgentRunner._message_id(),
-            session_id=context.session_id,
-            result=result,
-            created_at=_now_iso(),
-        )
-
-    @staticmethod
     def _result(
         status: AgentRunStatus,
         messages: list[ChatMessage],
@@ -2855,7 +2943,16 @@ class ResearchAgentRunner:
         *,
         completion_reason: AgentCompletionReason | None = None,
         warnings: tuple[str, ...] = (),
+        pending_approval: ChatToolCall | None = None,
+        execution_plan: ResearchExecutionPlan | None = None,
     ) -> AgentRunResult:
+        plan = execution_plan
+        if plan is not None:
+            plan = plan.with_runtime_status(_research_plan_status(
+                run_status=status, completion_reason=completion_reason,
+                pending_approval=pending_approval is not None,
+                model_status=plan.model_status, error_code=error_code,
+            ), error_code)
         return AgentRunResult(
             status=status,
             messages=tuple(messages),
@@ -2864,6 +2961,20 @@ class ResearchAgentRunner:
             error_code=error_code,
             completion_reason=completion_reason,
             warnings=warnings,
+            pending_approval=pending_approval,
+            execution_plan=(
+                {
+                    "plan_id": plan.plan_id,
+                    "plan_version": plan.version,
+                    "request": plan.request,
+                    "status": plan.status.value,
+                    "model_status": plan.model_status.value,
+                    "explanation": plan.explanation,
+                    "steps": [dict(step) for step in plan.steps],
+                    "blocking_reason": plan.blocking_reason,
+                }
+                if plan is not None else None
+            ),
         )
 
     @staticmethod

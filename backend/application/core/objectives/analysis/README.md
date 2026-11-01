@@ -40,14 +40,35 @@ Only a ready, source-grounded selection can enter Finding synthesis.
 | Prepare | `prepare_model_output` in [`paper_experiment_contract.py`](paper_experiment_contract.py) | Raw response -> validated local keys, source-label use, candidate direction and audit issues | None | None |
 | Reconcile | `reconcile_model_output` | Candidate scopes -> service-owned accepted scopes | None | None |
 | Bind | `bind_model_output` | Reconciled Draft -> formal Source references and `PaperExperimentRevision` | None | None |
-| Write/select | `ExperimentAnalysisWriter.write_experiment_analysis` | Revisions -> immutable revisions and Objective selections | None | Revisions and selections |
-| Synthesize | `ExperimentFindingSynthesisService` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
-| Project | `ExperimentCompatibilityProjection` | Fixed experiment graph -> existing Objective/Evidence/Finding response shapes | None | None |
+| Write/select | `experiment_analysis_writer.write_experiment_analysis` | Revisions -> immutable revisions and Objective selections | None | Revisions and selections |
+| Synthesize | `experiment_finding_synthesis` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
+| Project | `experiment_projection` functions | Fixed experiment graph -> existing Objective/Evidence/Finding read values | None | None |
 
-`source_extraction.py` remains the Source-local fact reader used by the
-screening/routing path. It does not allocate experiment identities. The old
-`paper_experiment.py` assembly and revision-converter path is retired; do not
-add new callers or documentation links to it.
+`source_extraction.py` supplies Source payload and context helpers used by
+screening, routing, and experiment bundle construction. Its legacy
+`extract_and_validate_source_facts` orchestrator has no production caller; the
+active service uses `build_bundle_from_routes` and `PaperExperimentExtractor`.
+The dormant orchestrator is retained pending a separate deletion task; do not
+add new callers. None of these payload helpers allocates experiment identities.
+The old `paper_experiment.py` assembly and revision-converter path is retired.
+
+Raw response parsing owns field formats. Preparation and binding consume those
+parsed values directly; repository reads reconstruct the stored facts without
+cleaning identifiers, dropping records, or changing numeric values. Domain
+objects retain scientific relationships and version rules. Source-local
+response validation uses those same domain rules inside the existing model
+repair loop, so an invalid attribution is rejected before persistence.
+
+Scientific reads choose their owner from the saved completed analysis version.
+Automatic `experiment_graph` analyses use the experiment projection; authored and
+historical snapshots retain their saved scientific records. A missing or unfinished
+analysis is rejected before record selection. Projection module availability is
+not a storage-source flag, and a view that already loaded its analysis reuses
+that source decision rather than rereading the same metadata. Both sources return
+existing Finding, ObjectiveEvidence and PaperContribution values; internal readers
+use their fields directly. Experiment display statuses and reasons retain the
+established client vocabulary in the concrete read views. Evaluation snapshots
+use the same domain identities, so a single-paper Finding keeps its document ID.
 
 ## Candidate Contract and Scientific Gates
 
@@ -142,7 +163,7 @@ for the end-to-end scenario and commands. Focused regression tests are:
 - `tests/unit/application/test_paper_experiment_extraction.py`
 - `tests/unit/application/test_paper_experiment_authoring_contract.py`
 - `tests/unit/application/test_experiment_analysis_writer.py`
-- `tests/unit/application/test_experiment_compatibility_projection.py`
+- `tests/unit/application/test_experiment_projection.py`
 - `tests/unit/application/test_objective_analysis_service.py`
 
 The live benchmark is evidence about a particular model, prompt, Source bundle,

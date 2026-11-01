@@ -2,8 +2,20 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from repositories.collection_repository import StoredDocument
+from repositories.paper_map_repository import PaperMapRepo
+from repositories.objective_repository import ObjectiveRepo
+from repositories.document_profile_repository import DocumentProfileRepo
+from repositories.source_artifact_repository import SourceArtifactRepo
+
+from domain.chat import ToolResultStatus
+
 import logging
 import re
+import hashlib
+import json
+from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -12,11 +24,12 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.chat.context_builder import ChatContextBuilder
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
 _OBJECTIVE_LIMIT = 12
-_PAPER_LIMIT = 12
+_PAPER_LIMIT = 100
 _ABSTRACT_LIMIT = 1_200
 logger = logging.getLogger(__name__)
 
@@ -33,24 +46,21 @@ class GetCollectionContextCapability:
             "Research Objective candidates. Use this before making collection-specific "
             "claims or proposing new Objective drafts."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=GetCollectionContextToolRequest,
     )
-
-    def __init__(self, *, collection_service: Any, objective_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         _arguments: GetCollectionContextToolRequest,
     ) -> ChatToolResult:
-        collection = await self.collection_service.get_collection_for_user(
+        collection = await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objectives = await self.objective_repository.list_objectives(
+        objectives = await ObjectiveRepo.list_objectives(
             context.collection_id
         )
         visible = objectives[:_OBJECTIVE_LIMIT]
@@ -63,18 +73,18 @@ class GetCollectionContextCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "collection": {
-                    "collection_id": str(collection["collection_id"]),
-                    "name": str(collection.get("name") or "")[:240],
+                    "collection_id": collection.collection.collection_id,
+                    "name": collection.collection.name[:240],
                     "description": (
-                        str(collection["description"])[:1_000]
-                        if collection.get("description")
+                        collection.collection.description[:1_000]
+                        if collection.collection.description
                         else None
                     ),
-                    "status": str(collection.get("status") or "unknown"),
-                    "paper_count": int(collection.get("paper_count") or 0),
+                    "status": collection.collection.status,
+                    "paper_count": len(collection.documents),
                 },
                 "objective_count": len(objectives),
                 "objectives": objective_records,
@@ -121,7 +131,10 @@ class BrowseCollectionPapersToolRequest(BaseModel):
 
     query: str | None = Field(default=None, max_length=240)
     offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=8, ge=1, le=_PAPER_LIMIT)
+    limit: int = Field(
+        default=_PAPER_LIMIT, ge=1, le=_PAPER_LIMIT,
+        description="Optional record cap; the returned page is fitted to the available context. Follow next_offset.",
+    )
 
     @field_validator("query")
     @classmethod
@@ -140,8 +153,9 @@ class BrowseCollectionPapersCapability:
         description=(
             "Browse a bounded page of papers in the current collection by visible "
             "filename or title. The optional query is a literal identity filter, not "
-            "semantic topic search; omit it to discover all visible paper identities "
-            "before selecting a paper by title or filename. Returns preparation state, document type, bounded "
+            "semantic topic search. Use it to locate named materials or titles, or omit it "
+            "for a context-sized survey. Read promising papers without first exhausting the "
+            "whole catalog. Returns preparation state, document type, bounded "
             "Paper Map materials, processes, variables, outcomes, and an abstract "
             "excerpt when an explicitly labelled abstract Source is available. "
             "Profile, Paper Map and abstract availability are optional navigation "
@@ -155,43 +169,27 @@ class BrowseCollectionPapersCapability:
             "These are screening signals only, not Evidence, and this capability "
             "does not change the formal analysis scope."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=BrowseCollectionPapersToolRequest,
     )
-
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        document_profile_repository: Any,
-        paper_map_repository: Any,
-        source_artifact_repository: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.document_profile_repository = document_profile_repository
-        self.paper_map_repository = paper_map_repository
-        self.source_artifact_repository = source_artifact_repository
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: BrowseCollectionPapersToolRequest,
     ) -> ChatToolResult:
-        collection = await self.collection_service.get_collection_for_user(
+        collection = await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document_records = tuple(collection.get("documents") or ())
-        document_ids = tuple(
-            str(item.get("document_id") or "")
-            for item in document_records
-            if isinstance(item, dict) and str(item.get("document_id") or "").strip()
-        )
-        profiles = await self.document_profile_repository.list_collection(
+        document_records = collection.documents
+        document_ids = tuple(item.document.document_id for item in document_records)
+        profiles = await DocumentProfileRepo.list_collection(
             context.collection_id,
             document_ids=document_ids or None,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        paper_maps = await PaperMapRepo.list_collection(
             context.collection_id,
             document_ids=document_ids or None,
         )
@@ -199,9 +197,8 @@ class BrowseCollectionPapersCapability:
         maps_by_id = {paper_map.document_id: paper_map for paper_map in paper_maps}
 
         candidates = [
-            (record, profiles_by_id.get(str(record.get("document_id") or "")))
+            (record, profiles_by_id.get(record.document.document_id))
             for record in document_records
-            if isinstance(record, dict)
         ]
         if arguments.query:
             candidates = [
@@ -214,11 +211,11 @@ class BrowseCollectionPapersCapability:
         ]
         paper_records: list[dict[str, Any]] = []
         for record, profile in visible_candidates:
-            document_id = str(record.get("document_id") or "")
+            document_id = str(record.document.document_id or "")
             paper_map = maps_by_id.get(document_id)
             source_document = None
             try:
-                source_document = await self.source_artifact_repository.read_document(
+                source_document = await SourceArtifactRepo.read_document(
                     context.collection_id,
                     document_id,
                 )
@@ -238,7 +235,7 @@ class BrowseCollectionPapersCapability:
                         "stored": "not_prepared",
                         "uploaded": "not_prepared",
                         "failed": "preparation_failed",
-                    }.get(str(record.get("status") or ""), "unavailable")
+                    }.get(str(record.document.status or ""), "unavailable")
             abstract_excerpt, abstract_status = self._abstract_excerpt(source_document)
             screening_limitations: list[str] = []
             if profile is None:
@@ -270,11 +267,12 @@ class BrowseCollectionPapersCapability:
             paper["source_status"] in {"preparation_failed", "unavailable", "read_failed"}
             for paper in paper_records
         )
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
+                "catalog_digest": hashlib.sha256(json.dumps(document_ids).encode()).hexdigest(),
                 "paper_total": len(candidates),
                 "offset": arguments.offset,
                 "limit": arguments.limit,
@@ -311,12 +309,35 @@ class BrowseCollectionPapersCapability:
                 else ()
             ),
         )
+        while len(paper_records) > 1 and ChatContextBuilder.estimate_tokens(
+            ChatContextBuilder.tool_result_message(result)
+        ) > context.max_result_tokens:
+            paper_records.pop()
+            visible_ids = {paper["document_id"] for paper in paper_records}
+            failed_source_count = sum(
+                paper["source_status"] in {"preparation_failed", "unavailable", "read_failed"}
+                for paper in paper_records
+            )
+            result = replace(
+                result,
+                data={**result.data, "papers": list(paper_records),
+                      "returned_paper_count": len(paper_records),
+                      "next_offset": arguments.offset + len(paper_records)},
+                resource_refs=tuple(ref for ref in result.resource_refs
+                                    if ref.resource_type == "collection" or ref.resource_id in visible_ids),
+                warnings=(
+                    (f"Prepared Source content is unavailable for {failed_source_count} paper(s) "
+                     "on this page. Check each paper's source_status; this is not scientific absence.",)
+                    if failed_source_count else ()
+                ),
+            )
+        return result
 
     @staticmethod
-    def _matches_query(record: dict[str, Any], profile: Any, query: str) -> bool:
+    def _matches_query(record: StoredDocument, profile: Any, query: str) -> bool:
         values = [
-            record.get("original_filename"),
-            record.get("stored_filename"),
+            record.document.original_filename,
+            record.stored_filename,
             getattr(profile, "title", None),
         ]
         haystack = " ".join(str(value or "") for value in values).casefold()
@@ -325,7 +346,7 @@ class BrowseCollectionPapersCapability:
     @classmethod
     def _paper_record(
         cls,
-        record: dict[str, Any],
+        record: StoredDocument,
         profile: Any,
         paper_map: Any,
         *,
@@ -334,7 +355,7 @@ class BrowseCollectionPapersCapability:
         source_status: str,
         screening_limitations: list[str],
     ) -> dict[str, Any]:
-        document_id = str(record.get("document_id") or "")
+        document_id = str(record.document.document_id or "")
         map_studies = tuple(getattr(paper_map, "studies", ()) or ())
         materials = cls._unique(
             value
@@ -360,15 +381,15 @@ class BrowseCollectionPapersCapability:
         return {
             "document_id": document_id,
             "filename": str(
-                record.get("original_filename")
-                or record.get("stored_filename")
+                record.document.original_filename
+                or record.stored_filename
                 or document_id
             )[:500],
             "title": (
                 str(getattr(profile, "title", None) or "")[:500]
                 or None
             ),
-            "status": str(record.get("status") or "unknown"),
+            "status": str(record.document.status or "unknown"),
             "source_status": source_status,
             "document_type": str(getattr(profile, "doc_type", None) or "uncertain"),
             "profile_confidence": getattr(profile, "confidence", None),

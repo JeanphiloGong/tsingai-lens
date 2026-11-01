@@ -8,9 +8,10 @@ DatasetExport.  A migrated sample is never confirmed automatically.
 
 from __future__ import annotations
 
+
 import argparse
 import asyncio
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -20,7 +21,7 @@ from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -42,16 +43,6 @@ class DatasetMigrationSpec:
     construction_spec: dict[str, Any]
     created_at: str
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "dataset_id": self.dataset_id,
-            "collection_id": self.collection_id,
-            "owner_id": self.owner_id,
-            "name": self.name,
-            "task_type": self.task_type,
-            "construction_spec": dict(self.construction_spec),
-            "created_at": self.created_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -69,21 +60,6 @@ class DatasetMigrationItem:
     provenance: dict[str, Any]
     created_at: str
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "import_key": self.import_key,
-            "dataset_id": self.dataset_id,
-            "sample_id": self.sample_id,
-            "source_case_id": self.source_case_id,
-            "task_type": self.task_type,
-            "source_digest": self.source_digest,
-            "status": self.status,
-            "missing_reasons": list(self.missing_reasons),
-            "revision_id": self.revision_id,
-            "content_digest": _digest(self.content) if self.content else None,
-            "provenance": dict(self.provenance),
-            "created_at": self.created_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -206,14 +182,24 @@ def legacy_row_to_content(
         }
 
     try:
-        # Import lazily so this pure conversion remains easy to exercise from
-        # the migration unit tests.
-        from domain.feedback.sample_revision import parse_revision_content
-
-        parsed = parse_revision_content(content)
+        from domain.feedback.sample_revision import (
+            SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
+        )
+        if task_type == "sft":
+            parsed = SftRevisionContent(**content)
+        elif task_type == "preference":
+            parsed = PreferenceRevisionContent(**content)
+        else:
+            parsed = EvaluationRevisionContent(**content)
     except (TypeError, ValueError) as exc:
         return None, (f"legacy_content_invalid:{str(exc)}",)
-    return parsed.to_record(), ()
+    saved_content = asdict(parsed)
+    saved_content["messages"] = list(parsed.messages)
+    saved_content["context"] = list(parsed.context)
+    saved_content["evidence"] = list(parsed.evidence)
+    if isinstance(parsed, EvaluationRevisionContent):
+        saved_content["criteria"] = list(parsed.criteria)
+    return saved_content, ()
 
 
 def build_plan_from_records(
@@ -417,33 +403,33 @@ def build_plan_from_records(
 
 
 async def build_migration_plan(
-    session: AsyncSession,
+    db: AsyncSession,
     *,
     now: str | None = None,
 ) -> DatasetMigrationPlan:
     """Read the legacy tables without exposing them through product APIs."""
 
     from infra.persistence.postgres.models.feedback import (
-        FeedbackAnnotationRow,
-        FeedbackCaseRow,
-        FeedbackDatasetSnapshotRow,
-        FeedbackReviewDecisionRow,
+        FeedbackAnnotationORM,
+        FeedbackCaseORM,
+        FeedbackDatasetSnapshotORM,
+        FeedbackReviewDecisionORM,
     )
 
-    snapshots = await session.scalars(
-        select(FeedbackDatasetSnapshotRow).order_by(FeedbackDatasetSnapshotRow.dataset_id)
+    snapshots = await db.scalars(
+        select(FeedbackDatasetSnapshotORM).order_by(FeedbackDatasetSnapshotORM.dataset_id)
     )
-    cases = await session.scalars(select(FeedbackCaseRow).order_by(FeedbackCaseRow.case_id))
-    annotations = await session.scalars(
-        select(FeedbackAnnotationRow).order_by(
-            FeedbackAnnotationRow.case_id,
-            FeedbackAnnotationRow.version,
+    cases = await db.scalars(select(FeedbackCaseORM).order_by(FeedbackCaseORM.case_id))
+    annotations = await db.scalars(
+        select(FeedbackAnnotationORM).order_by(
+            FeedbackAnnotationORM.case_id,
+            FeedbackAnnotationORM.version,
         )
     )
-    reviews = await session.scalars(
-        select(FeedbackReviewDecisionRow).order_by(
-            FeedbackReviewDecisionRow.case_id,
-            FeedbackReviewDecisionRow.seq,
+    reviews = await db.scalars(
+        select(FeedbackReviewDecisionORM).order_by(
+            FeedbackReviewDecisionORM.case_id,
+            FeedbackReviewDecisionORM.seq,
         )
     )
     return build_plan_from_records(
@@ -456,15 +442,15 @@ async def build_migration_plan(
 
 
 async def apply_plan(
-    session: AsyncSession,
+    db: AsyncSession,
     plan: DatasetMigrationPlan,
 ) -> dict[str, int]:
     """Insert the plan idempotently in the caller's transaction."""
 
     from infra.persistence.postgres.models.feedback_dataset import (
-        FeedbackDatasetRow,
-        FeedbackDatasetSampleRow,
-        FeedbackSampleRevisionRow,
+        FeedbackDatasetORM,
+        FeedbackDatasetSampleORM,
+        FeedbackSampleRevisionORM,
     )
 
     counts = {
@@ -476,10 +462,10 @@ async def apply_plan(
     }
     datasets_by_id = {item.dataset_id: item for item in plan.datasets}
     for spec in datasets_by_id.values():
-        row = await session.get(FeedbackDatasetRow, spec.dataset_id, with_for_update=True)
+        row = await db.get(FeedbackDatasetORM, spec.dataset_id, with_for_update=True)
         if row is None:
-            session.add(
-                FeedbackDatasetRow(
+            db.add(
+                FeedbackDatasetORM(
                     dataset_id=spec.dataset_id,
                     collection_id=spec.collection_id,
                     name=spec.name,
@@ -495,19 +481,19 @@ async def apply_plan(
         else:
             counts["existing_datasets"] += 1
             _assert_dataset_identity(row, spec)
-    await session.flush()
+    await db.flush()
 
     for item in plan.items:
-        row = await session.scalar(
-            select(FeedbackDatasetSampleRow)
+        row = await db.scalar(
+            select(FeedbackDatasetSampleORM)
             .where(
-                FeedbackDatasetSampleRow.dataset_id == item.dataset_id,
-                FeedbackDatasetSampleRow.source_case_id == item.source_case_id,
+                FeedbackDatasetSampleORM.dataset_id == item.dataset_id,
+                FeedbackDatasetSampleORM.source_case_id == item.source_case_id,
             )
             .with_for_update()
         )
         if row is None:
-            row = FeedbackDatasetSampleRow(
+            row = FeedbackDatasetSampleORM(
                 sample_id=item.sample_id,
                 dataset_id=item.dataset_id,
                 source_case_id=item.source_case_id,
@@ -523,12 +509,12 @@ async def apply_plan(
                 confirmed_by=None,
                 confirmed_at=None,
             )
-            session.add(row)
-            await session.flush()
+            db.add(row)
+            await db.flush()
             counts["created_samples"] += 1
             if item.content is not None and item.revision_id is not None:
-                session.add(
-                    FeedbackSampleRevisionRow(
+                db.add(
+                    FeedbackSampleRevisionORM(
                         revision_id=item.revision_id,
                         sample_id=item.sample_id,
                         revision_no=1,
@@ -543,11 +529,11 @@ async def apply_plan(
                         created_at=_datetime(item.created_at),
                     )
                 )
-                await session.flush()
+                await db.flush()
                 row.current_revision_id = item.revision_id
                 row.status = "needs_confirmation"
                 row.missing_reasons = []
-                await session.flush()
+                await db.flush()
                 counts["created_revisions"] += 1
             continue
 
@@ -558,14 +544,14 @@ async def apply_plan(
             and item.content is not None
             and item.revision_id is not None
         ):
-            revision = await session.get(
-                FeedbackSampleRevisionRow,
+            revision = await db.get(
+                FeedbackSampleRevisionORM,
                 item.revision_id,
                 with_for_update=True,
             )
             if revision is None:
-                session.add(
-                    FeedbackSampleRevisionRow(
+                db.add(
+                    FeedbackSampleRevisionORM(
                         revision_id=item.revision_id,
                         sample_id=row.sample_id,
                         revision_no=1,
@@ -580,13 +566,13 @@ async def apply_plan(
                         created_at=_datetime(item.created_at),
                     )
                 )
-                await session.flush()
+                await db.flush()
                 counts["created_revisions"] += 1
             row.current_revision_id = item.revision_id
             row.status = "needs_confirmation"
             row.missing_reasons = []
             row.updated_at = _datetime(item.created_at)
-            await session.flush()
+            await db.flush()
     return counts
 
 
@@ -595,33 +581,50 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
     from infra.persistence.database import (
         DatabaseSettings,
         build_database_engine,
-        build_session_factory,
+        AsyncSessionLocal,
     )
-    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetMigrationRunRow
+    from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetMigrationRunORM
 
     del ENV_FILE_PATH  # Settings resolves the configured env file itself.
     engine = build_database_engine(DatabaseSettings())
-    session_factory = build_session_factory(engine)
+    AsyncSessionLocal.configure(bind=engine)
     mode = "apply" if apply else "dry_run"
     plan: DatasetMigrationPlan | None = None
     try:
-        async with session_factory.begin() as session:
-            plan = await build_migration_plan(session)
+        async with AsyncSessionLocal() as db, db.begin():
+            plan = await build_migration_plan(db)
             summary = plan.summary()
             if apply:
-                summary.update(await apply_plan(session, plan))
-            session.add(
-                FeedbackDatasetMigrationRunRow(
+                summary.update(await apply_plan(db, plan))
+            db.add(
+                FeedbackDatasetMigrationRunORM(
                     run_id=plan.run_id,
                     migration_version=MIGRATION_VERSION,
                     mode=mode,
                     status="applied" if apply else "planned",
                     summary=summary,
-                    items=[*map(DatasetMigrationItem.to_record, plan.items), *plan.skipped],
+                    items=[
+                        {
+                            "import_key": item.import_key,
+                            "dataset_id": item.dataset_id,
+                            "sample_id": item.sample_id,
+                            "source_case_id": item.source_case_id,
+                            "task_type": item.task_type,
+                            "source_digest": item.source_digest,
+                            "status": item.status,
+                            "missing_reasons": list(item.missing_reasons),
+                            "revision_id": item.revision_id,
+                            "content_digest": _digest(item.content) if item.content else None,
+                            "provenance": dict(item.provenance),
+                            "created_at": item.created_at,
+                        }
+                        for item in plan.items
+                    ]
+                    + list(plan.skipped),
                     created_at=_datetime(datetime.now(timezone.utc).isoformat()),
                 )
             )
-            await session.flush()
+            await db.flush()
             summary["mode"] = mode
             return summary
     except Exception as exc:
@@ -629,9 +632,9 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
             # A failed run is useful evidence, but it must not share the
             # transaction that rolled back any partial data writes.
             try:
-                async with session_factory.begin() as session:
-                    session.add(
-                        FeedbackDatasetMigrationRunRow(
+                async with AsyncSessionLocal() as db, db.begin():
+                    db.add(
+                        FeedbackDatasetMigrationRunORM(
                             run_id=plan.run_id,
                             migration_version=MIGRATION_VERSION,
                             mode=mode,
@@ -641,7 +644,24 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
                                 "mode": mode,
                                 "error_code": _error_code(exc),
                             },
-                            items=[*map(DatasetMigrationItem.to_record, plan.items), *plan.skipped],
+                            items=[
+                                {
+                                    "import_key": item.import_key,
+                                    "dataset_id": item.dataset_id,
+                                    "sample_id": item.sample_id,
+                                    "source_case_id": item.source_case_id,
+                                    "task_type": item.task_type,
+                                    "source_digest": item.source_digest,
+                                    "status": item.status,
+                                    "missing_reasons": list(item.missing_reasons),
+                                    "revision_id": item.revision_id,
+                                    "content_digest": _digest(item.content) if item.content else None,
+                                    "provenance": dict(item.provenance),
+                                    "created_at": item.created_at,
+                                }
+                                for item in plan.items
+                            ]
+                            + list(plan.skipped),
                             created_at=_datetime(datetime.now(timezone.utc).isoformat()),
                         )
                     )
@@ -712,7 +732,7 @@ def _make_item(
     import_key = f"{MIGRATION_VERSION}:{dataset_id}:{source_case_id}:{task_type}"
     sample_id = stable_id("sample_mig", import_key)
     revision_id = stable_id("revision_mig", import_key) if content is not None else None
-    reasons = tuple(dict.fromkeys(str(item).strip() for item in missing_reasons if str(item).strip()))
+    reasons = tuple(dict.fromkeys(missing_reasons))
     return DatasetMigrationItem(
         import_key=import_key,
         dataset_id=dataset_id,

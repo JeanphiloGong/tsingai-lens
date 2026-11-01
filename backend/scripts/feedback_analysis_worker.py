@@ -1,69 +1,79 @@
 #!/usr/bin/env python3
-"""Run the feedback-analysis worker explicitly.
-
-The production app exposes the worker as an object for tests and operators;
-this script is the small operational entry point and does not start a hidden
-background task inside FastAPI.
-"""
-
+"""Run the concrete feedback_analysis worker without constructing the web application."""
 from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime, timezone
+import logging
+import signal
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from infra.persistence.database import AsyncSessionLocal, DatabaseSettings, build_database_engine
+from repositories.analysis_job_repository import AnalysisJobRepo, LeaseLostError
+from application.feedback.analysis_worker import execute_feedback_analysis_job
+from application.feedback.worker_lease import run_with_lease_heartbeat
 
-async def _build_runtime():
-    # Import the application graph only when a command is actually executed;
-    # this keeps the operational module importable for lightweight checks.
-    from main import ApplicationOverrides, build_application_runtime
-
-    return await build_application_runtime(ApplicationOverrides())
+from application.feedback.analysis_handler import RuleBasedFeedbackAnalysisEngine
 
 
-async def run_once() -> str:
-    runtime = await _build_runtime()
+logger = logging.getLogger(__name__)
+
+async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
+    database_engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=database_engine)
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
-        if runtime.feedback_analysis_worker is None:
-            raise RuntimeError("feedback analysis worker is not configured")
-        job = await runtime.feedback_analysis_worker.run_once()
-        return "idle" if job is None else job.status
+        engine = RuleBasedFeedbackAnalysisEngine()
+        while True:
+            now = datetime.now(timezone.utc).isoformat()
+            await AnalysisJobRepo.recover_expired_jobs(now=now)
+            job = await AnalysisJobRepo.claim_next_feedback_analysis_job(now=now)
+            if job is not None:
+                try:
+                    result = await run_with_lease_heartbeat(
+                        job,
+                        lambda: execute_feedback_analysis_job(
+                            job, engine=engine, model_name="rule-based-v1"
+                        ),
+                    )
+                    print(result.status, flush=True)
+                except LeaseLostError:
+                    logger.warning("Worker lease lost job_id=%s", job.job_id)
+            else:
+                print("idle", flush=True)
+            if once:
+                return
+            await asyncio.sleep(interval_seconds)
     finally:
-        await runtime.close()
+        try:
+            await database_engine.dispose()
+        finally:
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 async def requeue_failed_job(job_id: str) -> str:
-    """Explicitly requeue one failed feedback-analysis job for inspection."""
-    runtime = await _build_runtime()
+    database_engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=database_engine)
     try:
-        repository = runtime.analysis_job_repository
-        if repository is None:
-            raise RuntimeError("feedback analysis job repository is not configured")
-        job = await repository.requeue_failed_feedback_analysis_job(
-            job_id=job_id,
-            now=datetime.now(timezone.utc).isoformat(),
+        job = await AnalysisJobRepo.requeue_failed_feedback_analysis_job(
+            job_id=job_id, now=datetime.now(timezone.utc).isoformat(),
         )
         return job.status
     finally:
-        await runtime.close()
-
-
-async def run_loop(interval_seconds: float) -> None:
-    while True:
-        status = await run_once()
-        print(status, flush=True)
-        await asyncio.sleep(interval_seconds)
+        await database_engine.dispose()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run feedback analysis jobs explicitly")
+    parser = argparse.ArgumentParser(
+        description="Run feedback analysis jobs explicitly"
+    )
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--once", action="store_true", help="process at most one job")
     actions.add_argument(
@@ -71,19 +81,19 @@ def main() -> None:
         metavar="JOB_ID",
         help="manually return one failed feedback-analysis job to pending",
     )
-    parser.add_argument("--interval", type=float, default=2.0, help="loop delay in seconds")
+    parser.add_argument(
+        "--interval", type=float, default=2.0, help="loop delay in seconds"
+    )
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be positive")
-    if args.requeue_job is not None:
-        print(asyncio.run(requeue_failed_job(args.requeue_job)))
-    elif args.once:
-        print(asyncio.run(run_once()))
-    else:
-        try:
-            asyncio.run(run_loop(args.interval))
-        except KeyboardInterrupt:
-            return
+    try:
+        if args.requeue_job is not None:
+            print(asyncio.run(requeue_failed_job(args.requeue_job)))
+        else:
+            asyncio.run(run_loop(args.interval, once=args.once))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        return
 
 
 if __name__ == "__main__":

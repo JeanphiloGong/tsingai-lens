@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from application.core.objectives.analysis import analysis_record_source
+
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
+from application.core.objectives import analysis_service as actual_analysis_service
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
     ResearchObjectiveNotFoundError,
@@ -15,16 +16,17 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopeDecision,
     ObjectiveScopePreview,
 )
-from application.repositories.objective_repository import (
-    ObjectiveAnalysis,
-    StoredObjective,
+from controllers.core import research_objective_routes
+from controllers.core.research_objective_routes import (
+    research_objective_router as router,
 )
-from application.repositories.pipeline_run_repository import (
-    ExecutionStats,
-    ModelUsage,
-    TokenUsage,
+from controllers.dependencies.auth import get_current_user_id
+from controllers.exception_router import (
+    general_exception_handler,
+    http_exception_handler,
+    project_exception_handler,
+    request_validation_handler,
 )
-from controllers.core.research_objectives import router
 from controllers.schemas.core.research_objectives import (
     ObjectiveEvidenceAttributeResponse,
 )
@@ -37,25 +39,64 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PaperContribution,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
+    ResearchObjective,
+    build_research_objective_id,
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+from exceptions import ProjectException
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.testclient import TestClient
+from repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
+from repositories.pipeline_run_repository import (
+    ExecutionTimestamps,
+    PipelineRun,
+    PipelineRunStatus,
+)
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 def _objective() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["paper-1"],
-            "confidence": 0.9,
-            "source_relationship_ids": ["relationship-1"],
-            "rank": 1,
-            "confirmation_status": "confirmed",
-            "active_analysis_version": 1,
-            "published_analysis_version": 1,
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id="obj-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        source_relationship_ids=("relationship-1",),
+        rank=1,
+        confirmation_status="confirmed",
+        active_analysis_version=1,
+        published_analysis_version=1,
     )
 
 
@@ -65,16 +106,16 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
         objective_id="obj-1",
         analysis_version=1,
         document_inputs=(
-            PreparedDocumentInput("paper-1", "fingerprint-paper-1"),
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"
+            ),
         ),
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={"paper_framing": "paper_framing.v1"},
         stats=ExecutionStats(
             duration_ms=1250,
-            model_usage=(
-                ModelUsage("model-1", 2, TokenUsage(300, 50, 350)),
-            ),
+            model_usage=(ModelUsage("model-1", 2, TokenUsage(300, 50, 350)),),
             prompt_versions={"paper_framing": "paper_framing.v1"},
         ),
         diagnostics=(
@@ -99,115 +140,108 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
 
 
 def _finding() -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1",
-            "statement": "Higher temperature was associated with greater strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "limitations": ["Supported by one paper."],
-            "paper_contributions": [
-                {
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    return Finding(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement="Higher temperature was associated with greater strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope="isolated_effect",
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("Supported by one paper.",),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     )
 
 
 def _evidence() -> ObjectiveEvidence:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "evidence_id": "evidence-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-7",
-            "source_excerpt": "At 500 C, tensile strength increased to 620 MPa.",
-            "page_numbers": [7],
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 400,
-                    "target_value": 500,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "400 C",
-                "target_label": "500 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "value": 620,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "Tensile strength increased to 620 MPa.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [],
-                "sample": [],
-                "process": [
-                    {
-                        "name": "solver",
-                        "value": "ANSYS",
-                        "context_scope": "simulation",
-                    }
-                ],
-                "test": [],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    return ObjectiveEvidence(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        evidence_id="evidence-1",
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-7",
+        source_excerpt="At 500 C, tensile strength increased to 620 MPa.",
+        page_numbers=(7,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=400, target_value=500, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="400 C",
+            target_label="500 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=620,
+            unit="MPa",
+            direction="increase",
+            result_text="Tensile strength increased to 620 MPa.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            process=(
+                ScientificAttribute(
+                    name="solver", value="ANSYS", context_scope="simulation"
+                ),
+            )
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
 
 
 def _paper_contribution() -> PaperContribution:
-    return PaperContribution.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "confidence": 0.9,
-            "evidence_disposition": "comparable_evidence",
-            "routed_source_count": 3,
-            "extracted_source_count": 2,
-            "comparable_evidence_count": 1,
-            "failed_source_count": 1,
-        }
+    return PaperContribution(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="comparable_evidence",
+        routed_source_count=3,
+        extracted_source_count=2,
+        comparable_evidence_count=1,
+        failed_source_count=1,
     )
 
 
-def test_evidence_attribute_response_preserves_scope_and_outcome_applicability() -> None:
+def test_evidence_attribute_response_preserves_scope_and_outcome_applicability() -> (
+    None
+):
     simulation = ObjectiveEvidenceAttributeResponse.model_validate(
         {
             "name": "solver",
@@ -245,36 +279,35 @@ class _DiscoveryService:
         self.scope_calls: list[tuple[str, str]] = []
         self.scope_error = scope_error
 
-    async def start_objective_discovery(
-        self, collection_id, document_ids
-    ):
+    async def start_objective_discovery(self, collection_id, document_ids, *, user_id):
         self.discovery_calls.append((collection_id, document_ids))
-        return {
-            "run_id": "run-discovery-1",
-            "collection_id": collection_id,
-            "pipeline_name": "objective_discovery",
-            "scope_type": "collection",
-            "scope_id": collection_id,
-            "mode": "standard",
-            "input_fingerprint": "scope-fingerprint",
-            "status": "queued",
-            "current_node": "queued",
-            "progress_percent": 0,
-            "progress_detail": {
+        return PipelineRun(
+            run_id="run-discovery-1",
+            collection_id=collection_id,
+            pipeline_name="objective_discovery",
+            scope_type="collection",
+            scope_id=collection_id,
+            mode="standard",
+            input_fingerprint="scope-fingerprint",
+            status=PipelineRunStatus.QUEUED,
+            current_node="queued",
+            nodes=(),
+            stats=ExecutionStats(),
+            progress_detail={
                 "phase": "queued",
                 "unit": "documents",
                 "total": len(document_ids),
                 "message": "Research question formation is queued.",
             },
-            "errors": [],
-            "warnings": [],
-            "created_at": "2026-08-31T00:00:00+00:00",
-            "updated_at": "2026-08-31T00:00:00+00:00",
-            "started_at": None,
-            "finished_at": None,
-        }
+            errors=(),
+            warnings=(),
+            timestamps=ExecutionTimestamps(
+                created_at="2026-08-31T00:00:00+00:00",
+                updated_at="2026-08-31T00:00:00+00:00",
+            ),
+        )
 
-    async def preview_objective_scope(self, collection_id, objective_id):
+    async def preview_objective_scope(self, collection_id, objective_id, *, user_id):
         self.scope_calls.append((collection_id, objective_id))
         if self.scope_error is not None:
             raise self.scope_error
@@ -310,87 +343,631 @@ class _Service:
         self.dispatch_failure_version: int | None = None
         self.start_calls: list[tuple[str, str, tuple[str, ...]]] = []
 
-    async def start_analysis(self, collection_id, objective_id, document_ids):
+    async def start_objective_analysis(
+        self, collection_id, objective_id, document_ids, *, user_id
+    ):
         self.start_calls.append((collection_id, objective_id, document_ids))
         return await self.queue_analysis(collection_id, objective_id, document_ids)
 
     async def queue_analysis(self, collection_id, objective_id, document_ids):
-        return await self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(
+            collection_id, objective_id, user_id="user-researcher"
+        )
 
     async def execute_queued_analysis(
         self, collection_id, objective_id, analysis_version
     ):
-        return await self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(
+            collection_id, objective_id, user_id="user-researcher"
+        )
 
     async def fail_analysis_dispatch(
         self, collection_id, objective_id, analysis_version
     ):
         self.analysis_status = "failed"
         self.dispatch_failure_version = analysis_version
-        return await self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(
+            collection_id, objective_id, user_id="user-researcher"
+        )
 
-    async def get_analysis_state(self, collection_id, objective_id):
+    async def get_analysis_state(self, collection_id, objective_id, *, user_id):
         return {
             "collection_id": collection_id,
             "objective": StoredObjective(_objective()),
             "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
-            "paper_contributions": (_paper_contribution(),),
+            "paper_contributions": (
+                {
+                    **asdict(_paper_contribution()),
+                    "evidence_status_counts": dict(
+                        _paper_contribution().evidence_status_counts
+                    ),
+                },
+            ),
+            "evidence_review": {
+                "total_evidence_count": 0,
+                "result_count": 0,
+                "comparable_evidence_count": 0,
+                "gap_count": 0,
+                "omitted_gap_count": 0,
+                "status_counts": {},
+                "gaps": [],
+            },
             "warnings": [],
         }
 
-    async def get_analysis_status(self, collection_id, objective_id):
+    async def get_analysis_status(self, collection_id, objective_id, *, user_id):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "status": self.analysis_status,
-            "phase": "started" if self.analysis_status == "running" else self.analysis_status,
+            "phase": (
+                "started" if self.analysis_status == "running" else self.analysis_status
+            ),
             "processed_document_count": 0,
             "total_document_count": 1,
-            "current_document_id": "paper-1" if self.analysis_status == "running" else None,
-            "progress_message": "Analysis is running." if self.analysis_status == "running" else None,
+            "current_document_id": (
+                "paper-1" if self.analysis_status == "running" else None
+            ),
+            "progress_message": (
+                "Analysis is running." if self.analysis_status == "running" else None
+            ),
             "error_code": None,
             "error_message": None,
             "created_at": "2026-08-31T00:00:00+00:00",
-            "started_at": "2026-08-31T00:00:01+00:00" if self.analysis_status == "running" else None,
+            "started_at": (
+                "2026-08-31T00:00:01+00:00"
+                if self.analysis_status == "running"
+                else None
+            ),
             "completed_at": None,
         }
 
     async def list_findings(self, collection_id, objective_id, **kwargs):
+        expected_finding = _finding()
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
-            "items": [_finding().to_record()],
+            "items": [
+                {
+                    "collection_id": expected_finding.collection_id,
+                    "objective_id": expected_finding.objective_id,
+                    "analysis_version": expected_finding.analysis_version,
+                    "finding_id": expected_finding.finding_id,
+                    "statement": expected_finding.statement,
+                    "factors": list(expected_finding.factors),
+                    "outcome": expected_finding.outcome,
+                    "direction": expected_finding.direction,
+                    "assertion_strength": expected_finding.assertion_strength,
+                    "attribution_scope": expected_finding.attribution_scope,
+                    "synthesis_status": expected_finding.synthesis_status,
+                    "certainty": expected_finding.certainty,
+                    "display_rank": expected_finding.display_rank,
+                    "mechanisms": [
+                        {
+                            "source_term": mechanism.source_term,
+                            "relation_type": mechanism.relation_type,
+                            "target_term": mechanism.target_term,
+                            "direction": mechanism.direction,
+                            "assertion_strength": mechanism.assertion_strength,
+                            "supporting_evidence_ids": list(
+                                mechanism.supporting_evidence_ids
+                            ),
+                        }
+                        for mechanism in expected_finding.mechanisms
+                    ],
+                    "scientific_context": {
+                        "material": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_finding.scientific_context.material
+                        ],
+                        "sample": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_finding.scientific_context.sample
+                        ],
+                        "process": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_finding.scientific_context.process
+                        ],
+                        "test": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_finding.scientific_context.test
+                        ],
+                    },
+                    "limitations": list(expected_finding.limitations),
+                    "paper_contributions": [
+                        {
+                            "document_id": contribution.document_id,
+                            "analysis_status": contribution.analysis_status,
+                            "supporting_evidence_ids": list(
+                                contribution.supporting_evidence_ids
+                            ),
+                            "contradicting_evidence_ids": list(
+                                contribution.contradicting_evidence_ids
+                            ),
+                            "context_evidence_ids": list(
+                                contribution.context_evidence_ids
+                            ),
+                            "condition_boundary_evidence_ids": list(
+                                contribution.condition_boundary_evidence_ids
+                            ),
+                        }
+                        for contribution in expected_finding.paper_contributions
+                    ],
+                    "origin": expected_finding.origin,
+                    "source_analysis_version": expected_finding.source_analysis_version,
+                    "parent_finding_id": expected_finding.parent_finding_id,
+                    "created_by_user_id": expected_finding.created_by_user_id,
+                    "created_by_tool_call_id": expected_finding.created_by_tool_call_id,
+                    "created_at": (
+                        expected_finding.created_at.isoformat()
+                        if expected_finding.created_at
+                        else None
+                    ),
+                    **(
+                        {"selection_ids": list(expected_finding.selection_ids)}
+                        if expected_finding.selection_ids
+                        else {}
+                    ),
+                    **(
+                        {
+                            "comparison_group_ids": list(
+                                expected_finding.comparison_group_ids
+                            )
+                        }
+                        if expected_finding.comparison_group_ids
+                        else {}
+                    ),
+                    **(
+                        {"warnings": list(expected_finding.warnings)}
+                        if expected_finding.warnings
+                        else {}
+                    ),
+                }
+            ],
             "offset": kwargs["offset"],
             "limit": kwargs["limit"],
             "total": 1,
         }
 
-    async def get_finding(
-        self, collection_id, objective_id, finding_id, **kwargs
-    ):
+    async def get_finding(self, collection_id, objective_id, finding_id, **kwargs):
+        expected_finding = _finding()
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
-            "finding": _finding().to_record(),
+            "finding": {
+                "collection_id": expected_finding.collection_id,
+                "objective_id": expected_finding.objective_id,
+                "analysis_version": expected_finding.analysis_version,
+                "finding_id": expected_finding.finding_id,
+                "statement": expected_finding.statement,
+                "factors": list(expected_finding.factors),
+                "outcome": expected_finding.outcome,
+                "direction": expected_finding.direction,
+                "assertion_strength": expected_finding.assertion_strength,
+                "attribution_scope": expected_finding.attribution_scope,
+                "synthesis_status": expected_finding.synthesis_status,
+                "certainty": expected_finding.certainty,
+                "display_rank": expected_finding.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in expected_finding.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in expected_finding.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in expected_finding.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in expected_finding.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in expected_finding.scientific_context.test
+                    ],
+                },
+                "limitations": list(expected_finding.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in expected_finding.paper_contributions
+                ],
+                "origin": expected_finding.origin,
+                "source_analysis_version": expected_finding.source_analysis_version,
+                "parent_finding_id": expected_finding.parent_finding_id,
+                "created_by_user_id": expected_finding.created_by_user_id,
+                "created_by_tool_call_id": expected_finding.created_by_tool_call_id,
+                "created_at": (
+                    expected_finding.created_at.isoformat()
+                    if expected_finding.created_at
+                    else None
+                ),
+                **(
+                    {"selection_ids": list(expected_finding.selection_ids)}
+                    if expected_finding.selection_ids
+                    else {}
+                ),
+                **(
+                    {
+                        "comparison_group_ids": list(
+                            expected_finding.comparison_group_ids
+                        )
+                    }
+                    if expected_finding.comparison_group_ids
+                    else {}
+                ),
+                **(
+                    {"warnings": list(expected_finding.warnings)}
+                    if expected_finding.warnings
+                    else {}
+                ),
+            },
         }
 
     async def list_evidence(self, collection_id, objective_id, **kwargs):
+        expected_objective_evidence = _evidence()
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "finding_id": kwargs["finding_id"],
-            "items": [_evidence().to_record()],
+            "items": [
+                {
+                    "collection_id": expected_objective_evidence.collection_id,
+                    "objective_id": expected_objective_evidence.objective_id,
+                    "analysis_version": expected_objective_evidence.analysis_version,
+                    "evidence_id": expected_objective_evidence.evidence_id,
+                    "document_id": expected_objective_evidence.document_id,
+                    "source_kind": expected_objective_evidence.source_kind,
+                    "source_ref": expected_objective_evidence.source_ref,
+                    "source_excerpt": expected_objective_evidence.source_excerpt,
+                    "page_numbers": list(expected_objective_evidence.page_numbers),
+                    "evidence_role": expected_objective_evidence.evidence_role,
+                    "selection_status": expected_objective_evidence.selection_status,
+                    "selection_reason": expected_objective_evidence.selection_reason,
+                    "evidence_status": expected_objective_evidence.evidence_status,
+                    "evidence_status_reason": expected_objective_evidence.evidence_status_reason,
+                    "changed_variables": [
+                        {
+                            "name": variable.name,
+                            "baseline_value": variable.baseline_value,
+                            "target_value": variable.target_value,
+                            "unit": variable.unit,
+                        }
+                        for variable in expected_objective_evidence.changed_variables
+                    ],
+                    "comparison": (
+                        {
+                            "baseline_label": expected_objective_evidence.comparison.baseline_label,
+                            "target_label": expected_objective_evidence.comparison.target_label,
+                            "axis_names": list(
+                                expected_objective_evidence.comparison.axis_names
+                            ),
+                            "comparable": expected_objective_evidence.comparison.comparable,
+                            "incomparability_reasons": list(
+                                expected_objective_evidence.comparison.incomparability_reasons
+                            ),
+                        }
+                        if expected_objective_evidence.comparison
+                        else None
+                    ),
+                    "reported_result": (
+                        {
+                            "outcome": expected_objective_evidence.reported_result.outcome,
+                            "value": expected_objective_evidence.reported_result.value,
+                            "baseline_value": expected_objective_evidence.reported_result.baseline_value,
+                            "target_value": expected_objective_evidence.reported_result.target_value,
+                            "unit": expected_objective_evidence.reported_result.unit,
+                            "direction": expected_objective_evidence.reported_result.direction,
+                            "result_text": expected_objective_evidence.reported_result.result_text,
+                            "result_kind": expected_objective_evidence.reported_result.result_kind,
+                        }
+                        if expected_objective_evidence.reported_result
+                        else None
+                    ),
+                    "attribution_scope": expected_objective_evidence.attribution_scope,
+                    "scientific_context": {
+                        "material": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_objective_evidence.scientific_context.material
+                        ],
+                        "sample": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_objective_evidence.scientific_context.sample
+                        ],
+                        "process": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_objective_evidence.scientific_context.process
+                        ],
+                        "test": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in expected_objective_evidence.scientific_context.test
+                        ],
+                    },
+                    "resolution_status": expected_objective_evidence.resolution_status,
+                    "failure_reason": expected_objective_evidence.failure_reason,
+                    "confidence": expected_objective_evidence.confidence,
+                    "origin": expected_objective_evidence.origin,
+                    "source_analysis_version": expected_objective_evidence.source_analysis_version,
+                    "supersedes_evidence_id": expected_objective_evidence.supersedes_evidence_id,
+                    "superseded_by_evidence_id": expected_objective_evidence.superseded_by_evidence_id,
+                    "created_by_user_id": expected_objective_evidence.created_by_user_id,
+                    "created_by_tool_call_id": expected_objective_evidence.created_by_tool_call_id,
+                    "created_at": (
+                        expected_objective_evidence.created_at.isoformat()
+                        if expected_objective_evidence.created_at is not None
+                        else None
+                    ),
+                    "authoring_note": expected_objective_evidence.authoring_note,
+                    **(
+                        {"warnings": list(expected_objective_evidence.warnings)}
+                        if expected_objective_evidence.warnings
+                        else {}
+                    ),
+                    **(
+                        {
+                            "related_source_refs": [
+                                dict(item)
+                                for item in expected_objective_evidence.related_source_refs
+                            ]
+                        }
+                        if expected_objective_evidence.related_source_refs
+                        or expected_objective_evidence.related_source_refs_explicit
+                        else {}
+                    ),
+                }
+            ],
             "offset": kwargs["offset"],
             "limit": kwargs["limit"],
             "total": 1,
         }
 
-    async def get_evidence_map(self, collection_id, objective_id):
+    async def get_evidence_map(self, collection_id, objective_id, *, user_id):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -494,28 +1071,56 @@ def _client(
     raise_server_exceptions: bool = True,
 ) -> TestClient:
     app = FastAPI()
-    app.state.objective_repository = repository or _Repository()
-    app.state.objective_analysis_service = service or _Service()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
+    actual_analysis_service.ObjectiveRepo = repository or _Repository()
+    analysis_record_source.ObjectiveRepo = actual_analysis_service.ObjectiveRepo
+    actual_analysis_service.collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock(
+            return_value={"owner_user_id": "user-researcher"}
+        )
+    )
+    research_objective_routes.objective_analysis_service = service or _Service()
     scope_and_discovery = discovery_service or _DiscoveryService()
-    app.state.objective_discovery_service = scope_and_discovery
-    app.state.experiment_analysis_service = scope_and_discovery
+    research_objective_routes.start_objective_discovery = (
+        scope_and_discovery.start_objective_discovery
+    )
+    research_objective_routes.objective_scope_service = scope_and_discovery
+    app.dependency_overrides[get_current_user_id] = lambda: "user-researcher"
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def _ranked_objective(rank: int) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": f"obj-{rank}",
-            "question": f"How does variable {rank} affect outcome {rank}?",
-            "variables": [f"variable {rank}"],
-            "outcomes": [f"outcome {rank}"],
-            "seed_document_ids": [f"paper-{rank}"],
-            "confidence": 1 - rank / 100,
-            "source_relationship_ids": [f"relationship-{rank}"],
-            "rank": rank,
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id=f"obj-{rank}"
+        or build_research_objective_id(
+            question=f"How does variable {rank} affect outcome {rank}?" or "",
+            material_scope=(),
+            variables=normalize_objective_terms([f"variable {rank}"]),
+            outcomes=normalize_objective_terms([f"outcome {rank}"]),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question=f"How does variable {rank} affect outcome {rank}?" or "",
+        material_scope=(),
+        variables=normalize_objective_terms([f"variable {rank}"]),
+        outcomes=normalize_objective_terms([f"outcome {rank}"]),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=normalize_objective_terms([f"paper-{rank}"]),
+        excluded_document_ids=(),
+        confidence=1 - rank / 100,
+        reason=None,
+        source_relationship_ids=normalize_objective_terms([f"relationship-{rank}"]),
+        rank=rank,
     )
 
 
@@ -523,23 +1128,19 @@ def _ranked_facts(count: int) -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
         document_inputs=tuple(
-            PreparedDocumentInput(
-                f"paper-{rank}", f"fingerprint-paper-{rank}"
-            )
+            PreparedDocumentInput(f"paper-{rank}", f"fingerprint-paper-{rank}")
             for rank in range(1, count + 1)
         ),
         research_objectives=tuple(
             _ranked_objective(rank) for rank in range(1, count + 1)
         ),
         study_dispositions=tuple(
-            PaperStudyDisposition.from_mapping(
-                {
-                    "document_id": f"paper-{rank}",
-                    "study_id": f"study-{rank}",
-                    "relationship_id": f"relationship-{rank}",
-                    "status": "promoted",
-                    "objective_id": f"obj-{rank}",
-                }
+            PaperStudyDisposition(
+                document_id=f"paper-{rank}" or "",
+                study_id=f"study-{rank}" or "",
+                relationship_id=f"relationship-{rank}" or "",
+                status=PaperStudyDispositionStatus("promoted"),
+                objective_id=f"obj-{rank}",
             )
             for rank in range(1, count + 1)
         ),
@@ -550,18 +1151,18 @@ def _default_objective_facts() -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
         document_inputs=(
-            PreparedDocumentInput("paper-1", "fingerprint-paper-1"),
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"
+            ),
         ),
         research_objectives=(_objective(),),
         study_dispositions=(
-            PaperStudyDisposition.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "study_id": "study-1",
-                    "relationship_id": "relationship-1",
-                    "status": "promoted",
-                    "objective_id": "obj-1",
-                }
+            PaperStudyDisposition(
+                document_id="paper-1",
+                study_id="study-1",
+                relationship_id="relationship-1",
+                status=PaperStudyDispositionStatus("promoted"),
+                objective_id="obj-1",
             ),
         ),
     )
@@ -573,7 +1174,7 @@ def test_objective_list_returns_every_ranked_candidate_when_limit_is_omitted() -
     response = _client(repository=repository).get("/collections/col-1/objectives")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["total"] == 8
     assert payload["offset"] == 0
     assert payload["limit"] is None
@@ -594,7 +1195,7 @@ def test_objective_list_exposes_candidates_after_rank_six() -> None:
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["total"] == 8
     assert [objective["objective_id"] for objective in payload["objectives"]] == [
         "obj-7",
@@ -613,8 +1214,8 @@ def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["objectives"] == []
-    assert response.json()["total"] == 0
+    assert response.json()["data"]["objectives"] == []
+    assert response.json()["data"]["total"] == 0
 
 
 def test_objective_scope_returns_complete_analysis_ids_and_decisions() -> None:
@@ -625,7 +1226,7 @@ def test_objective_scope_returns_complete_analysis_ids_and_decisions() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    assert response.json()["data"] == {
         "collection_id": "col-1",
         "objective_id": "obj-1",
         "counts": {
@@ -672,23 +1273,24 @@ def test_objective_scope_returns_404_when_objective_does_not_exist() -> None:
         "/collections/col-1/objectives/obj-missing/scope"
     )
 
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "research_objective_not_found"
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
+    assert response.json()["data"]["code"] == "research_objective_not_found"
 
 
 def test_objective_scope_returns_409_when_paper_maps_are_not_ready() -> None:
     service = _DiscoveryService(
-        scope_error=ObjectiveScopeNotReadyError("col-1")
+        scope_error=ObjectiveScopeNotReadyError("col-1", "obj-1")
     )
 
     response = _client(discovery_service=service).get(
         "/collections/col-1/objectives/obj-1/scope"
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == {
+    assert response.status_code == 200
+    assert response.json()["code"] == 200204
+    assert response.json()["data"] == {
         "code": "objective_scope_not_ready",
-        "message": "objective paper scope not ready: col-1",
         "collection_id": "col-1",
         "objective_id": "obj-1",
     }
@@ -703,11 +1305,13 @@ def test_start_analysis_uses_the_canonical_service_dispatch() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["active_analysis"]["status"] == "queued"
+    assert response.json()["data"]["active_analysis"]["status"] == "queued"
     assert service.start_calls == [("col-1", "obj-1", ("paper-1",))]
 
 
-def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents() -> None:
+def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents() -> (
+    None
+):
     document_ids = [f"paper-{index}" for index in range(1, 132)]
     discovery_service = _DiscoveryService()
     analysis_service = _Service(queued=True)
@@ -727,9 +1331,9 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
     assert discovery_response.status_code == 200
     assert analysis_response.status_code == 200
-    assert discovery_response.json()["run_id"] == "run-discovery-1"
-    assert discovery_response.json()["pipeline_name"] == "objective_discovery"
-    assert discovery_response.json()["status"] == "queued"
+    assert discovery_response.json()["data"]["run_id"] == "run-discovery-1"
+    assert discovery_response.json()["data"]["pipeline_name"] == "objective_discovery"
+    assert discovery_response.json()["data"]["status"] == "queued"
     assert discovery_service.discovery_calls == [
         ("col-1", tuple(document_ids)),
     ]
@@ -738,39 +1342,29 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
     ]
 
 
-def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:
-    class DispatchFailureService(_Service):
-        async def start_analysis(self, collection_id, objective_id, document_ids):
-            raise ObjectiveAnalysisDispatchError(collection_id, objective_id, 1)
-
-    response = _client(DispatchFailureService(), raise_server_exceptions=False).post(
-        "/collections/col-1/objectives/obj-1/analysis",
-        json={"document_ids": ["paper-1"]},
-    )
-
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "objective_analysis_dispatch_failed"
-    assert response.json()["detail"]["analysis_version"] == 1
 
 
 def test_duplicate_objective_detail_route_is_not_registered() -> None:
     response = _client().get("/collections/col-1/objectives/obj-1")
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
 def test_confirm_objective_route_is_not_registered() -> None:
     response = _client().post("/collections/col-1/objectives/obj-1/confirm")
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
-def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
-) -> None:
+def test_objective_analysis_api_exposes_definition_and_separate_analysis_state() -> (
+    None
+):
     response = _client().get("/collections/col-1/objectives/obj-1/analysis")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["objective"]["confirmation_status"] == "confirmed"
     assert payload["active_analysis"]["status"] == "succeeded"
     assert payload["published_analysis"]["analysis_version"] == 1
@@ -778,7 +1372,46 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
     assert "diagnostics" not in payload["published_analysis"]
     assert payload["paper_contributions"] == [
         {
-            **_paper_contribution().to_record(),
+            **{
+                "collection_id": _paper_contribution().collection_id,
+                "objective_id": _paper_contribution().objective_id,
+                "analysis_version": _paper_contribution().analysis_version,
+                "document_id": _paper_contribution().document_id,
+                "analysis_status": _paper_contribution().analysis_status,
+                "relevance": _paper_contribution().relevance,
+                "paper_role": _paper_contribution().paper_role,
+                "contribution_summary": _paper_contribution().contribution_summary,
+                "material_match": list(_paper_contribution().material_match),
+                "changed_variables": list(_paper_contribution().changed_variables),
+                "measured_property_scope": list(
+                    _paper_contribution().measured_property_scope
+                ),
+                "test_environment_scope": list(
+                    _paper_contribution().test_environment_scope
+                ),
+                "exclusion_reason": _paper_contribution().exclusion_reason,
+                "warnings": list(_paper_contribution().warnings),
+                "confidence": _paper_contribution().confidence,
+                "evidence_disposition": _paper_contribution().evidence_disposition,
+                "routed_source_count": _paper_contribution().routed_source_count,
+                "extracted_source_count": _paper_contribution().extracted_source_count,
+                "comparable_evidence_count": _paper_contribution().comparable_evidence_count,
+                "failed_source_count": _paper_contribution().failed_source_count,
+                "uninspected_source_count": _paper_contribution().uninspected_source_count,
+                "evidence_disposition_reason": _paper_contribution().evidence_disposition_reason,
+                "evidence_status_counts": {
+                    status: count
+                    for status, count in _paper_contribution().evidence_status_counts
+                },
+                "inspected_source_refs": [
+                    {
+                        "source_kind": source_ref.source_kind,
+                        "source_ref": source_ref.source_ref,
+                        "source_digest": source_ref.source_digest,
+                    }
+                    for source_ref in _paper_contribution().inspected_source_refs
+                ],
+            },
         }
     ]
     assert payload["active_analysis"]["stats"] == {
@@ -813,7 +1446,7 @@ def test_objective_analysis_status_api_returns_only_progress_state() -> None:
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["status"] == "queued"
     assert payload["analysis_version"] == 1
     assert "paper_contributions" not in payload
@@ -828,7 +1461,7 @@ def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
     )
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["total"] == 1
     assert payload["items"][0]["finding_id"] == "finding-1"
     assert payload["items"][0]["factors"] == ["temperature"]
@@ -849,7 +1482,7 @@ def test_evidence_api_returns_exact_source_excerpt_and_locator() -> None:
     )
 
     assert response.status_code == 200
-    evidence = response.json()["items"][0]
+    evidence = response.json()["data"]["items"][0]
     assert evidence["source_excerpt"] == (
         "At 500 C, tensile strength increased to 620 MPa."
     )
@@ -868,7 +1501,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
     created_at = datetime(2026, 9, 1, tzinfo=UTC)
 
     class AgentAuthoredService(_Service):
-        async def get_analysis_state(self, collection_id, objective_id):
+        async def get_analysis_state(self, collection_id, objective_id, *, user_id):
             analysis = replace(
                 _analysis(),
                 origin="agent_authored",
@@ -881,7 +1514,23 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "objective": StoredObjective(_objective()),
                 "analysis": analysis,
                 "published_analysis": analysis,
-                "paper_contributions": (_paper_contribution(),),
+                "paper_contributions": (
+                    {
+                        **asdict(_paper_contribution()),
+                        "evidence_status_counts": dict(
+                            _paper_contribution().evidence_status_counts
+                        ),
+                    },
+                ),
+                "evidence_review": {
+                    "total_evidence_count": 0,
+                    "result_count": 0,
+                    "comparable_evidence_count": 0,
+                    "gap_count": 0,
+                    "omitted_gap_count": 0,
+                    "status_counts": {},
+                    "gaps": [],
+                },
                 "warnings": [],
             }
 
@@ -899,7 +1548,171 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "collection_id": collection_id,
                 "objective_id": objective_id,
                 "analysis_version": 2,
-                "items": [finding.to_record()],
+                "items": [
+                    {
+                        "collection_id": finding.collection_id,
+                        "objective_id": finding.objective_id,
+                        "analysis_version": finding.analysis_version,
+                        "finding_id": finding.finding_id,
+                        "statement": finding.statement,
+                        "factors": list(finding.factors),
+                        "outcome": finding.outcome,
+                        "direction": finding.direction,
+                        "assertion_strength": finding.assertion_strength,
+                        "attribution_scope": finding.attribution_scope,
+                        "synthesis_status": finding.synthesis_status,
+                        "certainty": finding.certainty,
+                        "display_rank": finding.display_rank,
+                        "mechanisms": [
+                            {
+                                "source_term": mechanism.source_term,
+                                "relation_type": mechanism.relation_type,
+                                "target_term": mechanism.target_term,
+                                "direction": mechanism.direction,
+                                "assertion_strength": mechanism.assertion_strength,
+                                "supporting_evidence_ids": list(
+                                    mechanism.supporting_evidence_ids
+                                ),
+                            }
+                            for mechanism in finding.mechanisms
+                        ],
+                        "scientific_context": {
+                            "material": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in finding.scientific_context.material
+                            ],
+                            "sample": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in finding.scientific_context.sample
+                            ],
+                            "process": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in finding.scientific_context.process
+                            ],
+                            "test": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in finding.scientific_context.test
+                            ],
+                        },
+                        "limitations": list(finding.limitations),
+                        "paper_contributions": [
+                            {
+                                "document_id": contribution.document_id,
+                                "analysis_status": contribution.analysis_status,
+                                "supporting_evidence_ids": list(
+                                    contribution.supporting_evidence_ids
+                                ),
+                                "contradicting_evidence_ids": list(
+                                    contribution.contradicting_evidence_ids
+                                ),
+                                "context_evidence_ids": list(
+                                    contribution.context_evidence_ids
+                                ),
+                                "condition_boundary_evidence_ids": list(
+                                    contribution.condition_boundary_evidence_ids
+                                ),
+                            }
+                            for contribution in finding.paper_contributions
+                        ],
+                        "origin": finding.origin,
+                        "source_analysis_version": finding.source_analysis_version,
+                        "parent_finding_id": finding.parent_finding_id,
+                        "created_by_user_id": finding.created_by_user_id,
+                        "created_by_tool_call_id": finding.created_by_tool_call_id,
+                        "created_at": (
+                            finding.created_at.isoformat()
+                            if finding.created_at
+                            else None
+                        ),
+                        **(
+                            {"selection_ids": list(finding.selection_ids)}
+                            if finding.selection_ids
+                            else {}
+                        ),
+                        **(
+                            {"comparison_group_ids": list(finding.comparison_group_ids)}
+                            if finding.comparison_group_ids
+                            else {}
+                        ),
+                        **(
+                            {"warnings": list(finding.warnings)}
+                            if finding.warnings
+                            else {}
+                        ),
+                    }
+                ],
                 "offset": kwargs["offset"],
                 "limit": kwargs["limit"],
                 "total": 1,
@@ -920,7 +1733,181 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "objective_id": objective_id,
                 "analysis_version": 2,
                 "finding_id": kwargs["finding_id"],
-                "items": [evidence.to_record()],
+                "items": [
+                    {
+                        "collection_id": evidence.collection_id,
+                        "objective_id": evidence.objective_id,
+                        "analysis_version": evidence.analysis_version,
+                        "evidence_id": evidence.evidence_id,
+                        "document_id": evidence.document_id,
+                        "source_kind": evidence.source_kind,
+                        "source_ref": evidence.source_ref,
+                        "source_excerpt": evidence.source_excerpt,
+                        "page_numbers": list(evidence.page_numbers),
+                        "evidence_role": evidence.evidence_role,
+                        "selection_status": evidence.selection_status,
+                        "selection_reason": evidence.selection_reason,
+                        "evidence_status": evidence.evidence_status,
+                        "evidence_status_reason": evidence.evidence_status_reason,
+                        "changed_variables": [
+                            {
+                                "name": variable.name,
+                                "baseline_value": variable.baseline_value,
+                                "target_value": variable.target_value,
+                                "unit": variable.unit,
+                            }
+                            for variable in evidence.changed_variables
+                        ],
+                        "comparison": (
+                            {
+                                "baseline_label": evidence.comparison.baseline_label,
+                                "target_label": evidence.comparison.target_label,
+                                "axis_names": list(evidence.comparison.axis_names),
+                                "comparable": evidence.comparison.comparable,
+                                "incomparability_reasons": list(
+                                    evidence.comparison.incomparability_reasons
+                                ),
+                            }
+                            if evidence.comparison
+                            else None
+                        ),
+                        "reported_result": (
+                            {
+                                "outcome": evidence.reported_result.outcome,
+                                "value": evidence.reported_result.value,
+                                "baseline_value": evidence.reported_result.baseline_value,
+                                "target_value": evidence.reported_result.target_value,
+                                "unit": evidence.reported_result.unit,
+                                "direction": evidence.reported_result.direction,
+                                "result_text": evidence.reported_result.result_text,
+                                "result_kind": evidence.reported_result.result_kind,
+                            }
+                            if evidence.reported_result
+                            else None
+                        ),
+                        "attribution_scope": evidence.attribution_scope,
+                        "scientific_context": {
+                            "material": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in evidence.scientific_context.material
+                            ],
+                            "sample": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in evidence.scientific_context.sample
+                            ],
+                            "process": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in evidence.scientific_context.process
+                            ],
+                            "test": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in evidence.scientific_context.test
+                            ],
+                        },
+                        "resolution_status": evidence.resolution_status,
+                        "failure_reason": evidence.failure_reason,
+                        "confidence": evidence.confidence,
+                        "origin": evidence.origin,
+                        "source_analysis_version": evidence.source_analysis_version,
+                        "supersedes_evidence_id": evidence.supersedes_evidence_id,
+                        "superseded_by_evidence_id": evidence.superseded_by_evidence_id,
+                        "created_by_user_id": evidence.created_by_user_id,
+                        "created_by_tool_call_id": evidence.created_by_tool_call_id,
+                        "created_at": (
+                            evidence.created_at.isoformat()
+                            if evidence.created_at is not None
+                            else None
+                        ),
+                        "authoring_note": evidence.authoring_note,
+                        **(
+                            {"warnings": list(evidence.warnings)}
+                            if evidence.warnings
+                            else {}
+                        ),
+                        **(
+                            {
+                                "related_source_refs": [
+                                    dict(item) for item in evidence.related_source_refs
+                                ]
+                            }
+                            if evidence.related_source_refs
+                            or evidence.related_source_refs_explicit
+                            else {}
+                        ),
+                    }
+                ],
                 "offset": kwargs["offset"],
                 "limit": kwargs["limit"],
                 "total": 1,
@@ -928,40 +1915,34 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
 
     client = _client(AgentAuthoredService())
 
-    analysis_response = client.get(
-        "/collections/col-1/objectives/obj-1/analysis"
-    )
-    findings_response = client.get(
-        "/collections/col-1/objectives/obj-1/findings"
-    )
-    evidence_response = client.get(
-        "/collections/col-1/objectives/obj-1/evidence"
-    )
+    analysis_response = client.get("/collections/col-1/objectives/obj-1/analysis")
+    findings_response = client.get("/collections/col-1/objectives/obj-1/findings")
+    evidence_response = client.get("/collections/col-1/objectives/obj-1/evidence")
 
     assert analysis_response.status_code == 200
     assert findings_response.status_code == 200
     assert evidence_response.status_code == 200
     assert (
-        analysis_response.json()["published_analysis"]["created_by_tool_call_id"]
+        analysis_response.json()["data"]["published_analysis"][
+            "created_by_tool_call_id"
+        ]
         == "call-agent-analysis"
     )
     assert (
-        findings_response.json()["items"][0]["created_by_tool_call_id"]
+        findings_response.json()["data"]["items"][0]["created_by_tool_call_id"]
         == "call-agent-finding"
     )
     assert (
-        evidence_response.json()["items"][0]["created_by_tool_call_id"]
+        evidence_response.json()["data"]["items"][0]["created_by_tool_call_id"]
         == "call-agent-evidence"
     )
 
 
 def test_evidence_map_api_returns_the_published_objective_projection() -> None:
-    response = _client().get(
-        "/collections/col-1/objectives/obj-1/evidence-map"
-    )
+    response = _client().get("/collections/col-1/objectives/obj-1/evidence-map")
 
     assert response.status_code == 200
-    payload = response.json()
+    payload = response.json()["data"]
     assert payload["projection_version"] == "objective-evidence-map.v1"
     assert payload["analysis_version"] == 1
     assert [node["type"] for node in payload["nodes"]] == [

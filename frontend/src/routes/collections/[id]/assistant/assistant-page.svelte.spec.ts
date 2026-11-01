@@ -1,8 +1,10 @@
 import { page as browserPage, userEvent } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
-import { authState, fetchCurrentSession, login, logout } from '../../../_shared/auth';
+import { authState } from '../../../_shared/authState';
+import { fetchCurrentSession, login, logout } from '../../../_shared/auth';
 import { collections } from '../../../_shared/collections';
+import { language } from '../../../_shared/i18n';
 
 import type {
 	ChatMessage,
@@ -42,7 +44,18 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 });
 
 vi.mock('$app/stores', () => ({ page: pageStore }));
+let modelDirectoryRequests = 0;
+let modelDirectoryStatus = 200;
+let modelDirectoryItems = [
+	{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' },
+	{ connection_id: 'lab-b', display_name: 'Lab B', model: 'model-b' }
+];
+
 vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+	if (requestPath(input) === '/api/v1/model-connections') {
+		modelDirectoryRequests += 1;
+		return Promise.resolve(jsonResponse({ items: modelDirectoryItems }, modelDirectoryStatus, 'Service temporarily unavailable.'));
+	}
 	if (requestPath(input).endsWith('/permissions')) {
 		return Promise.resolve(
 			jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 })
@@ -63,9 +76,9 @@ const session = {
 	updated_at: createdAt
 };
 
-function jsonResponse(body: unknown, status = 200) {
-	return new Response(JSON.stringify(body), {
-		status,
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
+		status: 200,
 		headers: { 'Content-Type': 'application/json' }
 	});
 }
@@ -180,7 +193,7 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'response'>;
+	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'retryable_decision' | 'response'>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -201,14 +214,14 @@ function installApi({
 					objectives: [
 						{
 							objective_id: 'obj_energy_1',
-							question: 'How does laser energy affect Ti-6Al-4V strength?'
+							question: 'How does laser energy affect Ti-6Al-4V strength?', confirmation_status: 'candidate'
 						}
 					]
 				})
 			);
 		}
 		if (path === '/api/v1/chat-sessions' && method === 'POST') {
-			return Promise.resolve(jsonResponse(session, 201));
+			return Promise.resolve(jsonResponse(session, 200, 'Request failed.'));
 		}
 		if (path === `/api/v1/chat-sessions/${session.session_id}` && method === 'GET') {
 			return Promise.resolve(jsonResponse(session));
@@ -229,7 +242,7 @@ function installApi({
 			const file = init?.body instanceof FormData ? init.body.get('file') : null;
 			return uploadDocument && file instanceof File
 				? Promise.resolve(uploadDocument(file))
-				: Promise.resolve(jsonResponse({ detail: 'Unexpected document upload' }, 500));
+				: Promise.resolve(jsonResponse({}, 200000, 'Unexpected document upload'));
 		}
 		const preparationMatch = path.match(
 			/^\/api\/v1\/collections\/col_123\/documents\/([^/]+)\/preparation$/
@@ -237,9 +250,9 @@ function installApi({
 		if (preparationMatch && method === 'POST') {
 			return prepareDocument
 				? Promise.resolve(prepareDocument(decodeURIComponent(preparationMatch[1])))
-				: Promise.resolve(jsonResponse({ detail: 'Unexpected document preparation' }, 500));
+				: Promise.resolve(jsonResponse({}, 200000, 'Unexpected document preparation'));
 		}
-		return Promise.resolve(jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500));
+		return Promise.resolve(jsonResponse({}, 200000, `Unexpected ${method} ${path}`));
 	});
 }
 
@@ -303,7 +316,14 @@ async function send(text: string, composer?: Awaited<ReturnType<typeof renderRea
 
 describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
+		modelDirectoryRequests = 0;
+		modelDirectoryStatus = 200;
+		modelDirectoryItems = [
+			{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' },
+			{ connection_id: 'lab-b', display_name: 'Lab B', model: 'model-b' }
+		];
 		localStorage.clear();
+		language.set('en');
 		sessionStorage.clear();
 		collections.set([]);
 		authState.set({
@@ -317,6 +337,222 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockReset();
 	});
 
+
+
+	it.each([
+		[false, 'approved'], [false, 'rejected'], [true, 'approved'], [true, 'rejected']
+	] as const)('recovers embedded=%s saved %s decision after a model failure', async (embedded, decision) => {
+		const call = pendingCall();
+		const request = message('request', 'assistant', '', {
+			tool_calls: [{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }]
+		});
+		const question = message('question', 'user', 'Save the reviewed research objective.');
+		const initial = { feedback: [], items: [question, request], pending_approval: call };
+		const savedCall = { ...call, status: decision, decision_user_id: 'researcher_1',
+			decision_arguments_digest: call.arguments_digest, decided_at: createdAt };
+		const recovery = { feedback: [], items: [question, request], pending_approval: null,
+			retryable_decision: savedCall, running: false, response: {
+				response_id: 'saved-decision', sequence: 1, started_at: createdAt, updated_at: createdAt,
+				status: 'approval_required', message_id: null, message_created_at: null, content: '',
+				progress: { phase: 'terminal' }, checkpoint_message_id: null,
+				completion_reason: null, error_code: null, warnings: [],
+				model_connection_id: 'lab-a', model_connection_name: 'Lab A'
+			}
+		};
+		localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
+		installApi({ trajectory: initial });
+		const original = fetchMock.getMockImplementation()!;
+		let saved = false;
+		let restored = false;
+		const decisions: unknown[] = [];
+		let finishRetry!: (response: Response) => void;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST') {
+				decisions.push(requestBody(input, init));
+				if (!restored) {
+					saved = true;
+					return Promise.resolve(jsonResponse({ code: 'model_connection_key_unavailable' }, 200205, 'The selected model connection is unavailable.'));
+				}
+				return new Promise<Response>((resolve) => { finishRetry = resolve; });
+			}
+			if (saved && requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'GET')
+				return Promise.resolve(jsonResponse(recovery));
+			return original(input, init);
+		});
+		let view = render(Conversation, { embedded });
+		await browserPage.getByRole('button', { name: decision === 'approved' ? 'Approve and create' : 'Reject', exact: true }).click();
+		const label = decision === 'approved' ? 'Retry approved action' : 'Continue after rejection';
+		await expect.element(browserPage.getByRole('button', { name: label, exact: true })).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Approve and create', exact: true })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		await view.unmount();
+		view = render(Conversation, { embedded });
+		const retry = browserPage.getByRole('button', { name: label, exact: true });
+		await expect.element(retry).toBeVisible();
+		expect(decisions).toHaveLength(1); // Reload and GET observation never retry.
+		await browserPage.getByTitle('Model', { exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		restored = true;
+		await retry.click();
+		await expect.element(retry).toBeDisabled();
+		expect(decisions).toEqual([
+			{ decision, arguments_digest: call.arguments_digest },
+			{ decision, arguments_digest: call.arguments_digest }
+		]); // No model selection and no new approval on the recovery request.
+		const result: ChatToolResult = decision === 'approved' ? baseToolResult(call.tool_call_id)
+			: { ...baseToolResult(call.tool_call_id), status: 'failed', error_code: 'user_rejected', error_message: 'The action was rejected.' };
+		finishRetry(jsonResponse({ status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null,
+			messages: [message('result', 'tool', '', { tool_call_id: call.tool_call_id, tool_result: result }),
+				message('answer', 'assistant', 'The saved decision has been handled.')]
+		}));
+		await expect.element(browserPage.getByText('The saved decision has been handled.', { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByTestId('decision-recovery')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled(); // Composer is empty, but it is available again.
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+	});
+
+	it.each([false, true])('model selection in embedded=%s sends one chosen ID', async (embedded) => {
+		installApi({ messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [], pending_approval: null, error_code: null } });
+		render(Conversation, { embedded });
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await expect.element(picker).toHaveTextContent('Lab A');
+		const actions = document.querySelector('.composer-actions')!;
+		expect(actions.firstElementChild).toBe(document.querySelector('.model-picker'));
+		expect(actions.lastElementChild).toContainElement(browserPage.getByRole('button', { name: 'Send', exact: true }).element());
+		await picker.click();
+		await expect.element(browserPage.getByRole('button', { name: 'Lab A', exact: true })).toHaveAttribute('aria-pressed', 'true');
+		expect(document.querySelector('.model-picker')?.textContent).not.toMatch(/model-a|model-b/);
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		await expect.element(picker).toHaveTextContent('Lab B');
+		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
+		await expect.element(picker).toHaveFocus();
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send('Compare the supplied evidence.', composer);
+		await expect.poll(() => fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST').length).toBe(1);
+		const sent = fetchMock.mock.calls.find(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		expect(JSON.parse(String(sent?.[1]?.body)).model_connection_id).toBe('lab-b');
+	});
+
+	it('shows an empty directory only inside the picker', async () => {
+		modelDirectoryItems = [];
+		installApi();
+		render(Conversation);
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await picker.click();
+		await expect.element(browserPage.getByRole('group', { name: 'Model' })).toHaveTextContent('No models configured.');
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		expect(fetchMock.mock.calls.some(([input, init]) => requestMethod(input, init) === 'POST' && requestPath(input).endsWith('/messages'))).toBe(false);
+	});
+
+	it('uses the existing error area if the directory request fails', async () => {
+		modelDirectoryStatus = 200205;
+		installApi();
+		render(Conversation);
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('Service temporarily unavailable.');
+		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		expect(document.querySelector('.model-picker-refresh')).toBeNull();
+	});
+
+	it.each([false, true])('reports a failed selected model at send time in embedded=%s', async (embedded) => {
+		installApi();
+		const fallback = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+				return Promise.resolve(new Response('event: error\ndata: {"code":"model_unavailable","message":"The model service is temporarily unavailable. Please try again later."}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+			}
+			return fallback(input, init);
+		});
+		render(Conversation, { embedded });
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await expect.element(picker).toHaveTextContent('Lab A');
+		await picker.click();
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await send('Compare the supplied evidence.', composer);
+		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('The model service is temporarily unavailable. Contact an administrator or try again later.');
+		await expect.element(picker).toHaveTextContent('Lab B');
+		await expect.element(composer).toHaveValue('Compare the supplied evidence.');
+		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		expect(posts).toHaveLength(1);
+		expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-b');
+		expect(modelDirectoryRequests).toBe(1);
+	});
+
+	it('supports keyboard selection, Escape and outside dismissal', async () => {
+		installApi();
+		const composer = await renderReady();
+		const picker = browserPage.getByTitle('Model', { exact: true });
+		await expect.element(picker).toHaveTextContent('Lab A');
+		await userEvent.click(picker);
+		await userEvent.keyboard('{Escape}');
+		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
+		await expect.element(picker).toHaveFocus();
+		await userEvent.keyboard('{Enter}{Tab}{Tab}{Enter}');
+		await expect.element(picker).toHaveTextContent('Lab B');
+		await expect.element(picker).toHaveFocus();
+		await picker.click();
+		await composer.click();
+		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
+	});
+
+	it.each([false, true])('fits long names above a narrow composer in embedded=%s', async (embedded) => {
+		const longName = 'Research comparison service with a long configured name';
+		modelDirectoryItems[0].display_name = longName;
+		await browserPage.viewport(390, 844);
+		try {
+			installApi();
+			render(Conversation, { embedded });
+			const picker = browserPage.getByTitle('Model', { exact: true });
+			await expect.element(picker).toHaveTextContent(longName);
+			await picker.click();
+			const shell = document.querySelector('.composer-shell')!.getBoundingClientRect();
+			const menu = document.querySelector('.model-picker-menu')!.getBoundingClientRect();
+			expect(menu.left).toBeGreaterThanOrEqual(shell.left);
+			expect(menu.right).toBeLessThanOrEqual(shell.right);
+			expect(menu.bottom).toBeLessThan(shell.top);
+			expect(document.querySelector('.composer-toolbar')!.scrollWidth).toBeLessThanOrEqual(Math.ceil(shell.width));
+		} finally {
+			await browserPage.viewport(1280, 720);
+		}
+	});
+
+	it('changing the selection during generation preserves the active request', async () => {
+		installApi();
+		const fallback = fetchMock.getMockImplementation()!;
+		const snapshot: ChatResponseSnapshot = {
+			response_id: 'active-answer', sequence: 1, started_at: createdAt, updated_at: createdAt,
+			status: 'running', message_id: 'active-message', message_created_at: createdAt, content: '',
+			progress: { phase: 'responding' }, checkpoint_message_id: null,
+			completion_reason: null, error_code: null, warnings: [],
+			model_connection_id: 'lab-a', model_connection_name: 'Lab A'
+		};
+		let output!: ReadableStreamDefaultController<Uint8Array>;
+		const event = (name: string, data: unknown) => new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+				return Promise.resolve(new Response(new ReadableStream({ start(controller) {
+					output = controller;
+					controller.enqueue(event('snapshot', snapshot));
+				} }), { headers: { 'Content-Type': 'text/event-stream' } }));
+			}
+			return fallback(input, init);
+		});
+		await send('Compare the supplied evidence.');
+		await browserPage.getByTitle('Model', { exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+		await expect.element(browserPage.getByTitle('Model', { exact: true })).toHaveTextContent('Lab B');
+		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		expect(posts).toHaveLength(1);
+		expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-a');
+		expect(posts[0][1]?.signal?.aborted).toBe(false);
+		output.enqueue(event('turn', { status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null, messages: [] }));
+		output.close();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		expect(document.querySelector('.model-connection-next')).toBeNull();
+		expect(document.querySelector('.model-connection-used')).toBeNull();
+	});
+
 	it('uses the current Collection name as metadata arrives and keeps empty conversations unframed', async () => {
 		installApi();
 		await renderReady();
@@ -325,14 +561,14 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toHaveAttribute('href', '/collections/col_123');
 		expect(document.querySelector('.conversation-header')).toBeNull();
 		collections.set([
-			{ id: 'col_other', collection_id: 'col_other', name: 'Other research', documents: [] },
-			{ id: 'col_123', collection_id: 'col_123', name: '316L LPBF comparison', documents: [] }
+			{ collection_id: 'col_other', name: 'Other research', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] },
+			{ collection_id: 'col_123', name: '316L LPBF comparison', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] }
 		]);
 		await expect
 			.element(browserPage.getByRole('link', { name: '316L LPBF comparison', exact: true }))
 			.toHaveAttribute('href', '/collections/col_123');
 		collections.update((items) =>
-			items.map((item) => (item.id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
+			items.map((item) => (item.collection_id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
 		);
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
@@ -347,7 +583,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await userEvent.keyboard('{Enter}');
 		await expect.element(composer).toHaveValue('/permissions');
 		await userEvent.keyboard('{Enter}');
-		await expect.element(browserPage.getByRole('combobox')).toBeVisible();
+		await expect.element(browserPage.getByRole('combobox', { name: /^Mode\b/ })).toBeVisible();
 		await composer.fill('/missing');
 		await userEvent.keyboard('{Enter}');
 		await expect
@@ -378,12 +614,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 		).toBe(false);
 		await composer.fill('Please only check the test conditions first.');
 		collections.set([
-			{ id: 'col_123', collection_id: 'col_123', name: 'Updated title', documents: [] }
+			{ collection_id: 'col_123', name: 'Updated title', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] }
 		]);
 		await expect.element(composer).toHaveValue('Please only check the test conditions first.');
 	});
 
-	it('keeps received text through a failed stream and failed recovery read, then resumes once', async () => {
+	it.each([true, false])('keeps received text through a failed stream and failed recovery read, then resumes once (snapshot=%s)', async (withSnapshot) => {
 		installApi();
 		const fallback = fetchMock.getMockImplementation()!;
 		const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
@@ -410,7 +646,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			branches: [],
 			branch_draft: null,
 			running: true,
-			response: snapshot
+			response: withSnapshot ? snapshot : undefined
 		};
 		let offline = false;
 		let recovering = false;
@@ -470,7 +706,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(answer).toHaveTextContent(partial);
 		offline = true;
 		output.error(new TypeError('Connection lost'));
-		await expect.element(answer.getByRole('alert')).toBeVisible();
+		await expect.element(browserPage.getByTestId('research-recovery')).toHaveTextContent('Connection lost.');
+		expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+		expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(1);
 		await expect.element(answer).toHaveTextContent(partial);
 		offline = false;
 		recovering = true;
@@ -527,7 +765,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
-					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
+					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 200, 'Request failed.');
 				}
 				const id = path.split('/')[4];
 				if (!path.endsWith('/messages')) return jsonResponse({ ...session, session_id: id });
@@ -676,7 +914,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
-					return jsonResponse(newSession, 201);
+					return jsonResponse(newSession, 200, 'Request failed.');
 				}
 				if (path === `/api/v1/chat-sessions/${oldSession.session_id}` && method === 'GET') {
 					return jsonResponse({
@@ -696,7 +934,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 						running: false
 					});
 				}
-				return jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500);
+				return jsonResponse({}, 200000, `Unexpected ${method} ${path}`);
 			});
 
 			await renderReady();
@@ -725,6 +963,100 @@ describe('collections/[id]/assistant Research Agent', () => {
 			).toBe(true);
 		}
 	);
+
+	it.each([false, true])('shows the generated title after the first answer and reload (embedded=%s)', async (embedded) => {
+		let title: string | null = null;
+		const generatedTitle = 'IN718 process and ductility';
+		let completed = false;
+		let titleReads = 0;
+		const question = message('title-question', 'user', 'How should we compare IN718 process parameters and elongation?');
+		const answer = message('title-answer', 'assistant', 'Check density and tensile conditions separately.');
+		installApi({
+			trajectory: { items: [question, answer], feedback: [], pending_approval: null },
+			messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [question, answer], pending_approval: null, error_code: null }
+		});
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (path === '/api/v1/chat-sessions' && method === 'GET')
+				return Promise.resolve(jsonResponse({ items: [{ ...session, title }], limit: 10, offset: 0 }));
+			if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET') {
+				if (completed && ++titleReads >= 2) title = generatedTitle;
+				return Promise.resolve(jsonResponse({ ...session, title }));
+			}
+			if (path.endsWith('/messages') && method === 'POST') completed = true;
+			return original(input, init);
+		});
+		let view = render(Conversation, { embedded });
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send(question.content, composer);
+		await vi.waitFor(() => expect(document.querySelector(embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2')?.textContent).toContain(generatedTitle), { timeout: 5000 });
+		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
+		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		await expect.element(browserPage.getByRole('button', { name: /IN718 process and ductility/ }).first()).toBeVisible();
+		await view.unmount();
+		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+		view = render(Conversation, { embedded });
+		await expect.element(composer).toBeEnabled();
+		await vi.waitFor(() => expect(document.querySelector(embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2')?.textContent).toContain(generatedTitle));
+	});
+
+	it.each([false, true])('renames, reloads and continues a conversation without losing its title (embedded=%s)', async (embedded) => {
+		const saved = { ...session, title: null as string | null, is_pinned: false };
+		const question = { message_id: 'msg_title', session_id: session.session_id, role: 'user' as const, content: 'Original research question', created_at: createdAt, tool_call_id: null, tool_calls: [], tool_result: null, source_contexts: [] };
+		installApi({ trajectory: {items: [question], feedback: [], pending_approval: null}, messageTurn: {status: 'completed', completion_reason:'model_answer', warnings:[], messages:[question], pending_approval:null, error_code:null} });
+		const original = fetchMock.getMockImplementation()!;
+		let fail = true;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if(path.endsWith('/chat_1/title')) {
+				expect(method).toBe('PUT');
+				if(fail) return Promise.resolve(jsonResponse({}, 200000, 'Save unavailable'));
+				saved.title = JSON.parse(String(init?.body)).title;
+				return Promise.resolve(jsonResponse(saved));
+			}
+			if(path === '/api/v1/chat-sessions' && method==='GET') return Promise.resolve(jsonResponse({items:[{...saved, title:saved.title || question.content}],limit:10,offset:0}));
+			if(path === '/api/v1/chat-sessions/chat_1' && method==='GET') return Promise.resolve(jsonResponse(saved));
+			return original(input,init);
+		});
+		let view = render(Conversation, {embedded});
+		const openHistory = async () => {
+			await expect.element(browserPage.getByLabelText('Message',{exact:true})).toBeEnabled();
+			if(embedded) await browserPage.getByRole('button',{name:'Conversation history',exact:true}).click();
+			else if(window.innerWidth <= 820) await browserPage.getByRole('button',{name:'Show history',exact:true}).click();
+		};
+		await openHistory();
+		await browserPage.getByRole('button',{name:'Rename conversation',exact:true}).click();
+		const input = browserPage.getByLabelText('Conversation title',{exact:true});
+		await input.fill(' ');
+		await expect.element(browserPage.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
+		await input.fill('x'.repeat(161));
+		await expect.element(browserPage.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
+		await input.fill('Cancelled title');
+		await browserPage.getByRole('button',{name:'Cancel',exact:true}).click();
+		expect(saved.title).toBeNull();
+		await browserPage.getByRole('button',{name:'Rename conversation',exact:true}).click();
+		await input.fill('IN718 ductility comparison');
+		await browserPage.getByRole('button',{name:'Save',exact:true}).click();
+		await expect.element(browserPage.getByRole('alert').filter({hasText:'The request could not be completed'})).toBeInTheDocument();
+		await expect.element(input).toHaveValue('IN718 ductility comparison');
+		fail = false;
+		await browserPage.getByRole('button',{name:'Save',exact:true}).click();
+		await vi.waitFor(() => expect(document.querySelector('dialog')?.hasAttribute('open')).toBe(false));
+		expect(saved.title).toBe('IN718 ductility comparison');
+		await view.unmount();
+		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+		view = render(Conversation, {embedded});
+		await openHistory();
+		await expect.element(browserPage.getByRole('button',{name:/IN718 ductility comparison/}).first()).toBeInTheDocument();
+		await browserPage.getByLabelText('Message',{exact:true}).fill('Continue comparison');
+		await browserPage.getByRole('button',{name:'Send',exact:true}).click();
+		await expect.element(browserPage.getByLabelText('Message',{exact:true})).toBeEnabled();
+		await vi.waitFor(()=>expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].title).toBe('IN718 ductility comparison'));
+	});
 
 	it.each([false, true])('pins and unpins history without switching the conversation (embedded=%s)', async (embedded) => {
 		const old = { ...session, session_id: 'chat_old', title: 'Compare LPBF conditions',
@@ -786,7 +1118,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				offsets.push(offset);
 				if (offset === 10 && failNextPage) {
 					failNextPage = false;
-					return Promise.resolve(jsonResponse({ detail: 'History temporarily unavailable' }, 503));
+					return Promise.resolve(jsonResponse({}, 200205, 'History temporarily unavailable'));
 				}
 				return Promise.resolve(jsonResponse({ items: items.slice(offset, offset + limit), limit, offset }));
 			}
@@ -801,7 +1133,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await vi.waitFor(() => expect(rowCount()).toBe(10));
 		container.scrollTop = container.scrollHeight;
 		container.dispatchEvent(new Event('scroll'));
-		await expect.element(browserPage.getByText('The request could not be completed. Please try again.', { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByText('History temporarily unavailable', { exact: true })).toBeVisible();
 		expect(rowCount()).toBe(10);
 		await browserPage.getByRole('button', { name: 'Load more conversations', exact: true }).click();
 		await vi.waitFor(() => expect(rowCount()).toBe(20));
@@ -819,7 +1151,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
 			requestPath(input).endsWith('/pin')
-				? Promise.resolve(jsonResponse({ detail: 'Pin could not be saved' }, 500))
+				? Promise.resolve(jsonResponse({}, 200000, 'Pin could not be saved'))
 				: original(input, init));
 		await renderReady();
 		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
@@ -848,7 +1180,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
 				if (failRefresh) {
 					failRefresh = false;
-					return Promise.resolve(jsonResponse({}, 503));
+					return Promise.resolve(jsonResponse({}, 200205, 'Request failed.'));
 				}
 				const offset = Number(new URL(String(input), 'http://localhost').searchParams.get('offset') ?? 0);
 				const ordered = old.is_pinned ? [old, session, ...others] : [session, ...others, old];
@@ -926,7 +1258,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			render(Conversation, { embedded });
 			await vi.waitFor(() => expect(finishCreation).toBeTypeOf('function'));
 			expect(historyRequested).toBe(true);
-			finishCreation!(jsonResponse(session, 201));
+			finishCreation!(jsonResponse(session, 200, 'Request failed.'));
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!))
 				.toEqual([expect.objectContaining({ session_id: session.session_id })]);
@@ -1028,7 +1360,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
-				return Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, 503));
+				return Promise.resolve(jsonResponse({}, 200205, 'Temporarily unavailable'));
 			}
 			return original(input, init);
 		});
@@ -1047,7 +1379,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			if (requestMethod(input, init) === 'DELETE') {
 				return Promise.resolve(
-					jsonResponse({ detail: { code: 'chat_session_has_branches' } }, 409)
+					jsonResponse({ code: 'chat_session_has_branches' }, 200204, 'Request failed.')
 				);
 			}
 			return original(input, init);
@@ -1133,7 +1465,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				readFails = true;
 				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
 				await expect
-					.element(browserPage.getByText('Recovery connection lost', { exact: true }))
+					.element(browserPage.getByText('Connection lost. The background task may still be running. Check the saved result before sending again.', { exact: true }))
 					.toBeVisible();
 				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 				readFails = false;
@@ -1305,7 +1637,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		async (available) => {
 			const file = new File(['%PDF-1.7'], 'LPBF-study.pdf', { type: 'application/pdf' });
 			let stored = false;
-			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 202));
+			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 200, 'Request failed.'));
 			installApi({
 				uploadDocument: () => {
 					if (!stored) {
@@ -1314,7 +1646,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					}
 					return available
 						? jsonResponse(uploadedDocument(file, 'doc_saved'))
-						: jsonResponse({ detail: 'Upload recovery unavailable' }, 503);
+						: jsonResponse({}, 200205, 'Upload recovery unavailable');
 				},
 				prepareDocument: preparation
 			});
@@ -1386,7 +1718,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					requestBody(input, init)?.collection_id === 'col_456'
 				)
 					return Promise.resolve(
-						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 201)
+						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 200, 'Request failed.')
 					);
 				if (path.endsWith('/messages') && requestMethod(input, init) === 'POST')
 					return Promise.resolve(
@@ -1539,7 +1871,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				});
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(signal?.aborted).toBe(true);
-			finish(jsonResponse({ detail: 'Previous feedback failed' }, 503));
+			finish(jsonResponse({}, 200205, 'Previous feedback failed'));
 			await new Promise(requestAnimationFrame);
 			await expect
 				.element(browserPage.getByText('Could not save feedback. Please try again.'))
@@ -1575,7 +1907,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				if (requestPath(input) === '/api/v1/chat-sessions/chat_1' && unavailable)
 					return failure === 'offline'
 						? Promise.reject(new TypeError('Failed to fetch'))
-						: Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, failure));
+						: Promise.resolve(jsonResponse({}, ({ 403: 200203, 503: 200205 } as const)[failure], 'Temporarily unavailable'));
 				return original(input, init);
 			});
 			render(Page);
@@ -1610,7 +1942,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
 			requestPath(input).endsWith('/missing')
-				? Promise.resolve(jsonResponse({ detail: 'Not found' }, 404))
+				? Promise.resolve(jsonResponse({}, 200201, 'Not found'))
 				: original(input, init)
 		);
 		await renderReady();
@@ -1644,7 +1976,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				);
 			if (path === '/api/v1/chat-sessions')
 				return Promise.resolve(
-					jsonResponse({ ...session, user_id: 'researcher_2', session_id: 'chat_2' }, 201)
+					jsonResponse({ ...session, user_id: 'researcher_2', session_id: 'chat_2' }, 200, 'Request failed.')
 				);
 			return original(input, init);
 		});
@@ -1796,7 +2128,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				stage === 'creation'
 					? jsonResponse(session)
 					: stage === 'failure'
-						? jsonResponse({ detail: 'Old collection unavailable' }, 503)
+						? jsonResponse({}, 200205, 'Old collection unavailable')
 						: jsonResponse({
 								feedback: [],
 								items: [message('old', 'assistant', 'Old collection answer')],
@@ -1882,7 +2214,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => pending,
-			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 200, 'Request failed.')
 		});
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
@@ -1907,7 +2239,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			url: new URL('http://localhost/collections/col_456/assistant')
 		});
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-		finish(jsonResponse(uploadedDocument(file), 201));
+		finish(jsonResponse(uploadedDocument(file), 200, 'Request failed.'));
 		await vi.waitFor(() =>
 			expect(
 				fetchMock.mock.calls.some(([input]) =>
@@ -1931,7 +2263,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => pending,
-			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 202)
+			prepareDocument: (id) => jsonResponse(queuedPreparation(id), 200, 'Request failed.')
 		});
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
@@ -1947,7 +2279,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.click();
 		await logout();
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
-		finish(jsonResponse(uploadedDocument(file), 201));
+		finish(jsonResponse(uploadedDocument(file), 200, 'Request failed.'));
 		await new Promise(requestAnimationFrame);
 		await new Promise(requestAnimationFrame);
 		expect(
@@ -1958,8 +2290,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
 		installApi({
-			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 201),
-			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 202)
+			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 200, 'Request failed.'),
+			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
 		});
 		await renderReady();
 
@@ -2007,7 +2339,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => uploadPending,
-			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 202)
+			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
 		});
 		await renderReady();
 
@@ -2019,13 +2351,13 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeDisabled();
 		await expect.element(browserPage.getByRole('button', { name: 'Add papers' })).toBeDisabled();
 
-		finishUpload?.(jsonResponse(uploadedDocument(file), 201));
+		finishUpload?.(jsonResponse(uploadedDocument(file), 200, 'Request failed.'));
 		await expect.element(browserPage.getByText('Preparation queued')).toBeInTheDocument();
 	});
 
 	it('reports an upload failure beside the paper without hiding the retry path', async () => {
 		installApi({
-			uploadDocument: () => jsonResponse({ detail: 'PDF exceeds the upload limit' }, 413)
+			uploadDocument: () => jsonResponse({}, 200100, 'PDF exceeds the upload limit')
 		});
 		await renderReady();
 
@@ -2043,7 +2375,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('marks a paper already in the collection without presenting it as a retryable failure', async () => {
 		installApi({
 			uploadDocument: () =>
-				jsonResponse({ detail: 'document content already exists in collection' }, 400)
+				jsonResponse({ code: 'document_content_already_exists' }, 200204, 'Document content already exists in this collection.')
 		});
 		await renderReady();
 
@@ -2068,13 +2400,13 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi({
 			uploadDocument: (file) => {
 				uploadCalls += 1;
-				return jsonResponse(uploadedDocument(file), 201);
+				return jsonResponse(uploadedDocument(file), 200, 'Request failed.');
 			},
 			prepareDocument: (documentId) => {
 				preparationCalls += 1;
 				return preparationCalls === 1
-					? jsonResponse({ detail: 'Preparation worker unavailable' }, 503)
-					: jsonResponse(queuedPreparation(documentId), 202);
+					? jsonResponse({}, 200205, 'Preparation worker unavailable')
+					: jsonResponse(queuedPreparation(documentId), 200, 'Request failed.');
 			}
 		});
 		await renderReady();
@@ -2183,6 +2515,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			})
 			.toEqual({
 				message: 'What does this result support?',
+				model_connection_id: 'lab-a',
 				source_contexts: [sourceContext]
 			});
 		await expect
@@ -2286,7 +2619,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.'
+					'This turn reached its time, tool or model budget. You can continue the unfinished research.'
 				)
 			)
 			.toBeInTheDocument();
@@ -2300,7 +2633,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 	it.each([
 		['completed', 'resource_budget', null, 'Run resource limit reached'],
-		['failed', null, 'model_unavailable', 'Technical failure']
+		['failed', null, 'model_unavailable', 'The model service is temporarily unavailable. Contact an administrator or try again later.']
 	] as const)('restores %s recovery without an execution plan or warnings', async (status, reason, errorCode, title) => {
 		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		installApi({ trajectory: {
@@ -2328,6 +2661,133 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Run resource limit reached', { exact: true })).not.toBeInTheDocument();
 	});
+
+	for (const embedded of [false, true]) {
+		it.each([320, 768, 1024, 1440])(`keeps a failure and its action inside the conversation at %spx (embedded=${embedded})`, async (width) => {
+			await browserPage.viewport(width, 900);
+			try {
+				localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
+				installApi({ trajectory: {
+					items: [message('question', 'user', 'Compare the tensile conditions.')], feedback: [], pending_approval: null,
+					response: {
+						response_id: 'failed-response', sequence: 1, status: 'failed', error_code: 'provider_timeout',
+						started_at: createdAt, updated_at: createdAt, completion_reason: null, warnings: [],
+						content: 'The reported test temperatures differ.', message_id: 'partial', message_created_at: createdAt,
+						progress: { phase: 'terminal' }, checkpoint_message_id: 'question'
+					}
+				} });
+				render(Conversation, { embedded });
+				const notice = browserPage.getByTestId('turn-notice');
+				await expect.element(notice).toBeVisible();
+				await expect.element(notice.getByRole('button', { name: 'Continue research' })).toBeEnabled();
+				const bounds = notice.element().getBoundingClientRect();
+				expect(bounds.left).toBeGreaterThanOrEqual(0);
+				expect(bounds.right).toBeLessThanOrEqual(width);
+				expect(notice.element().scrollWidth).toBeLessThanOrEqual(Math.ceil(bounds.width));
+			} finally { await browserPage.viewport(1280, 720); }
+		});
+
+		for (const locale of ['en', 'zh'] as const) {
+			it(`keeps session load failures in the conversation area (embedded=${embedded}, locale=${locale})`, async () => {
+				language.set(locale);
+				installApi();
+				const fallback = fetchMock.getMockImplementation()!;
+				let failed = true;
+				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+					if (failed && requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'POST')
+						return Promise.reject(new TypeError('Offline'));
+					return fallback(input, init);
+				});
+				render(Conversation, { embedded });
+				await expect.element(browserPage.getByRole('alert')).toHaveTextContent(locale === 'en' ? 'Conversation could not be loaded' : '对话加载失败');
+				expect(document.querySelector('.message-list [role="alert"]')).not.toBeNull();
+				expect(document.querySelector('.welcome-state')).toBeNull();
+				failed = false;
+				await browserPage.getByRole('button', { name: locale === 'en' ? 'Retry conversation' : '重试加载会话' }).click();
+				await expect.element(browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true })).toBeEnabled();
+				await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+			});
+
+			it.each([false, true])(`localizes a service failure before a snapshot exists (embedded=${embedded}, locale=${locale}, recovery unavailable=%s)`, async (unavailable) => {
+				language.set(locale);
+				installApi();
+				const fallback = fetchMock.getMockImplementation()!;
+				let submitted = false;
+				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+					if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+						submitted = true;
+						return Promise.resolve(new Response('event: error\ndata: {"code":"provider_timeout","message":"Provider timeout details"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+					}
+					if (submitted && unavailable && requestPath(input).endsWith('/messages'))
+						return Promise.reject(new TypeError('Offline'));
+					return fallback(input, init);
+				});
+				render(Conversation, { embedded });
+				const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true });
+				await expect.element(composer).toBeEnabled();
+				await composer.fill('Compare the tensile conditions.');
+				await browserPage.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true }).click();
+				await expect.element(browserPage.getByTestId(unavailable ? 'research-recovery' : 'turn-notice')).toHaveTextContent(locale === 'en' ? 'The model service timed out.' : '模型服务响应超时');
+				expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+			});
+
+			for (const restored of [false, true]) {
+				it.each([
+					['failed', 'provider_timeout', 'The model service timed out.', '模型服务响应超时'],
+					['failed', 'model_unavailable', 'The model service is temporarily unavailable.', '模型服务暂时不可用'],
+					['interrupted', null, 'Generation was interrupted.', '回复生成已中断']
+				] as const)(`preserves the specific %s / %s reason (embedded=${embedded}, locale=${locale}, restored=${restored})`, async (status, errorCode, english, chinese) => {
+					language.set(locale);
+					if (restored) localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
+					const items = [
+						message('saved-question', 'user', 'Compare the tensile conditions.'),
+						message('unfinished-read', 'assistant', '', {
+							tool_calls: [{ tool_call_id: 'read-1', name: 'read_source', arguments: {}, position: 0 }]
+						})
+					];
+					const partial = 'The test temperatures have not yet been checked.';
+					const response: ChatResponseSnapshot = {
+						response_id: 'failed-response', sequence: 3, started_at: createdAt, updated_at: createdAt,
+						status, completion_reason: null, error_code: errorCode, warnings: [],
+						message_id: 'partial-answer', message_created_at: createdAt, content: partial,
+						progress: { phase: 'terminal' }, checkpoint_message_id: 'saved-question'
+					};
+					installApi({
+						trajectory: { items, pending_approval: null, feedback: [], response },
+						messageTurn: status === 'failed' ? {
+							status, completion_reason: null, error_code: errorCode, warnings: [],
+							pending_approval: null, messages: [...items, message('partial-answer', 'assistant', partial)]
+						} : undefined
+					});
+					if (!restored && status === 'interrupted') {
+						const fallback = fetchMock.getMockImplementation()!;
+						fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+							if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST')
+								return Promise.resolve(new Response(`event: snapshot\ndata: ${JSON.stringify(response)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } }));
+							return fallback(input, init);
+						});
+					}
+					render(Conversation, { embedded });
+					const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true });
+					await expect.element(composer).toBeEnabled();
+					if (!restored) {
+						await composer.fill('Compare the tensile conditions.');
+						await browserPage.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true }).click();
+					}
+					const notice = browserPage.getByTestId('turn-notice');
+					await expect.element(notice).toHaveTextContent(locale === 'en' ? english : chinese);
+					await expect.element(browserPage.getByText(partial)).toBeVisible();
+					await expect.element(notice.getByRole('button', { name: locale === 'en' ? 'Continue research' : '继续研究' })).toBeEnabled();
+					expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+					expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(0);
+					expect(notice.element().textContent).not.toContain('researchAgent.');
+					expect(document.querySelectorAll('.retained-results')).toHaveLength(1);
+					expect(document.querySelector('.message-list')!.contains(notice.element())).toBe(true);
+				}
+				);
+			}
+		}
+	}
 
 	it('allows a second question after the first turn is persisted', async () => {
 		installApi({

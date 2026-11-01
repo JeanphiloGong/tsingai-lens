@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from application.chat.capabilities import finding_authoring
+
+from application.chat.capabilities import objective_analysis
+
+from domain.chat import ChatMessageRole
+
 from domain.chat import ChatToolRequest
 
 from collections import deque
 import asyncio
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any, ClassVar
 
 import pytest
@@ -42,6 +48,12 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.chat.permissions import AUTO_ACTIONS
+from exceptions import (
+    PermissionDeniedException,
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -53,31 +65,8 @@ def skip_retry_delays(monkeypatch):
     monkeypatch.setattr(agent_runner_module, "sleep", no_wait)
 
 
-def test_provider_overload_without_http_status_is_retryable() -> None:
-    import httpx
-    from openai import APIError
-    error = APIError("Our servers are currently overloaded. Please try again later.",
-                     request=httpx.Request("POST", "https://example.test"), body=None)
-
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["retryable"] is True
-    assert details["reason"] == "transient_provider_error"
 
 
-def test_provider_retry_after_is_preserved_without_exposing_response_body() -> None:
-    class Response:
-        status_code = 503
-        headers = {"retry-after": "2.5"}
-
-    class ProviderError(RuntimeError):
-        response = Response()
-
-    details = agent_runner_module._provider_failure_details(ProviderError("temporary failure"))
-
-    assert details["retryable"] is True
-    assert details["http_status"] == 503
-    assert details["retry_after_seconds"] == 2.5
 
 
 def test_default_run_limits_bound_an_unconfigured_turn() -> None:
@@ -144,6 +133,9 @@ class _Model:
         self.tool_spec_names: list[tuple[str, ...]] = []
         self.contexts: list[tuple[ChatMessage, ...]] = []
         self.request_limits: list[tuple[float, int]] = []
+
+    async def generate_title(self, *, question: str, answer: str) -> str:
+        return ""
 
     async def respond(
         self,
@@ -286,14 +278,33 @@ def test_reconstruct_active_trajectory_retains_completed_write_observations() ->
             message_id="msg-write",
             session_id="chat-1",
             content="",
-            tool_calls=(completed.to_request(),),
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id=completed.tool_call_id,
+                    name=completed.name,
+                    arguments=completed.arguments,
+                    position=completed.position,
+                    decision_user_id=completed.decision_user_id,
+                    decision_arguments_digest=completed.decision_arguments_digest,
+                    decided_at=completed.decided_at,
+                    decision_basis=completed.decision_basis,
+                    authorization_revision=completed.authorization_revision,
+                ),
+            ),
             created_at="2026-09-29T00:00:30+00:00",
         ),
-        ChatMessage.from_tool_result(
+        ChatMessage(
             message_id="msg-result",
             session_id="chat-1",
-            result=result,
+            role=ChatMessageRole.TOOL,
+            content=json.dumps(
+                asdict(result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
             created_at="2026-09-29T00:01:01+00:00",
+            tool_call_id=result.tool_call_id,
+            tool_result=result,
         ),
     )
     writer_capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
@@ -340,21 +351,74 @@ def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> N
         arguments_digest=second_request.arguments_digest,
         decided_at="2026-09-29T00:02:45+00:00",
     ).start("2026-09-29T00:03:00+00:00").succeed("2026-09-29T00:03:01+00:00")
+    first_tool_result = ChatToolResult(
+        tool_call_id=first.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"saved": True}
+    )
+    second_tool_result = ChatToolResult(
+        tool_call_id=second.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"saved": True}
+    )
     messages = (
-        ChatMessage.user(message_id="msg-user", session_id="chat-1", content="Save both.", created_at="2026-09-29T00:00:00+00:00"),
+        ChatMessage.user(
+            message_id="msg-user",
+            session_id="chat-1",
+            content="Save both.",
+            created_at="2026-09-29T00:00:00+00:00",
+        ),
         ChatMessage.assistant_tool_calls(
-            message_id="msg-writes", session_id="chat-1", content="",
-            tool_calls=(first.to_request(), second.to_request()), created_at="2026-09-29T00:00:30+00:00",
+            message_id="msg-writes",
+            session_id="chat-1",
+            content="",
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id=first.tool_call_id,
+                    name=first.name,
+                    arguments=first.arguments,
+                    position=first.position,
+                    decision_user_id=first.decision_user_id,
+                    decision_arguments_digest=first.decision_arguments_digest,
+                    decided_at=first.decided_at,
+                    decision_basis=first.decision_basis,
+                    authorization_revision=first.authorization_revision,
+                ),
+                ChatToolRequest(
+                    tool_call_id=second.tool_call_id,
+                    name=second.name,
+                    arguments=second.arguments,
+                    position=second.position,
+                    decision_user_id=second.decision_user_id,
+                    decision_arguments_digest=second.decision_arguments_digest,
+                    decided_at=second.decided_at,
+                    decision_basis=second.decision_basis,
+                    authorization_revision=second.authorization_revision,
+                ),
+            ),
+            created_at="2026-09-29T00:00:30+00:00",
         ),
-        ChatMessage.from_tool_result(
-            message_id="msg-first-result", session_id="chat-1",
-            result=ChatToolResult(tool_call_id=first.tool_call_id, status="succeeded", data={"saved": True}),
+        ChatMessage(
+            message_id="msg-first-result",
+            session_id="chat-1",
+            role=ChatMessageRole.TOOL,
+            content=json.dumps(
+                asdict(first_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
             created_at="2026-09-29T00:01:01+00:00",
+            tool_call_id=first_tool_result.tool_call_id,
+            tool_result=first_tool_result,
         ),
-        ChatMessage.from_tool_result(
-            message_id="msg-second-result", session_id="chat-1",
-            result=ChatToolResult(tool_call_id=second.tool_call_id, status="succeeded", data={"saved": True}),
+        ChatMessage(
+            message_id="msg-second-result",
+            session_id="chat-1",
+            role=ChatMessageRole.TOOL,
+            content=json.dumps(
+                asdict(second_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
             created_at="2026-09-29T00:03:01+00:00",
+            tool_call_id=second_tool_result.tool_call_id,
+            tool_result=second_tool_result,
         ),
     )
     capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
@@ -554,7 +618,7 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
         risk=ToolRisk.READ,
     )
     result = ChatToolResult(
-        tool_call_id="call-1", status="succeeded",
+        tool_call_id="call-1", status=ToolResultStatus.SUCCEEDED,
         data={"document": {"document_id": "doc-1"}, "batch_token_budget": 16000, "sources": [{
             "source_kind": "text_window", "source_ref": "block-1", "source_digest": "digest-1",
             "content_truncated": False, "content": "Methods and results",
@@ -758,9 +822,9 @@ async def test_request_timeout_is_independent_from_prior_active_turn_time(monkey
     ),))
     now[0] = 200
     await runner._respond(context, (), progress, None)
-    now[0] = 550
+    now[0] = 450
     await runner._respond(context, (), progress, None)
-    assert [timeout for timeout, _ in model.request_limits] == [180, 50]
+    assert [timeout for timeout, _ in model.request_limits] == [180, 30]
 
 
 def test_stage_hint_keeps_all_draft_references_without_copying_full_payloads():
@@ -842,7 +906,7 @@ async def test_new_source_pages_and_revised_source_content_remain_progress() -> 
     assert len(_results_for(result, read.spec.name)) == 3
 
 
-async def test_timed_out_model_is_cancelled_without_starting_finalization() -> None:
+async def test_timed_out_decision_and_summary_respect_total_deadline() -> None:
     cancelled = asyncio.Event()
 
     class SlowModel:
@@ -867,7 +931,7 @@ async def test_timed_out_model_is_cancelled_without_starting_finalization() -> N
     assert result.status is AgentRunStatus.COMPLETED
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
     assert result.error_code is None
-    assert model.calls == 1
+    assert model.calls == 2
     assert cancelled.is_set()
     assert deltas == []
 
@@ -887,91 +951,18 @@ async def test_transient_provider_timeout_is_retried_up_to_success() -> None:
     assert len(model.request_limits) == 2
 
 
-@pytest.mark.parametrize("status,retryable", [(408, True), (429, True), (503, True), (401, False), (403, False), (400, False), (None, False)])
-def test_generic_provider_errors_use_structured_status(status, retryable):
-    class APIError(Exception):
-        status_code = status
-
-    details = agent_runner_module._provider_failure_details(APIError("private provider request"))
-    assert details["retryable"] is retryable
-    assert details["http_status"] == status
-    assert "private provider request" not in json.dumps(details)
 
 
-def test_provider_failure_details_keep_safe_message_and_fingerprint_only() -> None:
-    error = AttributeError("response has no attribute message")
-
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["message"] == "response has no attribute message"
-    assert len(details["message_fingerprint"]) == 16
-    assert details["exception_chain"] == ["AttributeError"]
 
 
-def test_provider_failure_details_do_not_keep_provider_error_message() -> None:
-    error = RuntimeError("provider response contained private-token-value")
-
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["message"] is None
-    assert details["message_fingerprint"]
-    assert "private-token-value" not in json.dumps(details)
 
 
-@pytest.mark.parametrize("error", [
-    TypeError("provider parameter contained private-value"),
-    ValueError("provider response contained private-value"),
-])
-def test_provider_failure_details_do_not_keep_argument_error_text(error: Exception) -> None:
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["message"] is None
-    assert "private-value" not in json.dumps(details)
 
 
-def test_provider_failure_details_redact_sensitive_structural_message() -> None:
-    details = agent_runner_module._provider_failure_details(
-        AttributeError("api_key=private-key-value")
-    )
-
-    assert details["message"] is None
-    assert "private-key-value" not in json.dumps(details)
 
 
-def test_provider_error_cause_and_permanent_quota_are_distinguished():
-    import httpx
-
-    class APIError(Exception):
-        status_code = None
-
-    error = APIError("private response")
-    error.__cause__ = httpx.RemoteProtocolError("private connection")
-    assert agent_runner_module._provider_failure_details(error)["retryable"]
-    error.status_code = 429
-    error.body = {"error": {"code": "insufficient_quota", "message": "private account"}}
-    details = agent_runner_module._provider_failure_details(error)
-    assert not details["retryable"]
-    assert details["reason"] == "quota_exhausted"
 
 
-@pytest.mark.parametrize("body,retryable", [
-    ({"code": "internal_server_error"}, True),
-    ({"type": "server_error"}, True),
-    ({"error": {"code": "rate_limit_exceeded"}}, True),
-    ({"code": "insufficient_quota", "type": "server_error"}, False),
-    ({"code": "invalid_api_key"}, False),
-    ({"code": ["malformed"]}, False),
-    ({"message": "unknown provider error"}, True),
-])
-def test_stream_api_error_uses_known_structured_codes_without_status(body, retryable):
-    import httpx
-    from openai import APIError
-
-    error = APIError("private stream response", request=httpx.Request("POST", "https://example.test"), body=body)
-    details = agent_runner_module._provider_failure_details(error)
-    assert details["retryable"] is retryable
-    assert details["http_status"] is None
-    assert "private stream response" not in json.dumps(details)
 
 
 async def test_generic_provider_failure_recovers_after_five_retries_without_repeating_read(monkeypatch, caplog):
@@ -987,7 +978,7 @@ async def test_generic_provider_failure_recovers_after_five_retries_without_repe
     read = _Capability("test_source", ToolRisk.READ, result_data={"content": "Known paper result"})
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall("test_source", {}),)),
-        *(APIError("private request and credential") for _ in range(5)),
+        *(ModelResponseError("Provider unavailable", reason="http_status", http_status=503) for _ in range(5)),
         ModelTurn(content="The inspected paper result is retained."),
     )
     events = []
@@ -1013,8 +1004,7 @@ async def test_retryable_api_error_stops_after_initial_attempt_and_five_retries(
         pass
 
     monkeypatch.setattr(agent_runner_module, "sleep", wait)
-    error = APIError("private response", request=httpx.Request("POST", "https://example.test"),
-                     body={"type": "server_error"})
+    error = ModelResponseError("Provider unavailable", reason="transient_provider_error")
     model = _Model(*(error for _ in range(7)))
     events = []
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(())).run_turn(
@@ -1031,7 +1021,7 @@ async def test_provider_stream_failure_retries_as_non_streaming_request():
     import httpx
     from openai import APIError
     model = _Model(
-        APIError("stream upstream overloaded", request=httpx.Request("POST", "https://example.test"), body={"type": "upstream_error"}),
+        ModelResponseError("Provider unavailable", reason="transient_provider_error"),
         ModelTurn(content="The provider recovered without streaming."),
     )
     callbacks = []
@@ -1094,11 +1084,22 @@ async def test_finalization_timeout_cancels_the_only_summary_request() -> None:
     assert _results_for(result, read.spec.name)[0].status is ToolResultStatus.SUCCEEDED
 
 
-async def test_read_deadline_preserves_successes_without_starting_a_summary() -> None:
+async def test_read_deadline_preserves_successes_and_attempts_summary(monkeypatch) -> None:
     cancelled = asyncio.Event()
+    clock = agent_runner_module.monotonic
+    reads_started_at = None
+
+    # Exercise a deadline during reads, independent of tokenizer/schema startup.
+    monkeypatch.setattr(
+        agent_runner_module, "monotonic",
+        lambda: 0.0 if reads_started_at is None else clock() - reads_started_at,
+    )
 
     class SourceRead(_Capability):
         async def execute(self, context, arguments):
+            nonlocal reads_started_at
+            if reads_started_at is None:
+                reads_started_at = clock()
             if arguments.question == "paper-b":
                 try:
                     await asyncio.Event().wait()
@@ -1109,17 +1110,17 @@ async def test_read_deadline_preserves_successes_without_starting_a_summary() ->
     read = SourceRead("test_source", ToolRisk.READ, _QuestionArguments)
     model = _Model(ModelTurn(tool_calls=tuple(
         ModelToolCall(name=read.spec.name, arguments={"question": paper}) for paper in ("paper-a", "paper-b")
-    )))
+    )), ModelTurn(content="Paper A read; paper B timed out; continue the missing check."))
     result = await ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_elapsed_seconds=0.02),
+        limits=AgentRunLimits(max_elapsed_seconds=0.5),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
 
     assert result.error_code is None
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
     assert result.warnings
     assert cancelled.is_set()
-    assert len(model.contexts) == 1
+    assert len(model.contexts) == 2
     read_results = _results_for(result, read.spec.name)
     assert read_results[0].status is ToolResultStatus.SUCCEEDED
     assert read_results[1].error_code == "capability_timeout"
@@ -1400,6 +1401,9 @@ async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() ->
         arguments={},
         position=1,
     )
+    third_tool_result = ChatToolResult(
+        tool_call_id="read-1", status=ToolResultStatus.SUCCEEDED, data=read.result_data
+    )
     prior_messages = (
         ChatMessage.user(
             message_id="user-1",
@@ -1414,15 +1418,18 @@ async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() ->
             tool_calls=(source_request, pending_request),
             created_at="2026-10-11T00:00:01Z",
         ),
-        ChatMessage.from_tool_result(
+        ChatMessage(
             message_id="tool-1",
             session_id="chat-1",
-            created_at="2026-10-11T00:00:02Z",
-            result=ChatToolResult(
-                tool_call_id="read-1",
-                status="succeeded",
-                data=read.result_data,
+            role=ChatMessageRole.TOOL,
+            content=json.dumps(
+                asdict(third_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
             ),
+            created_at="2026-10-11T00:00:02Z",
+            tool_call_id=third_tool_result.tool_call_id,
+            tool_result=third_tool_result,
         ),
     )
     pending = ChatToolCall.requested(
@@ -2378,7 +2385,17 @@ async def test_successful_approved_write_preserves_result_but_fails_when_respons
             message_id="msg-2",
             session_id="chat-1",
             content="我准备保存这个实验版本。",
-            tool_calls=(approved.to_request(),),
+            tool_calls=(ChatToolRequest(
+                tool_call_id=approved.tool_call_id,
+                name=approved.name,
+                arguments=approved.arguments,
+                position=approved.position,
+                decision_user_id=approved.decision_user_id,
+                decision_arguments_digest=approved.decision_arguments_digest,
+                decided_at=approved.decided_at,
+                decision_basis=approved.decision_basis,
+                authorization_revision=approved.authorization_revision,
+            ),),
             created_at="2026-09-29T00:00:30+00:00",
         ),
     )
@@ -2420,7 +2437,17 @@ async def test_failed_approved_write_allows_a_failure_explanation_without_new_re
         ChatMessage.user(message_id="user-1", session_id="chat-1",
                          content="Publish from the inspected Sources.", created_at="2026-09-08T00:00:00+00:00"),
         ChatMessage.assistant_tool_calls(message_id="request-1", session_id="chat-1", content="",
-                                         tool_calls=(approved.to_request(),), created_at="2026-09-08T00:00:00+00:00"),
+                                         tool_calls=(ChatToolRequest(
+                                             tool_call_id=approved.tool_call_id,
+                                             name=approved.name,
+                                             arguments=approved.arguments,
+                                             position=approved.position,
+                                             decision_user_id=approved.decision_user_id,
+                                             decision_arguments_digest=approved.decision_arguments_digest,
+                                             decided_at=approved.decided_at,
+                                             decision_basis=approved.decision_basis,
+                                             authorization_revision=approved.authorization_revision,
+                                         ),), created_at="2026-09-08T00:00:00+00:00"),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((writer, read))).resume_claimed_call(
         context=_context(), previous_messages=messages, claimed_call=approved.start("2026-09-08T00:00:02+00:00"),
@@ -2477,6 +2504,10 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                     arguments={"question": "Test the supported preheating effect."},
                 ),),
             ),
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the reviewed research plan", "status": "completed"}],
+                "status": "completed", "explanation": "The exact approved write succeeded.",
+            }),)),
             ModelTurn(content="The approved plan draft has been saved."),
             discover=(
                 "inspect_published_finding",
@@ -2636,8 +2667,15 @@ async def test_invalid_arguments_do_not_execute_capability() -> None:
     assert capability.executed_arguments == []
 
 
-async def test_finding_draft_repair_receives_actionable_selection_error() -> None:
+async def test_finding_draft_repair_receives_actionable_selection_error(monkeypatch) -> None:
     from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability
+    from unittest.mock import AsyncMock
+
+    validate = AsyncMock()
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.validate_selection_references",
+        validate,
+    )
 
     arguments = {
         "draft_id": "correction", "objective_id": "obj-1", "source_analysis_version": 6,
@@ -2658,6 +2696,10 @@ async def test_finding_draft_repair_receives_actionable_selection_error() -> Non
     assert "invalid_tool_arguments" in model.contexts[1][-1].content
     assert result.status is AgentRunStatus.COMPLETED
     assert any(item.data.get("draft") == {**corrected, "comparison_group_ids": []} for item in result.tool_results)
+    validate.assert_awaited_once_with(
+        collection_id="col-1", objective_id="obj-1", source_analysis_version=6,
+        selection_ids=("selection-1",), comparison_group_ids=(), user_id="user-1",
+    )
 
 
 async def test_finding_draft_does_not_invent_scientific_strength_and_deduplicates_evidence() -> None:
@@ -2731,6 +2773,43 @@ async def test_requested_calls_deduplicates_success_only_in_memory_write() -> No
     assert requested == ()
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        ResourceConflictException(
+            "The approved Sources changed; inspect the current plan before retrying.",
+            data={"code": "research_plan_sources_stale", "plan_id": "plan-1"},
+        ),
+        ResourceNotFoundException(
+            "The Objective no longer exists; inspect the available questions.",
+            data={"code": "objective_not_found", "objective_id": "obj-1"},
+        ),
+        RequestInvalidException("Select exactly one outcome before retrying."),
+    ],
+)
+async def test_capability_business_rejection_reaches_the_next_model_turn(error) -> None:
+    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=error)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),
+        ModelTurn(content="当前依据已变化，需要重新检查后再决定。"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((capability,)))
+
+    result = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="检查研究依据",
+    )
+
+    failure = result.tool_results[-1]
+    assert failure.status is ToolResultStatus.FAILED
+    assert failure.error_code == (error.data or {}).get("code", str(error.code))
+    assert failure.error_message == error.message
+    assert failure.data == (error.data or {})
+    call = next(item for item in result.tool_calls if item.name == capability.spec.name)
+    assert call.status is ToolCallStatus.FAILED
+    assert call.error_code == failure.error_code
+    assert any(message.tool_result == failure for message in model.contexts[-1])
+
+
 async def test_capability_exception_is_sanitized_before_returning_to_model(caplog) -> None:
     capability = _Capability(
         "get_collection_context",
@@ -2763,7 +2842,7 @@ async def test_capability_exception_is_sanitized_before_returning_to_model(caplo
     assert "exception_type=RuntimeError" in caplog.text
 
 
-async def test_capability_validation_exception_is_actionable_for_model_repair() -> None:
+async def test_arbitrary_capability_value_error_does_not_expose_internal_text() -> None:
     capability = _Capability(
         "get_collection_context",
         ToolRisk.DRAFT,
@@ -2790,8 +2869,8 @@ async def test_capability_validation_exception_is_actionable_for_model_repair() 
         if item.error_code == "capability_execution_failed"
     )
     assert failure.error_code == "capability_execution_failed"
-    assert "unknown source labels" in failure.error_message
-    assert "S001=methods-1" in failure.error_message
+    assert "unknown source labels" not in failure.error_message
+    assert "S001=methods-1" not in failure.error_message
 
 
 async def test_paper_experiment_validation_failure_is_structured_for_model_repair() -> None:
@@ -3004,7 +3083,8 @@ async def test_plan_only_loop_reaches_no_progress(kind: str) -> None:
 
     assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
     plan_results = _results_for(result, "update_execution_plan")
-    assert len(plan_results) == (2 if kind == "invalid" else 3)
+    # One corrective model decision is allowed before the stalled run closes.
+    assert len(plan_results) == (3 if kind == "invalid" else 4)
     assert all(item.status is (ToolResultStatus.FAILED if kind == "invalid" else ToolResultStatus.SUCCEEDED)
                for item in plan_results)
     assert result.warnings
@@ -3058,7 +3138,10 @@ async def test_plan_version_stays_on_model_updates_after_approved_write(write_st
     ).start("2026-10-10T00:00:01Z")
     events = []
     resumed = await ResearchAgentRunner(
-        model=_Model(ModelTurn(content="The save operation returned; its recorded status is authoritative.")),
+        model=_Model(
+            ModelTurn(content="The save operation returned; its recorded status is authoritative."),
+            ModelTurn(content="The research disposition is still unreported."),
+            ModelTurn(content="The save result is retained; the research plan is still incomplete.")),
         capabilities=capabilities,
     ).resume_claimed_call(
         context=_context(), previous_messages=proposed.messages, claimed_call=claimed,
@@ -3081,10 +3164,23 @@ async def test_plan_version_stays_on_model_updates_after_approved_write(write_st
         messages=resumed.messages, run_status=resumed.status, completion_reason=resumed.completion_reason,
     )
     assert recovered is not None
-    assert recovered.to_record() == after
+    assert recovered.plan_id == after["plan_id"]
+    assert recovered.version == after["plan_version"]
+    assert recovered.request == after["request"]
+    assert recovered.status.value == after["status"]
+    assert recovered.model_status.value == after["model_status"]
+    assert recovered.explanation == after["explanation"]
+    assert list(recovered.steps) == after["steps"]
+    assert recovered.blocking_reason == after["blocking_reason"]
 
 
-async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
+async def test_model_authored_execution_plan_is_loaded_and_revised(monkeypatch) -> None:
+    restores = []
+    original = agent_runner_module.ResearchExecutionPlan.from_messages
+    def restore(**kwargs):
+        restores.append(1)
+        return original(**kwargs)
+    monkeypatch.setattr(agent_runner_module.ResearchExecutionPlan, "from_messages", restore)
     read = _Capability("read_source", ToolRisk.READ, _QuestionArguments,
                        result_data={"document_id": "paper-1", "source_ref": "results"})
     model = _Model(
@@ -3156,9 +3252,11 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
     ]
     assert any("update_execution_plan" in names for names in model.tool_spec_names)
 
+    assert len(restores) == 1
+
 
 @pytest.mark.parametrize("model_status, expected", [
-    ("in_progress", "completed"),
+    ("in_progress", "stalled"),
     ("completed", "completed"),
     ("waiting_for_clarification", "waiting_for_clarification"),
     ("scientific_refusal", "scientific_refusal"),
@@ -3176,6 +3274,9 @@ async def test_streamed_and_final_plan_preserve_the_same_research_outcome(model_
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan),)),
         ModelTurn(content="The available comparison is complete."),
+        *([ModelTurn(content="The conditions are still unchecked."),
+           ModelTurn(content="Partial result; continue the unchecked conditions.")]
+          if model_status == "in_progress" else []),
         discover=("update_execution_plan",),
     )
 
@@ -3320,7 +3421,7 @@ async def test_approval_resume_inherits_time_and_model_budget(
         claimed_call=approved,
         progress_callback=events.append,
         continuation_progress={
-            "elapsed_ms": 9_500,
+            "elapsed_ms": 7_500,
             "model_cycles": 1,
             "model_tokens": 90,
             "prompt_tokens": 70,
@@ -3518,13 +3619,13 @@ def test_reading_ledger_retains_failed_and_unread_document_scope() -> None:
         ))
     ]
     results = [
-        ChatToolResult(tool_call_id="call-0", status="succeeded", data={
+        ChatToolResult(tool_call_id="call-0", status=ToolResultStatus.SUCCEEDED, data={
             "paper_total": 3,
             "papers": [{"document_id": f"paper-{i}"} for i in (1, 2, 3)],
         }),
-        ChatToolResult(tool_call_id="call-1", status="failed",
+        ChatToolResult(tool_call_id="call-1", status=ToolResultStatus.FAILED,
                        error_code="source_not_found", error_message="Source unavailable"),
-        ChatToolResult(tool_call_id="call-2", status="failed",
+        ChatToolResult(tool_call_id="call-2", status=ToolResultStatus.FAILED,
                        error_code="resource_budget", error_message="Not executed"),
     ]
 
@@ -4444,46 +4545,6 @@ def test_failed_curation_retains_failure_observation() -> None:
     }
 
 
-def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
-    from tests.unit.application.test_finding_review_import_service import _finding
-
-    canonical = _finding()
-    inspect_request = ChatToolCall.requested(
-        tool_call_id="inspect-1", session_id="chat-1", assistant_message_id="inspect-call",
-        name="inspect_published_finding", arguments={}, risk=ToolRisk.READ,
-    ).start("2026-09-10T00:00:00Z").succeed("2026-09-10T00:00:01Z").to_request()
-    inspect_call = ChatMessage.assistant_tool_calls(
-        message_id="inspect-call", session_id="chat-1", content="", tool_calls=(
-            inspect_request,
-        ), created_at="2026-09-10T00:00:00Z",
-    )
-    inspected = ChatMessage.from_tool_result(
-        message_id="inspect-result", session_id="chat-1", created_at="2026-09-10T00:00:00Z",
-        result=ChatToolResult(
-            tool_call_id="inspect-1", status=ToolResultStatus.SUCCEEDED,
-            data={"finding": canonical},
-        ),
-    )
-    candidate = {
-        "objective_id": canonical["objective_id"],
-        "analysis_version": canonical["analysis_version"],
-        "finding_id": canonical["finding_id"],
-        "curated_finding": {
-            "statement": "The reported effect is limited to the inspected condition.",
-            "limitation": ["Only one paper was checked."],
-        },
-    }
-    repaired = ResearchAgentRunner._complete_curation_shape(
-        candidate, [ChatMessage.user(
-            message_id="user-1", session_id="chat-1", content="Revise this Finding.",
-            created_at="2026-09-10T00:00:00Z",
-        ), inspect_call, inspected],
-    )
-    finding = repaired["curated_finding"]
-    assert finding["collection_id"] == canonical["collection_id"]
-    assert finding["paper_contributions"] == canonical["paper_contributions"]
-    assert finding["limitations"] == ["Only one paper was checked."]
-    assert "limitation" not in finding
 
 
 @pytest.mark.parametrize("name", ["record_finding_feedback", "curate_finding"])
@@ -4893,14 +4954,233 @@ async def test_unexpected_model_failure_remains_model_unavailable(exception: Exc
 
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_unavailable"
-    if isinstance(exception, AttributeError):
-        assert str(exception) in caplog.text
+    assert str(exception) not in caplog.text
+    assert f"exception_type={type(exception).__name__}" in caplog.text
+
+
+def test_context_recovery_budget_survives_approval_continuation():
+    original = agent_runner_module._RunProgress(AgentRunLimits())
+    original.context_token_limit = 39000
+    original.context_recovery_attempts = 2
+    original.retry_count = 3
+    original.model_tokens = 1200
+    snapshots = []
+    original.progress_callback = snapshots.append
+    original.trace(_context(), phase="context_recovery")
+    restored = agent_runner_module._RunProgress(original.limits)
+    restored.restore_persisted_progress(snapshots[-1])
+    assert restored.context_token_limit == 39000
+    assert restored.context_recovery_attempts == 2
+    assert restored.retry_count == 3 and restored.model_tokens == 1200
+
+
+async def test_oversized_current_question_stops_before_any_provider_call():
+    model = _Model()
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    result = await runner.run_turn(context=_context(), previous_messages=(),
+                                  user_message="Research question with immutable conditions. " * 20000)
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "context_window_exceeded"
+    assert not model.contexts
+
+
+@pytest.mark.parametrize("rejections", [1, 3])
+async def test_original_inconel_request_survives_reading_compaction_and_provider_rejection(rejections):
+    """Offline runtime replay; synthetic paper text and model decisions are not scientific evidence."""
+    from hashlib import sha256
+    from pathlib import Path
+    from application.chat.capabilities.document_sources import ReadSourceToolRequest
+
+    prompt = (Path(__file__).resolve().parents[2] / "fixtures/chat/inconel718_parameter_ranking.txt").read_text().rstrip()
+    assert len(prompt) == 10449 and "| B24 |" in prompt
+
+    class Sources(_Capability):
+        async def execute(self, context, arguments):
+            self.executed_arguments.append(arguments.model_dump())
+            content = ("Synthetic test passage: as-built Inconel 718, liquid-floating process; "
+                       "tensile orientation and comparable elongation remain unknown. ") * 150
+            return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={
+                **arguments.model_dump(), "content": content,
+                "source_digest": sha256(content.encode()).hexdigest(),
+                "content_truncated": False, "next_offset": None,
+            }, resource_refs=(ChatResourceRef("source", arguments.document_id + ":results"),))
+
+    sources = Sources("read_source", ToolRisk.READ, ReadSourceToolRequest)
+    answer = "Directly comparable elongation evidence is insufficient; no validated winner or exact elongation is established."
+
+    class Model(_Model):
+        def __init__(self):
+            super().__init__(*(ModelTurn(tool_calls=(ModelToolCall("read_source", {
+                "document_id": f"paper-{i}", "source_kind": "text_window", "source_ref": "results",
+            }),)) for i in range(6)), ModelTurn(content=answer))
+            self.rejected_inputs = []
+            self.notes_seen = []
+            self.requests_after_rejection = []
+
+        async def respond(self, *, context, **kwargs):
+            assert next(message for message in context.messages if message.message_id == context.active_user_message_id).content == prompt
+            if context.compacting:
+                result = next(message for message in context.messages if message.tool_result is not None)
+                return ModelTurn(content=json.dumps({"scope": "Supplied collection only; Inconel 718; density >= 99.9%.",
+                    "checks": [{"statement": "Synthetic first paper: comparable elongation is unknown.",
+                                "conditions": "As-built; tensile orientation unknown.",
+                                "basis_message_ids": [result.message_id], "unresolved": "Need comparable tensile data."}],
+                    "next_actions": ["Verify comparable tensile conditions before ranking."]}))
+            self.notes_seen.append(context.working_summary)
+            if len(sources.executed_arguments) == 4:
+                tokens = agent_runner_module.ChatContextBuilder.estimate_tokens(context.provider_messages("system"))
+                self.requests_after_rejection.append(tokens)
+                if len(self.rejected_inputs) < rejections:
+                    self.rejected_inputs.append(tokens)
+                    raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
+            return await super().respond(context=context, **kwargs)
+
+    model = Model()
+    traces = []
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((sources,)))
+    result = await runner.run_turn(context=_context(), previous_messages=(), user_message=prompt,
+                                   progress_callback=traces.append)
+    if rejections == 1:
+        assert result.status is AgentRunStatus.COMPLETED
+        assert result.messages[-1].content == answer
+        assert len(sources.executed_arguments) == 6
+        assert any("tensile orientation unknown" in notes for notes in model.notes_seen[-2:])
     else:
-        assert str(exception) not in caplog.text
-    record = next(record for record in caplog.records if "Research Agent model call failed" in record.message)
-    details = json.loads(record.message.split("details=", 1)[1])
-    assert details["exception_type"] == type(exception).__name__
-    assert details["http_status"] is None
-    assert details["retryable"] is False
-    assert details["reason"] == "unclassified_provider_error"
-    assert details["message_fingerprint"]
+        assert result.status is AgentRunStatus.FAILED
+        assert result.error_code == "context_window_exceeded"
+        assert len(sources.executed_arguments) == 4
+    assert any(trace["phase"] == "context_recovery" for trace in traces)
+    assert any(trace["phase"] == "context_compaction" for trace in traces)
+    assert all(after < before for before, after in zip(model.requests_after_rejection, model.requests_after_rejection[1:]))
+    assert len({arguments["document_id"] for arguments in sources.executed_arguments}) == len(sources.executed_arguments)
+    assert len([message for message in result.messages if message.tool_result and message.tool_result.data.get("content")]) == len(sources.executed_arguments)
+    assert result.messages[0].content == prompt
+    assert not any(call.risk is ToolRisk.WRITE for call in result.tool_calls)
+
+
+@pytest.mark.parametrize(
+    ("model_name", "arguments"),
+    [
+        ("ReadSourceToolRequest", {"document_id": " ", "source_kind": "text_window", "source_ref": "block-1"}),
+        ("ReadSourceToolRequest", {"document_id": "paper-1", "source_kind": "text_window", "source_ref": " "}),
+        ("InspectTableToolRequest", {"document_id": "paper-1", "table_ref": " "}),
+        ("InspectDocumentSourcesToolRequest", {"document_id": " "}),
+        ("InspectDocumentSourcesToolRequest", {"document_id": "paper-1", "source_ref": " "}),
+    ],
+)
+def test_source_requests_reject_blank_identifiers(model_name, arguments) -> None:
+    from application.chat.capabilities import document_sources
+
+    with pytest.raises(ValueError):
+        getattr(document_sources, model_name).model_validate(arguments)
+
+
+def test_source_inspection_preserves_exact_ids_and_normalizes_search_text() -> None:
+    from application.chat.capabilities.document_sources import InspectDocumentSourcesToolRequest
+
+    request = InspectDocumentSourcesToolRequest(
+        document_id=" Paper  A ", source_ref=" Block  B ",
+        query=" laser   power ", heading_path=" Methods   >  LPBF ",
+    )
+    assert request.document_id == "Paper  A"
+    assert request.source_ref == "Block  B"
+    assert request.query == "laser power"
+    assert request.heading_path == "Methods > LPBF"
+
+
+async def test_incomplete_curation_is_rejected_before_approval_without_alias_repair():
+    from application.chat.capabilities.finding_review import CurateFindingToolRequest
+    capability = _Capability("curate_finding", ToolRisk.WRITE, CurateFindingToolRequest)
+    raw = {
+        "objective_id": "obj-1", "analysis_version": 1, "finding_id": "finding-1",
+        "curated_status": "accepted",
+        "curated_finding": {"statement": "Revised", "direction": "mixed", "limitation": ["condition unresolved"]},
+    }
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("curate_finding", raw),)),
+        ModelTurn(content="The complete canonical Finding is required before approval."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((capability,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Revise this Finding.",
+    )
+    call = next(call for call in result.tool_calls if call.name == "curate_finding")
+    assert call.arguments == raw
+    assert result.pending_approval is None
+    assert any(item.error_code == "invalid_tool_arguments" for item in result.tool_results)
+    assert not capability.executed_arguments
+
+
+@pytest.mark.parametrize("error", [PermissionError("private authority details"), PermissionDeniedException()])
+async def test_capability_permission_failure_keeps_a_distinct_error_contract(error):
+    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=error)
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),
+            ModelTurn(content="当前权限不允许读取该集合。"),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+    result = await runner.run_turn(context=_context(), previous_messages=(), user_message="读取集合")
+    failure = next(item for item in result.tool_results if item.error_code == "tool_permission_denied")
+    assert failure.status is ToolResultStatus.FAILED
+    assert "private authority" not in failure.error_message
+
+
+@pytest.mark.parametrize("confirmation", [None, "candidate"])
+async def test_analysis_prerequisites_return_actionable_rejections_without_scheduling(
+    confirmation,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from application.chat.capabilities.objective_analysis import (
+        StartObjectiveAnalysisCapability,
+        StartObjectiveAnalysisToolRequest,
+    )
+
+    analysis = SimpleNamespace(start_analysis=AsyncMock())
+    objective_analysis.collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock()
+    )
+    objective_analysis.ObjectiveRepo = SimpleNamespace(
+        read_objective=AsyncMock(
+            return_value=(
+                None
+                if confirmation is None
+                else SimpleNamespace(confirmation_status=confirmation)
+            )
+        )
+    )
+    capability = StartObjectiveAnalysisCapability()
+    result = await capability.execute(
+        CapabilityExecutionContext.for_call(_context(), "start-1"),
+        StartObjectiveAnalysisToolRequest(
+            objective_id="objective-1", document_ids=["paper-1"]
+        ),
+    )
+    assert result.error_code == (
+        "objective_not_found"
+        if confirmation is None
+        else "objective_confirmation_required"
+    )
+    assert result.status is ToolResultStatus.FAILED
+    analysis.start_analysis.assert_not_awaited()
+
+
+async def test_finding_draft_rejects_unavailable_selection_without_returning_a_draft():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability, CreateFindingDraftToolRequest
+    from exceptions import RequestInvalidException
+
+    finding_authoring.finding_authoring_service = SimpleNamespace(
+        validate_selection_references=AsyncMock(side_effect=RequestInvalidException("internal storage details")),
+    )
+    capability = CreateFindingDraftCapability()
+    result = await capability.execute(
+        CapabilityExecutionContext.for_call(_context(), "draft-1"),
+        CreateFindingDraftToolRequest(draft_id="draft-1", objective_id="objective-1", source_analysis_version=1, selection_ids=["missing"]),
+    )
+    assert result.error_code == "finding_selection_rejected"
+    assert result.status is ToolResultStatus.FAILED
+    assert not result.data
+    assert "internal storage" not in result.error_message

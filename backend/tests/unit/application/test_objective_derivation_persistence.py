@@ -1,20 +1,32 @@
 from __future__ import annotations
 
+from application.chat.capabilities import objective_candidate
+
+from application.core.objectives.analysis import analysis_record_source
+
 from dataclasses import replace
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
-
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
-from application.core.objectives.objective_authoring_service import (
-    ObjectiveAuthoringService,
-)
+from application.core.objectives import objective_authoring_service
 from domain.core import ResearchObjective
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    ObjectiveEvidence,
+    PreparedDocumentInput,
+    ResearchObjective,
+    build_research_objective_id,
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import ScientificContext, ScientificResult
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from exceptions import RequestInvalidException, ResourceConflictException
 
 pytestmark = pytest.mark.anyio
 
@@ -29,7 +41,9 @@ class _CollectionService:
         assert (collection_id, user_id) == ("col-1", "user-1")
         return {"collection_id": collection_id}
 
-    async def get_document(self, collection_id: str, document_id: str) -> SimpleNamespace:
+    async def get_document(
+        self, collection_id: str, document_id: str
+    ) -> SimpleNamespace:
         assert collection_id == "col-1"
         return SimpleNamespace(document_id=document_id)
 
@@ -40,31 +54,59 @@ class _ObjectiveAuthoringService:
 
     async def create_chat_assisted_candidate(self, **kwargs) -> ResearchObjective:
         self.calls.append(kwargs)
-        return ResearchObjective.from_mapping(
-            {
-                **kwargs,
-                "objective_id": "objective-derived",
-                "origin": "chat_assisted",
-                "confidence": 0,
-                "created_by_user_id": kwargs["user_id"],
-                "created_by_tool_call_id": kwargs["tool_call_id"],
-            }
+        return ResearchObjective(
+            collection_id=kwargs.get("collection_id", None) or "",
+            objective_id="objective-derived",
+            question=kwargs.get("question", None) or "",
+            material_scope=normalize_objective_terms(kwargs.get("material_scope", ())),
+            variables=normalize_objective_terms(kwargs.get("variables", ())),
+            outcomes=normalize_objective_terms(kwargs.get("outcomes", ())),
+            mechanisms=normalize_objective_terms(kwargs.get("mechanisms", ())),
+            constraints=normalize_objective_terms(kwargs.get("constraints", ())),
+            requested_comparator=kwargs.get("requested_comparator", None),
+            seed_document_ids=normalize_objective_terms(
+                kwargs.get("seed_document_ids", ())
+            ),
+            excluded_document_ids=normalize_objective_terms(
+                kwargs.get("excluded_document_ids", ())
+            ),
+            confidence=0.0,
+            reason=kwargs.get("reason", None),
+            source_relationship_ids=normalize_objective_terms(
+                kwargs.get("source_relationship_ids", ())
+            ),
+            parent_objective_id=kwargs.get("parent_objective_id", None),
+            parent_analysis_version=kwargs.get("parent_analysis_version", None),
+            derivation_basis=tuple(kwargs.get("derivation_basis", None) or ()),
+            rank=kwargs.get("rank", None),
+            confirmation_status=kwargs.get("confirmation_status", None),
+            active_analysis_version=kwargs.get("active_analysis_version", None),
+            published_analysis_version=kwargs.get("published_analysis_version", None),
+            origin="chat_assisted",
+            created_by_user_id=kwargs["user_id"],
+            created_by_tool_call_id=kwargs["tool_call_id"],
         )
 
 
 class _ParentObjectiveRepository:
     def __init__(self, published_version: int = 3) -> None:
-        self.parent = ResearchObjective.from_mapping(
-            {
-                "collection_id": "col-1",
-                "objective_id": "objective-parent",
-                "question": "How does preheating affect elongation?",
-                "variables": ["preheating"],
-                "outcomes": ["elongation"],
-                "confirmation_status": "confirmed",
-                "active_analysis_version": published_version,
-                "published_analysis_version": published_version,
-            }
+        self.parent = ResearchObjective(
+            collection_id="col-1",
+            objective_id="objective-parent",
+            question="How does preheating affect elongation?",
+            material_scope=(),
+            variables=("preheating",),
+            outcomes=("elongation",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=(),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            confirmation_status="confirmed",
+            active_analysis_version=published_version,
+            published_analysis_version=published_version,
         )
         self.finding = SimpleNamespace(
             finding_id="finding-1",
@@ -93,6 +135,31 @@ class _ParentObjectiveRepository:
             ),
         )
         self.created: list[ResearchObjective] = []
+
+    async def read_analysis(self, collection_id, objective_id, analysis_version):
+        if (collection_id, objective_id, analysis_version) != (
+            "col-1",
+            "objective-parent",
+            self.parent.published_analysis_version,
+        ):
+            return None
+        return ObjectiveAnalysis(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-paper-1"),),
+            pipeline_version="test-v1",
+            model_name=None,
+            prompt_versions={},
+            status="succeeded",
+            origin="agent_authored",
+            scientific_record_source="authored_snapshot",
+            created_by_user_id="user-1",
+            created_by_tool_call_id="call-parent",
+            phase="completed",
+            processed_document_count=1,
+            total_document_count=1,
+        )
 
     async def read_objective(self, collection_id: str, objective_id: str):
         if (collection_id, objective_id) == ("col-1", "objective-parent"):
@@ -161,10 +228,25 @@ class _ParentObjectiveRepository:
 class _ParentExperimentProjection:
     def __init__(self, repository: _ParentObjectiveRepository) -> None:
         self.finding = repository.finding
-        self.evidence = repository.evidence
+        source = repository.evidence
+        self.evidence = ObjectiveEvidence(
+            collection_id="col-1", objective_id="objective-parent", analysis_version=3,
+            evidence_id=source.evidence_id, document_id=source.document_id,
+            source_kind=source.source_kind, source_ref=source.source_ref,
+            source_excerpt="The paper reports elongation without binding it to an intermediate preheat level.",
+            page_numbers=(), related_source_refs=(), evidence_role="direct_result",
+            selection_status="extracted", selection_reason=None,
+            changed_variables=(), comparison=None,
+            reported_result=ScientificResult(
+                outcome="elongation", value=None, unit="%", direction="unknown",
+                result_text="Elongation was reported without the intermediate preheat condition.",
+            ),
+            attribution_scope="descriptive_only", scientific_context=ScientificContext(),
+            resolution_status="partial", failure_reason=None, confidence=0.8,
+        )
         self.contribution = repository.contribution
 
-    async def read_finding(
+    async def read_analysis_finding(
         self, collection_id, objective_id, analysis_version, finding_id
     ):
         assert (collection_id, objective_id, analysis_version, finding_id) == (
@@ -175,7 +257,7 @@ class _ParentExperimentProjection:
         )
         return self.finding
 
-    async def list_evidence(
+    async def list_analysis_evidence(
         self,
         collection_id,
         objective_id,
@@ -194,7 +276,7 @@ class _ParentExperimentProjection:
         )
         return records[offset : offset + limit], len(records)
 
-    async def list_contributions(self, collection_id, objective_id, analysis_version):
+    async def list_analysis_contributions(self, collection_id, objective_id, analysis_version):
         if (collection_id, objective_id, analysis_version) == (
             "col-1",
             "objective-parent",
@@ -263,11 +345,12 @@ def _all_lineage_with_untrusted_snapshots() -> list[dict]:
     ]
 
 
-async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call() -> None:
+async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call() -> (
+    None
+):
     service = _ObjectiveAuthoringService()
-    capability = CreateObjectiveCandidateCapability(
-        objective_authoring_service=service,
-    )
+    objective_candidate.objective_authoring_service = service
+    capability = CreateObjectiveCandidateCapability()
 
     result = await capability.execute(
         _context(),
@@ -290,23 +373,30 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
     assert service.calls[0]["derivation_basis"] == _lineage()
 
 
-async def test_derived_candidate_lineage_round_trips_through_memory_repository() -> None:
-    repository = MemoryObjectiveRepository()
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-derived",
-            "question": "How does intermediate preheating affect fatigue life?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["build-plate preheating"],
-            "outcomes": ["fatigue life"],
-            "parent_objective_id": "objective-parent",
-            "parent_analysis_version": 3,
-            "derivation_basis": _lineage(),
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-derived",
-        }
+async def test_derived_candidate_lineage_round_trips_through_postgres_repository(
+    *, postgres_session_factory
+) -> None:
+    repository = ObjectiveRepository()
+    objective = ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("build-plate preheating",),
+        outcomes=("fatigue life",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=3,
+        derivation_basis=tuple(_lineage() or ()),
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-derived",
     )
 
     await repository.create_authored_candidate(
@@ -322,20 +412,27 @@ async def test_derived_candidate_lineage_round_trips_through_memory_repository()
     assert restored.derivation_basis == tuple(_lineage())
 
 
-async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> None:
-    repository = MemoryObjectiveRepository()
-    first = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-derived",
-            "question": "How does intermediate preheating affect fatigue life?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["build-plate preheating"],
-            "outcomes": ["fatigue life"],
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-retry",
-        }
+async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(
+    *, postgres_session_factory
+) -> None:
+    repository = ObjectiveRepository()
+    first = ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("build-plate preheating",),
+        outcomes=("fatigue life",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-retry",
     )
     second = replace(
         first,
@@ -349,7 +446,7 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> No
         created_by_user_id="user-1",
         created_by_tool_call_id="call-retry",
     )
-    with pytest.raises(ValueError, match="already created a different objective"):
+    with pytest.raises(ResourceConflictException, match="already created a different objective"):
         await repository.create_authored_candidate(
             second,
             created_by_user_id="user-1",
@@ -357,23 +454,30 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> No
         )
 
 
-async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -> None:
-    repository = MemoryObjectiveRepository()
-    first = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-derived",
-            "question": "How does intermediate preheating affect fatigue life?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["build-plate preheating"],
-            "outcomes": ["fatigue life"],
-            "parent_objective_id": "objective-parent",
-            "parent_analysis_version": 3,
-            "derivation_basis": _lineage(),
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-idempotent",
-        }
+async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(
+    *, postgres_session_factory
+) -> None:
+    repository = ObjectiveRepository()
+    first = ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("build-plate preheating",),
+        outcomes=("fatigue life",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=3,
+        derivation_basis=tuple(_lineage() or ()),
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-idempotent",
     )
     await repository.create_authored_candidate(
         first,
@@ -390,34 +494,41 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -
     assert retried.rank == 1
 
 
-def _service(*, repository: MemoryObjectiveRepository) -> ObjectiveAuthoringService:
-    return ObjectiveAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-    )
+def _service(*, repository: ObjectiveRepository) -> ModuleType:
+    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
+    return objective_authoring_service
 
 
 def _published_parent() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-parent",
-            "question": "How does preheating affect elongation?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["preheating"],
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-            "active_analysis_version": 3,
-            "published_analysis_version": 3,
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-parent",
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-parent",
+        question="How does preheating affect elongation?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("preheating",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
+        active_analysis_version=3,
+        published_analysis_version=3,
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-parent",
     )
 
 
-async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published() -> None:
-    repository = MemoryObjectiveRepository()
+async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published(
+    *, postgres_session_factory
+) -> None:
+    repository = ObjectiveRepository()
     await repository.create_authored_candidate(
         _published_parent(),
         created_by_user_id="user-1",
@@ -425,7 +536,7 @@ async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_pub
     )
     service = _service(repository=repository)
 
-    with pytest.raises(ValueError, match="analysis version is no longer published"):
+    with pytest.raises(ResourceConflictException, match="analysis version is no longer published"):
         await service.create_chat_assisted_candidate(
             collection_id="col-1",
             user_id="user-1",
@@ -504,8 +615,22 @@ async def test_service_persists_derived_candidate_against_published_parent() -> 
     )
 
 
-async def test_derived_objective_reads_parent_basis_from_experiment_projection() -> None:
+async def test_derived_objective_reads_parent_basis_from_experiment_projection() -> (
+    None
+):
+    from unittest.mock import AsyncMock
+
     repository = _ParentObjectiveRepository()
+    analysis = await repository.read_analysis("col-1", "objective-parent", 3)
+    repository.read_analysis = AsyncMock(
+        return_value=replace(
+            analysis,
+            origin="system_generated",
+            scientific_record_source="experiment_graph",
+            created_by_user_id=None,
+            created_by_tool_call_id=None,
+        )
+    )
     projection = _ParentExperimentProjection(repository)
 
     async def reject_legacy_read(*args, **kwargs):  # noqa: ARG001
@@ -514,11 +639,11 @@ async def test_derived_objective_reads_parent_basis_from_experiment_projection()
     repository.read_finding = reject_legacy_read
     repository.list_evidence = reject_legacy_read
     repository.list_contributions = reject_legacy_read
-    service = ObjectiveAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-        experiment_projection=projection,
-    )
+    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
+    objective_authoring_service.experiment_projection = projection
+    service = objective_authoring_service
 
     created = await service.create_chat_assisted_candidate(
         collection_id="col-1",
@@ -541,6 +666,9 @@ async def test_derived_objective_reads_parent_basis_from_experiment_projection()
     assert created.derivation_basis[0]["snapshot"]["statement"].startswith(
         "Canonical Finding"
     )
+    assert created.derivation_basis[1]["snapshot"]["evidence_status"] == "needs_context"
+    assert created.derivation_basis[1]["snapshot"]["reason"] == "The selected measurement has incomplete binding context."
+
 
 
 @pytest.mark.parametrize(
@@ -638,7 +766,7 @@ async def test_service_rejects_noncanonical_derivation_basis_before_persistence(
             )
     service = _service(repository=repository)
 
-    with pytest.raises(ValueError, match=expected_error):
+    with pytest.raises(RequestInvalidException, match=expected_error):
         await service.create_chat_assisted_candidate(
             collection_id="col-1",
             user_id="user-1",
@@ -660,12 +788,14 @@ async def test_service_rejects_noncanonical_derivation_basis_before_persistence(
     assert repository.created == []
 
 
-async def test_derived_candidate_requires_the_current_published_parent_version() -> None:
+async def test_derived_candidate_requires_the_current_published_parent_version() -> (
+    None
+):
     repository = _ParentObjectiveRepository(published_version=3)
-    service = ObjectiveAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-    )
+    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
+    service = objective_authoring_service
     kwargs = {
         "collection_id": "col-1",
         "user_id": "user-1",
@@ -688,7 +818,7 @@ async def test_derived_candidate_requires_the_current_published_parent_version()
     assert created.parent_objective_id == "objective-parent"
     assert repository.created
 
-    with pytest.raises(ValueError, match="no longer published"):
+    with pytest.raises(ResourceConflictException, match="no longer published"):
         await service.create_chat_assisted_candidate(
             **{**kwargs, "tool_call_id": "call-stale", "parent_analysis_version": 2}
         )
@@ -707,11 +837,98 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         "parent_analysis_version": 3,
         "derivation_basis": _lineage(),
     }
-    first = ResearchObjective.from_mapping(
-        {**common, "parent_objective_id": "objective-parent-a"}
+    first = ResearchObjective(
+        collection_id=common.get("collection_id", None) or "",
+        objective_id=common.get("objective_id", None)
+        or build_research_objective_id(
+            question=common.get("question", None) or "",
+            material_scope=normalize_objective_terms(common.get("material_scope", ())),
+            variables=normalize_objective_terms(common.get("variables", ())),
+            outcomes=normalize_objective_terms(common.get("outcomes", ())),
+            mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+            constraints=normalize_objective_terms(common.get("constraints", ())),
+            requested_comparator=common.get("requested_comparator", None),
+            parent_objective_id="objective-parent-a",
+            parent_analysis_version=common.get("parent_analysis_version", None),
+        ),
+        question=common.get("question", None) or "",
+        material_scope=normalize_objective_terms(common.get("material_scope", ())),
+        variables=normalize_objective_terms(common.get("variables", ())),
+        outcomes=normalize_objective_terms(common.get("outcomes", ())),
+        mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+        constraints=normalize_objective_terms(common.get("constraints", ())),
+        requested_comparator=common.get("requested_comparator", None),
+        seed_document_ids=normalize_objective_terms(
+            common.get("seed_document_ids", ())
+        ),
+        excluded_document_ids=normalize_objective_terms(
+            common.get("excluded_document_ids", ())
+        ),
+        confidence=common.get("confidence", 0.0),
+        reason=common.get("reason", None),
+        source_relationship_ids=normalize_objective_terms(
+            common.get("source_relationship_ids", ())
+        ),
+        parent_objective_id="objective-parent-a",
+        parent_analysis_version=common.get("parent_analysis_version", None),
+        derivation_basis=tuple(common.get("derivation_basis", None) or ()),
+        rank=common.get("rank", None),
+        confirmation_status=common.get("confirmation_status", None),
+        active_analysis_version=common.get("active_analysis_version", None),
+        published_analysis_version=common.get("published_analysis_version", None),
+        origin=common.get("origin", None),
+        created_by_user_id=common.get("created_by_user_id", None),
+        created_by_tool_call_id=common.get("created_by_tool_call_id", None),
     )
-    second = ResearchObjective.from_mapping(
-        {**common, "parent_objective_id": "objective-parent-b"}
+    second = ResearchObjective(
+        collection_id=common.get("collection_id", None) or "",
+        objective_id=common.get("objective_id", None)
+        or build_research_objective_id(
+            question=common.get("question", None) or "",
+            material_scope=normalize_objective_terms(common.get("material_scope", ())),
+            variables=normalize_objective_terms(common.get("variables", ())),
+            outcomes=normalize_objective_terms(common.get("outcomes", ())),
+            mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+            constraints=normalize_objective_terms(common.get("constraints", ())),
+            requested_comparator=common.get("requested_comparator", None),
+            parent_objective_id="objective-parent-b",
+            parent_analysis_version=common.get("parent_analysis_version", None),
+        ),
+        question=common.get("question", None) or "",
+        material_scope=normalize_objective_terms(common.get("material_scope", ())),
+        variables=normalize_objective_terms(common.get("variables", ())),
+        outcomes=normalize_objective_terms(common.get("outcomes", ())),
+        mechanisms=normalize_objective_terms(common.get("mechanisms", ())),
+        constraints=normalize_objective_terms(common.get("constraints", ())),
+        requested_comparator=common.get("requested_comparator", None),
+        seed_document_ids=normalize_objective_terms(
+            common.get("seed_document_ids", ())
+        ),
+        excluded_document_ids=normalize_objective_terms(
+            common.get("excluded_document_ids", ())
+        ),
+        confidence=common.get("confidence", 0.0),
+        reason=common.get("reason", None),
+        source_relationship_ids=normalize_objective_terms(
+            common.get("source_relationship_ids", ())
+        ),
+        parent_objective_id="objective-parent-b",
+        parent_analysis_version=common.get("parent_analysis_version", None),
+        derivation_basis=tuple(common.get("derivation_basis", None) or ()),
+        rank=common.get("rank", None),
+        confirmation_status=common.get("confirmation_status", None),
+        active_analysis_version=common.get("active_analysis_version", None),
+        published_analysis_version=common.get("published_analysis_version", None),
+        origin=common.get("origin", None),
+        created_by_user_id=common.get("created_by_user_id", None),
+        created_by_tool_call_id=common.get("created_by_tool_call_id", None),
     )
 
     assert first.objective_id != second.objective_id
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col-1")

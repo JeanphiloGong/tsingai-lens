@@ -11,43 +11,76 @@ Read this page first, then follow the first entry point that matches the task:
 
 | Research step | First code entry point | Reads | Calls the LLM | Persists |
 |---|---|---|---|---|
-| Upload a paper | `controllers/source/collections.py:upload_collection_document` | upload bytes | No | Document and original bytes |
+| Upload a paper | `controllers/source/collection_routes.py:upload_collection_document` | upload bytes | No | Document and original bytes |
 | Prepare one paper | `application/source/document_preparation_service.py:queue_document_preparation` | current Document and source file | Profile stage only; Docling parses the PDF | Source, Profile, Pipeline Run |
 | Map selected papers | `application/core/objectives/paper_research_map_service.py:build_document_paper_map` | prepared Source, Profile, tree | Extraction and signal reconciliation | None directly; input service stores map |
-| Form candidate questions | `controllers/core/research_objectives.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
+| Form candidate questions | `controllers/core/research_objective_routes.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
 | Create or confirm a question | `application/core/objectives/objective_authoring_service.py:create_chat_assisted_candidate` or `confirm_objective` | exact candidate or approved arguments | No | Objective |
-| Analyze one confirmed question | `controllers/core/research_objectives.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
-| Chat or Agent request | `application/chat/session_service.py:post_message_for_user` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
+| Analyze one confirmed question | `controllers/core/research_objective_routes.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
+| Chat or Agent request | `application/chat/session_service.py:send_message` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
 
 The normal reading path is:
 
 ```text
-HTTP controller -> application use case -> repository port -> storage implementation
+HTTP controller -> application use case -> concrete repository -> PostgreSQL
                          |
                          +-> scientific stage -> model when needed -> grounded records
 ```
 
 Start with the owning application README before opening a large service file.
-Controllers authorize the request and shape HTTP responses; application
-services organize work; domain records express scientific objects and their
-invariants; infrastructure implements parsing, model access, and repositories.
+Controllers parse requests, resolve the session with `Depends(get_current_user_id)`,
+and shape HTTP responses; owning application functions authorize resources and organize work; domain records express scientific objects and their
+invariants; repositories own SQL and record mapping; infrastructure supplies
+database sessions, ORM tables, parsing, and model access.
 The scientific meaning belongs to the Core services and analysis stages.
 
-[`../../main.py`](../../main.py) is the assembly point. `create_app()` configures
-routes, middleware, and the startup lifecycle. On startup,
-`build_application_runtime()` constructs repositories and services;
-`install_application_runtime()` exposes them on `app.state` to controllers.
-Startup then recovers interrupted work before serving requests. Start there to
-understand construction, not to add scientific rules. Start with the owning
-service to change an existing behavior.
+[`../../main.py`](../../main.py) configures routes and middleware and owns the
+startup/shutdown lifespan. It binds the database session factory, creates file
+resources in their infrastructure modules, and configures the Chat runner and
+model-call observer. Shared instances live with their actual owners:
+`application.chat.session_service.ChatService`,
+`infra.persistence.file.collection_workspace.Workspace`, and
+`infra.persistence.file.object_store.Store`. Modules declare these names without
+creating clients or directories during import. Chat controllers call
+`session_service.ChatService` directly. File-facing application functions use
+the owning file module's instance internally; controllers pass research input
+and the authenticated actor, not storage dependencies.
+Repositories expose concrete singletons beside their implementations.
+Preparation, discovery and analysis are queued in PostgreSQL and executed by
+concrete scripts. Feedback and dataset sample entry points similarly create
+only their own database and model resources. Each independent worker owns its
+operation, file resources and heartbeat and closes its resources on exit.
+The optional synchronous Finding summary owns a separate request client with
+its existing budget. On shutdown the Web lifespan cancels and awaits active
+Chat tasks, closes the model client, then disposes the database engine. The same
+cleanup runs for resources already created when startup fails. Each Web worker
+process owns one set of shared instances; overlapping applications with
+different bindings in the same process are not supported. Browser disconnect
+still leaves the Chat turn running.
+The four legacy snapshot handlers remain unmounted.
 
-For Paper Maps, read `PaperResearchMapService` as the coordinator. It orders
+`controllers/exception_router.py` owns the four centralized exception handlers;
+`utils/response.py` owns the HTTP 200 JSON envelope. Actual operations raise
+explicit application errors at their owning input, authorization, or state
+boundary. Unexpected database, filesystem, or provider failures remain server
+failures; builtin exception types and message substrings do not classify them.
+The public contract is specified in [the API reference](../specs/api.md).
+
+For Paper Maps, read `paper_research_map_service` as the coordinator. It orders
 Source selection, bounded extraction, optional expansion, reconciliation, and
 status assessment. `paper_map_sources.py` selects Sources and builds windows;
-`paper_map_extraction.py` performs model calls, structured-output recovery, and
+`paper_map_extraction.py` assembles and fits windows, performs model calls,
+structured-output recovery, and
 window-result normalization; `paper_map_aggregation.py` owns merging, signal
 reconciliation, and map status. This separation is structural: the scientific
 selection rules and persisted Paper Map contract remain unchanged.
+
+HTTP, tool, model and Source-parser inputs are parsed by their owning boundary.
+Application methods pass those values and domain objects directly. Repositories
+construct stored results beside the query and write fields beside the mutation;
+they do not expose general model codecs. Controllers and Agent outputs assemble
+their own responses. Scientific matching, stable identities, Source ownership,
+approval and revision rules remain with the operations that own them.
 
 ## Find The Modification Point
 
@@ -148,10 +181,12 @@ analysis of an explicitly selected ready subset.
 - `application/chat/` owns conversation, capability trajectory, and approval;
   it references rather than duplicates scientific records.
 - `domain/` owns business objects, evidence, invariants, and business transitions.
-- [`application/repositories/`](../../application/repositories/README.md) owns
-  storage contracts and repository-specific query results. Domain objects do
-  not depend on those contracts.
-- `infra/` owns PostgreSQL, object storage, model providers, and parsing.
+- [`repositories/`](../../repositories/README.md) owns concrete PostgreSQL
+  repositories, their query results, and storage mappings. Application operations
+  import concrete repository instances directly; domain objects do not depend
+  on them.
+- `infra/` owns database connections, ORM tables, shared transactions, object
+  storage, model providers, and parsing.
 
 PostgreSQL stores structured current state and analysis history. Object storage
 stores uploaded and extracted bytes. Local files are disposable runtime scratch.
@@ -168,14 +203,26 @@ but have separate owners.
 | Model family | Domain responsibility | Execution, storage, or HTTP owner |
 | --- | --- | --- |
 | Source and Collection | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
-| Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `application/repositories/objective_repository.py` |
-| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `application/repositories/chat_repository.py` |
+| Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `repositories/objective_repository.py` |
+| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `repositories/chat_repository.py` |
 | Feedback | Observed dissatisfaction/correction signals, evidence coverage, annotations, review decisions, sample revisions and export integrity | Jobs and leases live in `analysis_job_repository.py`; sample-build payloads and idempotency inputs live in `feedback_dataset_sample_repository.py` |
 | Goal | Authored experiment-plan content, immutable revision identity and revision-conflict rules | Repositories own record persistence; controllers validate requests and format responses |
 | Evaluation | Reference items, prediction snapshots, scores, failure judgments and expert Finding review | `evaluation_repository.py` owns persistence; controllers own review response schemas |
-| Pipeline | No scientific objects; a successful technical run is not scientific proof | `application/repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
+| Pipeline | No scientific objects; a successful technical run is not scientific proof | `repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
 
-Repository-specific result types stay beside the contract that returns them.
+Repository-specific result types stay beside the concrete repository that returns them.
+`pipeline_run_service` creates execution records from fixed node definitions and
+advances them; the repository stores and reads those records. Statistics remain direct
+operations on the execution values. `ObjectiveRepository` retains locked analysis
+claims and publication transitions; the application selects the scientific
+record read path from the returned analysis fields.
+
+Experiment repositories obtain current reference and ownership facts inside the
+publication transaction, then call the existing Finding and ComparisonGroup
+objects for independent-experiment rules. Invalid support rolls back the entire
+graph. Feedback review similarly retains digest and state conflicts under a row
+lock while content acceptance belongs to its domain object and service.
+
 `StoredCollection` contains the existing `Collection`, record timestamps, and
 the current `StoredDocument` members. Each `StoredDocument` contains a `Document`
 plus its storage key, stored filename, and record timestamps. Content hashes,
@@ -196,7 +243,8 @@ and the `task_dataset_schemas.py` / `research_objective_schemas.py` files beside
 their feedback and research-objective routes). Only models consumed by
 multiple route files belong in `controllers/schemas/`, including the shared
 Objective/Finding responses and Pipeline Run responses. Service-local results
-stay beside their service, and repository projections beside their contract.
+stay beside their service, and repository projections beside their concrete
+repository.
 `ResearchObjective` owns scientific normalization and transitions; PostgreSQL
 encodes its persisted payload, and controllers format its HTTP response.
 
@@ -209,17 +257,34 @@ contradicting claims, immutable revision digests and valid business transitions
 retain their domain checks.
 
 Controllers use response schemas to read attributes or compose stored metadata.
-Existing `to_record()`/`from_mapping()` methods that define canonical artifact,
-snapshot or digest inputs retain their exact formats; replacing those with
-unqualified `asdict()` would change omitted fields, defaults or digests.
-They are not a reason to add encoders to new domain objects. Frozen dataclasses
+Chat controllers construct typed domain objects directly from validated request
+fields. The PostgreSQL Chat repository reconstructs those objects from rows and
+nested JSON fields; Chat domain objects do not interpret generic mappings.
+Application and persistence boundaries explicitly project selected source
+contexts into their wire or storage records. Core scientific records, Source
+artifacts and versioned Feedback sample content follow the same rule: external
+HTTP/model/document input is parsed at its owning entry point, PostgreSQL rows
+are reconstructed in the owning repository, and typed objects cross internal
+application boundaries without a
+dictionary round trip. The application-owned
+`chat/tool_result_projection.py` preserves the stable tool-result record used
+by model messages and failure digests; Chat domain objects no longer own that
+serialization. Evaluation record mappings and experiment-plan mappings likewise
+live beside their concrete repositories in `repositories/evaluation_repository.py`,
+`repositories/finding_review_repository.py` and
+`repositories/experiment_plan_repository.py`. These moves preserve existing
+wire fields, persisted records and digest inputs; replacing the explicit
+projections with unqualified `asdict()` can change omitted fields or defaults.
+These values keep their business rules while the owning input, query and
+repository methods interpret concrete formats. Do not add generic mapping
+factories or storage/response encoders to new domain objects. Frozen dataclasses
 preserve revision identities, but nested dictionaries are still mutable; copied
 input and output payloads isolate the snapshots from caller-owned dictionaries.
 
 Obsolete artifact-status, evidence-backbone and generic record-normalization
 models have been removed. Their former definitions and exports are not retained
 as compatibility paths. See the
-[repository index](../../application/repositories/README.md) for the current
+[repository index](../../repositories/README.md) for the current
 import locations.
 
 ## Concurrency And Reuse
@@ -246,21 +311,16 @@ import locations.
 
 ## Restart Recovery And Scientific Versioning
 
-The process-local background workers are not durable queues. Before the API
-starts serving requests, startup recovery converts persisted work that no live
-worker can own into retryable state:
+Research jobs are durable execution records. Independent workers claim queued
+jobs or take over expired running leases. `worker_id`, `lease_version`,
+`lease_expires_at` and `heartbeat_at` belong to `pipeline_runs` and
+`objective_analyses`; they are not scientific domain states. Every stage or result
+write checks ownership and fixed inputs in the same transaction as publication.
+A Web restart never interrupts another process's work. Lost leases cancel the
+local operation and heartbeat, and late workers cannot publish.
 
-- queued or running Document preparation runs become failed with the
-  `interrupted` node; a Document left in `processing` returns to `stored`, while
-  already written Source and DocumentProfile artifacts remain
-  available for fingerprinted reuse. Research-facing status projects this
-  technical interruption as `not_started` rather than a scientific failure;
-- queued or running Objective analyses become failed with
-  `analysis_interrupted`; an unpublished interrupted analysis is not projected
-  as active work, so the current state is `not_started` until the researcher
-  retries it; and
-- recovery never resumes a scientific operation from an unknown in-memory
-  position and never treats a restart as a scientific absence or conclusion.
+A Profile failure preserves completed Source and remains retryable. Failed or
+interrupted new analysis work never clears the previous published version.
 
 Published analyses are immutable readable snapshots. An interrupted or failed
 new analysis does not replace the published version. A retry uses the selected

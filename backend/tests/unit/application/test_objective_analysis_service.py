@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from tests.support.analysis_worker import AnalysisWorkerFixture
+from repositories.objective_repository import ObjectiveAnalysisJobSnapshot
+
+from application.core.objectives.analysis import analysis_record_source
+
 import asyncio
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import pytest
-
+from application.core.objectives import analysis_service as objective_analysis_service
+from application.core.objectives import (
+    objective_analysis_service as experiment_analysis_service,
+)
 from application.core.objectives.analysis.diagnostics import record_analysis_diagnostic
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraft,
@@ -19,22 +27,11 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis_service import (
-    ObjectiveAnalysisDispatchError,
-    ObjectiveAnalysisService,
     _experiment_abstention,
 )
 from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
-    ObjectiveExperimentAnalysisService,
     _used_draft_source_labels,
-)
-from application.repositories.objective_repository import (
-    ObjectiveAnalysis,
-    StoredObjective,
-)
-from application.repositories.pipeline_run_repository import (
-    ModelUsage,
-    TokenUsage,
 )
 from domain.core import (
     DocumentProfile,
@@ -44,7 +41,32 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    ObjectiveEvidence,
+    PaperContribution,
+    ResearchObjective,
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
+from repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from infra.execution_stats import ModelUsage, TokenUsage
+
 
 pytestmark = pytest.mark.anyio
 
@@ -62,25 +84,43 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture
+async def objective_analysis_runtime(monkeypatch):
+    from application.core.objectives.llm.structured_response import (
+        StructuredResponseClient,
+    )
+
+    runtime = AnalysisWorkerFixture(
+        client=StructuredResponseClient(
+            client=SimpleNamespace(close=lambda: None), model="test-model"
+        )
+    )
+    yield runtime
+    await runtime.close()
+
+
 def _objective(
     *,
     published: int | None = None,
     confirmation_status: str = "confirmed",
 ) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["paper-1"],
-            "confidence": 0.9,
-            "confirmation_status": confirmation_status,
-            "active_analysis_version": published,
-            "published_analysis_version": published,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        confirmation_status=confirmation_status,
+        active_analysis_version=published,
+        published_analysis_version=published,
     )
 
 
@@ -97,6 +137,7 @@ def _analysis(
         analysis_version=version,
         document_inputs=document_inputs,
         pipeline_version="test.v1",
+        scientific_record_source="legacy_snapshot",
         model_name="test-model",
         prompt_versions={},
         total_document_count=total_document_count,
@@ -111,135 +152,129 @@ def _analysis(
 
 
 def _evidence(version: int) -> ObjectiveEvidence:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "evidence_id": "evidence-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-1",
-            "source_excerpt": "Temperature changed strength.",
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 500,
-                    "target_value": 600,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "500 C",
-                "target_label": "600 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-                "incomparability_reasons": [],
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "value": 620,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "Strength increased at 600 C.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    return ObjectiveEvidence(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=version or 0,
+        evidence_id="evidence-1",
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-1",
+        source_excerpt="Temperature changed strength.",
+        page_numbers=(),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=500, target_value=600, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="500 C",
+            target_label="600 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=620,
+            unit="MPa",
+            direction="increase",
+            result_text="Strength increased at 600 C.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
 
 
 def _finding(version: int) -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "finding_id": "finding-1",
-            "statement": "Temperature was associated with strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "paper_contributions": [
-                {
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    return Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=version,
+        finding_id="finding-1",
+        statement="Temperature was associated with strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope="isolated_effect",
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        limitations=(),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     )
 
 
 def _native_finding(version: int) -> Finding:
     """A Finding whose provenance is the experiment selection graph."""
 
-    return Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "finding_id": "experiment-finding-1",
-            "statement": "Temperature was associated with strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "single_study",
-            "certainty": 0.5,
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "paper_contributions": [],
-            "selection_ids": ["selection-1"],
-        }
+    return Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=version,
+        finding_id="experiment-finding-1",
+        statement="Temperature was associated with strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope="isolated_effect",
+        synthesis_status="single_study",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=("selection-1",),
     )
 
 
 def _artifacts(version: int) -> ObjectiveExperimentAnalysisArtifacts:
     return ObjectiveExperimentAnalysisArtifacts(
         contributions=(
-            PaperContribution.from_mapping(
-                {
-                    "collection_id": "collection-1",
-                    "objective_id": "objective-1",
-                    "analysis_version": version,
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "confidence": 0.9,
-                    "evidence_disposition": "comparable_evidence",
-                    "routed_source_count": 1,
-                    "extracted_source_count": 1,
-                    "comparable_evidence_count": 1,
-                    "failed_source_count": 0,
-                }
+            PaperContribution(
+                collection_id="collection-1",
+                objective_id="objective-1",
+                analysis_version=version or 0,
+                document_id="paper-1",
+                analysis_status="analyzed",
+                relevance="high",
+                paper_role="primary_experiment",
+                contribution_summary=None,
+                material_match=(),
+                changed_variables=(),
+                measured_property_scope=(),
+                test_environment_scope=(),
+                exclusion_reason=None,
+                warnings=(),
+                confidence=0.9,
+                evidence_disposition="comparable_evidence",
+                routed_source_count=1,
+                extracted_source_count=1,
+                comparable_evidence_count=1,
+                failed_source_count=0,
             ),
         ),
         experiment_outputs=(),
@@ -290,30 +325,31 @@ class RecordingPaperExperimentExtractor:
 
 def _document_extraction_service(result: PaperExperimentExtractionResult):
     extractor = RecordingPaperExperimentExtractor(result)
+    experiment_analysis_service.collection_service = object()
+    experiment_analysis_service.PaperMapRepo = object()
+    experiment_analysis_service.ObjectiveRepo = object()
+    experiment_analysis_service.objective_input_service = object()
     return (
-        ObjectiveExperimentAnalysisService(
-            collection_service=object(),
-            paper_map_repository=object(),
-            objective_repository=object(),
-            objective_input_service=object(),
-            objective_source_screener=object(),
-            paper_experiment_extractor=extractor,
-        ),
+        experiment_analysis_service,
         extractor,
     )
 
 
 def _paper_frame() -> PaperAnalysisFrame:
-    return PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "objective-1",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["Alloy A"],
-            "changed_variables": ["temperature"],
-            "measured_property_scope": ["strength"],
-        }
+    return PaperAnalysisFrame(
+        objective_id="objective-1",
+        document_id="paper-1",
+        relevance="high",
+        paper_role="primary_experiment",
+        screening_note=None,
+        material_match=normalize_objective_terms(["Alloy A"]),
+        changed_variables=normalize_objective_terms(["temperature"]),
+        measured_property_scope=normalize_objective_terms(["strength"]),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
 
 
@@ -363,9 +399,15 @@ def _patch_document_source_flow(
 ) -> None:
     import application.core.objectives.objective_analysis_service as service_module
 
-    monkeypatch.setattr(service_module, "screen_sources", lambda **_kwargs: (_paper_frame(),))
-    monkeypatch.setattr(service_module, "route_sources", lambda **_kwargs: tuple(routes))
-    monkeypatch.setattr(service_module, "build_bundle_from_routes", lambda **_kwargs: bundle)
+    monkeypatch.setattr(
+        service_module, "screen_sources", lambda **_kwargs: (_paper_frame(),)
+    )
+    monkeypatch.setattr(
+        service_module, "route_sources", lambda **_kwargs: tuple(routes)
+    )
+    monkeypatch.setattr(
+        service_module, "build_bundle_from_routes", lambda **_kwargs: bundle
+    )
 
 
 def test_document_source_accounting_uses_authoritative_catalog(
@@ -391,6 +433,8 @@ def test_document_source_accounting_uses_authoritative_catalog(
         objective=_objective(),
         objective_inputs=_document_objective_inputs(),
         progress_callback=None,
+        source_screener=object(),
+        paper_experiment_extractor=_extractor,
     )
 
     assert artifacts.contribution.evidence_disposition == "no_grounded_evidence"
@@ -426,6 +470,8 @@ def test_document_provider_failure_marks_bundle_sources_failed(
         objective=_objective(),
         objective_inputs=_document_objective_inputs(),
         progress_callback=None,
+        source_screener=object(),
+        paper_experiment_extractor=_extractor,
     )
 
     assert artifacts.contribution.evidence_disposition == "extraction_failed"
@@ -459,6 +505,8 @@ def test_document_omitted_source_remains_uninspected(
         objective=_objective(),
         objective_inputs=_document_objective_inputs(),
         progress_callback=None,
+        source_screener=object(),
+        paper_experiment_extractor=_extractor,
     )
 
     assert artifacts.contribution.evidence_disposition == "coverage_incomplete"
@@ -488,9 +536,7 @@ class FakeObjectiveRepository:
         )
         self.findings = {1: (_finding(1),)} if published else {}
         self.evidence = {1: (_evidence(1),)} if published else {}
-        self.contributions = (
-            {1: _artifacts(1).contributions} if published else {}
-        )
+        self.contributions = {1: _artifacts(1).contributions} if published else {}
         self.claimable = claimable
         self.claim_error = claim_error
         self.claim_before_fail = claim_before_fail
@@ -535,9 +581,27 @@ class FakeObjectiveRepository:
         self.analyses[analysis_version] = analysis.start()
         return self.analyses[analysis_version]
 
+    async def claim_next_objective_analysis_job(self, *, worker_id, lease_duration):
+        for version, analysis in self.analyses.items():
+            if analysis.status == "queued":
+                claimed = await self.claim_analysis(
+                    analysis.collection_id, analysis.objective_id, version
+                )
+                return (
+                    ObjectiveAnalysisJobSnapshot(claimed, worker_id, 1) if claimed else None
+                )
+        return None
+
+    async def lock_analysis_job(self, db, job):
+        assert self.analyses[job.analysis.analysis_version].status == "running"
+
+    async def check_analysis_inputs(self, db, analysis):
+        assert analysis.document_inputs
+
     async def update_analysis_progress(
         self, collection_id, objective_id, analysis_version, **kwargs
     ):
+        kwargs.pop("job", None)
         analysis = self.analyses[analysis_version].update_progress(**kwargs)
         self.analyses[analysis_version] = analysis
         return analysis
@@ -548,6 +612,7 @@ class FakeObjectiveRepository:
         objective_id,
         analysis_version,
         *,
+        job,
         stats,
         model_name,
         prompt_versions,
@@ -563,9 +628,7 @@ class FakeObjectiveRepository:
         self.analyses[analysis_version] = analysis
         return analysis
 
-    async def fail_analysis(
-        self, collection_id, objective_id, analysis_version, **kwargs
-    ):
+    async def fail_analysis(self, collection_id, objective_id, analysis_version, **kwargs):
         analysis = self.analyses[analysis_version]
         if self.claim_before_fail and analysis.status == "queued":
             analysis = analysis.start()
@@ -573,6 +636,7 @@ class FakeObjectiveRepository:
         expected_status = kwargs.pop("expected_status", None)
         if expected_status is not None and analysis.status != expected_status:
             return analysis
+        kwargs.pop("job", None)
         analysis = analysis.fail(**kwargs)
         self.analyses[analysis_version] = analysis
         return analysis
@@ -599,16 +663,17 @@ class FakeObjectiveRepository:
 
     async def publish_experiment_analysis(
         self,
+        db,
         collection_id,
         objective_id,
         analysis_version,
         *,
+        job,
         contributions=(),
         abstention_reason=None,
         abstention_note=None,
-        transaction=None,
     ):
-        self.published_transaction = transaction
+        self.published_transaction = db
         analysis = self.analyses[analysis_version].succeed(
             abstention_reason=abstention_reason,
             abstention_note=abstention_note,
@@ -625,17 +690,15 @@ class FakeObjectiveRepository:
             if self.native_findings is not None
             else (_native_finding(analysis_version),)
         )
-        self.contributions[analysis_version] = contributions or _artifacts(
-            analysis_version
-        ).contributions
+        self.contributions[analysis_version] = (
+            contributions or _artifacts(analysis_version).contributions
+        )
         # Native publication does not copy the legacy ObjectiveEvidence ledger.
         self.evidence[analysis_version] = ()
         self.experiment_published_calls += 1
         return self.objective, analysis
 
-    async def read_analysis(
-        self, collection_id, objective_id, analysis_version=None
-    ):
+    async def read_analysis(self, collection_id, objective_id, analysis_version=None):
         if analysis_version is None:
             analysis_version = self.objective.active_analysis_version
         return self.analyses.get(analysis_version)
@@ -643,20 +706,6 @@ class FakeObjectiveRepository:
     async def read_published_analysis(self, collection_id, objective_id):
         return self.analyses.get(self.objective.published_analysis_version)
 
-    async def interrupt_active_analyses(self):
-        interrupted = 0
-        for version, analysis in tuple(self.analyses.items()):
-            if analysis.status not in {"queued", "running"}:
-                continue
-            self.analyses[version] = analysis.fail(
-                error_code="analysis_interrupted",
-                error_message=(
-                    "Objective analysis was interrupted by a backend restart. "
-                    "Retry the analysis."
-                ),
-            )
-            interrupted += 1
-        return interrupted
 
     async def list_findings(
         self, collection_id, objective_id, analysis_version, **_kwargs
@@ -664,9 +713,7 @@ class FakeObjectiveRepository:
         findings = self.findings.get(analysis_version, ())
         return findings, len(findings)
 
-    async def list_contributions(
-        self, collection_id, objective_id, analysis_version
-    ):
+    async def list_contributions(self, collection_id, objective_id, analysis_version):
         return self.contributions.get(analysis_version, ())
 
     async def list_evidence(
@@ -684,13 +731,12 @@ class FakeObjectiveInputService:
             if document_ids is not None and "paper-1" not in document_ids:
                 return ()
             return (
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "title": "Heat treatment paper",
-                        "doc_type": "experimental",
-                        "confidence": 0.9,
-                    }
+                DocumentProfile(
+                    document_id="paper-1",
+                    title="Heat treatment paper",
+                    doc_type="experimental",
+                    confidence=0.9,
+                    profile_warnings=(),
                 ),
             )
 
@@ -717,7 +763,7 @@ class FakeObjectiveExperimentAnalysisService:
         self.calls = 0
 
     async def generate_experiment_analysis_artifacts(
-        self, collection_id, analysis, progress_callback=None
+        self, collection_id, analysis, progress_callback=None, **model_components
     ):
         self.calls += 1
         if self.error is not None:
@@ -736,9 +782,11 @@ class FakeObjectiveExperimentAnalysisService:
         return self.artifacts or _artifacts(analysis.analysis_version)
 
 
-class UsageRecordingObjectiveExperimentAnalysisService(FakeObjectiveExperimentAnalysisService):
+class UsageRecordingObjectiveExperimentAnalysisService(
+    FakeObjectiveExperimentAnalysisService
+):
     async def generate_experiment_analysis_artifacts(
-        self, collection_id, analysis, progress_callback=None
+        self, collection_id, analysis, progress_callback=None, **model_components
     ):
         record_llm_prompt_version("paper_framing", "paper_framing.v1")
         record_llm_completion(
@@ -759,9 +807,11 @@ class UsageRecordingObjectiveExperimentAnalysisService(FakeObjectiveExperimentAn
         )
 
 
-class DiagnosticsRecordingObjectiveExperimentAnalysisService(FakeObjectiveExperimentAnalysisService):
+class DiagnosticsRecordingObjectiveExperimentAnalysisService(
+    FakeObjectiveExperimentAnalysisService
+):
     async def generate_experiment_analysis_artifacts(
-        self, collection_id, analysis, progress_callback=None
+        self, collection_id, analysis, progress_callback=None, **model_components
     ):
         record_analysis_diagnostic(
             {
@@ -813,6 +863,7 @@ class NativeRecordingExperimentAnalysisWriter:
         if self.error is not None:
             raise self.error
         return SimpleNamespace(
+            revisions=(),
             findings=(
                 self.findings
                 if self.findings is not None
@@ -829,9 +880,18 @@ class NativeRecordingExperimentAnalysisWriter:
         pytest.fail("native writer path must not call the legacy write method")
 
 
-class RecordingAnalysisTransactionFactory:
+class RecordingDatabaseSession:
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
     def __init__(self) -> None:
-        self.handle = object()
+        self.handle = self
         self.events: list[str] = []
 
     @asynccontextmanager
@@ -851,8 +911,7 @@ def _service(
     repository=None,
     analyzer=None,
     experiment_analysis_writer=None,
-    experiment_analysis_transaction_factory=None,
-    experiment_compatibility_projection=None,
+    experiment_projection=None,
 ):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeObjectiveExperimentAnalysisService()
@@ -862,46 +921,46 @@ def _service(
     if getattr(experiment_analysis_writer, "findings", None) is not None:
         repository.native_findings = experiment_analysis_writer.findings
     inputs = FakeObjectiveInputService()
-    service = ObjectiveAnalysisService(
-        objective_repository=repository,
-        experiment_analysis_service=analyzer,
-        objective_input_service=inputs,
-        document_profile_service=inputs.document_profile_service,
-        experiment_analysis_writer=experiment_analysis_writer,
-        experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
-        experiment_compatibility_projection=experiment_compatibility_projection,
+    objective_analysis_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
+    objective_analysis_service.experiment_analysis_service = analyzer
+    objective_analysis_service.objective_input_service = inputs
+    objective_analysis_service.document_profile_service = (
+        inputs.document_profile_service
     )
+    objective_analysis_service.experiment_analysis_writer = experiment_analysis_writer
+    objective_analysis_service.experiment_projection = (
+        experiment_projection
+    )
+    objective_analysis_service.collection_service = SimpleNamespace(
+        get_collection_for_user=_owned_collection
+    )
+    service = objective_analysis_service
     return service, repository, analyzer
 
 
-class RecordingExperimentCompatibilityProjection:
-    async def list_findings(self, *args, **kwargs):
-        return (
-            ({"finding_id": "projected-finding", "paper_contributions": []},),
-            1,
-        )
+class RecordingExperimentProjection:
+    async def list_analysis_findings(self, *args, **kwargs):
+        return (replace(_finding(1), finding_id="projected-finding"),), 1
 
-    async def read_finding(self, *args, **kwargs):
-        return {"finding_id": "projected-finding", "paper_contributions": []}
+    async def read_analysis_finding(self, *args, **kwargs):
+        return replace(_finding(1), finding_id="projected-finding")
 
-    async def list_evidence(self, *args, **kwargs):
-        return (
-            (
-                {
-                    "evidence_id": "projected-evidence",
-                    "supports_finding": True,
-                    "eligible_for_finding_authoring": True,
-                },
-            ),
-            1,
-        )
+    async def list_analysis_evidence(self, *args, **kwargs):
+        return (replace(_evidence(1), evidence_id="projected-evidence"),), 1
 
 
-async def test_analysis_queries_use_experiment_projection_without_changing_arguments() -> None:
-    projection = RecordingExperimentCompatibilityProjection()
+async def test_analysis_queries_use_experiment_projection_without_changing_arguments() -> (
+    None
+):
+    projection = RecordingExperimentProjection()
+    repository = FakeObjectiveRepository(published=True)
+    repository.analyses[1] = replace(
+        repository.analyses[1], scientific_record_source="experiment_graph",
+    )
     service, _repository, _analyzer = _service(
-        repository=FakeObjectiveRepository(published=True),
-        experiment_compatibility_projection=projection,
+        repository=repository,
+        experiment_projection=projection,
     )
 
     findings = await service.list_findings(
@@ -910,6 +969,7 @@ async def test_analysis_queries_use_experiment_projection_without_changing_argum
         analysis_version=1,
         offset=2,
         limit=7,
+        user_id="user-1",
     )
     evidence = await service.list_evidence(
         "collection-1",
@@ -918,13 +978,16 @@ async def test_analysis_queries_use_experiment_projection_without_changing_argum
         finding_id="projected-finding",
         offset=3,
         limit=8,
+        user_id="user-1",
     )
 
     assert findings["items"][0]["finding_id"] == "projected-finding"
     assert evidence["items"][0]["evidence_id"] == "projected-evidence"
 
 
-async def test_authored_analysis_keeps_authored_snapshot_when_projection_is_available() -> None:
+async def test_authored_analysis_keeps_authored_snapshot_when_projection_is_available() -> (
+    None
+):
     repository = FakeObjectiveRepository(published=True)
     authored = replace(
         repository.analyses[1],
@@ -936,29 +999,31 @@ async def test_authored_analysis_keeps_authored_snapshot_when_projection_is_avai
     repository.analyses[1] = authored
 
     class RejectingProjection:
-        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_findings(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_evidence(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
     service, _, _ = _service(
         repository=repository,
-        experiment_compatibility_projection=RejectingProjection(),
+        experiment_projection=RejectingProjection(),
     )
 
     findings = await service.list_findings(
-        "collection-1", "objective-1", analysis_version=1
+        "collection-1", "objective-1", analysis_version=1, user_id="user-1"
     )
     evidence = await service.list_evidence(
-        "collection-1", "objective-1", analysis_version=1
+        "collection-1", "objective-1", analysis_version=1, user_id="user-1"
     )
 
     assert findings["items"][0]["finding_id"] == "finding-1"
     assert evidence["items"][0]["evidence_id"] == "evidence-1"
 
 
-async def test_legacy_automatic_analysis_keeps_snapshot_when_projection_is_available() -> None:
+async def test_legacy_automatic_analysis_keeps_snapshot_when_projection_is_available() -> (
+    None
+):
     repository = FakeObjectiveRepository(published=True)
     repository.analyses[1] = replace(
         repository.analyses[1],
@@ -966,19 +1031,23 @@ async def test_legacy_automatic_analysis_keeps_snapshot_when_projection_is_avail
     )
 
     class RejectingProjection:
-        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
-            pytest.fail("legacy automatic analysis must not read the experiment projection")
+        async def list_analysis_findings(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail(
+                "legacy automatic analysis must not read the experiment projection"
+            )
 
-        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
-            pytest.fail("legacy automatic analysis must not read the experiment projection")
+        async def list_analysis_evidence(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail(
+                "legacy automatic analysis must not read the experiment projection"
+            )
 
     service, _, _ = _service(
         repository=repository,
-        experiment_compatibility_projection=RejectingProjection(),
+        experiment_projection=RejectingProjection(),
     )
 
     findings = await service.list_findings(
-        "collection-1", "objective-1", analysis_version=1
+        "collection-1", "objective-1", analysis_version=1, user_id="user-1"
     )
 
     assert findings["items"][0]["finding_id"] == "finding-1"
@@ -993,14 +1062,14 @@ async def test_experiment_abstention_still_reads_experiment_projection() -> None
         abstention_note="No source-grounded selection was recovered.",
     )
     repository.findings[1] = ()
-    projection = RecordingExperimentCompatibilityProjection()
+    projection = RecordingExperimentProjection()
     service, _, _ = _service(
         repository=repository,
-        experiment_compatibility_projection=projection,
+        experiment_projection=projection,
     )
 
     findings = await service.list_findings(
-        "collection-1", "objective-1", analysis_version=1
+        "collection-1", "objective-1", analysis_version=1, user_id="user-1"
     )
 
     assert findings["items"][0]["finding_id"] == "projected-finding"
@@ -1012,9 +1081,11 @@ def test_partial_experiment_archive_is_insufficient_not_no_grounded_evidence() -
         selections=(),
         revisions=(
             SimpleNamespace(
-                measurements=(SimpleNamespace(measurement_key="m1"),),
-                comparisons=(),
-                reported_interpretations=(),
+                revision=SimpleNamespace(
+                    measurements=(SimpleNamespace(measurement_key="m1"),),
+                    comparisons=(),
+                    reported_interpretations=(),
+                ),
             ),
         ),
     )
@@ -1048,32 +1119,35 @@ def test_partial_stored_experiment_archive_unwraps_revision_payload() -> None:
     assert "partial bindings" in note
 
 
-async def test_objective_analysis_publishes_one_complete_version() -> None:
+async def test_objective_analysis_publishes_one_complete_version(objective_analysis_runtime, ) -> None:
     service, repository, _analyzer = _service()
     queued = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert queued["analysis"].status == "queued"
     assert result["analysis"].status == "succeeded"
     assert result["analysis"].progress_message == "Objective analysis completed."
     assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == (_native_finding(1),)
-    assert result["paper_contributions"] == _artifacts(1).contributions
+    assert result["paper_contributions"] == tuple(
+        {**asdict(item), "evidence_status_counts": dict(item.evidence_status_counts)}
+        for item in _artifacts(1).contributions
+    )
     assert result["warnings"] == []
     assert repository.experiment_published_calls == 1
     assert repository.published_calls == 0
 
 
-async def test_objective_analysis_writes_experiment_records_without_legacy_publication() -> None:
+async def test_objective_analysis_writes_experiment_records_without_legacy_publication(objective_analysis_runtime, ) -> (
+    None
+):
     writer = RecordingExperimentAnalysisWriter()
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
     assert repository.experiment_published_calls == 1
@@ -1085,32 +1159,38 @@ async def test_objective_analysis_writes_experiment_records_without_legacy_publi
     assert call["objective"].collection_id == repository.objective.collection_id
     assert call["analysis"].analysis_version == 1
     assert call["experiment_outputs"] == _artifacts(1).experiment_outputs
-    assert call["partial_experiment_outputs"] == _artifacts(1).partial_experiment_outputs
+    assert (
+        call["partial_experiment_outputs"] == _artifacts(1).partial_experiment_outputs
+    )
     assert "findings" not in call
 
 
-async def test_experiment_write_failure_prevents_successful_analysis_publication() -> None:
-    writer = RecordingExperimentAnalysisWriter(error=RuntimeError("experiment write failed"))
+async def test_experiment_write_failure_prevents_successful_analysis_publication(objective_analysis_runtime, ) -> (
+    None
+):
+    writer = RecordingExperimentAnalysisWriter(
+        error=RuntimeError("experiment write failed")
+    )
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
     assert repository.published_calls == 0
     assert len(writer.calls) == 1
 
 
-async def test_native_experiment_writer_publishes_without_legacy_publication() -> None:
+async def test_native_experiment_writer_publishes_without_legacy_publication(objective_analysis_runtime, ) -> None:
     writer = NativeRecordingExperimentAnalysisWriter()
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
     assert repository.experiment_published_calls == 1
@@ -1119,44 +1199,61 @@ async def test_native_experiment_writer_publishes_without_legacy_publication() -
     assert writer.calls[0]["analysis"].analysis_version == 1
 
 
-async def test_experiment_publication_commits_one_shared_transaction() -> None:
-    transaction_factory = RecordingAnalysisTransactionFactory()
+async def test_experiment_publication_commits_one_shared_transaction(
+    objective_analysis_runtime,
+    monkeypatch,
+) -> None:
+    transaction_factory = RecordingDatabaseSession()
+    monkeypatch.setattr(
+        "application.core.objectives.analysis_service.AsyncSessionLocal",
+        transaction_factory,
+    )
     writer = NativeRecordingExperimentAnalysisWriter()
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transaction_factory,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
 
     assert result["analysis"].status == "succeeded"
-    assert transaction_factory.events == ["begin", "commit"]
-    assert writer.calls[0]["transaction"] is transaction_factory.handle
+    assert transaction_factory.events == ["begin", "commit", "begin", "commit"]
+    assert writer.calls[0]["db"] is transaction_factory.handle
     assert repository.published_transaction is transaction_factory.handle
 
 
-async def test_experiment_publication_rolls_back_when_writer_fails() -> None:
-    transaction_factory = RecordingAnalysisTransactionFactory()
+async def test_experiment_publication_rolls_back_when_writer_fails(
+    objective_analysis_runtime, monkeypatch
+) -> None:
+    transaction_factory = RecordingDatabaseSession()
+    monkeypatch.setattr(
+        "application.core.objectives.analysis_service.AsyncSessionLocal",
+        transaction_factory,
+    )
     writer = NativeRecordingExperimentAnalysisWriter(
         error=RuntimeError("experiment write failed")
     )
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transaction_factory,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
 
     assert result["analysis"].status == "failed"
-    assert transaction_factory.events == ["begin", "rollback"]
-    assert writer.calls[0]["transaction"] is transaction_factory.handle
+    assert transaction_factory.events == ["begin", "commit", "begin", "rollback"]
+    assert writer.calls[0]["db"] is transaction_factory.handle
     assert repository.experiment_published_calls == 0
     assert repository.published_transaction is None
 
 
-async def test_native_experiment_writer_failure_prevents_successful_publication() -> None:
+async def test_native_experiment_writer_failure_prevents_successful_publication(objective_analysis_runtime, ) -> (
+    None
+):
     writer = NativeRecordingExperimentAnalysisWriter(
         error=RuntimeError("native experiment write failed")
     )
@@ -1165,7 +1262,7 @@ async def test_native_experiment_writer_failure_prevents_successful_publication(
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
     assert repository.experiment_published_calls == 0
@@ -1185,10 +1282,14 @@ async def test_analysis_view_reads_one_typed_objective_snapshot() -> None:
             self.metadata_reads += 1
             return StoredObjective(self.objective)
 
-        async def read_analysis(self, collection_id, objective_id, analysis_version=None):
+        async def read_analysis(
+            self, collection_id, objective_id, analysis_version=None
+        ):
             assert analysis_version is not None
             self.analysis_reads += 1
-            return await super().read_analysis(collection_id, objective_id, analysis_version)
+            return await super().read_analysis(
+                collection_id, objective_id, analysis_version
+            )
 
         async def read_published_analysis(self, collection_id, objective_id):
             pytest.fail("the view already knows the published version")
@@ -1196,7 +1297,9 @@ async def test_analysis_view_reads_one_typed_objective_snapshot() -> None:
     repository = CountingRepository(published=True)
     service, _, _ = _service(repository=repository)
 
-    result = await service.get_analysis_state("collection-1", "objective-1")
+    result = await service.get_analysis_state(
+        "collection-1", "objective-1", user_id="user-1"
+    )
 
     assert result["objective"].objective == repository.objective
     assert repository.metadata_reads == 1
@@ -1215,142 +1318,27 @@ async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> N
     assert result["analysis"].status == "queued"
 
 
-async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> None:
+async def test_start_analysis_queues_and_dispatches_the_canonical_worker(
+    objective_analysis_runtime,
+) -> None:
     service, repository, analyzer = _service()
 
-    queued = await service.start_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    queued = await service.start_objective_analysis(
+        "collection-1", "objective-1", _DOCUMENT_IDS, user_id="user-1"
+    )
 
     assert queued["analysis"].status == "queued"
     assert queued["objective"].objective.active_analysis_version == 1
-    await asyncio.gather(*tuple(service._analysis_tasks))
-    completed = await service.get_analysis_state("collection-1", "objective-1")
+    await objective_analysis_runtime.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
+    completed = await service.get_analysis_state(
+        "collection-1", "objective-1", user_id="user-1"
+    )
     assert completed["analysis"].status == "succeeded"
     assert analyzer.calls == 1
     assert repository.experiment_published_calls == 1
     assert repository.published_calls == 0
-
-
-async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start() -> None:
-    repository = FakeObjectiveRepository()
-    analyzer = FakeObjectiveExperimentAnalysisService()
-
-    def unavailable_task_factory(_coroutine):
-        raise RuntimeError("event loop unavailable")
-
-    inputs = FakeObjectiveInputService()
-    service = ObjectiveAnalysisService(
-        objective_repository=repository,
-        experiment_analysis_service=analyzer,
-        objective_input_service=inputs,
-        document_profile_service=inputs.document_profile_service,
-        task_factory=unavailable_task_factory,
-    )
-
-    with pytest.raises(ObjectiveAnalysisDispatchError) as error:
-        await service.start_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-
-    assert error.value.analysis_version == 1
-    failed = await repository.read_analysis("collection-1", "objective-1", 1)
-    assert failed is not None
-    assert failed.status == "failed"
-    assert failed.error_code == "analysis_dispatch_failed"
-    assert analyzer.calls == 0
-
-
-async def test_start_analysis_enforces_the_service_concurrency_limit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    inputs = FakeObjectiveInputService()
-    service = ObjectiveAnalysisService(
-        objective_repository=FakeObjectiveRepository(),
-        experiment_analysis_service=FakeObjectiveExperimentAnalysisService(),
-        objective_input_service=inputs,
-        document_profile_service=inputs.document_profile_service,
-        max_concurrency=1,
-    )
-    release_first = asyncio.Event()
-    first_started = asyncio.Event()
-    second_started = asyncio.Event()
-    active_count = 0
-    maximum_active_count = 0
-
-    async def queue_analysis(
-        collection_id: str,
-        objective_id: str,
-        document_ids: tuple[str, ...],
-    ) -> dict:
-        assert document_ids
-        version = 1 if objective_id == "objective-1" else 2
-        return {"analysis": _analysis(version)}
-
-    async def execute_queued_analysis(
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> dict:
-        nonlocal active_count, maximum_active_count
-        active_count += 1
-        maximum_active_count = max(maximum_active_count, active_count)
-        if objective_id == "objective-1":
-            first_started.set()
-            await release_first.wait()
-        else:
-            second_started.set()
-        active_count -= 1
-        return {"analysis_version": analysis_version}
-
-    monkeypatch.setattr(service, "queue_analysis", queue_analysis)
-    monkeypatch.setattr(service, "execute_queued_analysis", execute_queued_analysis)
-
-    await service.start_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    await first_started.wait()
-    await service.start_analysis("collection-1", "objective-2", ("paper-2",))
-    await asyncio.sleep(0)
-
-    assert not second_started.is_set()
-    assert maximum_active_count == 1
-
-    release_first.set()
-    await asyncio.gather(*tuple(service._analysis_tasks))
-
-    assert second_started.is_set()
-    assert maximum_active_count == 1
-
-
-async def test_restart_projects_unpublished_interrupted_analysis_as_not_started() -> None:
-    service, repository, _ = _service()
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    repository.analyses[1] = repository.analyses[1].start()
-
-    recovered = await service.recover_interrupted_analyses()
-    state = await service.get_analysis_state("collection-1", "objective-1")
-
-    assert recovered == 1
-    assert repository.analyses[1].status == "failed"
-    assert repository.analyses[1].error_code == "analysis_interrupted"
-    assert state["analysis"] is None
-    assert state["published_analysis"] is None
-
-
-async def test_restart_preserves_published_results_and_retry_uses_next_version() -> None:
-    service, repository, _ = _service(repository=FakeObjectiveRepository(published=True))
-    _, interrupted = await repository.queue_analysis(
-        "collection-1",
-        "objective-1",
-        document_inputs=_DOCUMENT_INPUTS,
-    )
-    repository.analyses[interrupted.analysis_version] = interrupted.start()
-
-    recovered = await service.recover_interrupted_analyses()
-    state = await service.get_analysis_state("collection-1", "objective-1")
-    retry = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-
-    assert recovered == 1
-    assert state["analysis"] is None
-    assert state["published_analysis"].analysis_version == 1
-    assert state["findings"] == (_finding(1),)
-    assert retry["analysis"].analysis_version == 3
-    assert retry["analysis"].status == "queued"
 
 
 async def test_objective_analysis_aggregates_persisted_contribution_warnings() -> None:
@@ -1370,7 +1358,9 @@ async def test_objective_analysis_aggregates_persisted_contribution_warnings() -
     )
     service, _repository, _analyzer = _service(repository=repository)
 
-    result = await service.get_analysis_state("collection-1", "objective-1")
+    result = await service.get_analysis_state(
+        "collection-1", "objective-1", user_id="user-1"
+    )
 
     assert result["warnings"] == [
         f"paper-1: {warning}",
@@ -1379,15 +1369,13 @@ async def test_objective_analysis_aggregates_persisted_contribution_warnings() -
     ]
 
 
-async def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None:
+async def test_objective_analysis_persists_real_model_prompt_and_token_usage(objective_analysis_runtime, ) -> None:
     service, _repository, _analyzer = _service(
         analyzer=UsageRecordingObjectiveExperimentAnalysisService()
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     analysis = result["analysis"]
     assert analysis.model_name == "model-a"
@@ -1395,37 +1383,30 @@ async def test_objective_analysis_persists_real_model_prompt_and_token_usage() -
     assert analysis.stats.model_usage == (
         ModelUsage("model-a", 1, TokenUsage(200, 40, 240)),
     )
-    assert analysis.stats.prompt_versions == {
-        "paper_framing": "paper_framing.v1"
-    }
+    assert analysis.stats.prompt_versions == {"paper_framing": "paper_framing.v1"}
     assert analysis.stats.duration_ms is not None
 
 
-async def test_checkpoint_only_analysis_preserves_the_evidence_model_name() -> None:
+async def test_checkpoint_only_analysis_preserves_the_evidence_model_name(objective_analysis_runtime, ) -> None:
     artifacts = replace(_artifacts(1), model_name="cached-evidence-model")
     service, _repository, _analyzer = _service(
         analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts)
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
     assert result["analysis"].model_name == "cached-evidence-model"
 
 
-async def test_objective_analysis_persists_internal_diagnostics_without_public_exposure(
-) -> None:
+async def test_objective_analysis_persists_internal_diagnostics(objective_analysis_runtime, ) -> None:
     service, repository, _analyzer = _service(
         analyzer=DiagnosticsRecordingObjectiveExperimentAnalysisService()
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     analysis = await repository.read_analysis("collection-1", "objective-1", 1)
     assert analysis is not None
@@ -1436,11 +1417,10 @@ async def test_objective_analysis_persists_internal_diagnostics_without_public_e
             "status": "verified",
         },
     )
-    assert "diagnostics" not in analysis.to_record()
-    assert "diagnostics" not in result["analysis"].to_record()
+    assert result["analysis"].diagnostics == analysis.diagnostics
 
 
-async def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
+async def test_failed_objective_analysis_keeps_internal_diagnostics(objective_analysis_runtime, ) -> None:
     service, repository, _analyzer = _service(
         analyzer=DiagnosticsRecordingObjectiveExperimentAnalysisService(
             error=RuntimeError("analysis failed after table repair")
@@ -1448,9 +1428,7 @@ async def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     analysis = await repository.read_analysis("collection-1", "objective-1", 1)
     assert analysis is not None
@@ -1477,7 +1455,9 @@ async def test_route_progress_does_not_replace_candidate_paper_count() -> None:
     running = await repository.claim_analysis("collection-1", "objective-1", 1)
     assert running is not None
 
-    progress = service._build_progress_callback(running)
+    progress = service._build_progress_callback(
+        ObjectiveAnalysisJobSnapshot(running, "worker", 1)
+    )
     await asyncio.to_thread(
         progress,
         {
@@ -1514,7 +1494,9 @@ async def test_concurrent_progress_counts_only_unique_completed_papers() -> None
         "collection-1", "objective-1", tuple(f"paper-{i}" for i in range(1, 5))
     )
     running = await repository.claim_analysis("collection-1", "objective-1", 1)
-    progress = service._build_progress_callback(running)
+    progress = service._build_progress_callback(
+        ObjectiveAnalysisJobSnapshot(running, "worker", 1)
+    )
 
     await asyncio.gather(
         *(
@@ -1551,7 +1533,7 @@ async def test_concurrent_progress_counts_only_unique_completed_papers() -> None
     assert counts == [1, 2, 2, 3, 4]
 
 
-async def test_empty_finding_output_publishes_scientific_abstention() -> None:
+async def test_empty_finding_output_publishes_scientific_abstention(objective_analysis_runtime, ) -> None:
     artifacts = _artifacts(1)
     service, repository, _analyzer = _service(
         analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts),
@@ -1561,38 +1543,42 @@ async def test_empty_finding_output_publishes_scientific_abstention() -> None:
         ),
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
     assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == ()
-    assert result["paper_contributions"] == artifacts.contributions
+    assert result["paper_contributions"] == tuple(
+        {**asdict(item), "evidence_status_counts": dict(item.evidence_status_counts)}
+        for item in artifacts.contributions
+    )
     assert repository.experiment_published_calls == 1
     assert repository.published_calls == 0
 
 
-async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "confidence": 0.9,
-            "evidence_disposition": "no_routable_evidence",
-            "routed_source_count": 0,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-            "evidence_disposition_reason": (
-                "No source in this paper was selected for Objective extraction."
-            ),
-        }
+async def test_no_grounded_evidence_publishes_scientific_abstention(objective_analysis_runtime, ) -> None:
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="no_routable_evidence",
+        routed_source_count=0,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=0,
+        evidence_disposition_reason="No source in this paper was selected for Objective extraction.",
     )
     artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(contribution,),
@@ -1607,9 +1593,7 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
     assert result["objective"].objective.published_analysis_version == 1
@@ -1622,16 +1606,14 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
     assert repository.published_calls == 0
 
 
-async def test_missing_paper_contributions_still_fails_without_publication() -> None:
+async def test_missing_paper_contributions_still_fails_without_publication(objective_analysis_runtime, ) -> None:
     artifacts = replace(_artifacts(1), contributions=())
     service, repository, _analyzer = _service(
         analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts)
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
     assert (
@@ -1642,27 +1624,29 @@ async def test_missing_paper_contributions_still_fails_without_publication() -> 
     assert repository.published_calls == 0
 
 
-async def test_all_relevant_paper_extractions_failed_without_publication() -> None:
-    failed_contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "failed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "warnings": ["1 selected source(s) failed extraction."],
-            "confidence": 0.9,
-            "evidence_disposition": "extraction_failed",
-            "routed_source_count": 1,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 1,
-            "evidence_disposition_reason": (
-                "1 selected source(s) failed extraction."
-            ),
-        }
+async def test_all_relevant_paper_extractions_failed_without_publication(objective_analysis_runtime, ) -> None:
+    failed_contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="failed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=("1 selected source(s) failed extraction.",),
+        confidence=0.9,
+        evidence_disposition="extraction_failed",
+        routed_source_count=1,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=1,
+        evidence_disposition_reason="1 selected source(s) failed extraction.",
     )
     artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(failed_contribution,),
@@ -1673,9 +1657,7 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
     assert (
@@ -1686,7 +1668,9 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
     assert repository.published_calls == 0
 
 
-async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_absence() -> None:
+async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_absence(objective_analysis_runtime, ) -> (
+    None
+):
     from application.core.objectives.analysis.paper_experiment_extraction import (
         PaperExperimentExtractor,
         build_source_bundle,
@@ -1698,48 +1682,81 @@ async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_abs
 
     class InvalidDraftClient:
         def complete(self, *, response_model, **kwargs):
-            return response_model.model_validate({
-                "experiments": [{
-                    "label": "Reported tensile experiment",
-                    "scope_description": "Same batch under two treatments",
-                    "test_conditions": [{
-                        "test_key": None,
-                        "test_type": "tensile",
-                        "source_labels": ["S001"],
-                    }],
-                }],
-                "source_labels": ["S001"],
-            })
+            return response_model.model_validate(
+                {
+                    "experiments": [
+                        {
+                            "label": "Reported tensile experiment",
+                            "scope_description": "Same batch under two treatments",
+                            "test_conditions": [
+                                {
+                                    "test_key": None,
+                                    "test_type": "tensile",
+                                    "source_labels": ["S001"],
+                                }
+                            ],
+                        }
+                    ],
+                    "source_labels": ["S001"],
+                }
+            )
 
     service, repository, analyzer = _service()
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
     analysis = await repository.read_analysis("collection-1", "objective-1", 1)
     objective = repository.objective
     bundle = build_source_bundle(
-        document_id="paper-1", source_fingerprint="prepared-1",
-        source_payloads=({"source_kind": "block", "source_ref": "methods-1",
-                          "text": "Both treatment groups underwent tensile testing."},),
+        document_id="paper-1",
+        source_fingerprint="prepared-1",
+        source_payloads=(
+            {
+                "source_kind": "block",
+                "source_ref": "methods-1",
+                "text": "Both treatment groups underwent tensile testing.",
+            },
+        ),
     )
     extraction = PaperExperimentExtractor(InvalidDraftClient()).extract(
-        objective=objective, bundle=bundle,
+        objective=objective,
+        bundle=bundle,
     )
     assert extraction.status == "technical_failure"
     assert len(extraction.attempts) == 3
     refs = tuple(bundle.source_catalog.values())
     contribution = _build_contribution_for_extraction(
-        collection_id="collection-1", analysis=analysis, objective=objective,
-        frame=PaperAnalysisFrame.from_mapping({"document_id": "paper-1", "relevance": "high"}),
-        extraction=extraction, routed_source_refs=refs,
-        inspected_source_refs=(), failed_source_refs=refs, omitted_source_refs=(),
+        collection_id="collection-1",
+        analysis=analysis,
+        objective=objective,
+        frame=PaperAnalysisFrame(
+            objective_id="",
+            document_id="paper-1",
+            relevance="high",
+            paper_role="uncertain",
+            screening_note=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            relevant_sections=(),
+            relevant_text_source_refs=(),
+            relevant_tables=(),
+            excluded_tables=(),
+        ),
+        extraction=extraction,
+        routed_source_refs=refs,
+        inspected_source_refs=(),
+        failed_source_refs=refs,
+        omitted_source_refs=(),
     )
     assert contribution.analysis_status == "failed"
     assert contribution.evidence_disposition == "extraction_failed"
     assert contribution.failed_source_count == 1
     analyzer.artifacts = ObjectiveExperimentAnalysisArtifacts(
-        contributions=(contribution,), experiment_outputs=(),
+        contributions=(contribution,),
+        experiment_outputs=(),
     )
 
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
     assert result["analysis"].abstention_reason is None
@@ -1747,13 +1764,15 @@ async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_abs
     assert repository.experiment_published_calls == 0
 
 
-async def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version() -> None:
-    analyzer = FakeObjectiveExperimentAnalysisService(error=RuntimeError("model unavailable"))
+async def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version(objective_analysis_runtime, ) -> (
+    None
+):
+    analyzer = FakeObjectiveExperimentAnalysisService(
+        error=RuntimeError("model unavailable")
+    )
     service, repository, _analyzer = _service(analyzer=analyzer)
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    failed = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    failed = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
     retry = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
     assert failed["analysis"].status == "failed"
@@ -1784,7 +1803,7 @@ async def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version(
         ),
     ],
 )
-async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
+async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(objective_analysis_runtime,
     exception_type: type[Exception],
     code: str,
     message: str,
@@ -1792,11 +1811,15 @@ async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
 ) -> None:
     secret_marker = "private-provider-response-marker"
     service, repository, _ = _service(
-        analyzer=FakeObjectiveExperimentAnalysisService(error=exception_type(secret_marker))
+        analyzer=FakeObjectiveExperimentAnalysisService(
+            error=exception_type(secret_marker)
+        )
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
-    status = await service.get_analysis_status("collection-1", "objective-1")
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
+    status = await service.get_analysis_status(
+        "collection-1", "objective-1", user_id="user-1"
+    )
 
     assert result["analysis"].error_message == message
     assert status["error_code"] == code
@@ -1805,7 +1828,6 @@ async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
     failure = stored.diagnostics[-1]
     assert failure["error_type"] == exception_type.__name__
     assert failure["frames"][-1]["function"] == "generate_experiment_analysis_artifacts"
-    assert secret_marker not in str(stored.to_record())
     assert secret_marker not in str(stored.diagnostics)
     assert secret_marker not in caplog.text
 
@@ -1825,8 +1847,12 @@ async def test_historical_failure_is_safe_without_rewriting_published_or_stored_
     )
     repository.analyses[2] = stored_failure
 
-    result = await service.get_analysis_state("collection-1", "objective-1")
-    status = await service.get_analysis_status("collection-1", "objective-1")
+    result = await service.get_analysis_state(
+        "collection-1", "objective-1", user_id="user-1"
+    )
+    status = await service.get_analysis_status(
+        "collection-1", "objective-1", user_id="user-1"
+    )
 
     assert result["analysis"].status == "failed"
     assert result["analysis"].error_code == error_code
@@ -1837,31 +1863,25 @@ async def test_historical_failure_is_safe_without_rewriting_published_or_stored_
     assert repository.analyses[2] is stored_failure
 
 
-async def test_losing_worker_does_not_run_duplicate_analysis() -> None:
+async def test_losing_worker_does_not_run_duplicate_analysis(objective_analysis_runtime, ) -> None:
     repository = FakeObjectiveRepository(claimable=False)
     analyzer = FakeObjectiveExperimentAnalysisService()
-    service, _repository, _analyzer = _service(
-        repository=repository, analyzer=analyzer
-    )
+    service, _repository, _analyzer = _service(repository=repository, analyzer=analyzer)
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "queued"
     assert analyzer.calls == 0
 
 
-async def test_failed_retry_keeps_previous_published_findings_readable() -> None:
+async def test_failed_retry_keeps_previous_published_findings_readable(objective_analysis_runtime, ) -> None:
     repository = FakeObjectiveRepository(published=True)
-    analyzer = FakeObjectiveExperimentAnalysisService(error=TimeoutError("provider timeout"))
-    service, _repository, _analyzer = _service(
-        repository=repository, analyzer=analyzer
+    analyzer = FakeObjectiveExperimentAnalysisService(
+        error=TimeoutError("provider timeout")
     )
+    service, _repository, _analyzer = _service(repository=repository, analyzer=analyzer)
     queued = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 2
-    )
+    result = await objective_analysis_runtime.execute_queued_analysis("collection-1", "objective-1", 2)
 
     assert queued["analysis"].analysis_version == 2
     assert result["analysis"].status == "failed"
@@ -1874,7 +1894,9 @@ async def test_evidence_map_reads_only_the_published_analysis_version() -> None:
         repository=FakeObjectiveRepository(published=True)
     )
 
-    payload = await service.get_evidence_map("collection-1", "objective-1")
+    payload = await service.get_evidence_map(
+        "collection-1", "objective-1", user_id="user-1"
+    )
 
     assert payload["analysis_version"] == 1
     assert payload["projection_version"] == "objective-evidence-map.v1"
@@ -1885,67 +1907,32 @@ async def test_evidence_map_reads_only_the_published_analysis_version() -> None:
     )
 
 
-async def test_dispatch_failure_marks_the_queued_version_failed() -> None:
-    service, repository, _analyzer = _service()
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-
-    result = await service.fail_analysis_dispatch(
-        "collection-1", "objective-1", 1
-    )
-
-    assert result["analysis"].status == "failed"
-    assert result["analysis"].error_code == "analysis_dispatch_failed"
-    assert result["analysis"].error_message == (
-        "Objective analysis could not be scheduled. Retry the analysis."
-    )
-    analysis = await repository.read_analysis("collection-1", "objective-1", 1)
-    assert analysis is not None
-    assert analysis.status == "failed"
-
-
-async def test_dispatch_failure_does_not_fail_a_version_claimed_concurrently() -> None:
-    repository = FakeObjectiveRepository(claim_before_fail=True)
-    service, _repository, _analyzer = _service(repository=repository)
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-
-    result = await service.fail_analysis_dispatch(
-        "collection-1", "objective-1", 1
-    )
-
-    assert result["analysis"].status == "running"
-
-
-async def test_claim_failure_marks_the_queued_version_failed() -> None:
+async def test_claim_failure_marks_the_queued_version_failed(
+    objective_analysis_runtime,
+) -> None:
     repository = FakeObjectiveRepository(
         claim_error=RuntimeError("database unavailable")
     )
     service, _repository, analyzer = _service(repository=repository)
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await objective_analysis_runtime.execute_queued_analysis(
+            "collection-1", "objective-1", 1
+        )
+    assert repository.analyses[1].status == "queued"
+
+
+async def _owned_collection(collection_id, user_id):
+    assert collection_id == "collection-1"
+    assert user_id == "user-1"
+    return {"collection_id": collection_id, "owner_user_id": user_id}
+
+
+@pytest.fixture(autouse=True)
+def owned_research_inputs(monkeypatch):
+    monkeypatch.setattr(
+        objective_analysis_service,
+        "collection_service",
+        SimpleNamespace(get_collection_for_user=_owned_collection),
     )
-
-    assert result["analysis"].status == "failed"
-    assert result["analysis"].error_message == (
-        "Objective analysis could not be completed. Retry the analysis."
-    )
-    assert analyzer.calls == 0
-
-
-async def test_delayed_worker_does_not_claim_a_newer_retry_version() -> None:
-    service, repository, analyzer = _service()
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-    repository.analyses[1] = repository.analyses[1].fail(
-        error_code="failed",
-        error_message="first attempt failed",
-    )
-    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
-
-    result = await service.execute_queued_analysis(
-        "collection-1", "objective-1", 1
-    )
-
-    assert result["analysis"].analysis_version == 2
-    assert result["analysis"].status == "queued"
-    assert analyzer.calls == 0

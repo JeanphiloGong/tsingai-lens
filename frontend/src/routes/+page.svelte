@@ -3,8 +3,10 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy, onMount } from 'svelte';
+	import { Plus, Upload, Search, Library, ArrowRight, Ellipsis } from '@lucide/svelte';
 	import { errorMessage } from './_shared/api';
-	import { authState } from './_shared/auth';
+	import { authState } from './_shared/authState';
+
 	import {
 		createCollection,
 		collections,
@@ -41,6 +43,7 @@
 	let loading = false;
 	let error = '';
 	let isCreateOpen = false;
+	let createDialog: HTMLDialogElement;
 	let name = '';
 	let description = '';
 	let createLoading = false;
@@ -56,7 +59,7 @@
 
 	$: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
 	$: sortedCollections = [...$collections].sort(compareCollectionsByUpdated);
-	$: latestCollectionId = sortedCollections[0]?.id ?? '';
+	$: latestCollectionId = sortedCollections[0]?.collection_id ?? '';
 	$: visibleCollections = sortedCollections.filter((collection) => {
 		const query = searchTerm.trim().toLowerCase();
 		const matchesQuery =
@@ -153,7 +156,12 @@
 		openRowMenuId = '';
 	}
 
+	function showCreateDialog(node: HTMLDialogElement) {
+		node.showModal();
+	}
+
 	function closeCreate() {
+		createDialog?.close();
 		isCreateOpen = false;
 		name = '';
 		description = '';
@@ -164,12 +172,6 @@
 		}
 	}
 
-	function handleBackdropKeydown(event: KeyboardEvent) {
-		if (!isCreateOpen) return;
-		if (event.key === 'Escape') {
-			closeCreate();
-		}
-	}
 
 	async function submitCreate(event: SubmitEvent) {
 		event.preventDefault();
@@ -188,7 +190,7 @@
 			});
 			closeCreate();
 			await loadCollections();
-			await goto(resolve('/collections/[id]', { id: result.id }));
+			await goto(resolve('/collections/[id]', { id: result.collection_id }));
 		} catch (err) {
 			createError = errorMessage(err);
 		} finally {
@@ -310,24 +312,24 @@
 		openRowMenuId = '';
 		const pendingDocuments = collection.documents.filter((document) => document.status !== 'ready');
 		if (!collection.documents.length) {
-			setRowMessage(collection.id, $t('home.indexNoFiles'), 'error');
+			setRowMessage(collection.collection_id, $t('home.indexNoFiles'), 'error');
 			return;
 		}
 		if (!pendingDocuments.length) {
-			setRowMessage(collection.id, $t('home.indexStarted'));
+			setRowMessage(collection.collection_id, $t('home.indexStarted'));
 			return;
 		}
 
 		try {
-			setRowMessage(collection.id, $t('home.indexing'));
+			setRowMessage(collection.collection_id, $t('home.indexing'));
 			const runs = await Promise.all(
 				pendingDocuments.map((document) =>
-					prepareCollectionDocument(collection.id, document.document_id)
+					prepareCollectionDocument(collection.collection_id, document.document_id)
 				)
 			);
 			collections.update((items) =>
 				items.map((item) =>
-					item.id === collection.id
+					item.collection_id === collection.collection_id
 						? {
 								...item,
 								status: 'running',
@@ -337,9 +339,9 @@
 				)
 			);
 			scheduleCollectionPoll();
-			setRowMessage(collection.id, $t('home.indexStarted'));
+			setRowMessage(collection.collection_id, $t('home.indexStarted'));
 		} catch (err) {
-			setRowMessage(collection.id, errorMessage(err), 'error');
+			setRowMessage(collection.collection_id, errorMessage(err), 'error');
 		}
 	}
 
@@ -352,33 +354,31 @@
 			return;
 		}
 
-		deletingCollectionId = collection.id;
-		setRowMessage(collection.id, $t('home.deleting'));
+		deletingCollectionId = collection.collection_id;
+		setRowMessage(collection.collection_id, $t('home.deleting'));
 
 		try {
-			await deleteCollection(collection.id);
+			await deleteCollection(collection.collection_id);
 			setNotice($t('home.deleted', { name }));
 		} catch (err) {
-			setRowMessage(collection.id, errorMessage(err), 'error');
+			setRowMessage(collection.collection_id, errorMessage(err), 'error');
 		} finally {
 			deletingCollectionId = '';
 		}
 	}
 </script>
 
-<svelte:window on:keydown={handleBackdropKeydown} />
 
 <svelte:head>
 	<title>{$t('home.title')}</title>
 </svelte:head>
 
 <section class="home-hero">
-	<p class="home-eyebrow">{$t('home.eyebrow')}</p>
 	<h1>{$t('home.title')}</h1>
 	<p class="home-lead">{$t('home.lead')}</p>
 	<div class="home-actions" aria-label={$t('home.heroActionsLabel')}>
 		<button class="home-button home-button--primary" type="button" on:click={openCreate}>
-			<span aria-hidden="true">+</span>
+			<Plus size={16} aria-hidden="true" />
 			{$t('home.primaryAction')}
 		</button>
 		{#if latestCollectionId}
@@ -386,12 +386,12 @@
 				class="home-button home-button--secondary"
 				href={resolve('/collections/[id]/documents', { id: latestCollectionId })}
 			>
-				<span aria-hidden="true">^</span>
+				<Upload size={16} aria-hidden="true" />
 				{$t('home.secondaryAction')}
 			</a>
 		{:else}
 			<button class="home-button home-button--secondary" type="button" on:click={openCreate}>
-				<span aria-hidden="true">^</span>
+				<Upload size={16} aria-hidden="true" />
 				{$t('home.secondaryAction')}
 			</button>
 		{/if}
@@ -401,7 +401,7 @@
 <section class="recent-card" aria-labelledby="recent-collections-title">
 	<div class="recent-card__header">
 		<div class="section-heading">
-			<span class="section-icon" aria-hidden="true">R</span>
+			<span class="section-icon" aria-hidden="true"><Library size={20} /></span>
 			<div>
 				<h2 id="recent-collections-title">{$t('home.recentTitle')}</h2>
 				<p>{$t('home.recentSubtitle')}</p>
@@ -410,7 +410,7 @@
 		<div class="recent-controls">
 			<label class="sr-only" for="collection-search">{$t('home.searchLabel')}</label>
 			<div class="search-field">
-				<span aria-hidden="true">/</span>
+				<Search size={16} aria-hidden="true" />
 				<input
 					id="collection-search"
 					bind:value={searchTerm}
@@ -445,7 +445,7 @@
 			<p>{$collections.length ? $t('home.noResultsDesc') : $t('home.emptyDesc')}</p>
 			{#if !$collections.length}
 				<button class="home-button home-button--primary" type="button" on:click={openCreate}>
-					<span aria-hidden="true">+</span>
+					<Plus size={16} aria-hidden="true" />
 					{$t('home.emptyCta')}
 				</button>
 			{/if}
@@ -464,7 +464,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each visibleCollections as collection (collection.id)}
+					{#each visibleCollections as collection (collection.collection_id)}
 						{@const step = nextStep(collection)}
 						{@const statusGroup = getCollectionStatusGroup(collection)}
 						<tr>
@@ -496,16 +496,16 @@
 										statusGroup === 'complete'
 											? '/collections/[id]/objectives'
 											: '/collections/[id]',
-										{ id: collection.id }
+										{ id: collection.collection_id }
 									)}
 								>
 									{step}
-									<span aria-hidden="true">&gt;</span>
+									<ArrowRight size={16} aria-hidden="true" />
 								</a>
 							</td>
 							<td>
 								<div class="row-actions">
-									<a class="enter-link" href={resolve('/collections/[id]', { id: collection.id })}
+									<a class="enter-link" href={resolve('/collections/[id]', { id: collection.collection_id })}
 										>{$t('home.actionEnter')}</a
 									>
 									<div class="row-menu">
@@ -515,12 +515,12 @@
 											aria-label={$t('home.moreActions', {
 												name: collection.name || $t('collection.unknownName')
 											})}
-											aria-expanded={openRowMenuId === collection.id}
-											on:click={(event) => toggleRowMenu(collection.id, event)}
+											aria-expanded={openRowMenuId === collection.collection_id}
+											on:click={(event) => toggleRowMenu(collection.collection_id, event)}
 										>
-											...
+											<Ellipsis size={16} aria-hidden="true" />
 										</button>
-										{#if openRowMenuId === collection.id}
+										{#if openRowMenuId === collection.collection_id}
 											<div class="row-menu__panel" style={rowMenuPanelStyle}>
 												<button
 													type="button"
@@ -533,10 +533,10 @@
 												<button
 													type="button"
 													class="danger-menu-item"
-													disabled={deletingCollectionId === collection.id}
+													disabled={deletingCollectionId === collection.collection_id}
 													on:click={() => removeCollection(collection)}
 												>
-													{deletingCollectionId === collection.id
+													{deletingCollectionId === collection.collection_id
 														? $t('home.deleting')
 														: $t('home.actionDelete')}
 												</button>
@@ -544,13 +544,13 @@
 										{/if}
 									</div>
 								</div>
-								{#if rowMessages[collection.id]}
+								{#if rowMessages[collection.collection_id]}
 									<div
-										class={`row-message ${rowMessages[collection.id].type === 'error' ? 'row-message--error' : ''}`}
+										class={`row-message ${rowMessages[collection.collection_id].type === 'error' ? 'row-message--error' : ''}`}
 										role="status"
 										aria-live="polite"
 									>
-										{rowMessages[collection.id].message}
+										{rowMessages[collection.collection_id].message}
 									</div>
 								{/if}
 							</td>
@@ -561,7 +561,7 @@
 		</div>
 
 		<div class="collection-list">
-			{#each visibleCollections as collection (collection.id)}
+			{#each visibleCollections as collection (collection.collection_id)}
 				{@const step = nextStep(collection)}
 				{@const statusGroup = getCollectionStatusGroup(collection)}
 				<article class="collection-list-card">
@@ -595,23 +595,23 @@
 							class="next-link"
 							href={resolve(
 								statusGroup === 'complete' ? '/collections/[id]/objectives' : '/collections/[id]',
-								{ id: collection.id }
+								{ id: collection.collection_id }
 							)}
 						>
 							{step}
-							<span aria-hidden="true">&gt;</span>
+							<ArrowRight size={16} aria-hidden="true" />
 						</a>
-						<a class="enter-link" href={resolve('/collections/[id]', { id: collection.id })}
+						<a class="enter-link" href={resolve('/collections/[id]', { id: collection.collection_id })}
 							>{$t('home.actionEnter')}</a
 						>
 					</div>
-					{#if rowMessages[collection.id]}
+					{#if rowMessages[collection.collection_id]}
 						<div
-							class={`row-message ${rowMessages[collection.id].type === 'error' ? 'row-message--error' : ''}`}
+							class={`row-message ${rowMessages[collection.collection_id].type === 'error' ? 'row-message--error' : ''}`}
 							role="status"
 							aria-live="polite"
 						>
-							{rowMessages[collection.id].message}
+							{rowMessages[collection.collection_id].message}
 						</div>
 					{/if}
 				</article>
@@ -620,14 +620,13 @@
 	{/if}
 </section>
 
-<section class="future-workspace" aria-labelledby="future-workspace-title">
-	<div class="section-heading section-heading--future">
-		<span class="section-icon" aria-hidden="true">*</span>
+<details class="future-workspace">
+	<summary class="section-heading section-heading--future">
 		<div>
-			<h2 id="future-workspace-title">{$t('home.futureTitle')}</h2>
+			<h2>{$t('home.futureTitle')}</h2>
 			<p>{$t('home.futureSubtitle')}</p>
 		</div>
-	</div>
+	</summary>
 	<div class="future-grid">
 		{#each futureCards as card (card.key)}
 			<article class="future-card">
@@ -638,13 +637,12 @@
 			</article>
 		{/each}
 	</div>
-</section>
+</details>
 
 {#if isCreateOpen}
-	<div class="modal-backdrop" role="presentation" on:click|self={closeCreate}>
-		<div class="modal" role="dialog" aria-modal="true" tabindex="-1">
+	<dialog class="modal create-dialog" aria-labelledby="create-collection-title" bind:this={createDialog} use:showCreateDialog on:cancel|preventDefault={closeCreate} on:close={closeCreate} on:click|self={closeCreate}>
 			<div class="modal-header">
-				<h3>{$t('create.title')}</h3>
+				<h3 id="create-collection-title">{$t('create.title')}</h3>
 			</div>
 			<form class="modal-form" on:submit={submitCreate}>
 				<div class="field">
@@ -681,24 +679,36 @@
 					</button>
 				</div>
 			</form>
-		</div>
-	</div>
+	</dialog>
 {/if}
 
 <style>
+	.create-dialog {
+		margin: auto;
+		color: var(--text-primary);
+	}
+	.create-dialog::backdrop {
+		background: rgba(10, 20, 40, 0.45);
+	}
+	.future-workspace > summary {
+		cursor: pointer;
+		padding: 12px 0;
+		list-style: disclosure-closed;
+		display: list-item;
+	}
+	.future-workspace > summary > div {
+		display: inline-block;
+		vertical-align: middle;
+		margin-left: 8px;
+	}
+	.future-workspace[open] > summary { list-style-type: disclosure-open; }
+	.future-workspace > summary h2 { font-size: 16px; line-height: 24px; }
+
 	.home-hero {
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
 		padding: 8px 0 0;
-	}
-
-	.home-eyebrow {
-		margin: 0;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 500;
-		line-height: 16px;
 	}
 
 	.home-hero h1 {
@@ -754,8 +764,8 @@
 	.home-button--primary {
 		border-color: var(--brand-primary);
 		background: var(--brand-primary);
-		color: #fff;
-		box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+		color: var(--on-brand);
+		box-shadow: var(--shadow-xs);
 	}
 
 	.home-button--primary:hover {
@@ -788,7 +798,6 @@
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-lg);
 		background: var(--surface-card);
-		box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
 	}
 
 	.recent-card__header {
@@ -1161,9 +1170,6 @@
 		margin-top: -8px;
 	}
 
-	.section-heading--future .section-icon {
-		background: #fff;
-	}
 
 	.future-grid {
 		display: grid;
@@ -1345,6 +1351,7 @@
 
 		.collection-list-card {
 			display: grid;
+			min-width: 0;
 			gap: 12px;
 			padding: 16px;
 			border: 1px solid var(--border-default);
@@ -1357,7 +1364,15 @@
 			display: flex;
 			align-items: flex-start;
 			justify-content: space-between;
+			flex-wrap: wrap;
+			min-width: 0;
 			gap: 12px;
+		}
+
+		.collection-list-card .collection-main {
+			flex: 1 1 160px;
+			max-width: 100%;
+			overflow-wrap: anywhere;
 		}
 
 		.collection-list-card__meta {

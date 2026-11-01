@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback.sample_builder_support import SftSampleModelOutput
+
 
 import pytest
 
@@ -62,7 +64,7 @@ async def test_builder_keeps_ids_out_of_model_content_and_retains_provenance() -
         sample=_sample(),
         case=_case(
             {
-                "question": "比较 A、B 的预热条件。",
+                "messages": [{"role": "user", "content": "比较 A、B 的预热条件。"}], "question": "比较 A、B 的预热条件。",
                 "answer": "B 没有预热。",
                 "candidate_target": "文献 B 的图注显示存在预热条件。",
                 "inspected_sources": [
@@ -96,7 +98,7 @@ async def test_builder_does_not_invent_target_or_evidence() -> None:
         sample=_sample(),
         case=_case(
             {
-                "question": "比较 A、B。",
+                "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
                 "answer": "原回答",
                 "inspected_sources": [
                     {"document_id": "doc-b", "source_ref": "blk-b-1"}
@@ -108,9 +110,30 @@ async def test_builder_does_not_invent_target_or_evidence() -> None:
 
     assert isinstance(result, SftBuildNeedsInput)
     assert result.missing_reasons == (
-        "readable_evidence_missing",
         "candidate_target_missing",
     )
+
+
+@pytest.mark.parametrize("rating", ["helpful", "not_helpful"])
+async def test_rating_without_paper_excerpts_preserves_conversation(rating) -> None:
+    messages = [
+        {"role": "user", "content": "We need to isolate laser power from scan speed."},
+        {"role": "assistant", "content": "Hold scan speed fixed in the next comparison."},
+        {"role": "user", "content": "Summarize that decision."},
+    ]
+    result = await SftSampleBuilder().build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": messages[-1]["content"], "messages": messages,
+                    "answer": "Compare power levels at fixed scan speed.", "rating": rating}),
+    )
+    if rating == "helpful":
+        assert isinstance(result, SftBuildCandidate)
+        assert result.content.messages == tuple(messages)
+        assert result.content.context == result.content.evidence == ()
+        assert result.provenance["target_origin"] == "helpful_answer"
+    else:
+        assert isinstance(result, SftBuildNeedsInput)
+        assert result.missing_reasons == ("candidate_target_missing",)
 
 
 async def test_builder_generates_a_target_from_readable_evidence() -> None:
@@ -120,11 +143,11 @@ async def test_builder_generates_a_target_from_readable_evidence() -> None:
         async def generate(self, **inputs):
             assert inputs["task_type"] == "sft"
             assert inputs["context"] == ({"document_title": "B", "text": "Preheated at 200 C."},)
-            return {"target": "Paper B used preheating at 200 C."}
+            return SftSampleModelOutput.model_validate({"target": "Paper B used preheating at 200 C."})
 
     result = await SftSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "What preheating did B use?", "answer": "No preheating.",
+        case=_case({"messages": [{"role": "user", "content": "What preheating did B use?"}], "question": "What preheating did B use?", "answer": "No preheating.",
                     "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
     )
     assert isinstance(result, SftBuildCandidate)
@@ -137,11 +160,11 @@ async def test_generator_can_abstain_without_inventing_missing_conditions() -> N
         model_name = "test-grounded-model"
 
         async def generate(self, **inputs):
-            return {"missing_reasons": ["preheating_condition_not_in_evidence"]}
+            return SftSampleModelOutput.model_validate({"missing_reasons": ["preheating_condition_not_in_evidence"]})
 
     result = await SftSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "What preheating did B use?",
+        case=_case({"messages": [{"role": "user", "content": "What preheating did B use?"}], "question": "What preheating did B use?",
                     "inspected_sources": [{"document_title": "B", "quote": "Tensile tests were performed."}]}),
     )
     assert isinstance(result, SftBuildNeedsInput)

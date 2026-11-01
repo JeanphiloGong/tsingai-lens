@@ -217,6 +217,9 @@ const mechanismEvidence = {
 };
 
 const experimentProjection = {
+	collection_id: collectionId,
+	objective_id: objectiveId,
+	analysis_version: 1,
 	selections: [
 		{
 			selection_id: 'selection-1',
@@ -405,6 +408,7 @@ async function mockApis(page: Page) {
 							title: 'LPBF 316L tensile study',
 							source_filename: 'paper-1.pdf',
 							doc_type: 'experimental',
+							profile_status: 'completed',
 							profile_warnings: [],
 							confidence: 0.95
 						}
@@ -413,7 +417,8 @@ async function mockApis(page: Page) {
 					count: 1,
 					summary: {
 						total_documents: 1,
-						doc_type_counts: { experimental: 1 },
+						by_doc_type: { experimental: 1 },
+						technical_failure_count: 0,
 						warnings: []
 					}
 				})
@@ -426,7 +431,11 @@ async function mockApis(page: Page) {
 					objective,
 					active_analysis: analysis('failed', 2),
 					published_analysis: analysis('succeeded', 1),
-					warnings: []
+					warnings: [],
+					evidence_review: {
+						total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0,
+						gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: []
+					}
 				})
 			);
 		}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 DatasetSampleStatus = Literal[
     "pending",
@@ -54,16 +54,6 @@ class DatasetSample:
     def __post_init__(self) -> None:
         if not self.sample_id or not self.dataset_id or not self.source_case_id:
             raise ValueError("dataset sample identity is required")
-        if self.status not in {
-            "pending",
-            "building",
-            "needs_confirmation",
-            "needs_input",
-            "confirmed",
-            "discarded",
-            "build_failed",
-        }:
-            raise ValueError("invalid dataset sample status")
         if self.generation < 1:
             raise ValueError("sample generation must be positive")
         if not _is_sha256(self.source_digest):
@@ -78,8 +68,6 @@ class DatasetSample:
             raise ValueError("confirmed sample requires a confirmed revision")
         if self.status != "confirmed" and (self.confirmed_by or self.confirmed_at):
             raise ValueError("unconfirmed sample cannot have confirmation audit")
-        reasons = tuple(dict.fromkeys(str(item).strip() for item in self.missing_reasons if str(item).strip()))
-        object.__setattr__(self, "missing_reasons", reasons)
 
     @classmethod
     def pending(
@@ -106,24 +94,6 @@ class DatasetSample:
             created_at=now,
             updated_at=now,
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "sample_id": self.sample_id,
-            "dataset_id": self.dataset_id,
-            "source_case_id": self.source_case_id,
-            "status": self.status,
-            "current_revision_id": self.current_revision_id,
-            "confirmed_revision_id": self.confirmed_revision_id,
-            "generation": self.generation,
-            "source_digest": self.source_digest,
-            "active_job_id": self.active_job_id,
-            "missing_reasons": list(self.missing_reasons),
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "confirmed_by": self.confirmed_by,
-            "confirmed_at": self.confirmed_at,
-        }
 
 
 def _is_sha256(value: str) -> bool:

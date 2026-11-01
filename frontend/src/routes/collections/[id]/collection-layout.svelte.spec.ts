@@ -17,7 +17,7 @@ const { pageStore, collectionStore, fetchCollectionMock, fetchCollectionsMock } 
 			subscribe(run: (value: unknown[]) => void) {
 				run([
 					{
-						id: 'col_123',
+						collection_id: 'col_123',
 						name: 'Battery papers',
 						description: 'Current document collection',
 						status: 'uploaded',
@@ -55,6 +55,7 @@ describe('current collection layout', () => {
 		render(Layout);
 		const navigation = browserPage.getByRole('navigation', { name: 'Collection navigation' });
 
+		await browserPage.getByText('More', { exact: true }).click();
 		for (const name of ['Objectives', 'Evidence Map', 'Papers', 'AI Copilot']) {
 			await expect
 				.element(navigation.getByRole('link', { name }))

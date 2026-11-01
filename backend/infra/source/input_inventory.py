@@ -11,24 +11,25 @@ from typing import Any
 import pandas as pd
 
 from infra.source.hashing import gen_sha512_hash
+from infra.source.config.source_parser_config import InputConfig
 from infra.source.storage.file_storage import FileStorage
 
 logger = logging.getLogger(__name__)
 
 
 async def load_document_inventory(
-    config: Any,
+    config: InputConfig,
     storage: FileStorage,
 ) -> pd.DataFrame:
     """Load the configured document inventory from file storage."""
     logger.info("loading input from root_dir=%s", config.storage.base_dir)
-    file_type = _normalize_enum_value(config.file_type)
+    file_type = config.file_type
     if file_type != "document":
         raise ValueError(f"Unknown input type {file_type}; expected document")
     return await load_documents(config, storage)
 
 
-async def load_documents(config: Any, storage: FileStorage) -> pd.DataFrame:
+async def load_documents(config: InputConfig, storage: FileStorage) -> pd.DataFrame:
     """Load mixed document inventories from storage without flattening binaries."""
 
     async def load_file(path: str, group: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -58,7 +59,7 @@ async def load_documents(config: Any, storage: FileStorage) -> pd.DataFrame:
 
 async def load_files(
     loader: Any,
-    config: Any,
+    config: InputConfig,
     storage: FileStorage,
 ) -> pd.DataFrame:
     """Load files from storage and apply a loader function."""
@@ -69,7 +70,7 @@ async def load_files(
         )
     )
 
-    file_type = _normalize_enum_value(config.file_type)
+    file_type = config.file_type
     if not files:
         raise ValueError(f"No {file_type} files found in {config.storage.base_dir}")
 
@@ -103,7 +104,3 @@ async def load_files(
     result.attrs["load_failures"] = load_failures
     logger.info("Total number of unfiltered %s rows: %d", file_type, len(result))
     return result
-
-
-def _normalize_enum_value(value: Any) -> str:
-    return str(getattr(value, "value", value))

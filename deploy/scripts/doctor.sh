@@ -121,6 +121,9 @@ if [ "$COMPOSE_READY" -eq 1 ]; then
     fi
 
     for worker in \
+      document-preparation-worker \
+      objective-discovery-worker \
+      objective-analysis-worker \
       feedback-analysis-worker \
       correction-signal-analysis-worker \
       tool-failure-analysis-worker \

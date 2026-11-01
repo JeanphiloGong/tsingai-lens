@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolResult, ToolRisk
+from domain.chat import ChatMessageRole, ToolResultStatus
+
+from dataclasses import asdict
+
+import json
+
+from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolRequest, ChatToolResult, ToolRisk
 
 from application.chat.inline_citations import format_inline_citations, format_message_citations
 
@@ -25,7 +31,7 @@ def _read_result(
 ) -> ChatToolResult:
     return ChatToolResult(
         tool_call_id=call_id,
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "document_id": "doc-1",
             "document_title": "P006.pdf",
@@ -95,7 +101,7 @@ def test_ambiguous_short_marker_requires_a_document_qualified_reference() -> Non
     second = _read_result(call_id="call-2", source_ref="shared-table")
     second = ChatToolResult(
         tool_call_id="call-2",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={**second.data, "document_id": "doc-2", "document_title": "P007.pdf"},
         resource_refs=(
             ChatResourceRef(
@@ -125,7 +131,7 @@ def test_ambiguous_short_marker_requires_a_document_qualified_reference() -> Non
 def test_search_match_is_readable_but_never_a_supporting_link() -> None:
     result = ChatToolResult(
         tool_call_id="call-search",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "matches": [
                 {
@@ -162,7 +168,7 @@ def test_search_match_is_readable_but_never_a_supporting_link() -> None:
 def test_table_ref_is_bound_when_the_capability_uses_its_canonical_field_name() -> None:
     result = ChatToolResult(
         tool_call_id="call-table",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "document_id": "doc-1",
             "document_title": "P006.pdf",
@@ -204,27 +210,31 @@ def test_unknown_internal_source_id_is_not_exposed() -> None:
 
 def test_historical_assistant_message_is_projected_with_its_source_context() -> None:
     source = _read_result()
-    request = ChatMessage.from_mapping({
-        "message_id": "request-1",
-        "session_id": "session-1",
-        "role": "assistant",
-        "content": "",
-        "created_at": "2026-09-28T00:00:00Z",
-        "tool_calls": [{
-            "tool_call_id": "call-1", "name": "inspect_table", "arguments": {}, "position": 0,
-        }],
-    })
+    request = ChatMessage.assistant_tool_calls(
+        message_id="request-1",
+        session_id="session-1",
+        content="",
+        created_at="2026-09-28T00:00:00Z",
+        tool_calls=(ChatToolRequest("call-1", "inspect_table", {}, 0),),
+    )
     assistant = ChatMessage.assistant(
         message_id="answer-1",
         session_id="session-1",
         content="The value is supported by `tbl_doc_abc_table_3`.",
         created_at="2026-09-28T00:00:00Z",
     )
-    tool = ChatMessage.from_tool_result(
+    tool = ChatMessage(
         message_id="tool-1",
         session_id="session-1",
-        result=source,
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(source),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-28T00:00:00Z",
+        tool_call_id=source.tool_call_id,
+        tool_result=source,
     )
     projected = format_message_citations((request, tool, assistant))[2].content
 

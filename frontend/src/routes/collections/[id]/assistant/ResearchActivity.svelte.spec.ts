@@ -58,6 +58,13 @@ function activity(papers: Record<string, unknown>[], extra: Record<string, unkno
 
 beforeEach(() => language.set('zh'));
 
+it('shows unavailable counts without inventing an empty search result', async () => {
+	const item = activity([], { returned_paper_count: undefined, query: 'LPBF' });
+	render(ResearchActivity, { item });
+	await expect.element(page.getByText(/--/)).toBeInTheDocument();
+	await expect.element(page.getByText(/未找到|No papers matched/)).not.toBeInTheDocument();
+});
+
 describe('paper browsing activity', () => {
 	it('keeps optional metadata and normal pagination out of warning UI', async () => {
 		render(ResearchActivity, {

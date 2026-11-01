@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
+	import { requestBlob } from '../../../../../_shared/api';
 	import type {
 		DocumentSourceSelection,
 		SourceAnchor,
@@ -56,6 +57,7 @@
 	let searchInput: HTMLInputElement | null = null;
 	let pdfDocument: PDFDocumentProxy | null = null;
 	let loadingTask: PdfLoadingTask | null = null;
+	let sourceRequest: AbortController | null = null;
 	let pdfPageStates: PdfPageState[] = [];
 	let readerView: 'pdf' | 'source' = 'pdf';
 	let pendingSourceJump: SourceAnchor | null = null;
@@ -145,6 +147,8 @@
 	}
 
 	function cleanupPdf() {
+		sourceRequest?.abort();
+		sourceRequest = null;
 		loadGeneration += 1;
 		renderGeneration += 1;
 		disconnectPageObserver();
@@ -176,7 +180,13 @@
 		try {
 			const pdfjs = await loadPdfJs();
 			if (generation !== loadGeneration) return;
-			const task = pdfjs.getDocument({ url: sourceUrl }) as PdfLoadingTask;
+			const controller = new AbortController();
+			sourceRequest = controller;
+			const source = await requestBlob(sourceUrl, { signal: controller.signal });
+			const data = new Uint8Array(await source.arrayBuffer());
+			if (generation !== loadGeneration) return;
+			sourceRequest = null;
+			const task = pdfjs.getDocument({ data }) as PdfLoadingTask;
 			loadingTask = task;
 			const document = await task.promise;
 			if (loadingTask === task) loadingTask = null;

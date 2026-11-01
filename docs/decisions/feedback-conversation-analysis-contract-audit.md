@@ -24,7 +24,7 @@ target, or bypass annotation and review. The implementation is owned by:
 - `backend/application/feedback/correction_signal_handler.py`
 - `backend/application/feedback/correction_signal_worker.py`
 - `backend/domain/feedback/correction_signal.py`
-- `backend/infra/persistence/postgres/analysis_job_repository.py`
+- `backend/repositories/analysis_job_repository.py`
 - `backend/migrations/versions/20260925_0076_feedback_signal_analysis.py`
 
 The shared `analysis_jobs` table is an execution envelope. A job's

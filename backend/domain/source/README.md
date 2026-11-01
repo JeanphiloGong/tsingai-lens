@@ -30,7 +30,7 @@ from the owned text units rather than stored as a second source of truth.
 `Document` describes imported paper identity, content and preparation provenance.
 Storage filenames, object keys and record timestamps belong to `StoredCollection`
 and `StoredDocument` beside the
-[Collection repository contract](../../application/repositories/collection_repository.py).
+[Collection repository](../../repositories/collection_repository.py).
 These records carry existing domain objects directly, without duplicating their
 fields or adding forwarding properties. The repository reads current membership.
 Neither domain model serializes database or HTTP records.
@@ -63,7 +63,7 @@ use flat tables as an interchange format, but they must assemble those rows
 into `SourceDocument` aggregates at the application boundary. Assembly rejects
 duplicate documents and artifacts whose owning document is missing. PostgreSQL
 may normalize aggregates into separate tables; storage layout details are not
-the Source business model. Memory repositories exist only for isolated tests.
+the Source business model. Test doubles live under `tests/support/`; PostgreSQL owns runtime persistence.
 
 ## Related Infrastructure
 

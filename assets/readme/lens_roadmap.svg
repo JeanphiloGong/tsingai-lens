@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Lens direction: reusable research knowledge and a supervised feedback loop</title>
+  <desc id="desc">Lens first proves its value through traceable literature comparison. Its longer-term direction is to accumulate reusable facts and judgments across investigations, then support verifiable tools and researcher-reviewed experiments. New observations revise the knowledge and judgments available for the next decision. These directions are not shipped capabilities or a delivery schedule.</desc>
+  <defs>
+    <style>
+      text { font-family: 'Noto Sans', 'DejaVu Sans', sans-serif; fill: #171717; }
+      .heading { font-size: 29px; font-weight: 600; }
+      .body { font-size: 24px; }
+      .small { font-size: 22px; }
+      .muted { fill: #646464; }
+      .blue { fill: #2d56c7; }
+      .rule { stroke: #dedede; stroke-width: 1.5; }
+      .flow { fill: none; stroke: #2d56c7; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M1 1 L6 4 L1 7" fill="none" stroke="#2d56c7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="1" y="1" width="1598" height="998" rx="16" fill="#ffffff" stroke="#dedede"/>
+  <text x="64" y="84" font-size="44" font-weight="600">Build toward a research loop that learns.</text>
+  <text x="64" y="134" class="body muted">Each investigation should improve the knowledge available for the next decision.</text>
+
+  <path d="M64 186 H1536" class="rule"/>
+  <text x="64" y="246" font-size="27" font-weight="500" class="blue">Current v1 focus</text>
+  <text x="450" y="246" class="heading">Support a literature-based decision</text>
+  <text x="450" y="294" class="body muted">Inspect sources, reconstruct experiments and compare papers.</text>
+  <text x="450" y="332" class="body muted">Keep conditions, uncertainty and the path back to evidence visible.</text>
+
+  <path d="M64 376 H1536" class="rule"/>
+  <text x="64" y="436" font-size="27" font-weight="500">Expansion direction</text>
+  <text x="450" y="436" class="heading">Carry knowledge across investigations</text>
+  <text x="450" y="484" class="body muted">Reuse traceable facts and reviewed judgments across questions and collections.</text>
+  <text x="450" y="522" class="body muted">Enable structured retrieval and research tools for researchers and agents.</text>
+
+  <path d="M64 566 H1536" class="rule"/>
+  <text x="64" y="626" font-size="27" font-weight="500">Longer-term direction</text>
+  <text x="450" y="626" class="heading">Test hypotheses and revise judgments</text>
+  <text x="450" y="674" class="body muted">Use verifiable tools and researcher-reviewed experiments to address gaps.</text>
+  <text x="450" y="712" class="body muted">Assess new observations against earlier evidence, conditions and uncertainty.</text>
+
+  <path d="M64 756 H1536" class="rule"/>
+  <text x="64" y="824" font-size="25">Question</text>
+  <path d="M201 815 H271" class="flow"/>
+  <text x="303" y="824" font-size="25">Knowledge + methods</text>
+  <path d="M601 815 H671" class="flow"/>
+  <text x="703" y="824" font-size="25">Judgment + gaps</text>
+  <path d="M948 815 H1018" class="flow"/>
+  <text x="1050" y="824" font-size="25">Next investigation</text>
+  <path d="M1414 834 V892 H112 V844" class="flow"/>
+  <rect x="409" y="870" width="718" height="44" fill="#ffffff"/>
+  <text x="768" y="900" text-anchor="middle" font-size="23" class="blue">New observations update the available research knowledge.</text>
+  <text x="64" y="964" class="small muted">Tools and experimental feedback are future directions, subject to researcher review; no delivery dates are implied.</text>
+</svg>

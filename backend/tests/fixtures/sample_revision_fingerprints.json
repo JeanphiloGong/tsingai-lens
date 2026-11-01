@@ -1,0 +1,104 @@
+[
+  {
+    "content": {
+      "schema_version": "literature-sft.v1",
+      "messages": [
+        {
+          "role": "system",
+          "content": "按原文判断。"
+        },
+        {
+          "role": "user",
+          "content": "预热如何影响钢的延伸率？"
+        }
+      ],
+      "context": [
+        {
+          "document_title": "预热研究",
+          "text": "每组进行三次拉伸试验。"
+        }
+      ],
+      "target": "证据不足以单独归因。",
+      "evidence": [
+        {
+          "document_title": "预热研究",
+          "text": "误差条为标准差。"
+        }
+      ]
+    },
+    "content_digest": "b475f33b625a17161645a22c117724c2398384df1f0fa3370c13fafc473bf24e",
+    "preview_digest": "70219f4d09a8fd795c0e8c4152e863a61730ebb4db38ceb5fc34aa57d52d4e86",
+    "member_digest": "ab4cb7e8ad5439ee0d2a36f9debbee0b742d317235c5ee83e6ac979ba53fc31e"
+  },
+  {
+    "content": {
+      "schema_version": "literature-preference.v1",
+      "messages": [
+        {
+          "role": "system",
+          "content": "按原文判断。"
+        },
+        {
+          "role": "user",
+          "content": "预热如何影响钢的延伸率？"
+        }
+      ],
+      "context": [
+        {
+          "document_title": "预热研究",
+          "text": "每组进行三次拉伸试验。"
+        }
+      ],
+      "response_a": "证据不足。",
+      "response_b": "必然提高延伸率。",
+      "suggested_preference": "a",
+      "rationale": "保留固定条件的不确定性。",
+      "evidence": [
+        {
+          "document_title": "预热研究",
+          "text": "误差条为标准差。"
+        }
+      ],
+      "human_preference": null
+    },
+    "content_digest": "5e1780dcd10c02332a3f8f7a51893079094d3c8feedaa96c2800a0a96ed1b992",
+    "preview_digest": "72e185c12b20f7470e1d2c894797bb9947dd4f86a5a6ca338e5d1b32b3cfee85",
+    "member_digest": "70d800f936629978ef19a53431bf395ace79d7745df1f6b746c6ad7de4a47a02"
+  },
+  {
+    "content": {
+      "schema_version": "literature-evaluation.v1",
+      "messages": [
+        {
+          "role": "system",
+          "content": "按原文判断。"
+        },
+        {
+          "role": "user",
+          "content": "预热如何影响钢的延伸率？"
+        }
+      ],
+      "context": [
+        {
+          "document_title": "预热研究",
+          "text": "每组进行三次拉伸试验。"
+        }
+      ],
+      "reference": "证据不足。",
+      "criteria": [
+        "引用测量原文",
+        "保留不确定性"
+      ],
+      "evaluation_mode": "reference",
+      "evidence": [
+        {
+          "document_title": "预热研究",
+          "text": "误差条为标准差。"
+        }
+      ]
+    },
+    "content_digest": "78aaa4b384b8a3fea94759f8cced39b45ca39b24b96cb8b1586b127f0cd2b37f",
+    "preview_digest": "f7d04f0c83d0269daf960713363e4b7d8c1ca3e013e28591c89402093436e7f6",
+    "member_digest": "2c85ecd4f90a7f5d6cca704bba1ca108296c9fa680dabe7837eaa11cfd29e53e"
+  }
+]

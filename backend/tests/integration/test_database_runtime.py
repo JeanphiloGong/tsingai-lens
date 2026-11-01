@@ -9,11 +9,7 @@ from pydantic import ValidationError
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from infra.persistence.database import (
-    DatabaseSettings,
-    build_database_engine,
-    build_session_factory,
-)
+from infra.persistence.database import AsyncSessionLocal, DatabaseSettings, build_database_engine
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -126,22 +122,25 @@ async def test_database_engine_uses_async_psycopg_and_masks_credentials() -> Non
 
 
 @pytest.mark.anyio
-async def test_session_factory_creates_one_async_session_per_task() -> None:
+async def test_session_factory_creates_one_async_session_per_task(monkeypatch) -> None:
     settings = DatabaseSettings(
         database_url="postgresql+psycopg://lens:secret@localhost/lens_test",
         _env_file=None,
     )
     engine = build_database_engine(settings)
-    sessions = build_session_factory(engine)
+    monkeypatch.setattr(AsyncSessionLocal, "kw", AsyncSessionLocal.kw.copy())
+    AsyncSessionLocal.configure(bind=engine)
 
     async def open_session() -> AsyncSession:
-        session = sessions()
+        session = AsyncSessionLocal()
         await asyncio.sleep(0)
         return session
 
     first, second = await asyncio.gather(open_session(), open_session())
     try:
-        assert isinstance(sessions, async_sessionmaker)
+        assert isinstance(AsyncSessionLocal, async_sessionmaker)
+        assert first.sync_session.expire_on_commit is False
+        assert second.sync_session.expire_on_commit is False
         assert isinstance(first, AsyncSession)
         assert isinstance(second, AsyncSession)
         assert first is not second

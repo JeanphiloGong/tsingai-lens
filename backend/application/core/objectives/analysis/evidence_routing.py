@@ -17,10 +17,8 @@ from application.core.objectives.analysis.source_screening import (
 )
 from domain.core import (
     ResearchObjective,
-    normalize_objective_confidence,
-    normalize_objective_terms,
 )
-from domain.source import SourceDocumentTree
+from domain.source import SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceTable
 
 logger = logging.getLogger(__name__)
 
@@ -74,41 +72,6 @@ class EvidenceCandidate:
     used_fallback: bool = False
     context_fields: tuple[str, ...] = ()
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceCandidate":
-        return cls(
-            objective_id=_text(payload.get("objective_id")),
-            document_id=_text(payload.get("document_id")),
-            source_kind=_text(payload.get("source_kind")) or "text_window",
-            source_ref=_text(payload.get("source_ref")),
-            role=_text(payload.get("role")) or "low_value_or_irrelevant",
-            extractable=bool(payload.get("extractable")),
-            reason=_optional_text(payload.get("reason")),
-            table_schema=_mapping(payload.get("table_schema")),
-            column_roles=_mapping(payload.get("column_roles")),
-            join_plan=_mapping(payload.get("join_plan")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            used_fallback=bool(payload.get("used_fallback")),
-            context_fields=normalize_objective_terms(payload.get("context_fields")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "role": self.role,
-            "extractable": self.extractable,
-            "reason": self.reason,
-            "table_schema": dict(self.table_schema),
-            "column_roles": dict(self.column_roles),
-            "join_plan": dict(self.join_plan),
-            "confidence": self.confidence,
-            "used_fallback": self.used_fallback,
-            "context_fields": list(self.context_fields),
-        }
-
 
 @dataclass(frozen=True)
 class SourceSelectionHint:
@@ -123,38 +86,14 @@ class SourceSelectionHint:
     matched_variables: tuple[str, ...]
     reason: str | None
 
-    def __post_init__(self) -> None:
-        if not self.table_id:
-            raise ValueError("source selection hint requires table_id")
-        if self.role not in {"result_table", "condition_context"}:
-            raise ValueError(f"unsupported source selection hint role: {self.role}")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "SourceSelectionHint":
-        return cls(
-            table_id=_text(payload.get("table_id")),
-            document_id=_text(payload.get("document_id")),
-            caption_text=_optional_text(payload.get("caption_text")),
-            role=_text(payload.get("role")),
-            strength=_optional_text(payload.get("strength")),
-            matched_outcomes=normalize_objective_terms(payload.get("matched_outcomes")),
-            matched_variables=normalize_objective_terms(
-                payload.get("matched_variables")
-            ),
-            reason=_optional_text(payload.get("reason")),
-        )
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
-def _optional_text(value: Any) -> str | None:
-    return _text(value) or None
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
+
+
 
 
 def _notify_progress(
@@ -402,22 +341,18 @@ def route_sources(
                 if route_key not in seen:
                     seen.add(route_key)
                     routes.append(
-                        EvidenceCandidate.from_mapping(
-                            {
-                                "objective_id": frame.objective_id,
-                                "document_id": frame.document_id,
-                                "source_kind": candidate.get("source_kind"),
-                                "source_ref": candidate.get("source_ref"),
-                                "role": "low_value_or_irrelevant",
-                                "extractable": False,
-                                "reason": "Excluded by objective paper frame.",
-                                "table_schema": _route_table_schema_record(
-                                    candidate=candidate,
-                                ),
-                                "column_roles": {},
-                                "join_plan": {},
-                                "confidence": 0.7,
-                            }
+                        EvidenceCandidate(
+                            objective_id=frame.objective_id,
+                            document_id=frame.document_id,
+                            source_kind=str(candidate.get('source_kind') or '').strip() or 'text_window',
+                            source_ref=str(candidate.get('source_ref') or '').strip(),
+                            role='low_value_or_irrelevant',
+                            extractable=False,
+                            reason='Excluded by objective paper frame.',
+                            table_schema=dict(_route_table_schema_record(candidate=candidate) or {}),
+                            column_roles={},
+                            join_plan={},
+                            confidence=0.7,
                         )
                     )
                 continue
@@ -445,7 +380,7 @@ def route_sources(
                     objective_context=objective_context,
                     route_candidate=route_candidate,
                 )
-                role = str(record.get("role") or "low_value_or_irrelevant")
+                role = record["role"]
                 route_key = (
                     frame.objective_id,
                     frame.document_id,
@@ -456,7 +391,20 @@ def route_sources(
                 if route_key in seen:
                     continue
                 seen.add(route_key)
-                routes.append(EvidenceCandidate.from_mapping(record))
+                routes.append(EvidenceCandidate(
+                    objective_id=record['objective_id'],
+                    document_id=record['document_id'],
+                    source_kind=record['source_kind'],
+                    source_ref=record['source_ref'],
+                    role=role,
+                    extractable=record['extractable'],
+                    reason=record.get('reason'),
+                    table_schema=record['table_schema'],
+                    column_roles=record['column_roles'],
+                    join_plan=record['join_plan'],
+                    confidence=record['confidence'],
+                    used_fallback=record['used_fallback'],
+                ))
         _append_objective_context_hint_routes(
             routes=routes,
             seen=seen,
@@ -613,6 +561,11 @@ def _finalize_objective_route_record(
     )
     source_kind = str(route_candidate.get("source_kind") or "")
     source_ref = str(route_candidate.get("source_ref") or "")
+    role = finalized["role"]
+    if role == "low_value_or_irrelevant":
+        finalized["extractable"] = False
+    elif role in _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES:
+        finalized["extractable"] = True
     finalized.update(
         {
             "objective_id": frame.objective_id,
@@ -622,7 +575,6 @@ def _finalize_objective_route_record(
             "table_schema": _route_table_schema_record(
                 candidate=dict(route_candidate),
             ),
-            "extractable": _normalize_route_extractable(finalized),
         }
     )
     if evidence_role == "direct_support" and not finalized.get("reason"):
@@ -696,25 +648,18 @@ def _append_objective_context_hint_routes(
         seen.add(route_key)
         table_schema = _route_table_schema_record(candidate=candidate)
         routes.append(
-            EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": frame.objective_id,
-                    "document_id": frame.document_id,
-                    "source_kind": "table",
-                    "source_ref": table_id,
-                    "role": role,
-                    "extractable": True,
-                    "reason": hint.reason
-                    or "Selected from objective context routing hints.",
-                    "table_schema": table_schema,
-                    "column_roles": _objective_context_hint_column_roles(
-                        objective_context=objective_context,
-                        hint_role=hint.role,
-                        table_schema=table_schema,
-                    ),
-                    "join_plan": {},
-                    "confidence": objective_context.confidence,
-                }
+            EvidenceCandidate(
+                objective_id=frame.objective_id,
+                document_id=frame.document_id,
+                source_kind='table',
+                source_ref=str(table_id or '').strip(),
+                role=str(role or '').strip() or 'low_value_or_irrelevant',
+                extractable=True,
+                reason=str((hint.reason or 'Selected from objective context routing hints.') or '').strip() or None,
+                table_schema=dict(table_schema or {}),
+                column_roles=dict(_objective_context_hint_column_roles(objective_context=objective_context, hint_role=hint.role, table_schema=table_schema) or {}),
+                join_plan={},
+                confidence=round(objective_context.confidence, 4),
             )
         )
 
@@ -895,23 +840,18 @@ def _append_ranked_text_hint_routes(
             continue
         seen.add(route_key)
         routes.append(
-            EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": frame.objective_id,
-                    "document_id": frame.document_id,
-                    "source_kind": "text_window",
-                    "source_ref": source_ref,
-                    "role": role,
-                    "extractable": extractable,
-                    "reason": (
-                        "High-scoring objective text candidate retained as "
-                        f"{evidence_role}."
-                    ),
-                    "join_plan": {"evidence_role": evidence_role},
-                    "table_schema": {},
-                    "column_roles": {},
-                    "confidence": 0.62,
-                }
+            EvidenceCandidate(
+                objective_id=frame.objective_id,
+                document_id=frame.document_id,
+                source_kind='text_window',
+                source_ref=str(source_ref or '').strip(),
+                role=str(role or '').strip() or 'low_value_or_irrelevant',
+                extractable=bool(extractable),
+                reason=str(f'High-scoring objective text candidate retained as {evidence_role}.' or '').strip() or None,
+                table_schema={},
+                column_roles={},
+                join_plan=dict({'evidence_role': evidence_role} or {}),
+                confidence=0.62,
             )
         )
         added += 1
@@ -920,7 +860,7 @@ def _append_ranked_text_hint_routes(
 
 
 def _text_hint_route_priority(candidate: dict[str, Any]) -> int:
-    section_key = _objective_column_key(str(candidate.get("section_label") or ""))
+    section_key = _objective_column_key((candidate.get("section_label") or ""))
     priority = 0
     if "conclusion" in section_key:
         priority += 8
@@ -930,7 +870,7 @@ def _text_hint_route_priority(candidate: dict[str, Any]) -> int:
         priority += 2
     if "abstract" in section_key:
         priority -= 3
-    text = str(candidate.get("text") or "").casefold()
+    text = (candidate.get("text") or "").casefold()
     if any(
         phrase in text
         for phrase in (
@@ -984,7 +924,7 @@ def _text_hint_route_role(
     if evidence_role == "mediator_context":
         return "characterization"
     text = " ".join(
-        str(value or "")
+        (value or "")
         for value in (
             candidate.get("section_label"),
             candidate.get("text"),
@@ -1255,8 +1195,8 @@ def _build_route_source_candidates(
     *,
     frame: PaperAnalysisFrame,
     objective_context: ResearchObjective,
-    blocks: list[Any],
-    tables: list[Any],
+    blocks: list[SourceBlock],
+    tables: list[SourceTable],
     document_tree: SourceDocumentTree | None = None,
     lineage_source_refs: Iterable[tuple[str, str]] = (),
 ) -> list[dict[str, Any]]:
@@ -1267,9 +1207,9 @@ def _build_route_source_candidates(
         if str(source_kind or "").strip() and str(source_ref or "").strip()
     )
     table_by_id = {
-        str(getattr(table, "table_id", "") or ""): table
+        str(table.table_id or ""): table
         for table in tables
-        if str(getattr(table, "table_id", "") or "")
+        if str(table.table_id or "")
     }
     table_ids = list((*frame.relevant_tables, *frame.excluded_tables))
     # A primary experimental paper is a recall-first inspection scope. The
@@ -1278,9 +1218,9 @@ def _build_route_source_candidates(
     # binding even when the model only assigned medium relevance.
     if frame.paper_role == "primary_experiment":
         table_ids.extend(
-            str(getattr(table, "table_id", "") or "")
+            str(table.table_id or "")
             for table in tables
-            if str(getattr(table, "table_id", "") or "")
+            if str(table.table_id or "")
         )
     for table_id in dict.fromkeys(table_ids):
         table = table_by_id.get(table_id)
@@ -1297,8 +1237,8 @@ def _build_route_source_candidates(
                     "excluded" if table_id in frame.excluded_tables else "relevant"
                 )
             ),
-            "caption_text": getattr(table, "caption_text", None),
-            "heading_path": getattr(table, "heading_path", None),
+            "caption_text": table.caption_text,
+            "heading_path": table.heading_path,
             "table_schema": table_schema,
             "sample_rows": table_schema["sample_rows"],
             # Candidate recall uses the complete logical table a researcher
@@ -1346,14 +1286,14 @@ def _build_route_source_candidates(
             (
                 item
                 for item in blocks
-                if str(getattr(item, "block_id", "") or "") == source_ref
+                if item.block_id == source_ref
             ),
             None,
         )
         if block is None:
             continue
-        block_type = str(getattr(block, "block_type", "") or "")
-        text = str(getattr(block, "text", "") or "").strip()
+        block_type = str(block.block_type or "")
+        text = str(block.text or "").strip()
         if not text or block_type not in {"paragraph", "list_item", "figure_caption"}:
             continue
         text_candidates.append(
@@ -1441,6 +1381,7 @@ def _build_route_source_candidates(
         )
         in selected_keys
     ]
+
 
 
 def _route_candidate_is_direct_result_candidate(
@@ -1571,21 +1512,22 @@ def _route_tree_position(candidate: dict[str, Any]) -> dict[str, Any]:
 def _tree_position_payload(
     *,
     document_tree: SourceDocumentTree,
-    node: Any,
+    node: SourceDocumentNode,
 ) -> dict[str, Any]:
     return {
-        "node_id": getattr(node, "node_id", None),
-        "node_type": str(getattr(node, "node_type", "") or "") or None,
+        "node_id": node.node_id,
+        "node_type": str(node.node_type or "") or None,
         "section_path": _tree_node_section_path(
             document_tree=document_tree,
             node=node,
         ),
-        "source_ref_kind": getattr(node, "source_ref_kind", None),
-        "source_ref_id": getattr(node, "source_ref_id", None),
-        "order": getattr(node, "order", None),
-        "page_start": getattr(node, "page_start", None),
-        "page_end": getattr(node, "page_end", None),
+        "source_ref_kind": node.source_ref_kind,
+        "source_ref_id": node.source_ref_id,
+        "order": node.order,
+        "page_start": node.page_start,
+        "page_end": node.page_end,
     }
+
 
 
 def _tree_node_section_path(
@@ -2509,15 +2451,6 @@ def _route_table_schema_record(
     return dict(candidate_schema) if isinstance(candidate_schema, dict) else {}
 
 
-def _normalize_route_extractable(record: dict[str, Any]) -> bool:
-    role = str(record.get("role") or "").strip()
-    if role == "low_value_or_irrelevant":
-        return False
-    if role in _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES:
-        return True
-    return bool(record.get("extractable"))
-
-
 def _block_section_label(block: Any) -> str:
     block_type = str(getattr(block, "block_type", "") or "")
     if block_type == "heading":
@@ -2578,20 +2511,15 @@ def _build_objective_table_routing_hints(
         else:
             continue
         hints.append(
-            SourceSelectionHint.from_mapping(
-                {
-                    "table_id": str(getattr(table, "table_id", "") or ""),
-                    "document_id": document_id,
-                    "caption_text": getattr(table, "caption_text", None),
-                    "role": role,
-                    "strength": strength,
-                    "matched_outcomes": matched_outcomes,
-                    "matched_variables": matched_variable_axes,
-                    "reason": _build_objective_table_routing_reason(
-                        role,
-                        matched_variable_axes=matched_variable_axes,
-                    ),
-                }
+            SourceSelectionHint(
+                table_id=str(str(getattr(table, 'table_id', '') or '') or '').strip(),
+                document_id=document_id,
+                caption_text=str(getattr(table, 'caption_text', None) or '').strip() or None,
+                role=str(role or '').strip(),
+                strength=str(strength or '').strip() or None,
+                matched_outcomes=tuple(matched_outcomes),
+                matched_variables=tuple(matched_variable_axes),
+                reason=str(_build_objective_table_routing_reason(role, matched_variable_axes=matched_variable_axes) or '').strip() or None,
             )
         )
     return tuple(hints)

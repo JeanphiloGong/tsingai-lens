@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
+from tests.support.research_jobs import update_pipeline_fixture
+
 from dataclasses import replace
 
 import pytest
 
-from application.repositories.pipeline_run_repository import (
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
+from repositories.pipeline_run_repository import (
+    ExecutionTimestamps,
+    PipelineNodeRun,
+    PipelineNodeStatus,
     PipelineRun,
+    PipelineRunRepository,
     PipelineRunStatus,
-)
-from infra.persistence.postgres.pipeline_run_repository import (
-    PostgresPipelineRunRepository,
 )
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
 
@@ -26,7 +32,7 @@ def _run(
     scope_type: str = "document",
     scope_id: str = "doc_a",
 ) -> PipelineRun:
-    return PipelineRun.create(
+    return PipelineRun(
         pipeline_name=(
             "document_preparation"
             if scope_type == "document"
@@ -39,18 +45,17 @@ def _run(
         scope_id=scope_id,
         input_fingerprint=fingerprint,
         context={"document_ids": ["doc_a", "doc_b"]},
-        node_dependencies={
-            "source_parsing": (),
-            "document_profile": ("source_parsing",),
-        },
-        created_at=NOW,
+        status=PipelineRunStatus.QUEUED,
+        nodes=(PipelineNodeRun("source_parsing"), PipelineNodeRun("document_profile", ("source_parsing",))),
+        errors=(), warnings=(), stats=ExecutionStats(),
+        timestamps=ExecutionTimestamps(created_at=NOW, updated_at=NOW),
     )
 
 
 async def test_document_run_reuses_active_and_matching_completed_work(
     source_repository,
 ) -> None:
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     first = _run("run-first", "fingerprint-a")
     assert await runs.get_or_create_document_run(first) == (first, True)
 
@@ -59,11 +64,14 @@ async def test_document_run_reuses_active_and_matching_completed_work(
     )
     assert (reused_active, created) == (first, False)
 
-    completed = first.start(NOW).finish(
-        PipelineRunStatus.COMPLETED,
-        "2026-08-27T10:01:00+00:00",
+    completed = replace(
+        first,
+        status=PipelineRunStatus.COMPLETED,
+        timestamps=replace(
+            first.timestamps, started_at=NOW, finished_at="2026-08-27T10:01:00+00:00"
+        ),
     )
-    assert await runs.update_run(completed) is True
+    await update_pipeline_fixture(runs, completed)
 
     reused_completed, created = await runs.get_or_create_document_run(
         _run("run-matching-request", "fingerprint-a")
@@ -77,7 +85,7 @@ async def test_document_run_reuses_active_and_matching_completed_work(
 
 
 async def test_collection_run_reuses_only_active_work(source_repository) -> None:
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     first = _run(
         "run-discovery-first",
         "scope-a",
@@ -96,11 +104,17 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
     )
     assert (reused_active, created) == (first, False)
 
-    assert await runs.update_run(
-        first.start(NOW).finish(
-            PipelineRunStatus.COMPLETED,
-            "2026-08-27T10:01:00+00:00",
-        )
+    await update_pipeline_fixture(
+        runs,
+        replace(
+            first,
+            status=PipelineRunStatus.COMPLETED,
+            timestamps=replace(
+                first.timestamps,
+                started_at=NOW,
+                finished_at="2026-08-27T10:01:00+00:00",
+            ),
+        ),
     )
     retry = _run(
         "run-discovery-retry",
@@ -114,25 +128,41 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
 async def test_pipeline_run_round_trips_progress_nodes_and_context(
     source_repository,
 ) -> None:
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     queued = _run("run-round-trip", "fingerprint-a")
     await runs.add_run(queued)
-    source_node = queued.node("source_parsing").start(NOW).succeed(
-        "2026-08-27T10:00:10+00:00",
+    source_node = PipelineNodeRun(
+        name="source_parsing",
+        status=PipelineNodeStatus.SUCCEEDED,
+        timestamps=ExecutionTimestamps(
+            started_at=NOW, finished_at="2026-08-27T10:00:10+00:00"
+        ),
         output_summary={"block_count": 12},
+        stats=ExecutionStats(
+            duration_ms=10000,
+            model_usage=(
+                ModelUsage("model-a", 2, TokenUsage(100, 20, 120), 1),
+                ModelUsage("model-b", 1, None, 1),
+            ),
+            prompt_versions={"source_parsing": "v1"},
+        ),
     )
     running = replace(
-        queued.start(NOW).with_node(source_node).with_progress(
-            current_node="document_profile",
-            progress_percent=45,
-            progress_detail={"unit": "document", "message": "Profiling."},
-        ),
+        queued,
+        status=PipelineRunStatus.RUNNING,
+        nodes=(source_node, queued.nodes[1]),
+        stats=source_node.stats,
+        timestamps=replace(queued.timestamps, started_at=NOW),
+        current_node="document_profile",
+        progress_percent=45,
+        progress_detail={"unit": "document", "message": "Profiling."},
         warnings=("low confidence title",),
     )
 
-    assert await runs.update_run(running) is True
-    assert await runs.read_run(running.run_id) == running
-    summary, = await runs.list_runs(collection_id=COLLECTION_ID)
+    await update_pipeline_fixture(runs, running)
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await runs.read_run(running.run_id, db=db) == running
+    (summary,) = await runs.list_runs(collection_id=COLLECTION_ID)
     assert summary.run_id == running.run_id
     assert summary.progress_percent == 45
     assert summary.warnings == ["low confidence title"]
@@ -142,15 +172,15 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
 async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
     source_repository, monkeypatch
 ) -> None:
-    from infra.persistence.postgres import pipeline_run_repository as module
+    from repositories import pipeline_run_repository as module
 
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     await runs.add_run(_run("history-only", "fingerprint-history"))
 
-    def reject_full_hydration(_row):
+    def reject_full_hydration(*_args, **_kwargs):
         pytest.fail("history must not reconstruct full pipeline diagnostics")
 
-    monkeypatch.setattr(module, "_to_run", reject_full_hydration)
+    monkeypatch.setattr(module, "PipelineRun", reject_full_hydration)
     summary, = await runs.list_runs(collection_id=COLLECTION_ID)
 
     assert summary.run_id == "history-only"
@@ -161,9 +191,9 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
 async def test_artifact_retry_bypasses_completed_run_but_reuses_active_run(
     source_repository,
 ):
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     first = _run("run-incomplete-artifacts", "same-input")
-    await runs.add_run(first.start(NOW).finish(PipelineRunStatus.COMPLETED, NOW))
+    await runs.add_run(replace(first, status=PipelineRunStatus.COMPLETED, timestamps=replace(first.timestamps, started_at=NOW, finished_at=NOW)))
     retry, created = await runs.get_or_create_document_run(
         _run("run-retry-artifacts", "same-input"),
         reuse_completed=False,

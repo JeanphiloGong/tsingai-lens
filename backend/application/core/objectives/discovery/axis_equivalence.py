@@ -4,9 +4,10 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.structured_extraction.json_support import StructuredOutputError
 
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v7"
 
@@ -23,7 +24,7 @@ Non-negotiable rules:
 
 
 class _AxisEquivalenceResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class AxisPairDecisionModelOutput(_AxisEquivalenceResponse):
@@ -33,11 +34,6 @@ class AxisPairDecisionModelOutput(_AxisEquivalenceResponse):
 
 class AxisCanonicalizationPlanModelOutput(_AxisEquivalenceResponse):
     decisions: list[AxisPairDecisionModelOutput] = Field(default_factory=list)
-
-    @field_validator("decisions", mode="before")
-    @classmethod
-    def _normalize_decisions(cls, value: object) -> object:
-        return [] if value is None else value
 
 
 def build_research_axis_canonicalization_prompt(
@@ -197,7 +193,7 @@ def _validate_axis_candidate_accounting(
     ]
     decision_ids = [decision.pair_id for decision in response.decisions]
     if decision_ids != expected_ids:
-        raise ValueError(
+        raise StructuredOutputError(
             "axis pair decisions must account for every input pair_id exactly once "
             "and in input order"
         )

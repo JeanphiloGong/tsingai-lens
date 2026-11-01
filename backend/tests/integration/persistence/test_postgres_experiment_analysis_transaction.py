@@ -1,30 +1,38 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture
+
+from infra.persistence import database
+
 from dataclasses import replace
 
 import pytest
-
-from application.core.objectives.analysis.experiment_finding_publisher import (
-    ExperimentFindingPublisher,
-)
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
-from domain.core.finding import Finding
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+)
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
-from infra.persistence.postgres.comparison_group_repository import (
-    PostgresComparisonGroupRepository,
+from domain.core.paper_experiment import (
+    ExperimentalVariant,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
+    PaperExperimentRevision,
 )
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
+from domain.core.scientific_fact import (
+    ScientificContext,
 )
-from infra.persistence.postgres.experiment_finding_repository import (
-    PostgresExperimentFindingRepository,
+from repositories.comparison_group_repository import (
+    ComparisonGroupRepository,
 )
-from infra.persistence.postgres.objective_experiment_selection_repository import (
-    PostgresObjectiveExperimentSelectionRepository,
+from repositories.experiment_finding_repository import (
+    ExperimentFindingRepository,
 )
-from infra.persistence.postgres.paper_experiment_repository import (
-    PostgresPaperExperimentRepository,
+from repositories.objective_experiment_selection_repository import (
+    ObjectiveExperimentSelectionRepository,
+)
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
 )
 from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
@@ -33,49 +41,44 @@ from tests.integration.persistence.test_postgres_objective_lifecycle import (
     _queue_and_claim,
 )
 
-
 pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = pytest.mark.anyio
 
 
 def _revision() -> PaperExperimentRevision:
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": "experiment-transaction",
-            "document_id": "doc_a",
-            "experiment_version": 1,
-            "source_fingerprint": "fingerprint-doc-a",
-            "label": "Reported tensile series",
-            "scope_description": "One reported tensile-strength condition.",
-            "design_type": "observational",
-            "identity_status": "identified",
-            "binding_status": "bound",
-            "variants": [
-                {
-                    "variant_key": "reported-condition",
-                    "variant_label": "Reported condition",
-                    "binding_status": "direct",
-                }
-            ],
-            "test_conditions": [
-                {
-                    "test_key": "tensile",
-                    "test_type": "tensile test",
-                    "binding_status": "direct",
-                }
-            ],
-            "measurements": [
-                {
-                    "measurement_key": "strength-a",
-                    "variant_key": "reported-condition",
-                    "test_key": "tensile",
-                    "outcome": "tensile strength",
-                    "value": 900,
-                    "unit": "MPa",
-                    "binding_status": "direct",
-                }
-            ],
-        }
+    return PaperExperimentRevision(
+        experiment_id="experiment-transaction",
+        document_id="doc_a",
+        experiment_version=int(1),
+        source_fingerprint="fingerprint-doc-a",
+        label="Reported tensile series",
+        scope_description="One reported tensile-strength condition.",
+        design_type="observational",
+        identity_status="identified",
+        binding_status="bound",
+        variants=(
+            ExperimentalVariant(
+                variant_key="reported-condition",
+                variant_label="Reported condition",
+                binding_status="direct",
+            ),
+        ),
+        test_conditions=(
+            ExperimentTestCondition(
+                test_key="tensile", test_type="tensile test", binding_status="direct"
+            ),
+        ),
+        measurements=(
+            ExperimentMeasurementResult(
+                measurement_key="strength-a",
+                outcome="tensile strength",
+                variant_key="reported-condition",
+                test_key="tensile",
+                value=900,
+                unit="MPa",
+                binding_status="direct",
+            ),
+        ),
     )
 
 
@@ -119,36 +122,34 @@ def _cross_paper_finding(
     analysis_version: int,
     selection_ids: tuple[str, str],
 ) -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": OBJECTIVE_ID,
-            "analysis_version": analysis_version,
-            "finding_id": "finding-transaction",
-            "statement": "The reported tensile strength was comparable across papers.",
-            "factors": ["process condition"],
-            "outcome": "tensile strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "association_only",
-            "synthesis_status": "agreement",
-            "certainty": 0.7,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {},
-            "limitations": [],
-            "paper_contributions": [],
-            "selection_ids": list(selection_ids),
-            "comparison_group_ids": ["group-transaction"],
-        }
+    return Finding(
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=analysis_version,
+        finding_id="finding-transaction",
+        statement="The reported tensile strength was comparable across papers.",
+        factors=("process condition",),
+        outcome="tensile strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope='association_only',
+        synthesis_status="agreement",
+        certainty=0.7,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=tuple(list(selection_ids) or ()),
+        comparison_group_ids=("group-transaction",),
     )
 
 
-class _FailingAfterWriteFindingRepository(PostgresExperimentFindingRepository):
+class _FailingAfterWriteFindingRepository(ExperimentFindingRepository):
     """Flush a Finding, then fail so the enclosing transaction must undo it."""
 
-    async def add_finding(self, finding, *, transaction=None):
-        await super().add_finding(finding, transaction=transaction)
+    async def add_finding(self, db, finding):
+        await super().add_finding(db, finding)
         raise RuntimeError("forced Finding publication failure")
 
 
@@ -156,27 +157,21 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
     objective_repository,
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
-    session_factory = objective_repository.session_factory
-    experiments = PostgresPaperExperimentRepository(session_factory)
-    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
-    transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
     revision = _revision()
     selection = _selection(analysis.analysis_version)
 
     with pytest.raises(RuntimeError, match="forced rollback"):
-        async with transaction_factory.begin() as transaction:
+        async with database.AsyncSessionLocal() as db, db.begin():
             stored = await experiments.add_revision(
-                revision,
-                created_by="test-agent",
-                transaction=transaction,
+                db, revision, created_by="test-agent"
             )
             await selections.add_selection(
-                COLLECTION_ID,
-                selection,
-                revision_id=stored.revision_id,
-                transaction=transaction,
+                db, COLLECTION_ID, selection, revision_id=stored.revision_id
             )
             await objective_repository.publish_experiment_analysis(
+                db,
                 COLLECTION_ID,
                 OBJECTIVE_ID,
                 analysis.analysis_version,
@@ -184,18 +179,26 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
                     _contribution(analysis.analysis_version, "doc_a"),
                     _contribution(analysis.analysis_version, "doc_b"),
                 ),
-                transaction=transaction,
+                job=analysis_job_fixture(
+                    objective_repository,
+                    COLLECTION_ID,
+                    OBJECTIVE_ID,
+                    analysis.analysis_version,
+                ),
             )
             raise RuntimeError("forced rollback")
 
-    assert await experiments.read_latest_revision(
-        "experiment-transaction"
-    ) is None
-    assert await selections.list_selections(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert (
+            await experiments.read_latest_revision(db, "experiment-transaction") is None
+        )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert (
+            await selections.list_selections(
+                db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version
+            )
+            == ()
+        )
     restored = await objective_repository.read_analysis(
         COLLECTION_ID,
         OBJECTIVE_ID,
@@ -210,11 +213,19 @@ async def test_experiment_graph_publication_does_not_require_paper_contributions
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
 
-    await objective_repository.publish_experiment_analysis(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await objective_repository.publish_experiment_analysis(
+            db,
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+            job=analysis_job_fixture(
+                objective_repository,
+                COLLECTION_ID,
+                OBJECTIVE_ID,
+                analysis.analysis_version,
+            ),
+        )
 
     published = await objective_repository.read_analysis(
         COLLECTION_ID,
@@ -223,94 +234,107 @@ async def test_experiment_graph_publication_does_not_require_paper_contributions
     )
     assert published is not None
     assert published.status == "succeeded"
-    assert await objective_repository.list_contributions(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    assert (
+        await objective_repository.list_contributions(
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+        )
+        == ()
+    )
+
+
+async def test_single_study_finding_persists_without_a_comparison_group(
+    objective_repository,
+) -> None:
+    _, analysis = await _queue_and_claim(objective_repository)
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
+    findings = ExperimentFindingRepository()
+    revision = _revision()
+    selection = _selection(analysis.analysis_version)
+    finding = Finding(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        analysis_version=analysis.analysis_version,
+        finding_id="finding-single-study",
+        statement="The selected experiment reports 900 MPa tensile strength.",
+        factors=("process condition",),
+        outcome="tensile strength",
+        direction="unknown",
+        assertion_strength="descriptive",
+        attribution_scope="descriptive_only",
+        synthesis_status="single_study",
+        certainty=0.4,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=(selection.selection_id,),
+    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        stored = await experiments.add_revision(db, revision, created_by="test-agent")
+        await selections.add_selection(
+            db, COLLECTION_ID, selection, revision_id=stored.revision_id
+        )
+        assert await findings.add_finding(db, finding) == finding
+
+    async with database.AsyncSessionLocal() as db:
+        restored = await findings.read_finding(db, COLLECTION_ID, finding.finding_id)
+        assert restored == finding
+        assert restored.comparison_group_ids == ()
 
 
 async def test_finding_failure_rolls_back_revisions_selections_groups_and_finding(
     objective_repository,
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
-    session_factory = objective_repository.session_factory
-    experiments = PostgresPaperExperimentRepository(session_factory)
-    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
-    groups = PostgresComparisonGroupRepository(session_factory)
-    findings = _FailingAfterWriteFindingRepository(session_factory)
-    publisher = ExperimentFindingPublisher(selections, groups, findings)
-    transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
+    groups = ComparisonGroupRepository()
+    findings = _FailingAfterWriteFindingRepository()
 
     revision_a = _revision()
     revision_b = replace(
         revision_a,
-        experiment_id="experiment-transaction-b",
+        experiment_id="experiment-db-b",
         document_id="doc_b",
         source_fingerprint="fingerprint-doc-b",
     )
     selection_a = _selection(analysis.analysis_version)
     selection_b = replace(
         selection_a,
-        selection_id="selection-transaction-b",
-        experiment_id="experiment-transaction-b",
+        selection_id="selection-db-b",
+        experiment_id="experiment-db-b",
     )
     selection_ids = (selection_a.selection_id, selection_b.selection_id)
     group = _comparison_group(analysis.analysis_version, selection_ids)
     finding = _cross_paper_finding(analysis.analysis_version, selection_ids)
 
     with pytest.raises(RuntimeError, match="forced Finding publication failure"):
-        async with transaction_factory.begin() as transaction:
-            stored_a = await experiments.add_revision(
-                revision_a,
-                created_by="test-agent",
-                transaction=transaction,
-            )
-            stored_b = await experiments.add_revision(
-                revision_b,
-                created_by="test-agent",
-                transaction=transaction,
-            )
-            await selections.add_selection(
-                COLLECTION_ID,
-                selection_a,
-                revision_id=stored_a.revision_id,
-                transaction=transaction,
-            )
-            await selections.add_selection(
-                COLLECTION_ID,
-                selection_b,
-                revision_id=stored_b.revision_id,
-                transaction=transaction,
-            )
-            await groups.add_group(
-                COLLECTION_ID,
-                group,
-                transaction=transaction,
-            )
-            await publisher.publish(finding, transaction=transaction)
+        async with database.AsyncSessionLocal() as db, db.begin():
+            stored_a = await experiments.add_revision(db, revision_a, created_by='test-agent')
+            stored_b = await experiments.add_revision(db, revision_b, created_by='test-agent')
+            await selections.add_selection(db, COLLECTION_ID, selection_a, revision_id=stored_a.revision_id)
+            await selections.add_selection(db, COLLECTION_ID, selection_b, revision_id=stored_b.revision_id)
+            await groups.add_group(db, COLLECTION_ID, group)
+            await findings.add_finding(db, finding)
 
-    assert await experiments.read_latest_revision(
-        revision_a.experiment_id
-    ) is None
-    assert await experiments.read_latest_revision(
-        revision_b.experiment_id
-    ) is None
-    assert await selections.list_selections(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await groups.list_groups(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await findings.list_findings(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, revision_a.experiment_id) is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, revision_b.experiment_id) is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await selections.list_selections(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await groups.list_groups(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await findings.list_findings(db,
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+        ) == ()
 
     restored = await objective_repository.read_analysis(
         COLLECTION_ID,

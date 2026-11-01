@@ -36,7 +36,7 @@ beforeEach(() => {
 afterEach(() => language.set('en'));
 
 it('generates one paragraph on opening and links to its exact Source', async () => {
-	fetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+	fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: payload, meta: null }), { status: 200 }));
 	render(Summary, props);
 	expect(fetchMock).not.toHaveBeenCalled();
 	await page.getByText('AI summary', { exact: true }).click();
@@ -66,13 +66,13 @@ it('generates one paragraph on opening and links to its exact Source', async () 
 
 it('keeps an explicit retry when summary generation fails', async () => {
 	fetchMock.mockResolvedValue(
-		new Response(JSON.stringify({ detail: { code: 'summary_input_too_large' } }), { status: 503 })
+		new Response(JSON.stringify({ code: 200205, message: 'Summary input too large.', data: { code: 'summary_input_too_large' }, meta: null }), { status: 200 })
 	);
 	render(Summary, props);
 	await page.getByText('AI summary', { exact: true }).click();
 	await expect.element(page.getByRole('alert')).toHaveTextContent('Too much content');
 	await expect.element(page.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled();
-	fetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+	fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: payload, meta: null }), { status: 200 }));
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	await expect.element(page.getByText(payload.text)).toBeInTheDocument();
 	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
@@ -89,13 +89,13 @@ it('discards a response if language changes during generation', async () => {
 	await page.getByText('AI summary', { exact: true }).click();
 	await expect.element(page.getByRole('status')).toHaveTextContent('Summarizing...');
 	language.set('zh');
-	finish(new Response(JSON.stringify(payload), { status: 200 }));
+	finish(new Response(JSON.stringify({ code: 200, message: 'success', data: payload, meta: null }), { status: 200 }));
 	await expect.element(page.getByText('AI 总结', { exact: true })).toBeInTheDocument();
 	await expect.element(page.getByText(payload.text)).not.toBeInTheDocument();
 });
 
 it('clears a completed summary when the Finding or analysis version changes', async () => {
-	fetchMock.mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
+	fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: payload, meta: null }), { status: 200 }));
 	const view = render(Summary, props);
 	await page.getByText('AI summary', { exact: true }).click();
 	await expect.element(page.getByText(payload.text)).toBeInTheDocument();

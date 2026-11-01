@@ -48,6 +48,9 @@ async function mockPaperReaderApis(
 				})
 			);
 		}
+		if (path === '/api/v1/chat-sessions' && route.request().method() === 'GET') {
+			return route.fulfill(json({ items: [], total: 0, offset: 0, limit: 50 }));
+		}
 		if (path === '/api/v1/chat-sessions' && route.request().method() === 'POST') {
 			return route.fulfill(json(session, 201));
 		}

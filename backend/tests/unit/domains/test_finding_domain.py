@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
-
+import asyncio
+from dataclasses import replace
+from unittest.mock import AsyncMock, MagicMock
 from domain.core import (
     Finding,
     FindingMechanismRelation,
@@ -9,6 +11,28 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
+from domain.core.research_objective import (
+    PAPER_RELEVANCE_VALUES,
+    PAPER_ROLE_VALUES,
+    ObjectiveEvidence,
+    PaperContribution,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+from repositories.objective_repository import ObjectiveRepository
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 
 
 def _evidence(
@@ -24,56 +48,52 @@ def _evidence(
     direction: str = "increase",
 ) -> ObjectiveEvidence:
     result_role = role in {"direct_result", "contradictory_result"}
-    variables = [
-        {
-            "name": factor,
-            "baseline_value": f"baseline {factor}",
-            "target_value": f"target {factor}",
-        }
-        for factor in factors
-    ]
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": analysis_version,
-            "evidence_id": evidence_id,
-            "document_id": document_id,
-            "source_kind": "text_window",
-            "source_ref": f"{document_id}-block-1",
-            "source_excerpt": "Preheating was associated with higher ductility.",
-            "evidence_role": role,
-            "selection_status": "extracted",
-            "changed_variables": variables if result_role else [],
-            "comparison": (
-                {
-                    "baseline_label": "baseline",
-                    "target_label": "target",
-                    "axis_names": list(factors),
-                    "comparable": True,
-                }
-                if result_role
-                else None
-            ),
-            "reported_result": (
-                {
-                    "outcome": "ductility",
-                    "value": None,
-                    "unit": None,
-                    "direction": direction,
-                    "result_text": "Preheating was associated with higher ductility.",
-                }
-                if result_role
-                else None
-            ),
-            "attribution_scope": attribution_scope if result_role else "not_attributable",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": material}],
-                "test": [{"name": "temperature", "value": 25, "unit": "C"}],
-            },
-            "resolution_status": "resolved",
-            "confidence": confidence,
-        }
+    return ObjectiveEvidence(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=analysis_version,
+        evidence_id=evidence_id,
+        document_id=document_id,
+        source_kind="text_window",
+        source_ref=f"{document_id}-block-1",
+        source_excerpt="Preheating was associated with higher ductility.",
+        page_numbers=(),
+        related_source_refs=(),
+        evidence_role=role,
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            tuple(
+                ScientificVariable(factor, f"baseline {factor}", f"target {factor}")
+                for factor in factors
+            )
+            if result_role
+            else ()
+        ),
+        comparison=(
+            ScientificComparison("baseline", "target", factors, True)
+            if result_role
+            else None
+        ),
+        reported_result=(
+            ScientificResult(
+                "ductility",
+                None,
+                None,
+                direction,
+                "Preheating was associated with higher ductility.",
+            )
+            if result_role
+            else None
+        ),
+        attribution_scope=attribution_scope if result_role else "not_attributable",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute("alloy", material),),
+            test=(ScientificAttribute("temperature", 25, "C"),),
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=confidence,
     )
 
 
@@ -82,66 +102,64 @@ def _contribution(
     *,
     analysis_status: str = "analyzed",
 ) -> PaperContribution:
-    return PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": document_id,
-            "analysis_status": analysis_status,
-            "relevance": "high" if analysis_status == "analyzed" else "irrelevant",
-            "paper_role": (
-                "primary_experiment" if analysis_status == "analyzed" else "irrelevant"
-            ),
-            "contribution_summary": "Direct preheating experiment.",
-            "exclusion_reason": (
-                None if analysis_status == "analyzed" else "No relevant experiment."
-            ),
-            "confidence": 0.9,
-        }
+    return PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id=document_id or "",
+        analysis_status=analysis_status,
+        relevance='high' if analysis_status == 'analyzed' else 'irrelevant',
+        paper_role='primary_experiment' if analysis_status == 'analyzed' else 'irrelevant',
+        contribution_summary="Direct preheating experiment.",
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None if analysis_status == 'analyzed' else 'No relevant experiment.',
+        warnings=(),
+        confidence=0.9,
     )
 
 
 def _finding(**overrides) -> Finding:
-    payload = {
+    values = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "finding_id": "finding-1",
         "statement": "Preheating was associated with higher ductility in paper 1.",
-        "factors": ["preheating"],
+        "factors": ("preheating",),
         "outcome": "ductility",
         "direction": "increase",
         "assertion_strength": "associative",
-        "attribution_scope": "isolated_effect",
+        "attribution_scope": 'isolated_effect',
         "synthesis_status": "insufficient_confirmation",
         "certainty": 0.5,
         "display_rank": 0,
-        "mechanisms": [],
-        "scientific_context": {
-            "material": [{"name": "alloy", "value": "316L"}],
-            "test": [{"name": "temperature", "value": 25, "unit": "C"}],
-        },
-        "limitations": ["Cross-paper confirmation is absent."],
-        "paper_contributions": [
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            }
-        ],
+        "mechanisms": (),
+        "scientific_context": ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="316L"),),
+            test=(ScientificAttribute(name="temperature", value=25, unit="C"),),
+        ),
+        "limitations": ("Cross-paper confirmation is absent.",),
+        "paper_contributions": (
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     }
-    payload.update(overrides)
-    return Finding.from_mapping(payload)
+    values.update(overrides)
+    return Finding(**values)
 
 
-def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
+def test_finding_represents_one_atomic_outcome_without_legacy_fields() -> None:
     finding = _finding()
-    record = finding.to_record()
 
     assert finding.key == ("collection-1", "objective-1", 1, "finding-1")
-    assert record["factors"] == ["preheating"]
-    assert record["outcome"] == "ductility"
+    assert finding.factors == ("preheating",)
+    assert finding.outcome == "ductility"
     assert finding.support_scope == "paper"
     assert finding.direct_document_count == 1
     for removed in (
@@ -158,52 +176,80 @@ def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
         "context",
         "derivation",
     ):
-        assert removed not in record
+        assert not hasattr(finding, removed)
 
 
-def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> None:
-    finding = Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 2,
-            "finding_id": "finding-experiment-1",
-            "statement": "The reported outcome changes under the selected condition.",
-            "factors": ["preheating"],
-            "outcome": "elongation",
-            "direction": "mixed",
-            "assertion_strength": "descriptive",
-            "attribution_scope": "descriptive_only",
-            "synthesis_status": "single_study",
-            "certainty": 0.4,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {},
-            "limitations": ["The selected record has no cross-paper confirmation."],
-            "paper_contributions": [],
-            "selection_ids": ["selection-1"],
-            "comparison_group_ids": [],
-        }
+def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monkeypatch) -> None:
+    finding = Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=2,
+        finding_id="finding-experiment-1",
+        statement="The reported outcome changes under the selected condition.",
+        factors=("preheating",),
+        outcome="elongation",
+        direction="mixed",
+        assertion_strength="descriptive",
+        attribution_scope='descriptive_only',
+        synthesis_status="single_study",
+        certainty=0.4,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("The selected record has no cross-paper confirmation.",),
+        paper_contributions=(),
+        selection_ids=("selection-1",),
     )
 
-    record = finding.to_record()
-    restored = Finding.from_mapping(record)
+    row = ObjectiveAnalysisORM(payload={})
+    ObjectiveRepository._write_result_records(row, (), (finding,))
+    session = MagicMock()
+    session.get = AsyncMock(return_value=row)
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "repositories.objective_repository.AsyncSessionLocal", lambda: session
+    )
+    repository = ObjectiveRepository()
+    restored = asyncio.run(repository.read_finding(
+        finding.collection_id, finding.objective_id, finding.analysis_version, finding.finding_id,
+    ))
 
+    assert restored == finding
     assert restored.selection_ids == ("selection-1",)
     assert restored.comparison_group_ids == ()
     assert restored.support_scope == "paper"
 
 
+def test_finding_preserves_case_distinct_references() -> None:
+    finding = replace(
+        _finding(),
+        selection_ids=("selection-A", "selection-a", "001"),
+        comparison_group_ids=("group-A", "group-a"),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-A", "evidence-a", "001"),
+            ),
+        ),
+    )
+
+    assert finding.selection_ids == ("selection-A", "selection-a", "001")
+    assert finding.comparison_group_ids == ("group-A", "group-a")
+    assert finding.supporting_evidence_ids == ("evidence-A", "evidence-a", "001")
+
+
 def test_finding_validates_direct_evidence_and_complete_paper_coverage() -> None:
     finding = _finding(
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            },
-            {"document_id": "paper-2", "analysis_status": "excluded"},
-        ]
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+            FindingPaperContribution(document_id="paper-2", analysis_status="excluded"),
+        )
     )
 
     finding.validate_sources(
@@ -235,16 +281,16 @@ def test_finding_accepts_experiment_series_factor_subsets_with_exact_union() -> 
         direction="decrease",
     )
     finding = _finding(
-        factors=["energy input", "path strategy", "travel speed"],
+        factors=("energy input", "path strategy", "travel speed"),
         attribution_scope="joint_effect",
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-                "contradicting_evidence_ids": ["evidence-2"],
-            }
-        ],
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+                contradicting_evidence_ids=("evidence-2",),
+            ),
+        ),
     )
 
     finding.validate_sources(
@@ -263,7 +309,7 @@ def test_finding_accepts_semantically_equivalent_series_factor_labels() -> None:
         attribution_scope="joint_effect",
     )
     finding = _finding(
-        factors=["hatch spacing", "scanning speed"],
+        factors=("hatch spacing", "scanning speed"),
         attribution_scope="joint_effect",
     )
 
@@ -278,7 +324,7 @@ def test_finding_rejects_factor_not_covered_by_direct_evidence_union() -> None:
         attribution_scope="joint_effect",
     )
     finding = _finding(
-        factors=["atmosphere", "energy input", "travel speed"],
+        factors=("atmosphere", "energy input", "travel speed"),
         attribution_scope="joint_effect",
     )
 
@@ -313,18 +359,18 @@ def test_cross_paper_agreement_is_derived_from_independent_direct_results() -> N
     finding = _finding(
         synthesis_status="agreement",
         certainty=0.75,
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            },
-            {
-                "document_id": "paper-2",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-2"],
-            },
-        ],
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+            FindingPaperContribution(
+                document_id="paper-2",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-2",),
+            ),
+        ),
     )
     evidence = (
         _evidence("evidence-1", "paper-1"),
@@ -345,22 +391,22 @@ def test_finding_rejects_declared_status_that_differs_from_paper_evidence() -> N
 
 
 def test_joint_factor_finding_cannot_claim_isolated_or_causal_effect() -> None:
-    paper = [
-        {
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "supporting_evidence_ids": ["evidence-1"],
-        }
-    ]
+    paper = (
+        FindingPaperContribution(
+            document_id="paper-1",
+            analysis_status="analyzed",
+            supporting_evidence_ids=("evidence-1",),
+        ),
+    )
     with pytest.raises(ValueError, match="one factor"):
         _finding(
-            factors=["laser power", "scan speed"],
+            factors=("laser power", "scan speed"),
             attribution_scope="isolated_effect",
             paper_contributions=paper,
         )
     with pytest.raises(ValueError, match="causal Finding requires"):
         _finding(
-            factors=["laser power", "scan speed"],
+            factors=("laser power", "scan speed"),
             attribution_scope="joint_effect",
             assertion_strength="causal",
             paper_contributions=paper,
@@ -369,23 +415,24 @@ def test_joint_factor_finding_cannot_claim_isolated_or_causal_effect() -> None:
 
 def test_finding_mechanism_remains_subordinate_and_requires_mechanism_evidence() -> None:
     finding = _finding(
-        mechanisms=[
-            {
-                "source_term": "preheating",
-                "relation_type": "changes",
-                "target_term": "dislocation structure",
-                "assertion_strength": "associative",
-                "supporting_evidence_ids": ["mechanism-1"],
-            }
-        ],
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-                "context_evidence_ids": ["mechanism-1"],
-            }
-        ],
+        mechanisms=(
+            FindingMechanismRelation(
+                source_term="preheating",
+                relation_type="changes",
+                target_term="dislocation structure",
+                direction=None,
+                assertion_strength="associative",
+                supporting_evidence_ids=("mechanism-1",),
+            ),
+        ),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+                context_evidence_ids=("mechanism-1",),
+            ),
+        ),
     )
 
     finding.validate_sources(
@@ -411,15 +458,16 @@ def test_finding_mechanism_remains_subordinate_and_requires_mechanism_evidence()
 def test_finding_requires_mechanism_evidence_in_paper_context_binding() -> None:
     with pytest.raises(ValueError, match="must bind as paper context"):
         _finding(
-            mechanisms=[
-                {
-                    "source_term": "preheating",
-                    "relation_type": "changes",
-                    "target_term": "dislocation structure",
-                    "assertion_strength": "associative",
-                    "supporting_evidence_ids": ["mechanism-1"],
-                }
-            ]
+            mechanisms=(
+                FindingMechanismRelation(
+                    source_term="preheating",
+                    relation_type="changes",
+                    target_term="dislocation structure",
+                    direction=None,
+                    assertion_strength="associative",
+                    supporting_evidence_ids=("mechanism-1",),
+                ),
+            )
         )
 
 
@@ -434,18 +482,18 @@ def test_finding_rejects_support_or_contradiction_with_wrong_direction() -> None
     finding = _finding(
         synthesis_status="conflict",
         certainty=0.6,
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            },
-            {
-                "document_id": "paper-2",
-                "analysis_status": "analyzed",
-                "contradicting_evidence_ids": ["evidence-2"],
-            },
-        ],
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+            FindingPaperContribution(
+                document_id="paper-2",
+                analysis_status="analyzed",
+                contradicting_evidence_ids=("evidence-2",),
+            ),
+        ),
     )
 
     with pytest.raises(ValueError, match="does not oppose"):
@@ -499,22 +547,18 @@ def test_certainty_is_capped_by_independent_document_support() -> None:
 
 
 def test_finding_subordinates_have_no_independent_business_ids() -> None:
-    mechanism = FindingMechanismRelation.from_mapping(
-        {
-            "source_term": "porosity",
-            "relation_type": "affects",
-            "target_term": "passive film stability",
-            "assertion_strength": "associative",
-            "supporting_evidence_ids": ["mechanism-1"],
-        }
+    mechanism = FindingMechanismRelation(
+        source_term="preheating",
+        relation_type="changes",
+        target_term="dislocation structure",
+        direction=None,
+        assertion_strength="associative",
+        supporting_evidence_ids=("mechanism-1",),
     )
-    paper = FindingPaperContribution.from_mapping(
-        {
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "supporting_evidence_ids": ["evidence-1"],
-        }
+    paper = FindingPaperContribution(
+        document_id="paper-1",
+        analysis_status="analyzed",
+        supporting_evidence_ids=("evidence-1",),
     )
-
-    assert "relation_id" not in mechanism.to_record()
-    assert "contribution_id" not in paper.to_record()
+    assert not hasattr(mechanism, "relation_id")
+    assert not hasattr(paper, "contribution_id")

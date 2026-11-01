@@ -5,15 +5,14 @@ from pathlib import Path
 
 import pytest
 
-
 BACKEND = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("directory", ["domain", "application/repositories"])
-def test_domain_and_repository_contracts_do_not_import_storage_or_http(directory):
-    forbidden = {"sqlalchemy", "pydantic", "fastapi", "infra", "controllers"}
+@pytest.mark.parametrize("directory", ["domain", "repositories"])
+def test_domain_and_repositories_respect_their_dependencies(directory):
+    forbidden = {"pydantic", "fastapi", "controllers", "application", "tests"}
     if directory == "domain":
-        forbidden.add("application")
+        forbidden.update({"sqlalchemy", "infra", "repositories"})
     violations = []
     for path in (BACKEND / directory).rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
@@ -31,13 +30,16 @@ def test_domain_and_repository_contracts_do_not_import_storage_or_http(directory
 def test_retired_central_repository_ports_are_not_forwarded():
     assert not (BACKEND / "domain/ports.py").exists()
     assert not (BACKEND / "domain/source/ports.py").exists()
+    assert not list((BACKEND / "application/repositories").glob("*.py"))
+    assert not list((BACKEND / "infra/persistence/memory").glob("*.py"))
+    assert not list((BACKEND / "infra/persistence/postgres").glob("*_repository.py"))
 
 
 def test_objective_query_result_reuses_the_domain_model():
     from typing import get_type_hints
 
-    from application.repositories.objective_repository import ObjectiveRepository, StoredObjective
     from domain.core import ResearchObjective
+    from repositories.objective_repository import ObjectiveRepository, StoredObjective
 
     assert get_type_hints(StoredObjective)["objective"] is ResearchObjective
     assert StoredObjective.__module__ == ObjectiveRepository.__module__

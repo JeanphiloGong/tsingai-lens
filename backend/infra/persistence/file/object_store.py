@@ -56,3 +56,7 @@ class FileObjectStore:
             raise ValueError("invalid SHA-256")
         if hash_sha256(payload).hexdigest() != expected_sha256:
             raise ValueError("object SHA-256 mismatch")
+
+
+# Initialized by main.lifespan; workers continue to construct their own store.
+Store: FileObjectStore

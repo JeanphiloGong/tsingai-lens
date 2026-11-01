@@ -1,12 +1,36 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture
+
+from infra.persistence import database
+
+from dataclasses import replace
+from typing import Mapping
+
 import pytest
 
 from domain.core import Finding, ObjectiveEvidence
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+)
+
+from domain.core.research_objective import _scoped_id as objective_scoped_id
+from domain.core.scientific_fact import (
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
 from domain.evaluation import FindingCuration, FindingFeedback
-from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
-from infra.persistence.postgres.finding_review_repository import (
-    PostgresFindingReviewRepository,
+from infra.persistence.postgres.models.experiment_finding import ExperimentFindingORM
+from repositories.finding_review_repository import (
+    FindingReviewRepository,
 )
 from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
@@ -14,7 +38,6 @@ from tests.integration.persistence.test_postgres_objective_lifecycle import (
     _contribution,
     _queue_and_claim,
 )
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = [
@@ -24,39 +47,146 @@ pytestmark = [
 
 
 def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
-    return tuple(ObjectiveEvidence.from_mapping({
-        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
-        "analysis_version": version, "document_id": document_id,
-        "evidence_id": f"evidence-{document_id}", "source_kind": "text_window",
-        "source_ref": f"block-{document_id}", "page_numbers": [2],
-        "source_excerpt": "Laser power increased from 100 W to 150 W.",
-        "evidence_role": "direct_result", "selection_status": "extracted",
-        "selection_reason": "Reports the variable and measured result.",
-        "changed_variables": [{"name": "laser power", "baseline_value": 100, "target_value": 150, "unit": "W"}],
-        "comparison": {"baseline_label": "100 W", "target_label": "150 W", "axis_names": ["laser power"], "comparable": True},
-        "reported_result": {
-            "outcome": "tensile strength", "baseline_value": 900, "target_value": 950,
-            "value": 950, "unit": "MPa", "direction": "increase",
-            "result_text": "Tensile strength increased from 900 to 950 MPa.",
-        },
-        "attribution_scope": "isolated_effect", "resolution_status": "resolved", "confidence": 0.9,
-    }) for document_id in ("doc_a", "doc_b"))
+    return tuple(
+        ObjectiveEvidence(
+            collection_id=COLLECTION_ID or "",
+            objective_id=OBJECTIVE_ID or "",
+            analysis_version=version or 0,
+            evidence_id=f'evidence-{document_id}'
+            or objective_scoped_id(
+                "oev",
+                COLLECTION_ID or "",
+                OBJECTIVE_ID or "",
+                version or 0,
+                document_id or "",
+                "text_window",
+                f'block-{document_id}' or "",
+                "direct_result",
+                (
+                    ScientificResult(
+                        outcome="tensile strength",
+                        value=950,
+                        unit="MPa",
+                        direction="increase",
+                        result_text="Tensile strength increased from 900 to 950 MPa.",
+                        baseline_value=900,
+                        target_value=950,
+                    ).outcome
+                    if ScientificResult(
+                        outcome="tensile strength",
+                        value=950,
+                        unit="MPa",
+                        direction="increase",
+                        result_text="Tensile strength increased from 900 to 950 MPa.",
+                        baseline_value=900,
+                        target_value=950,
+                    )
+                    is not None
+                    else None
+                ),
+            ),
+            document_id=document_id or "",
+            source_kind="text_window",
+            source_ref=f'block-{document_id}' or "",
+            source_excerpt="Laser power increased from 100 W to 150 W.",
+            page_numbers=(2,),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="extracted",
+            selection_reason="Reports the variable and measured result.",
+            changed_variables=(
+                ScientificVariable(
+                    name="laser power", baseline_value=100, target_value=150, unit="W"
+                ),
+            ),
+            comparison=ScientificComparison(
+                baseline_label="100 W",
+                target_label="150 W",
+                axis_names=("laser power",),
+                comparable=True,
+            ),
+            reported_result=ScientificResult(
+                outcome="tensile strength",
+                value=950,
+                unit="MPa",
+                direction="increase",
+                result_text="Tensile strength increased from 900 to 950 MPa.",
+                baseline_value=900,
+                target_value=950,
+            ),
+            attribution_scope="isolated_effect",
+            scientific_context=ScientificContext(),
+            resolution_status="resolved",
+            failure_reason=None,
+            confidence=0.9,
+        )
+        for document_id in ("doc_a", "doc_b")
+    )
 
 
 def _finding(version: int) -> Finding:
-    return Finding.from_mapping({
-        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
-        "analysis_version": version, "finding_id": "finding-strength",
-        "statement": "Higher laser power was associated with higher tensile strength under the reported conditions.",
-        "factors": ["laser power"], "outcome": "tensile strength", "direction": "increase",
-        "assertion_strength": "associative", "attribution_scope": "isolated_effect",
-        "synthesis_status": "agreement", "certainty": 0.75, "display_rank": 0,
-        "limitations": ["Only the reported process windows are comparable."],
-        "paper_contributions": [{
-            "document_id": document_id, "analysis_status": "analyzed",
-            "supporting_evidence_ids": [f"evidence-{document_id}"],
-        } for document_id in ("doc_a", "doc_b")],
-    })
+    return Finding(
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=version,
+        finding_id="finding-strength",
+        statement="Higher laser power was associated with higher tensile strength under the reported conditions.",
+        factors=("laser power",),
+        outcome="tensile strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope='isolated_effect',
+        synthesis_status="agreement",
+        certainty=0.75,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("Only the reported process windows are comparable.",),
+        paper_contributions=tuple(
+            (
+                FindingPaperContribution(
+                    document_id=item.get('document_id') or "",
+                    analysis_status=item.get('analysis_status'),
+                    supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
+                    contradicting_evidence_ids=tuple(item.get('contradicting_evidence_ids') or ()),
+                    context_evidence_ids=tuple(item.get('context_evidence_ids') or ()),
+                    condition_boundary_evidence_ids=tuple(item.get('condition_boundary_evidence_ids') or ()),
+                )
+                for item in tuple(
+                    (
+                        dict(item)
+                        for item in (
+                            [
+                                {
+                                    "document_id": document_id,
+                                    "analysis_status": "analyzed",
+                                    "supporting_evidence_ids": [
+                                        f"evidence-{document_id}"
+                                    ],
+                                }
+                                for document_id in ("doc_a", "doc_b")
+                            ]
+                            if isinstance(
+                                [
+                                    {
+                                        "document_id": document_id,
+                                        "analysis_status": "analyzed",
+                                        "supporting_evidence_ids": [
+                                            f"evidence-{document_id}"
+                                        ],
+                                    }
+                                    for document_id in ("doc_a", "doc_b")
+                                ],
+                                (list, tuple),
+                            )
+                            else ()
+                        )
+                        if isinstance(item, Mapping)
+                    )
+                )
+            )
+        ),
+    )
 
 
 async def _publish_next_analysis(objective_repository):
@@ -66,9 +196,14 @@ async def _publish_next_analysis(objective_repository):
         COLLECTION_ID,
         OBJECTIVE_ID,
         version,
-        contributions=tuple(_contribution(version, document_id) for document_id in ("doc_a", "doc_b")),
+        contributions=tuple(
+            _contribution(version, document_id) for document_id in ("doc_a", "doc_b")
+        ),
         evidence_records=_analysis_evidence(version),
         findings=(_finding(version),),
+        job=analysis_job_fixture(
+            objective_repository, COLLECTION_ID, OBJECTIVE_ID, version
+        ),
     )
     return analysis
 
@@ -77,42 +212,41 @@ async def test_finding_review_round_trips_published_analysis_identity(
     objective_repository,
 ) -> None:
     analysis = await _publish_next_analysis(objective_repository)
-    reviews = PostgresFindingReviewRepository(objective_repository.session_factory)
+    reviews = FindingReviewRepository()
     finding = _finding(analysis.analysis_version)
 
     feedback = await reviews.upsert_feedback(
-        FindingFeedback.from_mapping(
-            {
-                "feedback_id": "feedback-1",
-                "collection_id": COLLECTION_ID,
-                "objective_id": OBJECTIVE_ID,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding.finding_id,
-                "review_status": "correct",
-                "issue_type": "none",
-                "reviewer": "expert-1",
-                "created_at": "2026-08-27T00:00:00+00:00",
-            }
+        FindingFeedback(
+            feedback_id="feedback-1",
+            collection_id=COLLECTION_ID,
+            objective_id=OBJECTIVE_ID,
+            analysis_version=analysis.analysis_version,
+            finding_id=finding.finding_id,
+            review_status="correct",
+            issue_type="none",
+            reviewer="expert-1",
+            created_at="2026-08-27T00:00:00+00:00",
+            note=None,
         )
     )
     curation = await reviews.upsert_curation(
-        FindingCuration.from_mapping(
-            {
-                "curation_id": "curation-1",
-                "collection_id": COLLECTION_ID,
-                "objective_id": OBJECTIVE_ID,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding.finding_id,
-                "curated_status": "limited",
-                "curated_finding": {
-                    **finding.to_record(),
-                    "statement": (
-                        "Higher laser power was associated with strength only "
-                        "within the reported process windows."
-                    ),
-                },
-                "updated_at": "2026-08-27T00:00:00+00:00",
-            }
+        FindingCuration(
+            curation_id="curation-1",
+            collection_id=COLLECTION_ID,
+            objective_id=OBJECTIVE_ID,
+            analysis_version=analysis.analysis_version,
+            finding_id=finding.finding_id,
+            curated_status="limited",
+            curated_finding=replace(
+                finding,
+                statement=(
+                    "Higher laser power was associated with strength only "
+                    "within the reported process windows."
+                ),
+            ),
+            updated_at="2026-08-27T00:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
 
@@ -135,9 +269,9 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
 ) -> None:
     analysis = await _publish_next_analysis(objective_repository)
     finding = _finding(analysis.analysis_version)
-    async with objective_repository.session_factory.begin() as session:
+    async with database.AsyncSessionLocal.begin() as session:
         session.add(
-            ExperimentFindingRow(
+            ExperimentFindingORM(
                 finding_id=finding.finding_id,
                 collection_id=COLLECTION_ID,
                 objective_id=OBJECTIVE_ID,
@@ -151,8 +285,107 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
                 synthesis_status=finding.synthesis_status,
                 certainty=finding.certainty,
                 display_rank=finding.display_rank,
-                mechanisms_json=[item.to_record() for item in finding.mechanisms],
-                scientific_context_json=finding.scientific_context.to_record(),
+                mechanisms_json=[
+                    {
+                        "source_term": item.source_term,
+                        "relation_type": item.relation_type,
+                        "target_term": item.target_term,
+                        "direction": item.direction,
+                        "assertion_strength": item.assertion_strength,
+                        "supporting_evidence_ids": list(item.supporting_evidence_ids),
+                    }
+                    for item in finding.mechanisms
+                ],
+                scientific_context_json={
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.test
+                    ],
+                },
                 limitations_json=list(finding.limitations),
                 origin="system_generated",
                 source_analysis_version=None,
@@ -164,20 +397,19 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
             )
         )
 
-    reviews = PostgresFindingReviewRepository(objective_repository.session_factory)
+    reviews = FindingReviewRepository()
     feedback = await reviews.upsert_feedback(
-        FindingFeedback.from_mapping(
-            {
-                "feedback_id": "experiment-feedback-1",
-                "collection_id": COLLECTION_ID,
-                "objective_id": OBJECTIVE_ID,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding.finding_id,
-                "review_status": "correct",
-                "issue_type": "none",
-                "reviewer": "experiment-reviewer",
-                "created_at": "2026-08-27T00:00:00+00:00",
-            }
+        FindingFeedback(
+            feedback_id="experiment-feedback-1",
+            collection_id=COLLECTION_ID,
+            objective_id=OBJECTIVE_ID,
+            analysis_version=analysis.analysis_version,
+            finding_id=finding.finding_id,
+            review_status="correct",
+            issue_type="none",
+            reviewer="experiment-reviewer",
+            created_at="2026-08-27T00:00:00+00:00",
+            note=None,
         )
     )
     assert feedback.finding_id == finding.finding_id

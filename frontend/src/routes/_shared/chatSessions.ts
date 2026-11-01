@@ -1,4 +1,4 @@
-import { buildApiUrl, requestJson, throwApiError } from './api';
+import { ApiError, buildApiUrl, requestJson, throwApiError } from './api';
 
 export type ChatResourceRef = {
 	resource_type: string;
@@ -137,6 +137,7 @@ export type ChatTurn = {
 export type ChatTrajectory = {
 	items: ChatMessage[];
 	pending_approval: ChatToolCall | null;
+	retryable_decision?: ChatToolCall | null;
 	feedback: ChatMessageFeedback[];
 	branches: ChatBranchOptions[];
 	branch_draft: ChatMessage | null;
@@ -145,6 +146,8 @@ export type ChatTrajectory = {
 };
 
 export type ChatResponseSnapshot = {
+	model_connection_id?: string | null;
+	model_connection_name?: string | null;
 	response_id: string;
 	sequence: number;
 	started_at: string;
@@ -311,6 +314,14 @@ export async function setChatSessionPin(sessionId: string, isPinned: boolean, si
 	})) as ChatSession;
 }
 
+export async function setChatSessionTitle(sessionId: string, title: string, signal?: AbortSignal) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/title`, {
+		signal,
+		method: 'PUT',
+		body: JSON.stringify({ title })
+	})) as ChatSession;
+}
+
 export type AgentPermission = {
 	mode: 'read_only' | 'confirm' | 'auto';
 	actions: string[];
@@ -389,10 +400,24 @@ export async function setChatMessageFeedback(
 	input: ChatFeedbackInput,
 	signal?: AbortSignal
 ) {
-	return (await requestJson(
+	const data = await requestJson(
 		`${chatSessionPath(sessionId)}/messages/${encodeURIComponent(messageId)}/feedback`,
 		{ signal, method: 'PUT', body: JSON.stringify(input) }
-	)) as ChatMessageFeedback | null;
+	);
+	if (Object.keys(data as object).length === 0) return null;
+	return data as ChatMessageFeedback;
+}
+
+export type ModelConnectionChoice = {
+	connection_id: string;
+	display_name: string;
+	model: string;
+};
+
+export async function fetchModelConnections(signal?: AbortSignal) {
+	return (await requestJson('/model-connections', { signal, method: 'GET' })) as {
+		items: ModelConnectionChoice[];
+	};
 }
 
 export async function streamChatMessage(
@@ -404,7 +429,8 @@ export async function streamChatMessage(
 	signal?: AbortSignal,
 	branchRevision = false,
 	onSnapshot?: (snapshot: ChatResponseSnapshot) => void,
-	onTrajectory?: (trajectory: ChatTrajectory) => void
+	onTrajectory?: (trajectory: ChatTrajectory) => void,
+	modelConnectionId?: string
 ) {
 	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		signal,
@@ -416,6 +442,7 @@ export async function streamChatMessage(
 		},
 		body: JSON.stringify({
 			message,
+			...(modelConnectionId ? { model_connection_id: modelConnectionId } : {}),
 			...(branchRevision ? { branch_revision: true } : {}),
 			...(sourceContexts.length ? { source_contexts: sourceContexts } : {})
 		})
@@ -459,7 +486,9 @@ async function readChatEvents(
 	},
 	signal?: AbortSignal
 ) {
-	if (!response.ok) await throwApiError(response);
+	if (!response.ok || !response.headers.get('Content-Type')?.includes('text/event-stream')) {
+		await throwApiError(response);
+	}
 	if (!response.body) throw new Error('The research response stream is unavailable.');
 
 	const reader = response.body.getReader();
@@ -508,7 +537,7 @@ async function readChatEvents(
 				payload && typeof payload === 'object' && 'message' in payload
 					? String(payload.message)
 					: 'The research response could not be completed.';
-			throw new Error(message);
+			throw new ApiError(200205, message, payload);
 		}
 	};
 

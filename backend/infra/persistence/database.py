@@ -16,6 +16,16 @@ from sqlalchemy.ext.asyncio import (
 from config import ENV_FILE_PATH
 
 
+# The Web lifespan owns this process engine and disposes it on exit.
+engine: AsyncEngine
+
+
+AsyncSessionLocal = async_sessionmaker(
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
 class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,
@@ -45,9 +55,3 @@ def build_database_engine(settings: DatabaseSettings) -> AsyncEngine:
         max_overflow=settings.database_max_overflow,
         pool_timeout=settings.database_pool_timeout,
     )
-
-
-def build_session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine)

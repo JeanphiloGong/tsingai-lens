@@ -25,6 +25,13 @@ validation, repair instruction, token budget, prompt version, and decision to
 call the model. Provider failures and JSON retries are technical execution
 outcomes; they do not define a research state.
 
+Only malformed JSON, response-model validation failures, explicit
+`StructuredOutputError` rejections, and the existing output-saturation policy
+can enter bounded output repair. Provider refusals, HTTP/transport failures, and
+unexpected postprocessing errors propagate without another repair request.
+When a caller supplies `before_request`, every request applies its remaining
+timeout with SDK retries disabled; output repairs recheck that deadline.
+
 There is one shared `StructuredResponseClient`. Do not add task dispatch,
 prompt registries, compatibility exports, or a second JSON parser to this
 package.

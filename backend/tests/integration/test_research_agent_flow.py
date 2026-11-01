@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-from pydantic import BaseModel, ConfigDict
-import pytest
+from application.chat import session_service as shared_chat_service
 
+from application.chat.capabilities import collection_context
+
+import pytest
 from application.chat import (
     CapabilityExecutionContext,
     CapabilityRegistry,
@@ -12,31 +13,25 @@ from application.chat import (
     ResearchAgentRunner,
     ToolSpec,
 )
+from application.chat import session_service as chat_session_service
 from application.chat.capabilities import GetCollectionContextCapability
-from application.chat.session_service import ChatSessionService
-from application.pipeline import PipelineRunService
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-    MemoryPipelineRunRepository,
-)
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from fastapi.testclient import TestClient
 from main import create_app
-from tests.support.chat_repository import MemoryChatRepository
+from pydantic import BaseModel, ConfigDict
+from repositories.chat_repository import ChatRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 from tests.unit.application.test_research_agent_runner import _Model
 
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 class _ObjectiveRepository:
     async def list_objectives(self, collection_id: str) -> tuple:
         assert collection_id
         return ()
-
-    async def interrupt_active_analyses(self) -> int:
-        return 0
 
 
 class _CandidateArguments(BaseModel):
@@ -64,7 +59,7 @@ class _CandidateCapability:
         self.executed.append(arguments.model_dump())
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": "obj-agent-1",
                 "confirmation_status": "candidate",
@@ -85,6 +80,10 @@ class _CandidateCapability:
 async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     auth_session_service,
     collection_service,
+    monkeypatch,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ) -> None:
     user = await auth_session_service.create_user(
         email="agent-flow@example.com",
@@ -101,65 +100,61 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     )
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
-    chat_repository = MemoryChatRepository()
-    source_artifact_repository = MemorySourceArtifactRepository()
+    chat_repository = ChatRepository()
+    source_artifact_repository = SourceArtifactRepository()
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
-            tool_calls=(ModelToolCall(
-                name="get_collection_context",
-                arguments={},
-            ),)
+            tool_calls=(
+                ModelToolCall(
+                    name="get_collection_context",
+                    arguments={},
+                ),
+            )
         ),
         ModelTurn(content="This collection is ready for a focused research question."),
         ModelTurn(
             content="I prepared the exact candidate for your approval.",
-            tool_calls=(ModelToolCall(
-                name="create_objective_candidate",
-                arguments={
-                    "question": "How does energy input affect grain morphology?"
-                },
-            ),),
+            tool_calls=(
+                ModelToolCall(
+                    name="create_objective_candidate",
+                    arguments={
+                        "question": "How does energy input affect grain morphology?"
+                    },
+                ),
+            ),
         ),
         ModelTurn(content="The candidate was created and still requires review."),
     )
-    chat_service = ChatSessionService(
-        collection_service=collection_service,
-        source_artifact_repository=source_artifact_repository,
-        repository=chat_repository,
-        runner=ResearchAgentRunner(
-            model=model,
-            capabilities=CapabilityRegistry(
-                (
-                    GetCollectionContextCapability(
-                        collection_service=collection_service,
-                        objective_repository=objective_repository,
-                    ),
-                    candidate_capability,
-                )
-            ),
-        ),
+    monkeypatch.setattr(chat_session_service, "collection_service", collection_service)
+    monkeypatch.setattr(
+        chat_session_service, "SourceArtifactRepo", source_artifact_repository
     )
-    app = create_app(
-        auth_session_service=auth_session_service,
-        collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
-        source_artifact_repository=source_artifact_repository,
-        document_profile_repository=MemoryDocumentProfileRepository(),
-        paper_map_repository=MemoryPaperMapRepository(),
-        objective_repository=objective_repository,
-        finding_review_repository=object(),
-        experiment_plan_repository=object(),
-        chat_session_service=chat_service,
-    )
+    monkeypatch.setattr(chat_session_service, "ChatRepo", chat_repository)
+    app = create_app()
 
     with TestClient(app) as client:
+        collection_context.collection_service = collection_service
+        collection_context.ObjectiveRepo = objective_repository
+        monkeypatch.setattr(
+            shared_chat_service.ChatService,
+            "runner",
+            ResearchAgentRunner(
+                model=model,
+                capabilities=CapabilityRegistry(
+                    (
+                        GetCollectionContextCapability(),
+                        candidate_capability,
+                    )
+                ),
+            ),
+        )
         client.cookies.set("lens_session", login["session_id"])
         created = client.post(
             "/api/v1/chat-sessions",
-            json={"collection_id": collection["collection_id"]},
+            json={"collection_id": collection.collection.collection_id},
         )
-        session_id = created.json()["session_id"]
+        session_id = created.json()["data"]["session_id"]
 
         greeting = client.post(
             f"/api/v1/chat-sessions/{session_id}/messages",
@@ -173,7 +168,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
             f"/api/v1/chat-sessions/{session_id}/messages",
             json={"message": "Create the focused grain-morphology objective"},
         )
-        pending = proposed_write.json()["pending_approval"]
+        pending = proposed_write.json()["data"]["pending_approval"]
         executed_before_approval = list(candidate_capability.executed)
 
         blocked = client.post(
@@ -195,21 +190,30 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         )
         trajectory = client.get(f"/api/v1/chat-sessions/{session_id}/messages")
 
-    assert created.status_code == 201
-    assert greeting.json()["status"] == "completed"
-    assert all(item["role"] != "tool" for item in greeting.json()["messages"])
-    assert context_turn.json()["messages"][-2]["tool_result"]["data"][
-        "collection"
-    ]["name"] == "Ti-6Al-4V energy input"
+    assert greeting.json()["code"] == 200, greeting.text
+    assert context_turn.json()["code"] == 200, context_turn.text
+    assert proposed_write.json()["code"] == 200, proposed_write.text
+    assert approved.json()["code"] == 200, approved.text
+    assert trajectory.json()["code"] == 200, trajectory.text
+    assert created.status_code == 200
+    assert created.json()["code"] == 200
+    assert greeting.json()["data"]["status"] == "completed"
+    assert all(item["role"] != "tool" for item in greeting.json()["data"]["messages"])
+    assert (
+        context_turn.json()["data"]["messages"][-2]["tool_result"]["data"][
+            "collection"
+        ]["name"]
+        == "Ti-6Al-4V energy input"
+    )
     assert proposed_write.status_code == 200
-    assert proposed_write.json()["status"] == "approval_required"
+    assert proposed_write.json()["data"]["status"] == "approval_required"
     assert executed_before_approval == []
-    assert blocked.status_code == 409
-    assert wrong_digest.status_code == 409
+    assert blocked.json()["code"] == 200204
+    assert wrong_digest.json()["code"] == 200204
     assert approved.status_code == 200
-    assert approved.json()["status"] == "completed"
-    proposed_plan = proposed_write.json()["execution_plan"]
-    approved_plan = approved.json()["execution_plan"]
+    assert approved.json()["data"]["status"] == "completed"
+    proposed_plan = proposed_write.json()["data"]["execution_plan"]
+    approved_plan = approved.json()["data"]["execution_plan"]
     assert (proposed_plan is None) == (approved_plan is None)
     if proposed_plan is not None:
         assert approved_plan["plan_id"] == proposed_plan["plan_id"]
@@ -217,24 +221,27 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     assert candidate_capability.executed == [
         {"question": "How does energy input affect grain morphology?"}
     ]
-    assert trajectory.json()["pending_approval"] is None
-    assert model.all_tool_spec_names[0] == ("discover_research_tools",)
+    assert trajectory.json()["data"]["pending_approval"] is None
+    assert model.all_tool_spec_names[0] == (
+        "get_collection_context",
+        "update_execution_plan",
+        "discover_research_tools",
+    )
     assert any(
-        "create_objective_candidate" in names
-        for names in model.all_tool_spec_names
+        "create_objective_candidate" in names for names in model.all_tool_spec_names
     )
     assert model.all_tool_spec_names[-1] == (
+        "get_collection_context",
         "create_objective_candidate",
+        "update_execution_plan",
         "discover_research_tools",
     )
     # A successful write does not hide the capability by name. The same
     # capability may be needed for a different resource in this continuation.
-    assert [item["role"] for item in trajectory.json()["items"]] == [
+    assert [item["role"] for item in trajectory.json()["data"]["items"]] == [
         "user",
         "assistant",
         "user",
-        "assistant",
-        "tool",
         "assistant",
         "tool",
         "assistant",

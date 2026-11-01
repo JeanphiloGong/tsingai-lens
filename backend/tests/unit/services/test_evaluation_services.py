@@ -1,17 +1,29 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import analysis_job_fixture, claim_analysis_fixture
+
+from application.chat.capabilities import finding_review
+
+from application.core.objectives.analysis import analysis_record_source
+
 from dataclasses import replace
+from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-
-from application.evaluation.core_evaluation_service import CoreEvaluationService
-from application.evaluation.gold_service import EvaluationGoldService
+from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.capabilities.finding_review import (
+    CurateFindingCapability,
+    CurateFindingToolRequest,
+)
+from application.evaluation import finding_dataset_service, finding_snapshot_service
+from application.evaluation import finding_feedback_service
+from application.evaluation import core_evaluation_service
+from application.evaluation.finding_review_import_service import parse_curated_finding
+from application.evaluation import gold_service
+from application.evaluation import prediction_snapshot_service
 from application.evaluation.prediction_snapshot_service import (
     CoreArtifactsNotReadyForEvaluationError,
-    EvaluationPredictionSnapshotService,
-)
-from application.evaluation.finding_feedback_service import (
-    FindingFeedbackService,
 )
 from domain.core import (
     Finding,
@@ -23,9 +35,39 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.evaluation import FindingCuration, FindingFeedback
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
-from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PaperContribution,
+    PaperResearchRelationship,
+    PaperResearchScope,
+    PaperResearchSourceRef,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
+    ResearchObjective,
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+from domain.evaluation import EvaluationGoldItem, FindingCuration, FindingFeedback
+from domain.source import SourceBlock, SourceDocument, Collection, Document
+from repositories.collection_repository import StoredCollection, StoredDocument
+from exceptions import RequestInvalidException, ResourceConflictException
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
+from repositories.evaluation_repository import EvaluationRepository
+from repositories.finding_review_repository import FindingReviewRepository
+from repositories.objective_repository import ObjectiveRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+from sqlalchemy import select
 
 pytestmark = pytest.mark.anyio
 
@@ -35,9 +77,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-_TEMPERATURE_STRENGTH_RELATIONSHIP_ID = (
-    "relationship-doc-1-temperature-strength"
-)
+_TEMPERATURE_STRENGTH_RELATIONSHIP_ID = "relationship-doc-1-temperature-strength"
 _TEMPERATURE_STRENGTH_STUDY_ID = "study-doc-1-temperature-strength"
 _DOC_1_INPUT = PreparedDocumentInput(
     document_id="doc-1",
@@ -59,117 +99,40 @@ class FakeCollectionService:
             ]
         }
 
-    async def get_collection(self, collection_id: str) -> dict:
+    async def get_collection(self, collection_id: str) -> StoredCollection:
         if collection_id not in self.existing:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return {
-            "collection_id": collection_id,
-            "name": "Gold collection",
-            "documents": list(self.documents_by_collection.get(collection_id, [])),
-        }
-
-
-class FakeEvaluationRepository:
-    backend_name = "fake"
-
-    def __init__(self) -> None:
-        self.gold_set = None
-        self.gold_items = ()
-        self.snapshot = None
-        self.run = None
-
-    async def upsert_gold_set(self, gold_set, gold_items) -> None:
-        self.gold_set = gold_set
-        self.gold_items = gold_items
-
-    async def read_gold_set(self, gold_id: str):
-        if self.gold_set and self.gold_set.gold_id == gold_id:
-            return self.gold_set
-        return None
-
-    async def list_gold_items(self, gold_id: str):  # noqa: ARG002
-        return self.gold_items
-
-    async def upsert_prediction_snapshot(self, snapshot) -> None:
-        self.snapshot = snapshot
-
-    async def read_prediction_snapshot(self, snapshot_id: str):
-        if self.snapshot and self.snapshot.snapshot_id == snapshot_id:
-            return self.snapshot
-        return None
-
-    async def upsert_evaluation_run(self, run) -> None:
-        self.run = run
-
-    async def upsert_feedback(self, feedback):
-        self.feedback = (
-            feedback,
-            *(
-                item
-                for item in getattr(self, "feedback", ())
-                if item.feedback_id != feedback.feedback_id
+        return StoredCollection(
+            collection=Collection(collection_id, "local-user", "Gold collection", None, "idle"),
+            created_at="2026-11-01", updated_at="2026-11-01",
+            documents=tuple(
+                StoredDocument(
+                    document=Document(record["document_id"], record["original_filename"], "digest", None, "ready", 0),
+                    stored_filename=record["stored_filename"], storage_key=record["storage_key"],
+                    created_at="2026-11-01",
+                )
+                for record in self.documents_by_collection.get(collection_id, [])
             ),
-        )
-        return feedback
-
-    async def upsert_curation(self, curation):
-        self.curations = (
-            curation,
-            *(
-                item
-                for item in getattr(self, "curations", ())
-                if item.curation_id != curation.curation_id
-            ),
-        )
-        return curation
-
-
-    async def list_curations(
-        self,
-        collection_id: str,
-        objective_id: str | None = None,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
-    ):
-        return tuple(
-            curation
-            for curation in getattr(self, "curations", ())
-            if curation.collection_id == collection_id
-            and (objective_id is None or curation.objective_id == objective_id)
-            and (
-                analysis_version is None
-                or curation.analysis_version == analysis_version
-            )
-            and (finding_id is None or curation.finding_id == finding_id)
-        )
-
-    async def list_feedback(
-        self,
-        collection_id: str,
-        objective_id: str | None = None,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
-    ):
-        return tuple(
-            feedback
-            for feedback in getattr(self, "feedback", ())
-            if feedback.collection_id == collection_id
-            and (objective_id is None or feedback.objective_id == objective_id)
-            and (
-                analysis_version is None
-                or feedback.analysis_version == analysis_version
-            )
-            and (finding_id is None or feedback.finding_id == finding_id)
         )
 
 
 class _RecordedExperimentProjection:
     def __init__(self, *, finding, evidence, contribution) -> None:
-        self.finding = finding.to_record()
-        self.evidence = evidence.to_record()
-        self.contribution = contribution.to_record()
+        self.finding_value = finding
+        self.evidence_value = evidence
+        self.contribution_value = contribution
 
-    async def list_findings(
+    async def read_analysis_records(
+        self, collection_id, objective_id, analysis_version
+    ):
+        assert (collection_id, objective_id, analysis_version) == (
+            "col-gold",
+            "obj-1",
+            1,
+        )
+        return (self.finding_value,), (self.evidence_value,), (self.contribution_value,)
+
+    async def list_analysis_findings(
         self, collection_id, objective_id, analysis_version, *, offset=0, limit=50
     ):
         assert (collection_id, objective_id, analysis_version) == (
@@ -177,10 +140,10 @@ class _RecordedExperimentProjection:
             "obj-1",
             1,
         )
-        records = (self.finding,)
+        records = (self.finding_value,)
         return records[offset : offset + limit], len(records)
 
-    async def read_finding(
+    async def read_analysis_finding(
         self, collection_id, objective_id, analysis_version, finding_id
     ):
         assert (collection_id, objective_id, analysis_version, finding_id) == (
@@ -189,9 +152,9 @@ class _RecordedExperimentProjection:
             1,
             "finding-1",
         )
-        return self.finding
+        return self.finding_value
 
-    async def list_evidence(
+    async def list_analysis_evidence(
         self,
         collection_id,
         objective_id,
@@ -207,73 +170,81 @@ class _RecordedExperimentProjection:
             1,
         )
         assert finding_id in {None, "finding-1"}
-        records = (self.evidence,)
+        records = (self.evidence_value,)
         return records[offset : offset + limit], len(records)
 
-    async def list_contributions(self, collection_id, objective_id, analysis_version):
+    async def list_analysis_contributions(self, collection_id, objective_id, analysis_version):
         assert (collection_id, objective_id, analysis_version) == (
             "col-gold",
             "obj-1",
             1,
         )
-        return (self.contribution,)
+        return (self.contribution_value,)
 
 
-async def test_evaluation_gold_service_registers_gold_set_for_collection():
-    repository = FakeEvaluationRepository()
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(),
-        evaluation_repository=repository,
-    )
+async def test_evaluation_gold_service_registers_gold_set_for_collection(
+    *, postgres_session_factory
+):
+    repository = EvaluationRepository()
+    gold_service.collection_service = FakeCollectionService()
+    gold_service.EvaluationRepo = repository
+    service = gold_service
 
     gold_set = await service.register_gold_set(
         collection_id="col-gold",
         gold_id="gold-v1",
+        metadata={},
         items=[
-            {
-                "gold_item_id": "gold-1",
-                "document_id": "doc-1",
-                "family": "measurement_results",
-                "item_key": "doc-1:sample-a:yield_strength",
-                "payload": {"metric": "yield_strength", "value": 520, "unit": "MPa"},
-            }
+            EvaluationGoldItem(
+                gold_item_id="gold-1",
+                gold_id="gold-v1",
+                document_id="doc-1",
+                family="measurement_results",
+                item_key="doc-1:sample-a:yield_strength",
+                payload={"metric": "yield_strength", "value": 520, "unit": "MPa"},
+            )
         ],
     )
 
-    assert repository.gold_set == gold_set
-    assert repository.gold_items[0].gold_id == "gold-v1"
-    assert repository.gold_items[0].payload["value"] == 520
+    assert await repository.read_gold_set("gold-v1") == gold_set
+    assert (await repository.list_gold_items("gold-v1"))[0].gold_id == "gold-v1"
+    assert (await repository.list_gold_items("gold-v1"))[0].payload["value"] == 520
 
 
-async def test_evaluation_gold_service_accepts_collection_file_storage_key():
-    repository = FakeEvaluationRepository()
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(),
-        evaluation_repository=repository,
-    )
+async def test_evaluation_gold_service_accepts_collection_file_storage_key(
+    *, postgres_session_factory
+):
+    repository = EvaluationRepository()
+    gold_service.collection_service = FakeCollectionService()
+    gold_service.EvaluationRepo = repository
+    service = gold_service
 
     await service.register_gold_set(
         collection_id="col-gold",
         gold_id="gold-by-storage-key",
         items=[
-            {
-                "gold_item_id": "gold-storage-key-1",
-                "document_id": "col-gold/input/paper-1.pdf",
-                "family": "measurement_results",
-                "item_key": "paper-1:sample-a:yield_strength",
-                "payload": {"metric": "yield_strength", "value": 520, "unit": "MPa"},
-            }
+            EvaluationGoldItem(
+                gold_item_id="gold-storage-key-1",
+                gold_id="gold-by-storage-key",
+                document_id="col-gold/input/paper-1.pdf",
+                family="measurement_results",
+                item_key="paper-1:sample-a:yield_strength",
+                payload={"metric": "yield_strength", "value": 520, "unit": "MPa"},
+            )
         ],
     )
 
-    assert repository.gold_items[0].document_id == "col-gold/input/paper-1.pdf"
+    assert (await repository.list_gold_items("gold-by-storage-key"))[
+        0
+    ].document_id == "col-gold/input/paper-1.pdf"
 
 
-async def test_evaluation_gold_service_rejects_missing_collection():
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(existing=set()),
-        evaluation_repository=FakeEvaluationRepository(),
-    )
+async def test_evaluation_gold_service_rejects_missing_collection(
+    *, postgres_session_factory
+):
+    gold_service.collection_service = FakeCollectionService(existing=set())
+    gold_service.EvaluationRepo = EvaluationRepository()
+    service = gold_service
 
     with pytest.raises(FileNotFoundError):
         await service.register_gold_set(
@@ -283,80 +254,84 @@ async def test_evaluation_gold_service_rejects_missing_collection():
         )
 
 
-async def test_evaluation_gold_service_rejects_gold_item_outside_collection():
-    service = EvaluationGoldService(
-        collection_service=FakeCollectionService(),
-        evaluation_repository=FakeEvaluationRepository(),
-    )
+async def test_evaluation_gold_service_rejects_gold_item_outside_collection(
+    *, postgres_session_factory
+):
+    gold_service.collection_service = FakeCollectionService()
+    gold_service.EvaluationRepo = EvaluationRepository()
+    service = gold_service
 
     with pytest.raises(ValueError, match="gold item document is not in collection"):
         await service.register_gold_set(
             collection_id="col-gold",
             gold_id="gold-v1",
             items=[
-                {
-                    "gold_item_id": "gold-1",
-                    "document_id": "doc-outside",
-                    "family": "measurement_results",
-                    "item_key": "doc-outside:sample-a:yield_strength",
-                    "payload": {
-                        "metric": "yield_strength",
-                        "value": 520,
-                        "unit": "MPa",
-                    },
-                }
+                EvaluationGoldItem(
+                    gold_item_id="gold-1",
+                    gold_id="gold-v1",
+                    document_id="doc-outside",
+                    family="measurement_results",
+                    item_key="doc-outside:sample-a:yield_strength",
+                    payload={"metric": "yield_strength", "value": 520, "unit": "MPa"},
+                )
             ],
         )
 
 
-async def _published_objective_repository() -> MemoryObjectiveRepository:
-    repository = MemoryObjectiveRepository()
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["doc-1"],
-            "confidence": 0.9,
-            "source_relationship_ids": [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID],
-            "rank": 1,
-        }
+async def _published_objective_repository(
+    *, postgres_session_factory
+) -> ObjectiveRepository:
+    repository = ObjectiveRepository()
+    objective = ResearchObjective(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        source_relationship_ids=normalize_objective_terms(
+            [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID]
+        ),
+        rank=1,
     )
-    skim = PaperResearchMap.from_mapping(
-        {
-            "document_id": "doc-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": list(objective.material_scope),
-                    "relationships": [
-                        {
-                            "relationship_id": (
-                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+    skim = PaperResearchMap(
+        document_id="doc-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=_TEMPERATURE_STRENGTH_STUDY_ID,
+                document_id="doc-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=objective.material_scope,
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        varied_factors=objective.variables,
+                        outcome=objective.outcomes[0],
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-7"
                             ),
-                            "varied_factors": list(objective.variables),
-                            "outcome": objective.outcomes[0],
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-7",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.9,
+        warnings=(),
     )
     await repository.replace(
         "col-gold",
@@ -365,14 +340,12 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
             document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": "doc-1",
-                        "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                        "relationship_id": _TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
-                        "status": "promoted",
-                        "objective_id": objective.objective_id,
-                    }
+                PaperStudyDisposition(
+                    document_id="doc-1",
+                    study_id=_TEMPERATURE_STRENGTH_STUDY_ID or "",
+                    relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID or "",
+                    status=PaperStudyDispositionStatus("promoted"),
+                    objective_id=objective.objective_id,
                 ),
             ),
         ),
@@ -385,137 +358,141 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
         model_name="model-1",
         prompt_versions={},
     )
-    running = await repository.claim_analysis(
-        "col-gold",
-        "obj-1",
-        analysis.analysis_version,
+    running = await claim_analysis_fixture(
+        repository, "col-gold", "obj-1", analysis.analysis_version
     )
     assert running is not None
-    evidence = ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "evidence_id": "evidence-1",
-            "document_id": "doc-1",
-            "source_kind": "text_window",
-            "source_ref": "block-7",
-            "source_excerpt": "At 500 C, tensile strength increased to 620 MPa.",
-            "page_numbers": [7],
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 400,
-                    "target_value": 500,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "400 C",
-                "target_label": "500 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-                "incomparability_reasons": [],
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "value": 620,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "At 500 C, tensile strength increased to 620 MPa.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [{"name": "test", "value": "tensile"}],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    evidence = ObjectiveEvidence(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        analysis_version=1,
+        evidence_id="evidence-1",
+        document_id="doc-1",
+        source_kind="text_window",
+        source_ref="block-7",
+        source_excerpt="At 500 C, tensile strength increased to 620 MPa.",
+        page_numbers=(7,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=400, target_value=500, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="400 C",
+            target_label="500 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=620,
+            unit="MPa",
+            direction="increase",
+            result_text="At 500 C, tensile strength increased to 620 MPa.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),),
+            test=(ScientificAttribute(name="test", value="tensile"),),
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
-    finding = Finding.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1",
-            "statement": "Higher temperature was associated with greater strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "display_rank": 0,
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [{"name": "test", "value": "tensile"}],
-            },
-            "limitations": ["Only one paper directly supports this Finding."],
-            "paper_contributions": [
-                {
-                    "document_id": "doc-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    finding = Finding(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement="Higher temperature was associated with greater strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope="isolated_effect",
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),),
+            test=(ScientificAttribute(name="test", value="tensile"),),
+        ),
+        limitations=("Only one paper directly supports this Finding.",),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="doc-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     )
     await repository.publish_analysis(
         "col-gold",
         "obj-1",
         1,
         contributions=(
-            PaperContribution.from_mapping(
-                {
-                    "collection_id": "col-gold",
-                    "objective_id": "obj-1",
-                    "analysis_version": 1,
-                    "document_id": "doc-1",
-                    "analysis_status": "analyzed",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "confidence": 0.9,
-                }
+            PaperContribution(
+                collection_id="col-gold",
+                objective_id="obj-1",
+                analysis_version=1,
+                document_id="doc-1",
+                analysis_status="analyzed",
+                relevance="high",
+                paper_role="primary_experiment",
+                contribution_summary=None,
+                material_match=(),
+                changed_variables=(),
+                measured_property_scope=(),
+                test_environment_scope=(),
+                exclusion_reason=None,
+                warnings=(),
+                confidence=0.9,
             ),
         ),
         evidence_records=(evidence,),
         findings=(finding,),
+        job=analysis_job_fixture(repository, "col-gold", "obj-1", 1),
     )
     return repository
 
 
-async def _finding_feedback_service() -> FindingFeedbackService:
-    return FindingFeedbackService(
-        review_repository=InMemoryObjectiveReviewRepository(),
-        objective_repository=await _published_objective_repository(),
+async def _finding_feedback_service(*, postgres_session_factory) -> ModuleType:
+    finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
+    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.ObjectiveRepo = await _published_objective_repository(
+        postgres_session_factory=postgres_session_factory
     )
+    analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    return finding_feedback_service
 
 
 def _prediction_snapshot_service(
-    objective_repository: MemoryObjectiveRepository,
-) -> tuple[EvaluationPredictionSnapshotService, FakeEvaluationRepository]:
-    evaluation_repository = FakeEvaluationRepository()
+    objective_repository: ObjectiveRepository,
+) -> tuple[ModuleType, EvaluationRepository]:
+    evaluation_repository = EvaluationRepository()
+    prediction_snapshot_service.collection_service = FakeCollectionService()
+    prediction_snapshot_service.ObjectiveRepo = objective_repository
+    analysis_record_source.ObjectiveRepo = prediction_snapshot_service.ObjectiveRepo
+    prediction_snapshot_service.EvaluationRepo = evaluation_repository
     return (
-        EvaluationPredictionSnapshotService(
-            collection_service=FakeCollectionService(),
-            objective_repository=objective_repository,
-            evaluation_repository=evaluation_repository,
-        ),
+        prediction_snapshot_service,
         evaluation_repository,
     )
 
 
-async def test_prediction_snapshot_exports_published_findings_with_exact_evidence() -> None:
+async def test_prediction_snapshot_exports_published_findings_with_exact_evidence(
+    *, postgres_session_factory
+) -> None:
     service, evaluation_repository = _prediction_snapshot_service(
-        await _published_objective_repository()
+        await _published_objective_repository(
+            postgres_session_factory=postgres_session_factory
+        )
     )
 
     snapshot = await service.create_core_snapshot(
@@ -524,7 +501,10 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
         snapshot_id="snapshot-1",
     )
 
-    assert evaluation_repository.snapshot == snapshot
+    assert (
+        await evaluation_repository.read_prediction_snapshot(snapshot.snapshot_id)
+        == snapshot
+    )
     assert snapshot.artifact_counts["published_objective_analyses"] == 1
     assert snapshot.artifact_counts["objective_findings"] == 1
     assert snapshot.artifact_counts["objective_evidence"] == 1
@@ -534,6 +514,7 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
     item = snapshot.items[0]
     assert item.family == "objective_findings"
     assert item.item_key == "obj-1:v1:finding-1"
+    assert item.document_id == "doc-1"
     assert item.payload["analysis_version"] == 1
     assert item.payload["finding_id"] == "finding-1"
     assert item.payload["evidence"][0]["source_excerpt"] == (
@@ -552,14 +533,26 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
     )
 
 
-async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> None:
-    repository = await _published_objective_repository()
+async def test_experiment_projection_drives_snapshot_and_feedback_reads(
+    *, postgres_session_factory
+) -> None:
+    repository = await _published_objective_repository(
+        postgres_session_factory=postgres_session_factory
+    )
     analysis = await repository.read_analysis("col-gold", "obj-1", 1)
     assert analysis is not None
-    repository._analyses[("col-gold", "obj-1", 1)] = replace(
-        analysis,
-        scientific_record_source="experiment_graph",
-    )
+    async with postgres_session_factory.begin() as session:
+        row = await session.scalar(
+            select(ObjectiveAnalysisORM).where(
+                ObjectiveAnalysisORM.collection_id == "col-gold",
+                ObjectiveAnalysisORM.objective_id == "obj-1",
+                ObjectiveAnalysisORM.analysis_version == 1,
+            )
+        )
+        row.payload = {
+            **row.payload,
+            **{"scientific_record_source": "experiment_graph"},
+        }
     finding = await repository.read_finding("col-gold", "obj-1", 1, "finding-1")
     evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
     contributions = await repository.list_contributions("col-gold", "obj-1", 1)
@@ -578,139 +571,184 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> Non
     repository.list_evidence = reject_legacy_read
     repository.list_contributions = reject_legacy_read
 
-    evaluation_repository = FakeEvaluationRepository()
-    snapshot_service = EvaluationPredictionSnapshotService(
-        collection_service=FakeCollectionService(),
-        objective_repository=repository,
-        evaluation_repository=evaluation_repository,
-        experiment_projection=projection,
-    )
-    feedback_service = FindingFeedbackService(
-        review_repository=InMemoryObjectiveReviewRepository(),
-        objective_repository=repository,
-        experiment_projection=projection,
-    )
+    evaluation_repository = EvaluationRepository()
+    prediction_snapshot_service.collection_service = FakeCollectionService()
+    prediction_snapshot_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = prediction_snapshot_service.ObjectiveRepo
+    prediction_snapshot_service.EvaluationRepo = evaluation_repository
+    prediction_snapshot_service.experiment_projection = projection
+    snapshot_service = prediction_snapshot_service
+    finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
+    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_snapshot_service.experiment_projection = projection
+    feedback_service = finding_feedback_service
 
     snapshot = await snapshot_service.create_core_snapshot(
         collection_id="col-gold",
         snapshot_id="experiment-snapshot",
     )
-    dataset = await feedback_service.export_dataset(
-        collection_id="col-gold",
-        objective_id="obj-1",
+    dataset = await finding_dataset_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
     assert snapshot.items[0].payload["finding_id"] == "finding-1"
+    assert snapshot.items[0].document_id == "doc-1"
     assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
 
 
-async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_available() -> None:
-    repository = await _published_objective_repository()
+async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_available(
+    *, postgres_session_factory
+) -> None:
+    repository = await _published_objective_repository(
+        postgres_session_factory=postgres_session_factory
+    )
     source = await repository.read_analysis("col-gold", "obj-1", 1)
     assert source is not None
-    repository._analyses[("col-gold", "obj-1", 1)] = replace(
-        source,
+    from tests.support.postgres import seed_user
+
+    await seed_user(postgres_session_factory, "researcher-1")
+    evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
+    findings, _ = await repository.list_findings("col-gold", "obj-1", 1)
+    contributions = await repository.list_contributions("col-gold", "obj-1", 1)
+    await repository.queue_analysis(
+        "col-gold",
+        "obj-1",
+        document_inputs=source.document_inputs,
+        pipeline_version="test.v1",
+        model_name=None,
+        prompt_versions={},
         origin="human_authored",
-        scientific_record_source="authored_snapshot",
-        source_analysis_version=0,
+        source_analysis_version=1,
         created_by_user_id="researcher-1",
+    )
+    from uuid import uuid4
+
+    queued = await repository.read_analysis("col-gold", "obj-1", 2)
+    async with postgres_session_factory() as db, db.begin():
+        job = await repository.start_authored_analysis(
+            db,
+            queued,
+            user_id="researcher-1",
+            execution_id=f"test-author:{uuid4().hex}",
+        )
+    repository._fixture_jobs[job.analysis.key] = job
+    await repository.publish_analysis(
+        "col-gold",
+        "obj-1",
+        2,
+        contributions=tuple(
+            replace(item, analysis_version=2) for item in contributions
+        ),
+        evidence_records=tuple(replace(item, analysis_version=2) for item in evidence),
+        findings=tuple(replace(item, analysis_version=2) for item in findings),
+        job=analysis_job_fixture(repository, "col-gold", "obj-1", 2),
     )
 
     class RejectingProjection:
-        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_findings(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_evidence(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def read_finding(self, *args, **kwargs):  # noqa: ARG002
+        async def read_analysis_finding(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def list_contributions(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_contributions(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
     snapshot_service, _ = _prediction_snapshot_service(repository)
     snapshot_service.experiment_projection = RejectingProjection()
-    feedback_service = FindingFeedbackService(
-        review_repository=InMemoryObjectiveReviewRepository(),
-        objective_repository=repository,
-        experiment_projection=RejectingProjection(),
-    )
+    finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
+    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
+    finding_snapshot_service.experiment_projection = RejectingProjection()
+    feedback_service = finding_feedback_service
 
     snapshot = await snapshot_service.create_core_snapshot(
         collection_id="col-gold", snapshot_id="authored-snapshot"
     )
-    dataset = await feedback_service.export_dataset(
-        collection_id="col-gold", objective_id="obj-1"
+    dataset = await finding_dataset_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
     assert snapshot.items[0].payload["finding_id"] == "finding-1"
     assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
 
 
-async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-candidate",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["doc-1"],
-            "confidence": 0.9,
-            "source_relationship_ids": [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID],
-            "rank": 1,
-        }
+async def test_prediction_snapshot_rejects_unconfirmed_objective(
+    *, postgres_session_factory
+) -> None:
+    objective = ResearchObjective(
+        collection_id="col-gold",
+        objective_id="obj-candidate",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        source_relationship_ids=normalize_objective_terms(
+            [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID]
+        ),
+        rank=1,
     )
-    skim = PaperResearchMap.from_mapping(
-        {
-            "document_id": "doc-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": list(objective.material_scope),
-                    "relationships": [
-                        {
-                            "relationship_id": (
-                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+    skim = PaperResearchMap(
+        document_id="doc-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=_TEMPERATURE_STRENGTH_STUDY_ID,
+                document_id="doc-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=objective.material_scope,
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        varied_factors=objective.variables,
+                        outcome=objective.outcomes[0],
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-7"
                             ),
-                            "varied_factors": list(objective.variables),
-                            "outcome": objective.outcomes[0],
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-7",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.9,
+        warnings=(),
     )
-    repository = MemoryObjectiveRepository.from_facts(
+    repository = ObjectiveRepository()
+    await repository.replace(
         "col-gold",
         ObjectiveFactSet(
             research_objectives_ready=True,
             document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": "doc-1",
-                        "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                        "relationship_id": _TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
-                        "status": "promoted",
-                        "objective_id": objective.objective_id,
-                    }
+                PaperStudyDisposition(
+                    document_id="doc-1",
+                    study_id=_TEMPERATURE_STRENGTH_STUDY_ID or "",
+                    relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID or "",
+                    status=PaperStudyDispositionStatus("promoted"),
+                    objective_id=objective.objective_id,
                 ),
             ),
         ),
@@ -724,10 +762,14 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
         )
 
 
-async def test_finding_feedback_rejects_stale_analysis_version() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_feedback_rejects_stale_analysis_version(
+    *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
 
-    with pytest.raises(ValueError, match="published analysis version"):
+    with pytest.raises(ResourceConflictException, match="published analysis version"):
         await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
@@ -735,13 +777,20 @@ async def test_finding_feedback_rejects_stale_analysis_version() -> None:
             finding_id="finding-1",
             review_status="correct",
             issue_type="none",
+            user_id="user-1",
         )
 
 
-async def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_feedback_rejects_inconsistent_review_decisions(
+    *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
 
-    with pytest.raises(ValueError, match="correct finding feedback cannot report"):
+    with pytest.raises(
+        RequestInvalidException, match="correct finding feedback cannot report"
+    ):
         await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
@@ -749,8 +798,11 @@ async def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
             finding_id="finding-1",
             review_status="correct",
             issue_type="evidence_not_grounded",
+            user_id="user-1",
         )
-    with pytest.raises(ValueError, match="partial finding feedback requires an issue"):
+    with pytest.raises(
+        RequestInvalidException, match="partial finding feedback requires an issue"
+    ):
         await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
@@ -758,65 +810,201 @@ async def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
             finding_id="finding-1",
             review_status="partial",
             issue_type="none",
+            user_id="user-1",
         )
 
 
-async def test_finding_review_rejects_unknown_status_values() -> None:
-    service = await _finding_feedback_service()
-    published = await service.objective_repository.read_finding(
-        "col-gold", "obj-1", 1, "finding-1"
+def test_review_input_rejects_unknown_status_values() -> None:
+    from controllers.core.finding_review_routes import (
+        FindingCurationCreateRequest,
+        FindingFeedbackCreateRequest,
     )
-    assert published is not None
+    from pydantic import ValidationError
 
-    with pytest.raises(ValueError, match="unsupported finding review status"):
-        await service.record_feedback(
-            collection_id="col-gold",
-            objective_id="obj-1",
+    with pytest.raises(ValidationError, match="review_status"):
+        FindingFeedbackCreateRequest(analysis_version=1, review_status="bogus")
+    with pytest.raises(ValidationError, match="curated_status"):
+        FindingCurationCreateRequest(
             analysis_version=1,
-            finding_id="finding-1",
-            review_status="bogus",
-            issue_type="none",
-        )
-    with pytest.raises(ValueError, match="unsupported finding curation status"):
-        await service.record_curation(
-            collection_id="col-gold",
-            objective_id="obj-1",
-            analysis_version=1,
-            finding_id="finding-1",
             curated_status="bogus",
-            curated_finding=published.to_record(),
+            curated_finding={},
         )
 
 
-async def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
-    service = await _finding_feedback_service()
-    published = await service.objective_repository.read_finding(
+async def test_finding_curation_rejects_evidence_outside_published_finding(
+    *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
+    published = await finding_snapshot_service.ObjectiveRepo.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
-    curated = published.to_record()
+    curated = {
+        "collection_id": published.collection_id,
+        "objective_id": published.objective_id,
+        "analysis_version": published.analysis_version,
+        "finding_id": published.finding_id,
+        "statement": published.statement,
+        "factors": list(published.factors),
+        "outcome": published.outcome,
+        "direction": published.direction,
+        "assertion_strength": published.assertion_strength,
+        "attribution_scope": published.attribution_scope,
+        "synthesis_status": published.synthesis_status,
+        "certainty": published.certainty,
+        "display_rank": published.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in published.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.test
+            ],
+        },
+        "limitations": list(published.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in published.paper_contributions
+        ],
+        "origin": published.origin,
+        "source_analysis_version": published.source_analysis_version,
+        "parent_finding_id": published.parent_finding_id,
+        "created_by_user_id": published.created_by_user_id,
+        "created_by_tool_call_id": published.created_by_tool_call_id,
+        "created_at": (
+            published.created_at.isoformat() if published.created_at else None
+        ),
+        **(
+            {"selection_ids": list(published.selection_ids)}
+            if published.selection_ids
+            else {}
+        ),
+        **(
+            {"comparison_group_ids": list(published.comparison_group_ids)}
+            if published.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(published.warnings)} if published.warnings else {}),
+    }
     curated["paper_contributions"][0]["supporting_evidence_ids"] = ["evidence-outside"]
 
-    with pytest.raises(ValueError, match="references missing evidence"):
+    with pytest.raises(RequestInvalidException, match="references missing evidence"):
         await service.record_curation(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=1,
             finding_id="finding-1",
             curated_status="limited",
-            curated_finding=curated,
+            curated_finding=parse_curated_finding(curated),
+            user_id="user-1",
         )
 
 
-async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
-    service = await _finding_feedback_service()
+async def test_latest_feedback_or_curation_controls_dataset_status(
+    *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
     candidate = (
-        await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
+        await finding_dataset_service.export_dataset(
+            collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+        )
     )["items"][0]
     assert candidate["dataset_use_status"] == "review_candidate"
     assert candidate["training_messages"] == []
 
-    published = await service.objective_repository.read_finding(
+    published = await finding_snapshot_service.ObjectiveRepo.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
@@ -826,59 +1014,201 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         "analysis_version": 1,
         "finding_id": "finding-1",
     }
-    await service.review_repository.upsert_curation(
-        FindingCuration.from_mapping(
-            {
-                "curation_id": "curation-1",
-                **identity,
-                "curated_status": "limited",
-                "curated_finding": published.to_record(),
-                "updated_at": "2026-08-02T10:00:00+00:00",
-            }
+    await service.FindingReviewRepo.upsert_curation(
+        FindingCuration(
+            curation_id="curation-1",
+            **identity,
+            curated_status="limited",
+            curated_finding=published,
+            updated_at="2026-08-02T10:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
-    await service.review_repository.upsert_feedback(
-        FindingFeedback.from_mapping(
-            {
-                "feedback_id": "feedback-1",
-                **identity,
-                "review_status": "incorrect",
-                "issue_type": "overclaim",
-                "created_at": "2026-08-02T11:00:00+00:00",
-            }
+    await service.FindingReviewRepo.upsert_feedback(
+        FindingFeedback(
+            feedback_id="feedback-1",
+            **identity,
+            review_status="incorrect",
+            issue_type="overclaim",
+            created_at="2026-08-02T11:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
 
     rejected = (
-        await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
+        await finding_dataset_service.export_dataset(
+            collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+        )
     )["items"][0]
     assert rejected["label_status"] == "rejected"
     assert rejected["dataset_use_status"] == "rejected"
     assert rejected["expert_target"] is None
     assert rejected["training_messages"] == []
 
-    await service.review_repository.upsert_curation(
-        FindingCuration.from_mapping(
-            {
-                "curation_id": "curation-1",
-                **identity,
-                "curated_status": "limited",
-                "curated_finding": published.to_record(),
-                "updated_at": "2026-08-02T12:00:00+00:00",
-            }
+    await service.FindingReviewRepo.upsert_curation(
+        FindingCuration(
+            curation_id="curation-1",
+            **identity,
+            curated_status="limited",
+            curated_finding=published,
+            updated_at="2026-08-02T12:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
 
     curated = (
-        await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
+        await finding_dataset_service.export_dataset(
+            collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+        )
     )["items"][0]
     assert curated["label_status"] == "gold"
     assert curated["dataset_use_status"] == "training_ready"
-    assert curated["expert_target"] == published.to_record()
+    assert curated["expert_target"] == {
+        "collection_id": published.collection_id,
+        "objective_id": published.objective_id,
+        "analysis_version": published.analysis_version,
+        "finding_id": published.finding_id,
+        "statement": published.statement,
+        "factors": list(published.factors),
+        "outcome": published.outcome,
+        "direction": published.direction,
+        "assertion_strength": published.assertion_strength,
+        "attribution_scope": published.attribution_scope,
+        "synthesis_status": published.synthesis_status,
+        "certainty": published.certainty,
+        "display_rank": published.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in published.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.test
+            ],
+        },
+        "limitations": list(published.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in published.paper_contributions
+        ],
+        "origin": published.origin,
+        "source_analysis_version": published.source_analysis_version,
+        "parent_finding_id": published.parent_finding_id,
+        "created_by_user_id": published.created_by_user_id,
+        "created_by_tool_call_id": published.created_by_tool_call_id,
+        "created_at": (
+            published.created_at.isoformat() if published.created_at else None
+        ),
+        **(
+            {"selection_ids": list(published.selection_ids)}
+            if published.selection_ids
+            else {}
+        ),
+        **(
+            {"comparison_group_ids": list(published.comparison_group_ids)}
+            if published.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(published.warnings)} if published.warnings else {}),
+    }
 
 
-async def test_finding_feedback_export_contains_exact_source_text() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_feedback_export_contains_exact_source_text(
+    *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
     await service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -887,11 +1217,11 @@ async def test_finding_feedback_export_contains_exact_source_text() -> None:
         review_status="correct",
         issue_type="none",
         reviewer="expert-1",
+        user_id="user-1",
     )
 
-    dataset = await service.export_dataset(
-        collection_id="col-gold",
-        objective_id="obj-1",
+    dataset = await finding_dataset_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1", user_id="user-1"
     )
 
     assert len(dataset["items"]) == 1
@@ -921,10 +1251,11 @@ async def test_finding_feedback_export_contains_exact_source_text() -> None:
     ],
 )
 async def test_finding_source_snapshot_detects_each_stale_dimension(
-    snapshot_change: dict,
-    expected_reason: str,
+    snapshot_change: dict, expected_reason: str, *, postgres_session_factory
 ) -> None:
-    service = await _finding_feedback_service()
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
     await service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -932,11 +1263,13 @@ async def test_finding_source_snapshot_detects_each_stale_dimension(
         finding_id="finding-1",
         review_status="correct",
         issue_type="none",
+        user_id="user-1",
     )
-    item = (await service.export_dataset(
-        collection_id="col-gold",
-        objective_id="obj-1",
-    ))["items"][0]
+    item = (
+        await finding_dataset_service.export_dataset(
+            collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+        )
+    )["items"][0]
     source_finding = {
         "finding_id": item["finding_id"],
         "analysis_version": item["analysis_version"],
@@ -946,7 +1279,7 @@ async def test_finding_source_snapshot_detects_each_stale_dimension(
         **snapshot_change,
     }
 
-    validity, reasons = await service.source_snapshot_validity(
+    validity, reasons = await finding_snapshot_service.source_snapshot_validity(
         collection_id="col-gold",
         objective_id="obj-1",
         source_findings=[source_finding],
@@ -956,10 +1289,14 @@ async def test_finding_source_snapshot_detects_each_stale_dimension(
     assert reasons == [expected_reason]
 
 
-async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable(
+    *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
 
-    validity, reasons = await service.source_snapshot_validity(
+    validity, reasons = await finding_snapshot_service.source_snapshot_validity(
         collection_id="missing-collection",
         objective_id="missing-objective",
         source_findings=[{"finding_id": "finding-1"}],
@@ -969,16 +1306,21 @@ async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() ->
     assert reasons == ["source_dataset_unavailable"]
 
 
-async def test_only_training_ready_samples_include_training_messages() -> None:
-    candidate_service = await _finding_feedback_service()
-    candidate = (await candidate_service.export_dataset(
-        collection_id="col-gold",
-        objective_id="obj-1",
-    ))["items"][0]
+async def test_only_training_ready_samples_include_training_messages(
+    *, postgres_session_factory
+) -> None:
+    candidate_service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
+    candidate = (
+        await finding_dataset_service.export_dataset(
+            collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+        )
+    )["items"][0]
     assert candidate["dataset_use_status"] == "review_candidate"
     assert candidate["training_messages"] == []
 
-    rejected_service = await _finding_feedback_service()
+    rejected_service = candidate_service
     await rejected_service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -986,10 +1328,703 @@ async def test_only_training_ready_samples_include_training_messages() -> None:
         finding_id="finding-1",
         review_status="incorrect",
         issue_type="overclaim",
+        user_id="user-1",
     )
-    rejected = (await rejected_service.export_dataset(
-        collection_id="col-gold",
-        objective_id="obj-1",
-    ))["items"][0]
+    rejected = (
+        await finding_dataset_service.export_dataset(
+            collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+        )
+    )["items"][0]
     assert rejected["dataset_use_status"] == "rejected"
     assert rejected["training_messages"] == []
+
+
+@pytest.mark.parametrize("entry", ("service", "agent"))
+async def test_typed_curation_preserves_published_finding_and_exports_expert_target(
+    entry,
+    *,
+    postgres_session_factory,
+) -> None:
+    service = await _finding_feedback_service(
+        postgres_session_factory=postgres_session_factory
+    )
+    published = await finding_snapshot_service.ObjectiveRepo.read_finding(
+        "col-gold", "obj-1", 1, "finding-1"
+    )
+    assert published is not None
+    candidate = replace(
+        published,
+        limitations=(
+            *published.limitations,
+            "Expert review retains the original experiment scope.",
+        ),
+    )
+
+    if entry == "service":
+        curation = await service.record_curation(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            curated_status="limited",
+            curated_finding=candidate,
+            reviewer="expert-1",
+            user_id="user-1",
+        )
+        assert curation.curated_finding == candidate
+    else:
+        arguments = CurateFindingToolRequest(
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            curated_status="limited",
+            curated_finding={
+                "collection_id": candidate.collection_id,
+                "objective_id": candidate.objective_id,
+                "analysis_version": candidate.analysis_version,
+                "finding_id": candidate.finding_id,
+                "statement": candidate.statement,
+                "factors": list(candidate.factors),
+                "outcome": candidate.outcome,
+                "direction": candidate.direction,
+                "assertion_strength": candidate.assertion_strength,
+                "attribution_scope": candidate.attribution_scope,
+                "synthesis_status": candidate.synthesis_status,
+                "certainty": candidate.certainty,
+                "display_rank": candidate.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in candidate.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in candidate.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in candidate.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in candidate.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in candidate.scientific_context.test
+                    ],
+                },
+                "limitations": list(candidate.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in candidate.paper_contributions
+                ],
+                "origin": candidate.origin,
+                "source_analysis_version": candidate.source_analysis_version,
+                "parent_finding_id": candidate.parent_finding_id,
+                "created_by_user_id": candidate.created_by_user_id,
+                "created_by_tool_call_id": candidate.created_by_tool_call_id,
+                "created_at": (
+                    candidate.created_at.isoformat() if candidate.created_at else None
+                ),
+                **(
+                    {"selection_ids": list(candidate.selection_ids)}
+                    if candidate.selection_ids
+                    else {}
+                ),
+                **(
+                    {"comparison_group_ids": list(candidate.comparison_group_ids)}
+                    if candidate.comparison_group_ids
+                    else {}
+                ),
+                **(
+                    {"warnings": list(candidate.warnings)} if candidate.warnings else {}
+                ),
+            },
+        )
+        collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+        finding_review.collection_service = collection_service
+        finding_review.finding_feedback_service = service
+        result = await CurateFindingCapability().execute(
+            CapabilityExecutionContext(
+                session_id="review-session",
+                user_id="user-1",
+                collection_id="col-gold",
+                tool_call_id="curate-1",
+            ),
+            arguments,
+        )
+        collection_service.get_collection_for_user.assert_awaited_once_with(
+            "col-gold", "user-1"
+        )
+        assert result.data["curated_finding"] == {
+            "collection_id": candidate.collection_id,
+            "objective_id": candidate.objective_id,
+            "analysis_version": candidate.analysis_version,
+            "finding_id": candidate.finding_id,
+            "statement": candidate.statement,
+            "factors": list(candidate.factors),
+            "outcome": candidate.outcome,
+            "direction": candidate.direction,
+            "assertion_strength": candidate.assertion_strength,
+            "attribution_scope": candidate.attribution_scope,
+            "synthesis_status": candidate.synthesis_status,
+            "certainty": candidate.certainty,
+            "display_rank": candidate.display_rank,
+            "mechanisms": [
+                {
+                    "source_term": mechanism.source_term,
+                    "relation_type": mechanism.relation_type,
+                    "target_term": mechanism.target_term,
+                    "direction": mechanism.direction,
+                    "assertion_strength": mechanism.assertion_strength,
+                    "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+                }
+                for mechanism in candidate.mechanisms
+            ],
+            "scientific_context": {
+                "material": [
+                    {
+                        "name": attribute.name,
+                        "value": attribute.value,
+                        "unit": attribute.unit,
+                        **(
+                            {"context_scope": attribute.context_scope}
+                            if attribute.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                            if attribute.applies_to_outcomes
+                            else {}
+                        ),
+                    }
+                    for attribute in candidate.scientific_context.material
+                ],
+                "sample": [
+                    {
+                        "name": attribute.name,
+                        "value": attribute.value,
+                        "unit": attribute.unit,
+                        **(
+                            {"context_scope": attribute.context_scope}
+                            if attribute.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                            if attribute.applies_to_outcomes
+                            else {}
+                        ),
+                    }
+                    for attribute in candidate.scientific_context.sample
+                ],
+                "process": [
+                    {
+                        "name": attribute.name,
+                        "value": attribute.value,
+                        "unit": attribute.unit,
+                        **(
+                            {"context_scope": attribute.context_scope}
+                            if attribute.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                            if attribute.applies_to_outcomes
+                            else {}
+                        ),
+                    }
+                    for attribute in candidate.scientific_context.process
+                ],
+                "test": [
+                    {
+                        "name": attribute.name,
+                        "value": attribute.value,
+                        "unit": attribute.unit,
+                        **(
+                            {"context_scope": attribute.context_scope}
+                            if attribute.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                            if attribute.applies_to_outcomes
+                            else {}
+                        ),
+                    }
+                    for attribute in candidate.scientific_context.test
+                ],
+            },
+            "limitations": list(candidate.limitations),
+            "paper_contributions": [
+                {
+                    "document_id": contribution.document_id,
+                    "analysis_status": contribution.analysis_status,
+                    "supporting_evidence_ids": list(
+                        contribution.supporting_evidence_ids
+                    ),
+                    "contradicting_evidence_ids": list(
+                        contribution.contradicting_evidence_ids
+                    ),
+                    "context_evidence_ids": list(contribution.context_evidence_ids),
+                    "condition_boundary_evidence_ids": list(
+                        contribution.condition_boundary_evidence_ids
+                    ),
+                }
+                for contribution in candidate.paper_contributions
+            ],
+            "origin": candidate.origin,
+            "source_analysis_version": candidate.source_analysis_version,
+            "parent_finding_id": candidate.parent_finding_id,
+            "created_by_user_id": candidate.created_by_user_id,
+            "created_by_tool_call_id": candidate.created_by_tool_call_id,
+            "created_at": (
+                candidate.created_at.isoformat() if candidate.created_at else None
+            ),
+            **(
+                {"selection_ids": list(candidate.selection_ids)}
+                if candidate.selection_ids
+                else {}
+            ),
+            **(
+                {"comparison_group_ids": list(candidate.comparison_group_ids)}
+                if candidate.comparison_group_ids
+                else {}
+            ),
+            **({"warnings": list(candidate.warnings)} if candidate.warnings else {}),
+        }
+        (curation,) = await service.FindingReviewRepo.list_curations(
+            "col-gold", "obj-1", 1, "finding-1"
+        )
+        assert curation.curated_finding == arguments._parsed_finding
+    dataset = await finding_dataset_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+    )
+
+    assert (
+        await finding_snapshot_service.ObjectiveRepo.read_finding("col-gold", "obj-1", 1, "finding-1")
+        == published
+    )
+    assert dataset["items"][0]["expert_target"] == {
+        "collection_id": candidate.collection_id,
+        "objective_id": candidate.objective_id,
+        "analysis_version": candidate.analysis_version,
+        "finding_id": candidate.finding_id,
+        "statement": candidate.statement,
+        "factors": list(candidate.factors),
+        "outcome": candidate.outcome,
+        "direction": candidate.direction,
+        "assertion_strength": candidate.assertion_strength,
+        "attribution_scope": candidate.attribution_scope,
+        "synthesis_status": candidate.synthesis_status,
+        "certainty": candidate.certainty,
+        "display_rank": candidate.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in candidate.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in candidate.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in candidate.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in candidate.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in candidate.scientific_context.test
+            ],
+        },
+        "limitations": list(candidate.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in candidate.paper_contributions
+        ],
+        "origin": candidate.origin,
+        "source_analysis_version": candidate.source_analysis_version,
+        "parent_finding_id": candidate.parent_finding_id,
+        "created_by_user_id": candidate.created_by_user_id,
+        "created_by_tool_call_id": candidate.created_by_tool_call_id,
+        "created_at": (
+            candidate.created_at.isoformat() if candidate.created_at else None
+        ),
+        **(
+            {"selection_ids": list(candidate.selection_ids)}
+            if candidate.selection_ids
+            else {}
+        ),
+        **(
+            {"comparison_group_ids": list(candidate.comparison_group_ids)}
+            if candidate.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(candidate.warnings)} if candidate.warnings else {}),
+    }
+    assert dataset["items"][0]["system_prediction"] == {
+        "collection_id": published.collection_id,
+        "objective_id": published.objective_id,
+        "analysis_version": published.analysis_version,
+        "finding_id": published.finding_id,
+        "statement": published.statement,
+        "factors": list(published.factors),
+        "outcome": published.outcome,
+        "direction": published.direction,
+        "assertion_strength": published.assertion_strength,
+        "attribution_scope": published.attribution_scope,
+        "synthesis_status": published.synthesis_status,
+        "certainty": published.certainty,
+        "display_rank": published.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in published.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in published.scientific_context.test
+            ],
+        },
+        "limitations": list(published.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in published.paper_contributions
+        ],
+        "origin": published.origin,
+        "source_analysis_version": published.source_analysis_version,
+        "parent_finding_id": published.parent_finding_id,
+        "created_by_user_id": published.created_by_user_id,
+        "created_by_tool_call_id": published.created_by_tool_call_id,
+        "created_at": (
+            published.created_at.isoformat() if published.created_at else None
+        ),
+        **(
+            {"selection_ids": list(published.selection_ids)}
+            if published.selection_ids
+            else {}
+        ),
+        **(
+            {"comparison_group_ids": list(published.comparison_group_ids)}
+            if published.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(published.warnings)} if published.warnings else {}),
+    }
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col-gold", document_ids=("doc-1",))
+    text = "At 500 C, tensile strength increased to 620 MPa."
+    await SourceArtifactRepository().replace_document(
+        "col-gold",
+        SourceDocument(
+            document_id="doc-1",
+            document_order=0,
+            title="Temperature and strength",
+            text=text,
+            blocks=(
+                SourceBlock(
+                    block_id="block-7",
+                    document_id="doc-1",
+                    block_type="paragraph",
+                    text=text,
+                    block_order=0,
+                    page=7,
+                ),
+            ),
+        ),
+    )
+
+
+async def test_plan_snapshot_check_reads_only_referenced_finding_without_training(
+    monkeypatch, *, postgres_session_factory
+) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
+    await service.record_feedback(
+        collection_id="col-gold", objective_id="obj-1", analysis_version=1,
+        finding_id="finding-1", review_status="correct", issue_type="none", user_id="user-1",
+    )
+    dataset = await finding_dataset_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1", user_id="user-1"
+    )
+    item = dataset["items"][0]
+    snapshot = {
+        key: item[key] for key in (
+            "finding_id", "analysis_version", "finding_fingerprint", "evidence_fingerprint"
+        )
+    }
+    snapshot["evidence_ids"] = [entry["evidence_id"] for entry in item["evidence"]]
+    def unexpected_export(*args, **kwargs):
+        raise AssertionError("Plan source validation must not enumerate or format a training dataset")
+    monkeypatch.setattr(finding_snapshot_service, "_all_findings", unexpected_export)
+    monkeypatch.setattr(finding_dataset_service, "_training_messages", unexpected_export)
+    read = AsyncMock(wraps=finding_snapshot_service.ObjectiveRepo.read_finding)
+    monkeypatch.setattr(finding_snapshot_service.ObjectiveRepo, "read_finding", read)
+
+    assert await finding_snapshot_service.source_snapshot_validity(
+        collection_id="col-gold", objective_id="obj-1", source_findings=[snapshot, snapshot]
+    ) == ("current", [])
+    read.assert_awaited_once_with("col-gold", "obj-1", 1, "finding-1")

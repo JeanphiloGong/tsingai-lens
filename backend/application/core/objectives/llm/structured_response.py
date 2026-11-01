@@ -16,6 +16,7 @@ from openai.lib._pydantic import to_strict_json_schema
 from pydantic import BaseModel, ValidationError
 
 from application.core.structured_extraction.json_support import (
+    StructuredOutputError,
     coerce_message_content,
     extract_json_object,
     load_json_payload,
@@ -196,7 +197,7 @@ class StructuredResponseClient:
                     trace_extraction_mode = (
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
                     )
-                except Exception as exc:
+                except (StructuredOutputError, ValidationError, json.JSONDecodeError) as exc:
                     if on_validation_error is not None:
                         on_validation_error(exc)
                     logger.warning(
@@ -384,44 +385,42 @@ class StructuredResponseClient:
                     self.model,
                     response_model.__name__,
                 )
+            raw_content = ""
+            finish_reason: str | None = None
+            request_client = self.client
+            if before_request is not None:
+                request_client = self.client.with_options(
+                    timeout=before_request(), max_retries=0,
+                )
             try:
-                raw_content = ""
-                finish_reason: str | None = None
-                request_client = self.client
-                if before_request is not None:
-                    timeout = before_request()
-                    if callable(getattr(request_client, "with_options", None)):
-                        request_client = request_client.with_options(
-                            timeout=timeout, max_retries=0,
-                        )
-                try:
-                    completion = request_client.chat.completions.create(**attempt_kwargs)
-                except Exception as exc:
-                    record_llm_completion(
-                        getattr(exc, "completion", None),
-                        requested_model=self.model,
+                completion = request_client.chat.completions.create(**attempt_kwargs)
+            except Exception as exc:
+                record_llm_completion(
+                    getattr(exc, "completion", None),
+                    requested_model=self.model,
+                )
+                completion = getattr(exc, "completion", None)
+                choice = (
+                    completion.choices[0]
+                    if completion is not None
+                    and getattr(completion, "choices", None)
+                    else None
+                )
+                raw_content = coerce_message_content(
+                    getattr(getattr(choice, "message", None), "content", None)
+                )
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=self._finish_reason_from_exception(exc),
+                        raw_content=raw_content,
+                        error=exc,
                     )
-                    completion = getattr(exc, "completion", None)
-                    choice = (
-                        completion.choices[0]
-                        if completion is not None
-                        and getattr(completion, "choices", None)
-                        else None
-                    )
-                    raw_content = coerce_message_content(
-                        getattr(getattr(choice, "message", None), "content", None)
-                    )
-                    attempts.append(
-                        self._build_attempt_trace(
-                            attempt=attempt + 1,
-                            finish_reason=self._finish_reason_from_exception(exc),
-                            raw_content=raw_content,
-                            error=exc,
-                        )
-                    )
-                    self._last_attempts.set(tuple(attempts))
-                    raise
-                record_llm_completion(completion, requested_model=self.model)
+                )
+                self._last_attempts.set(tuple(attempts))
+                raise
+            record_llm_completion(completion, requested_model=self.model)
+            try:
                 choice = completion.choices[0] if completion.choices else None
                 finish_reason = (
                     str(getattr(choice, "finish_reason", "") or "").strip() or None
@@ -429,6 +428,8 @@ class StructuredResponseClient:
                 raw_content = coerce_message_content(
                     choice.message.content if choice is not None else None
                 )
+                if choice is not None and getattr(choice.message, "refusal", None):
+                    raise RuntimeError("The provider refused the structured extraction request")
                 if (
                     fail_on_output_saturation
                     and finish_reason == "length"
@@ -437,33 +438,30 @@ class StructuredResponseClient:
                         "PaperResearchMap JSON output reached the completion-token limit"
                     )
                 if not raw_content:
-                    raise RuntimeError(
+                    raise StructuredOutputError(
                         "structured extraction returned empty response content"
                     )
-                payload = load_json_payload(extract_json_object(raw_content))
+                try:
+                    json_text = extract_json_object(raw_content)
+                except RuntimeError as exc:
+                    raise StructuredOutputError(str(exc)) from exc
+                payload = load_json_payload(json_text)
                 if normalize_response_payload is not None:
                     payload = normalize_response_payload(payload)
-                try:
-                    parsed = self._validate_response_payload(
-                        payload,
-                        response_model=response_model,
-                        postprocess_response=postprocess_response,
+                parsed = response_model.model_validate(payload)
+                if postprocess_response is not None:
+                    processed = postprocess_response(parsed)
+                    if processed is not None:
+                        parsed = processed
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=finish_reason,
+                        raw_content=raw_content,
                     )
-                    attempts.append(
-                        self._build_attempt_trace(
-                            attempt=attempt + 1,
-                            finish_reason=finish_reason,
-                            raw_content=raw_content,
-                        )
-                    )
-                    self._last_attempts.set(tuple(attempts))
-                    return parsed, raw_content
-                except ValidationError:
-                    if isinstance(payload, dict):
-                        extra_keys = set(payload) - set(response_model.model_fields)
-                        if extra_keys - {"confidence"}:
-                            raise
-                    raise
+                )
+                self._last_attempts.set(tuple(attempts))
+                return parsed, raw_content
             except StructuredOutputSaturatedError as exc:
                 attempts.append(
                     self._build_attempt_trace(
@@ -475,12 +473,7 @@ class StructuredResponseClient:
                 )
                 self._last_attempts.set(tuple(attempts))
                 raise
-            except (
-                RuntimeError,
-                ValueError,
-                ValidationError,
-                json.JSONDecodeError,
-            ) as exc:
+            except (StructuredOutputError, ValidationError, json.JSONDecodeError) as exc:
                 if on_validation_error is not None:
                     on_validation_error(exc)
                 attempts.append(
@@ -524,36 +517,6 @@ class StructuredResponseClient:
             f"{repair_detail}"
         )
 
-    @staticmethod
-    def _validate_response_payload(
-        payload: Any,
-        *,
-        response_model: type[BaseModel],
-        postprocess_response: Callable[[BaseModel], BaseModel | None] | None,
-    ) -> BaseModel:
-        def postprocess(parsed: BaseModel) -> BaseModel:
-            if postprocess_response is None:
-                return parsed
-            processed = postprocess_response(parsed)
-            return processed if processed is not None else parsed
-
-        try:
-            return postprocess(response_model.model_validate(payload))
-        except ValidationError:
-            if not isinstance(payload, dict):
-                raise
-            extra_keys = set(payload) - set(response_model.model_fields)
-            if extra_keys - {"confidence"}:
-                raise
-            filtered_payload = {
-                key: value
-                for key, value in payload.items()
-                if key in response_model.model_fields
-            }
-            if filtered_payload == payload:
-                raise
-            return postprocess(response_model.model_validate(filtered_payload))
-
     def _parse_provider_structured_response(
         self,
         *,
@@ -573,11 +536,9 @@ class StructuredResponseClient:
             request_kwargs["max_completion_tokens"] = max_completion_tokens
         request_client = self.client
         if before_request is not None:
-            timeout = before_request()
-            if callable(getattr(request_client, "with_options", None)):
-                request_client = request_client.with_options(
-                    timeout=timeout, max_retries=0,
-                )
+            request_client = self.client.with_options(
+                timeout=before_request(), max_retries=0,
+            )
         try:
             completion = request_client.beta.chat.completions.parse(**request_kwargs)
         except Exception as exc:
@@ -588,12 +549,14 @@ class StructuredResponseClient:
             raise
         record_llm_completion(completion, requested_model=self.model)
         if not completion.choices:
-            raise RuntimeError("structured extraction returned no completion choices")
+            raise StructuredOutputError("structured extraction returned no completion choices")
         message = completion.choices[0].message
         parsed = getattr(message, "parsed", None)
+        if getattr(message, "refusal", None):
+            raise RuntimeError("The provider refused the structured extraction request")
         if parsed is None:
             raw_content = coerce_message_content(getattr(message, "content", None))
-            raise RuntimeError(
+            raise StructuredOutputError(
                 "structured extraction returned no parsed response content"
                 + (f": {raw_content[:500]}" if raw_content else "")
             )

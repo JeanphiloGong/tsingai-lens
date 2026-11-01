@@ -4,13 +4,23 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-
+from application.core.objectives import (
+    objective_analysis_service as experiment_analysis_service,
+)
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveExperimentAnalysisService,
     ObjectiveScopeNotReadyError,
 )
 from application.core.objectives.scope_screening import screen_objective_scope
 from domain.core import PaperResearchMap, ResearchObjective
+from domain.core.research_objective import (
+    PaperResearchRelationship,
+    PaperResearchScope,
+    PaperResearchSourceRef,
+    ResearchObjective,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
+    normalize_objective_terms,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -20,18 +30,23 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _objective(*, seed_document_ids: tuple[str, ...] = ("paper-seed",)) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "question": "How does laser power affect elongation?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["elongation"],
-            "seed_document_ids": list(seed_document_ids),
-            "confidence": 0.8,
-        }
+def _objective(
+    *, seed_document_ids: tuple[str, ...] = ("paper-seed",)
+) -> ResearchObjective:
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id="obj-1",
+        question="How does laser power affect elongation?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=normalize_objective_terms(list(seed_document_ids)),
+        excluded_document_ids=(),
+        confidence=0.8,
+        reason=None,
     )
 
 
@@ -45,37 +60,44 @@ def _experimental_map(
 ) -> PaperResearchMap:
     studies = []
     if map_status == "sufficient":
-        studies = [
-            {
-                "study_id": f"study-{document_id}",
-                "design_type": "experimental",
-                "claim_scope": "current_work",
-                "material_scope": [material],
-                "relationships": [
-                    {
-                        "relationship_id": f"rel-{document_id}",
-                        "varied_factors": [factor],
-                        "outcome": outcome,
-                        "source_refs": [
-                            {"source_kind": "block", "source_ref": "block-1"}
-                        ],
-                        "confidence": 0.8,
-                    }
-                ],
-            }
-        ]
-    return PaperResearchMap.from_mapping(
-        {
-            "document_id": document_id,
-            "doc_role": "experimental",
-            "studies": studies,
-            "map_status": map_status,
-            "map_limitations": (
-                ["High-level Sources did not establish the target outcome."]
-                if map_status != "sufficient"
-                else []
+        studies = (
+            PaperResearchScope(
+                study_id=f"study-{document_id}",
+                document_id=document_id,
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(material,),
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=f"rel-{document_id}",
+                        varied_factors=(factor,),
+                        outcome=outcome,
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-1"
+                            ),
+                        ),
+                        confidence=0.8,
+                    ),
+                ),
+                confidence=0.0,
             ),
-        }
+        )
+    return PaperResearchMap(
+        document_id=document_id,
+        doc_role="experimental",
+        studies=tuple(studies),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        map_status=map_status,
+        map_limitations=tuple(
+            ["High-level Sources did not establish the target outcome."]
+            if map_status != "sufficient"
+            else []
+        ),
     )
 
 
@@ -123,7 +145,9 @@ def test_specific_material_conflict_is_confidently_out_of_scope() -> None:
     assert preview.decisions[0].reason == "material_scope_conflict"
 
 
-def test_unregistered_material_identity_requires_inspection_instead_of_exclusion() -> None:
+def test_unregistered_material_identity_requires_inspection_instead_of_exclusion() -> (
+    None
+):
     preview = screen_objective_scope(
         (
             _experimental_map(
@@ -157,27 +181,37 @@ def test_scope_preview_does_not_truncate_a_131_paper_collection() -> None:
     assert len(set(item.document_id for item in preview.decisions)) == 131
 
 
-def test_review_citation_lead_is_navigation_for_inspection_not_recommended_scope() -> None:
-    review = PaperResearchMap.from_mapping(
-        {
-            "document_id": "review-1",
-            "doc_role": "review",
-            "map_status": "sufficient",
-            "review_synthesis": {
-                "citation_leads": [
-                    {
-                        "content": "Smith et al. varied laser power and measured elongation.",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "variables": ["laser power"],
-                        "outcomes": ["elongation"],
-                        "source_refs": [
-                            {"source_kind": "block", "source_ref": "block-9"}
-                        ],
-                        "confidence": 0.9,
-                    }
-                ]
-            },
-        }
+def test_review_citation_lead_is_navigation_for_inspection_not_recommended_scope() -> (
+    None
+):
+    review = PaperResearchMap(
+        document_id="review-1",
+        doc_role="review",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        map_status="sufficient",
+        review_synthesis=ReviewSynthesisMap(
+            synthesis_claims=(),
+            disputes=(),
+            evidence_gaps=(),
+            citation_leads=(
+                ReviewKnowledgeItem(
+                    content="Smith et al. varied laser power and measured elongation.",
+                    material_scope=("Ti-6Al-4V",),
+                    variables=("laser power",),
+                    outcomes=("elongation",),
+                    conditions=(),
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="block-9"
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+        ),
     )
 
     preview = screen_objective_scope(
@@ -214,7 +248,7 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
         _experimental_map("paper-not-a-seed"),
     )
     collection_service = SimpleNamespace(
-        get_collection=lambda collection_id: _async_value(
+        get_collection_for_user=lambda collection_id, user_id: _async_value(
             {"collection_id": collection_id}
         )
     )
@@ -224,14 +258,13 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
     paper_map_repository = SimpleNamespace(
         list_collection=lambda collection_id: _async_value(paper_maps)
     )
-    service = ObjectiveExperimentAnalysisService(
-        collection_service=collection_service,
-        paper_map_repository=paper_map_repository,
-        objective_repository=objective_repository,
-        objective_input_service=SimpleNamespace(),
-    )
+    experiment_analysis_service.collection_service = collection_service
+    experiment_analysis_service.PaperMapRepo = paper_map_repository
+    experiment_analysis_service.ObjectiveRepo = objective_repository
+    experiment_analysis_service.objective_input_service = SimpleNamespace()
+    service = experiment_analysis_service
 
-    preview = await service.preview_objective_scope("col-1", "obj-1")
+    preview = await service.preview_objective_scope("col-1", "obj-1", user_id="user-1")
 
     assert preview.recommended_document_ids == (
         "paper-seed",
@@ -240,25 +273,22 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
 
 
 async def test_service_reports_scope_not_ready_without_collection_paper_maps() -> None:
-    service = ObjectiveExperimentAnalysisService(
-        collection_service=SimpleNamespace(
-            get_collection=lambda collection_id: _async_value(
-                {"collection_id": collection_id}
-            )
-        ),
-        paper_map_repository=SimpleNamespace(
-            list_collection=lambda collection_id: _async_value(())
-        ),
-        objective_repository=SimpleNamespace(
-            read_objective=lambda collection_id, objective_id: _async_value(
-                _objective()
-            )
-        ),
-        objective_input_service=SimpleNamespace(),
+    experiment_analysis_service.collection_service = SimpleNamespace(
+        get_collection_for_user=lambda collection_id, user_id: _async_value(
+            {"collection_id": collection_id}
+        )
     )
+    experiment_analysis_service.PaperMapRepo = SimpleNamespace(
+        list_collection=lambda collection_id: _async_value(())
+    )
+    experiment_analysis_service.ObjectiveRepo = SimpleNamespace(
+        read_objective=lambda collection_id, objective_id: _async_value(_objective())
+    )
+    experiment_analysis_service.objective_input_service = SimpleNamespace()
+    service = experiment_analysis_service
 
     with pytest.raises(ObjectiveScopeNotReadyError):
-        await service.preview_objective_scope("col-1", "obj-1")
+        await service.preview_objective_scope("col-1", "obj-1", user_id="user-1")
 
 
 async def _async_value(value):

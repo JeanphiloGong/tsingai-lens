@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+
 from copy import deepcopy
 
 import pytest
 
 from application.core.objectives.analysis.paper_experiment_contract import (
+    parse_paper_experiment_response,
     DraftReadiness,
-    PaperExperimentModelOutput,
     assess_draft_readiness,
     bind_model_output,
     prepare_model_output,
     reconcile_model_output,
 )
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ResearchObjective,
+    normalize_objective_terms,
+)
 
 
 def _output_payload() -> dict:
@@ -86,21 +90,51 @@ def _output_payload() -> dict:
     }
 
 
-def _raw_model_payload() -> dict:
-    payload = _output_payload()
-    payload.pop("document_id")
-    payload.pop("source_fingerprint")
-    payload.pop("source_labels")
+def _raw_model_payload(payload: dict | None = None) -> dict:
+    payload = deepcopy(payload) if payload is not None else _output_payload()
+    payload.pop("document_id", None)
+    payload.pop("source_fingerprint", None)
+    payload.pop("source_labels", None)
     return payload
 
 
 def _reconciled_output(payload: dict | None = None):
-    output = PaperExperimentModelOutput.from_mapping(payload or _output_payload())
+    output = parse_paper_experiment_response(
+        _raw_model_payload(payload or _output_payload()),
+        document_id=(payload or _output_payload()).get("document_id", ""),
+        source_fingerprint=(payload or _output_payload()).get("source_fingerprint", ""),
+        source_labels=(payload or _output_payload()).get("source_labels") or {},
+    )
     return reconcile_model_output(output, accepted_experiment_keys=("series-1",))
 
 
+@pytest.mark.parametrize(
+    ("component", "field", "invalid"),
+    [
+        ("variants", "notes", "silently iterable text"),
+        ("variants", "subject_attributes", ["not an object"]),
+        ("measurements", "measurement_key", 1),
+        ("measurements", "statistics", [1]),
+        ("measurements", "result_kind", "invented"),
+    ],
+)
+def test_raw_experiment_fields_are_rejected_before_internal_construction(component, field, invalid):
+    payload = _raw_model_payload()
+    payload["experiments"][0][component][0][field] = invalid
+    with pytest.raises(ValueError):
+        parse_paper_experiment_response(
+            payload, document_id="doc-1", source_fingerprint="prep-1",
+            source_labels=_output_payload()["source_labels"],
+        )
+
+
 def test_raw_model_output_cannot_receive_formal_identity_directly() -> None:
-    output = PaperExperimentModelOutput.from_mapping(_output_payload())
+    output = parse_paper_experiment_response(
+        _raw_model_payload(_output_payload()),
+        document_id=(_output_payload()).get("document_id", ""),
+        source_fingerprint=(_output_payload()).get("source_fingerprint", ""),
+        source_labels=(_output_payload()).get("source_labels") or {},
+    )
 
     with pytest.raises(ValueError, match="boundary reconciliation"):
         bind_model_output(
@@ -115,7 +149,12 @@ def test_raw_model_output_cannot_receive_formal_identity_directly() -> None:
 def test_raw_boundary_envelope_cannot_be_marked_as_reconciled() -> None:
     payload = _output_payload()
     payload["experiments"][0]["boundary_proposals"] = [{"series_key": "raw-1"}]
-    output = PaperExperimentModelOutput.from_mapping(payload)
+    output = parse_paper_experiment_response(
+        _raw_model_payload(payload),
+        document_id=(payload).get("document_id", ""),
+        source_fingerprint=(payload).get("source_fingerprint", ""),
+        source_labels=(payload).get("source_labels") or {},
+    )
 
     with pytest.raises(ValueError, match="raw boundary proposals"):
         reconcile_model_output(output, accepted_experiment_keys=("series-1",))
@@ -124,7 +163,12 @@ def test_raw_boundary_envelope_cannot_be_marked_as_reconciled() -> None:
 def test_selected_scope_requires_parent_and_source_backed_selector() -> None:
     payload = _output_payload()
     payload["experiments"][0]["scope_kind"] = "selected_stratum"
-    output = PaperExperimentModelOutput.from_mapping(payload)
+    output = parse_paper_experiment_response(
+        _raw_model_payload(payload),
+        document_id=(payload).get("document_id", ""),
+        source_fingerprint=(payload).get("source_fingerprint", ""),
+        source_labels=(payload).get("source_labels") or {},
+    )
 
     with pytest.raises(ValueError, match="scope_selector"):
         reconcile_model_output(output, accepted_experiment_keys=("series-1",))
@@ -154,7 +198,12 @@ def test_reconciled_scoped_experiment_with_parent_can_bind(
 
     revisions = bind_model_output(
         reconcile_model_output(
-            PaperExperimentModelOutput.from_mapping(payload),
+            parse_paper_experiment_response(
+                _raw_model_payload(payload),
+                document_id=(payload).get("document_id", ""),
+                source_fingerprint=(payload).get("source_fingerprint", ""),
+                source_labels=(payload).get("source_labels") or {},
+            ),
             accepted_experiment_keys=("series-1",),
         ),
         experiment_ids=["exp-1"],
@@ -235,7 +284,12 @@ def test_broad_measurement_scope_is_preserved_instead_of_being_dropped() -> None
     )
 
     output = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("series-1",),
     )
     revision = bind_model_output(
@@ -267,7 +321,12 @@ def test_prepare_model_output_generates_response_local_series_key() -> None:
     payload = _output_payload()
     payload["experiments"][0].pop("series_key", None)
     prepared = prepare_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
     )
     assert prepared.output.experiments[0].payload["series_key"].startswith("draft_")
 
@@ -292,7 +351,7 @@ def test_missing_binding_without_labels_still_creates_a_targeted_issue() -> None
 
 
 def test_raw_model_payload_gets_context_and_source_catalog_from_service() -> None:
-    envelope = PaperExperimentModelOutput.from_model_mapping(
+    envelope = parse_paper_experiment_response(
         _raw_model_payload(),
         document_id="doc-1",
         source_fingerprint="prep-1",
@@ -319,7 +378,7 @@ def test_raw_model_payload_preserves_reported_identifiers_in_population_scope() 
             "batch_id": "B-7",
         },
     }
-    envelope = PaperExperimentModelOutput.from_model_mapping(
+    envelope = parse_paper_experiment_response(
         payload,
         document_id="doc-1",
         source_fingerprint="prep-1",
@@ -352,7 +411,7 @@ def test_raw_model_payload_preserves_plural_reported_identifiers_in_scope() -> N
             "batch_ids": ["B-7", "B-8"],
         },
     }
-    envelope = PaperExperimentModelOutput.from_model_mapping(
+    envelope = parse_paper_experiment_response(
         payload,
         document_id="doc-1",
         source_fingerprint="prep-1",
@@ -391,7 +450,7 @@ def test_raw_model_payload_preserves_domain_specific_reported_identifiers() -> N
         },
     }
 
-    envelope = PaperExperimentModelOutput.from_model_mapping(
+    envelope = parse_paper_experiment_response(
         payload,
         document_id="doc-1",
         source_fingerprint="prep-1",
@@ -426,8 +485,8 @@ def test_raw_model_payload_rejects_formal_identity_inside_reported_identifiers()
         },
     }
 
-    with pytest.raises(ValueError, match="formal identity"):
-        PaperExperimentModelOutput.from_model_mapping(
+    with pytest.raises(ValueError, match="formal identity|request context"):
+        parse_paper_experiment_response(
             payload,
             document_id="doc-1",
             source_fingerprint="prep-1",
@@ -439,8 +498,8 @@ def test_raw_model_payload_rejects_reported_identifier_as_component_field() -> N
     payload = _raw_model_payload()
     payload["experiments"][0]["variants"][0]["sample_id"] = "S-01"
 
-    with pytest.raises(ValueError, match="formal identity"):
-        PaperExperimentModelOutput.from_model_mapping(
+    with pytest.raises(ValueError, match="formal identity|request context"):
+        parse_paper_experiment_response(
             payload,
             document_id="doc-1",
             source_fingerprint="prep-1",
@@ -452,8 +511,8 @@ def test_raw_model_payload_rejects_domain_identifier_outside_scope_map() -> None
     payload = _raw_model_payload()
     payload["experiments"][0]["variants"][0]["condition_id"] = "dual-task"
 
-    with pytest.raises(ValueError, match="formal identity"):
-        PaperExperimentModelOutput.from_model_mapping(
+    with pytest.raises(ValueError, match="formal identity|request context"):
+        parse_paper_experiment_response(
             payload,
             document_id="doc-1",
             source_fingerprint="prep-1",
@@ -466,7 +525,7 @@ def test_raw_model_payload_cannot_echo_request_context() -> None:
     payload["document_id"] = "doc-1"
 
     with pytest.raises(ValueError, match="request context"):
-        PaperExperimentModelOutput.from_model_mapping(
+        parse_paper_experiment_response(
             payload,
             document_id="doc-1",
             source_fingerprint="prep-1",
@@ -479,7 +538,7 @@ def test_raw_model_payload_cannot_invent_source_label_catalog_entry() -> None:
     payload["source_labels"] = ["model-invented"]
 
     with pytest.raises(ValueError, match="unknown source labels"):
-        PaperExperimentModelOutput.from_model_mapping(
+        parse_paper_experiment_response(
             payload,
             document_id="doc-1",
             source_fingerprint="prep-1",
@@ -491,8 +550,13 @@ def test_model_cannot_supply_formal_identity() -> None:
     payload = _output_payload()
     payload["experiments"][0]["experiment_id"] = "model-made-id"
 
-    with pytest.raises(ValueError, match="formal identity"):
-        PaperExperimentModelOutput.from_mapping(payload)
+    with pytest.raises(ValueError, match="formal identity|request context"):
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        )
 
 
 @pytest.mark.parametrize(
@@ -513,8 +577,13 @@ def test_model_cannot_supply_formal_top_level_fields(field_name: str) -> None:
     payload = _output_payload()
     payload[field_name] = "model-made-value"
 
-    with pytest.raises(ValueError, match="formal identity"):
-        PaperExperimentModelOutput.from_mapping(payload)
+    with pytest.raises(ValueError, match="formal identity|request context"):
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        )
 
 
 @pytest.mark.parametrize(
@@ -538,7 +607,12 @@ def test_model_cannot_supply_nested_identity_or_validation_fields(field_path) ->
     target[field_path[-1]] = "model-made-value"
 
     with pytest.raises(ValueError, match="validation fields"):
-        PaperExperimentModelOutput.from_mapping(payload)
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        )
 
 
 def test_unknown_source_label_blocks_binding() -> None:
@@ -557,15 +631,23 @@ def test_unknown_source_label_blocks_binding() -> None:
 
 
 def test_zero_experiment_output_is_valid_and_does_not_create_empty_experiment() -> None:
-    output = PaperExperimentModelOutput.from_mapping(
-        {
-            "document_id": "doc-1",
-            "source_fingerprint": "prep-1",
-            "experiments": [],
-            "unresolved_issues": [
-                {"target_ref": "document", "description": "only background discussion found"}
-            ],
-        }
+    output = parse_paper_experiment_response(
+        _raw_model_payload(
+            {
+                "document_id": "doc-1",
+                "source_fingerprint": "prep-1",
+                "experiments": [],
+                "unresolved_issues": [
+                    {
+                        "target_ref": "document",
+                        "description": "only background discussion found",
+                    }
+                ],
+            }
+        ),
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+        source_labels={},
     )
 
     assert output.experiments == ()
@@ -578,12 +660,17 @@ def test_zero_experiment_output_is_valid_and_does_not_create_empty_experiment() 
     ) == ()
 
 
-def test_trusted_envelope_cannot_hide_formal_ids_in_top_level_unresolved_issues() -> None:
+def test_response_cannot_hide_formal_ids_in_top_level_unresolved_issues() -> None:
     payload = _output_payload()
     payload["unresolved_issues"] = [{"related_record_id": "model-made-id"}]
 
-    with pytest.raises(ValueError, match="formal identity"):
-        PaperExperimentModelOutput.from_mapping(payload)
+    with pytest.raises(ValueError, match="formal identity|request context"):
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        )
 
 
 def test_malformed_experiment_container_is_rejected_instead_of_becoming_zero_experiments() -> None:
@@ -591,7 +678,12 @@ def test_malformed_experiment_container_is_rejected_instead_of_becoming_zero_exp
     payload["experiments"] = {"label": "not-a-list"}
 
     with pytest.raises(ValueError, match="experiments must be a list"):
-        PaperExperimentModelOutput.from_mapping(payload)
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        )
 
 
 def test_draft_level_source_labels_are_resolved_into_revision_sources() -> None:
@@ -625,7 +717,12 @@ def test_selected_scope_selector_must_hit_a_local_variant_or_test() -> None:
 
     with pytest.raises(ValueError, match="does not match"):
         reconcile_model_output(
-            PaperExperimentModelOutput.from_mapping(payload),
+            parse_paper_experiment_response(
+                _raw_model_payload(payload),
+                document_id=(payload).get("document_id", ""),
+                source_fingerprint=(payload).get("source_fingerprint", ""),
+                source_labels=(payload).get("source_labels") or {},
+            ),
             accepted_experiment_keys=("series-1",),
         )
 
@@ -642,7 +739,12 @@ def test_unresolved_physical_split_is_collapsed_before_identity_allocation() -> 
     payload["experiments"] = [payload["experiments"][0], second]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("parent",),
     )
 
@@ -662,7 +764,12 @@ def test_unknown_only_boundary_candidates_are_not_merged_by_response_order() -> 
     payload["experiments"] = [first, second]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("unknown-1", "unknown-2"),
     )
 
@@ -688,7 +795,12 @@ def test_unknown_candidate_is_not_absorbed_by_selected_scope_without_parent() ->
     payload["experiments"] = [unknown, selected]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("unknown-parent", "selected-p150"),
     )
 
@@ -711,7 +823,12 @@ def test_explicit_parent_does_not_absorb_incompatible_unknown_scope() -> None:
     payload["experiments"] = [parent, unknown]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("parent", "unknown-other-population"),
     )
 
@@ -735,7 +852,12 @@ def test_positive_split_requires_source_backed_evidence() -> None:
 
     with pytest.raises(ValueError, match="split evidence"):
         reconcile_model_output(
-            PaperExperimentModelOutput.from_mapping(payload),
+            parse_paper_experiment_response(
+                _raw_model_payload(payload),
+                document_id=(payload).get("document_id", ""),
+                source_fingerprint=(payload).get("source_fingerprint", ""),
+                source_labels=(payload).get("source_labels") or {},
+            ),
             accepted_experiment_keys=("split-1",),
         )
 
@@ -831,16 +953,20 @@ def _readiness_output(
 
 
 def _readiness_objective(*, outcome: str = "elongation") -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "Does preheating affect the reported outcome?",
-            "material_scope": ["316L"],
-            "variables": ["preheating"],
-            "outcomes": [outcome],
-            "confidence": 1.0,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="Does preheating affect the reported outcome?",
+        material_scope=("316L",),
+        variables=("preheating",),
+        outcomes=normalize_objective_terms([outcome]),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=1.0,
+        reason=None,
     )
 
 
@@ -1129,7 +1255,12 @@ def test_scope_selector_can_resolve_against_parent_facts_without_repeating_membe
     payload["experiments"] = [parent, selected]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("parent", "selected-p150"),
     )
 
@@ -1157,7 +1288,12 @@ def test_missing_parent_gets_a_synthetic_parent_without_losing_scope_selector() 
     payload["experiments"] = [first, second]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("synthetic-parent",),
     )
 
@@ -1177,7 +1313,12 @@ def test_boundary_merge_keeps_conflicting_measurement_reports() -> None:
     payload["experiments"] = [parent, second]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("parent",),
     )
 
@@ -1197,7 +1338,12 @@ def test_multiple_explicit_parents_are_retained_until_boundary_reconciliation() 
     payload["experiments"] = [first, second]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("parent-a", "parent-b"),
     )
 
@@ -1240,7 +1386,12 @@ def test_boundary_reconciliation_maps_retained_split_to_its_own_accepted_key() -
     payload["experiments"] = [parent, selected, physical]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("parent", "selected-p150", "physical-followup"),
     )
 
@@ -1274,7 +1425,12 @@ def test_all_physical_splits_are_retained_without_synthesizing_a_parent() -> Non
     payload["experiments"] = [first, second]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("physical-1", "physical-2"),
     )
 
@@ -1319,7 +1475,12 @@ def test_physical_split_before_missing_parent_scope_is_not_promoted_to_parent() 
     payload["experiments"] = [physical, selected]
 
     reconciled = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
         accepted_experiment_keys=("physical-follow-up", "synthetic-parent"),
     )
 
@@ -1341,7 +1502,12 @@ def test_prepare_model_output_generates_local_series_key_when_model_omits_it() -
 
     payload["experiments"][0].pop("series_key", None)
     prepared = prepare_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        parse_paper_experiment_response(
+            _raw_model_payload(payload),
+            document_id=(payload).get("document_id", ""),
+            source_fingerprint=(payload).get("source_fingerprint", ""),
+            source_labels=(payload).get("source_labels") or {},
+        ),
     )
 
     assert prepared.output.experiments[0].payload["series_key"].startswith("draft_")

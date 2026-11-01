@@ -4,16 +4,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from application.repositories.analysis_job_repository import (
+from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
+from repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     TOOL_FAILURE_JOB_TYPE,
+    AnalysisJobRepository,
     correction_signal_idempotency_key,
     tool_failure_idempotency_key,
 )
-from infra.persistence.postgres.analysis_job_repository import (
-    PostgresAnalysisJobRepository,
-)
-from infra.persistence.postgres.models.feedback import AnalysisJobRow
 
 pytestmark = pytest.mark.anyio
 
@@ -39,7 +37,7 @@ async def _insert_job(
     )
     async with session_factory.begin() as session:
         session.add(
-            AnalysisJobRow(
+            AnalysisJobORM(
                 job_id=job_id,
                 job_type=job_type,
                 payload_version=1,
@@ -64,7 +62,7 @@ async def _insert_job(
 async def test_failed_feedback_analysis_job_can_be_requeued_and_claimed(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    repository = AnalysisJobRepository()
     await _insert_job(postgres_session_factory, job_id="job-requeue")
 
     claimed = await repository.claim_next_feedback_analysis_job(
@@ -89,6 +87,14 @@ async def test_failed_feedback_analysis_job_can_be_requeued_and_claimed(
     assert requeued.result_id is None
     assert requeued.error_code is None
     assert requeued.available_at == "2026-09-24T00:00:03+00:00"
+    assert requeued.updated_at == requeued.available_at
+    assert requeued.created_at == claimed.created_at
+    assert requeued.payload == claimed.payload
+    assert requeued.idempotency_key == claimed.idempotency_key
+    assert requeued.worker_id is None
+    assert requeued.lease_expires_at is None
+    assert requeued.heartbeat_at is None
+    assert requeued.lease_version == claimed.lease_version
 
     claimed_again = await repository.claim_next_feedback_analysis_job(
         (BASE_TIME + timedelta(seconds=4)).isoformat()
@@ -96,13 +102,14 @@ async def test_failed_feedback_analysis_job_can_be_requeued_and_claimed(
     assert claimed_again is not None
     assert claimed_again.job_id == claimed.job_id
     assert claimed_again.status == "running"
+    assert claimed_again.lease_version == claimed.lease_version + 1
 
 
 async def test_expired_running_job_is_recovered_and_claimed_again(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(
-        postgres_session_factory,
+    repository = AnalysisJobRepository(
+
         worker_id="worker-next",
     )
     await _insert_job(
@@ -138,8 +145,8 @@ async def test_expired_running_job_is_recovered_and_claimed_again(
 async def test_running_job_lease_can_be_renewed_by_current_worker(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(
-        postgres_session_factory,
+    repository = AnalysisJobRepository(
+
         worker_id="worker-heartbeat",
     )
     await _insert_job(postgres_session_factory, job_id="job-heartbeat")
@@ -163,8 +170,8 @@ async def test_running_job_lease_can_be_renewed_by_current_worker(
 async def test_lease_renewal_rejects_wrong_owner_version_and_expired_lease(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(
-        postgres_session_factory,
+    repository = AnalysisJobRepository(
+
         worker_id="worker-heartbeat",
     )
     await _insert_job(postgres_session_factory, job_id="job-heartbeat-fence")
@@ -196,8 +203,8 @@ async def test_lease_renewal_rejects_wrong_owner_version_and_expired_lease(
 async def test_old_worker_cannot_finish_reclaimed_job(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(
-        postgres_session_factory,
+    repository = AnalysisJobRepository(
+
         worker_id="worker-next",
     )
     await _insert_job(
@@ -234,6 +241,7 @@ async def test_old_worker_cannot_finish_reclaimed_job(
 @pytest.mark.parametrize(
     ("job_type", "status", "result_id"),
     [
+        ("feedback_analysis", "pending", None),
         ("feedback_analysis", "running", None),
         ("feedback_analysis", "succeeded", "result-1"),
         ("feedback_analysis", "cancelled", None),
@@ -247,7 +255,7 @@ async def test_requeue_rejects_unsupported_terminal_identity(
     status: str,
     result_id: str | None,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    repository = AnalysisJobRepository()
     await _insert_job(
         postgres_session_factory,
         job_id="job-invalid",
@@ -269,7 +277,7 @@ async def test_requeue_rejects_unsupported_terminal_identity(
 
 
 async def test_requeue_rejects_unknown_job(postgres_session_factory) -> None:
-    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    repository = AnalysisJobRepository()
 
     with pytest.raises(FileNotFoundError, match="job-missing"):
         await repository.requeue_failed_feedback_analysis_job(
@@ -281,7 +289,7 @@ async def test_requeue_rejects_unknown_job(postgres_session_factory) -> None:
 async def test_correction_signal_jobs_use_payload_identity_and_are_idempotent(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    repository = AnalysisJobRepository()
     kwargs = {
         "session_id": "session-1",
         "anchor_message_id": "answer-1",
@@ -315,7 +323,7 @@ async def test_correction_signal_jobs_use_payload_identity_and_are_idempotent(
 async def test_correction_signal_pending_job_can_be_cancelled_by_trigger(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    repository = AnalysisJobRepository()
     trigger_digest = "b" * 64
     job = await repository.enqueue_correction_signal_analysis(
         session_id="session-1",
@@ -345,7 +353,7 @@ async def test_correction_signal_pending_job_can_be_cancelled_by_trigger(
 async def test_tool_failure_enqueue_is_idempotent_and_claim_is_type_scoped(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    repository = AnalysisJobRepository()
     digest = "c" * 64
     kwargs = {
         "session_id": "session-tool-failure",

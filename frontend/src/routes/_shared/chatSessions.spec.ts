@@ -4,6 +4,8 @@ import {
 	formatChatElapsed,
 	getChatProgressActions,
 	streamChatMessage,
+	streamChatUpdates,
+	fetchModelConnections,
 	setChatMessageFeedback,
 	deleteChatSession,
 	setChatSessionPin,
@@ -14,7 +16,7 @@ describe('chat session deletion', () => {
 	it('uses the same-origin DELETE endpoint with encoded session identity', async () => {
 		const fetch = vi
 			.spyOn(globalThis, 'fetch')
-			.mockResolvedValue(new Response(null, { status: 204 }));
+			.mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: {}, meta: null })));
 		try {
 			await deleteChatSession('session/one');
 			expect(fetch).toHaveBeenCalledWith(
@@ -32,7 +34,7 @@ describe('chat history pinning', () => {
 		'saves an explicit pin state %s with an encoded session identity',
 		async (isPinned) => {
 			const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-				new Response(JSON.stringify({ session_id: 'session/one', is_pinned: isPinned }), {
+				new Response(JSON.stringify({ code: 200, message: 'success', data: { session_id: 'session/one', is_pinned: isPinned }, meta: null }), {
 					headers: { 'Content-Type': 'application/json' }
 				})
 			);
@@ -60,7 +62,7 @@ describe('chat history pinning', () => {
 describe('answer feedback requests', () => {
 	it('uses the same-origin API with encoded identities and explicit withdrawal', async () => {
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response('null', {
+			new Response(JSON.stringify({ code: 200, message: 'success', data: {}, meta: null }), {
 				headers: { 'Content-Type': 'application/json' }
 			})
 		);
@@ -85,12 +87,34 @@ describe('answer feedback requests', () => {
 });
 
 describe('chat stream lifecycle', () => {
+	it('retains a streamed failure code so the conversation can localize its reason', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			'event: error\ndata: {"code":"provider_timeout","message":"Provider timeout details"}\n\n',
+			{ headers: { 'Content-Type': 'text/event-stream' } }
+		));
+		try {
+			await expect(streamChatMessage('chat_1', 'Compare the papers', () => {})).rejects.toMatchObject({
+				code: 200205, data: { code: 'provider_timeout' }
+			});
+		} finally { fetch.mockRestore(); }
+	});
+	it('rejects a JSON business error before the SSE stream starts', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			JSON.stringify({ code: 200204, message: 'Resolve the pending action.', data: { code: 'chat_tool_approval_pending' }, meta: null }),
+			{ headers: { 'Content-Type': 'application/json' } }
+		));
+		try {
+			await expect(streamChatMessage('chat_1', 'Compare the papers', () => {}))
+				.rejects.toMatchObject({ code: 200204, data: { code: 'chat_tool_approval_pending' } });
+		} finally { fetch.mockRestore(); }
+	});
 	it('leaves a silent stream for recovery but keeps a heartbeating long turn connected', async () => {
 		vi.useFakeTimers();
 		const cancel = vi.fn();
 		let stream!: ReadableStreamDefaultController<Uint8Array>;
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-			new ReadableStream({ start(controller) { stream = controller; }, cancel })
+			new ReadableStream({ start(controller) { stream = controller; }, cancel }),
+			{ headers: { 'Content-Type': 'text/event-stream' } }
 		));
 		try {
 			const response = streamChatMessage('chat_1', 'Compare the papers', () => {});
@@ -125,7 +149,8 @@ describe('chat stream lifecycle', () => {
 						);
 					},
 					cancel
-				})
+				}),
+				{ headers: { 'Content-Type': 'text/event-stream' } }
 			)
 		);
 		try {
@@ -159,7 +184,8 @@ describe('chat stream lifecycle', () => {
 						stream.enqueue(new TextEncoder().encode('event: progress\ndata: invalid\n\n'));
 					},
 					cancel
-				})
+				}),
+				{ headers: { 'Content-Type': 'text/event-stream' } }
 			)
 		);
 		try {
@@ -242,5 +268,28 @@ describe('chat progress presentation helpers', () => {
 		expect(appendChatProgress([initial], updated)).toHaveLength(2);
 		const terminal = { ...updated, execution_plan: { ...updated.execution_plan!, plan_version: 1 } };
 		expect(appendChatProgress([initial], terminal)).toHaveLength(2);
+	});
+});
+
+
+describe('model connection selection', () => {
+	it('sends the connection only on a new question and keeps reconnect read-only', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('event: turn\ndata: {"status":"completed","messages":[],"warnings":[],"completion_reason":"model_answer"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
+		try {
+			await streamChatMessage('chat_1', 'Compare papers', () => {}, [], undefined, undefined, false, undefined, undefined, 'lab-b');
+			expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).model_connection_id).toBe('lab-b');
+			fetch.mockResolvedValueOnce(new Response('', { headers: { 'Content-Type': 'text/event-stream' } }));
+			await streamChatUpdates('chat_1', 'response_1', () => {}, () => {});
+			expect(String(fetch.mock.calls[1][0])).toBe('/api/v1/chat-sessions/chat_1/events?response_id=response_1');
+			expect(fetch.mock.calls[1][1]?.body).toBeUndefined();
+		} finally { fetch.mockRestore(); }
+	});
+
+	it('reads only the same-origin model directory', async () => {
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ code: 200, message: 'success', data: { items: [] }, meta: null })));
+		try {
+			await expect(fetchModelConnections()).resolves.toEqual({ items: [] });
+			expect(fetch.mock.calls[0][0]).toBe('/api/v1/model-connections');
+		} finally { fetch.mockRestore(); }
 	});
 });

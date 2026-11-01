@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import ModuleType
 
 import pytest
-
-from application.feedback.dataset_service import (
-    FeedbackDatasetConflict,
-    FeedbackDatasetService,
-)
-from application.repositories.feedback_dataset_sample_repository import (
-    source_digest_for_case,
-)
+from application.feedback import dataset_service
+from application.feedback.dataset_service import FeedbackDatasetConflict
 from domain.feedback import (
     Dataset,
     DatasetSample,
     FeedbackCase,
     SampleRevision,
-    SftRevisionContent,
     content_digest_for,
+)
+from domain.feedback.sample_revision import SftRevisionContent
+from repositories.feedback_dataset_sample_repository import (
+    source_digest_for_case,
 )
 
 pytestmark = pytest.mark.anyio
@@ -110,7 +108,7 @@ def _sample() -> DatasetSample:
         current_revision_id="revision-1",
         confirmed_revision_id=None,
         generation=1,
-        source_digest=source_digest_for_case(_case().to_record()),
+        source_digest=source_digest_for_case(_case()),
         active_job_id=None,
         missing_reasons=(),
         created_at="2026-09-29T00:00:00+00:00",
@@ -120,14 +118,12 @@ def _sample() -> DatasetSample:
 
 def _revision(revision_id: str, author_kind: str) -> SampleRevision:
     # Use the mapping form so the test mirrors the HTTP payload shape.
-    content = SftRevisionContent.from_mapping(
-        {
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献 A", "text": "原文"}],
-            "target": "候选回答",
-            "evidence": [{"document_title": "文献 A", "text": "原文"}],
-        }
+    content = SftRevisionContent(
+        schema_version="literature-sft.v1",
+        messages=({"role": "user", "content": "比较 A、B。"},),
+        context=({"document_title": "文献 A", "text": "原文"},),
+        target="候选回答",
+        evidence=({"document_title": "文献 A", "text": "原文"},),
     )
     return SampleRevision(
         revision_id=revision_id,
@@ -164,32 +160,70 @@ def _case() -> FeedbackCase:
     )
 
 
-def _service(samples: _Samples, cases: _Cases | None = None) -> FeedbackDatasetService:
-    return FeedbackDatasetService(
-        repository=_Datasets(),
-        collection_service=_Collections(),
-        sample_repository=samples,
-        case_repository=cases or _Cases(),
-    )
+def _service(samples: _Samples, cases: _Cases | None = None) -> ModuleType:
+    dataset_service.FeedbackDatasetRepo = _Datasets()
+    dataset_service.collection_service = _Collections()
+    dataset_service.FeedbackDatasetSampleRepo = samples
+    dataset_service.FeedbackCaseRepo = cases or _Cases()
+    return dataset_service
 
 
 @pytest.mark.anyio
+async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
+    samples = _Samples()
+    samples.sample = replace(
+        samples.sample, status="needs_input", current_revision_id=None
+    )
+    service = _service(samples)
+    content = {
+        "schema_version": "literature-sft.v1",
+        "messages": [{"role": "user", "content": "Summarize the research decision."}],
+        "context": [],
+        "evidence": [],
+        "target": "Compare laser power at fixed scan speed.",
+    }
+    saved = await service.update_dataset_sample(
+        user_id="user-1",
+        dataset_id="fdset-1",
+        sample_id="sample-1",
+        expected_revision_id=None,
+        expected_generation=1,
+        content=SftRevisionContent(
+            schema_version=content["schema_version"],
+            messages=tuple(content["messages"]),
+            context=tuple(content["context"]),
+            target=content["target"],
+            evidence=tuple(content["evidence"]),
+        ),
+    )
+    assert saved.status == "needs_confirmation"
+    confirmed = await service.confirm_dataset_sample(
+        user_id="user-1",
+        dataset_id="fdset-1",
+        sample_id="sample-1",
+        expected_revision_id=saved.current_revision_id,
+    )
+    assert confirmed.status == "confirmed"
+    assert samples.appended.provenance["evidence_records"] == []
+    assert samples.appended.provenance["session_id"] == "session-1"
+
+
 async def test_human_edit_appends_revision_and_clears_confirmation() -> None:
     samples = _Samples()
     service = _service(samples)
 
-    result = await service.update_sample(
+    result = await service.update_dataset_sample(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
         expected_revision_id="revision-1",
-        content={
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献 A", "text": "原文"}],
-            "target": "人工修订回答",
-            "evidence": [{"document_title": "文献 A", "text": "原文"}],
-        },
+        content=SftRevisionContent(
+            schema_version="literature-sft.v1",
+            messages=({"role": "user", "content": "比较 A、B。"},),
+            context=({"document_title": "文献 A", "text": "原文"},),
+            target="人工修订回答",
+            evidence=({"document_title": "文献 A", "text": "原文"},),
+        ),
     )
 
     assert result.status == "needs_confirmation"
@@ -204,7 +238,7 @@ async def test_confirmation_binds_current_revision_and_stale_edit_is_rejected() 
     samples = _Samples()
     service = _service(samples)
 
-    confirmed = await service.confirm_sample(
+    confirmed = await service.confirm_dataset_sample(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -216,18 +250,18 @@ async def test_confirmation_binds_current_revision_and_stale_edit_is_rejected() 
     assert confirmed.confirmed_at is not None
 
     with pytest.raises(FeedbackDatasetConflict, match="sample_revision_stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",
             expected_revision_id="old-revision",
-            content={
-                "schema_version": "literature-sft.v1",
-                "messages": [{"role": "user", "content": "比较 A、B。"}],
-                "context": [{"document_title": "文献 A", "text": "原文"}],
-                "target": "晚到修改",
-                "evidence": [{"document_title": "文献 A", "text": "原文"}],
-            },
+            content=SftRevisionContent(
+                schema_version="literature-sft.v1",
+                messages=({"role": "user", "content": "比较 A、B。"},),
+                context=({"document_title": "文献 A", "text": "原文"},),
+                target="晚到修改",
+                evidence=({"document_title": "文献 A", "text": "原文"},),
+            ),
         )
 
 
@@ -242,18 +276,18 @@ async def test_edit_rejects_sample_when_source_case_digest_changed() -> None:
     )
 
     with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",
             expected_revision_id="revision-1",
-            content={
-                "schema_version": "literature-sft.v1",
-                "messages": [{"role": "user", "content": "比较 A、B。"}],
-                "context": [{"document_title": "文献 A", "text": "原文"}],
-                "target": "新的人工回答",
-                "evidence": [{"document_title": "文献 A", "text": "原文"}],
-            },
+            content=SftRevisionContent(
+                schema_version="literature-sft.v1",
+                messages=({"role": "user", "content": "比较 A、B。"},),
+                context=({"document_title": "文献 A", "text": "原文"},),
+                target="新的人工回答",
+                evidence=({"document_title": "文献 A", "text": "原文"},),
+            ),
         )
 
 
@@ -268,7 +302,7 @@ async def test_confirmation_rejects_sample_when_source_case_digest_changed() -> 
     )
 
     with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
-        await service.confirm_sample(
+        await service.confirm_dataset_sample(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",

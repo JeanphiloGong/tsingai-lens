@@ -1,25 +1,22 @@
-from __future__ import annotations
 
-import asyncio
+from infra.persistence import database
+"""Preparation keeps traceable Source on Profile failure and reuses it on retry."""
+
+from datetime import timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-
-from application.core.document_profiles.extraction import (
-    DocumentProfileExtractionError,
-    DocumentProfileModelOutput,
+from application.source import (
+    collection_service,
+    document_preparation_service as preparation,
 )
-from application.core.document_profiles.service import DocumentProfileService
-from application.pipeline import PipelineRunService
-from application.repositories.collection_repository import StoredDocument
-from application.source.document_preparation_service import DocumentPreparationService
-from domain.source import Document, SourceDocument
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
-from tests.support.collection_service import build_test_collection_service
+from application.core.document_profiles import service as profiles
+from domain.core.document_profile import DocumentProfile
+from domain.source import SourceDocument
+from repositories.pipeline_run_repository import PipelineRunRepo
+from repositories.source_artifact_repository import SourceArtifactRepo
+from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio
 
@@ -30,211 +27,223 @@ def anyio_backend():
 
 
 @pytest.fixture
-async def preparation(tmp_path):
-    collections = build_test_collection_service(tmp_path / "collections")
-    collection = await collections.create_collection("LPBF porosity research")
-    collection_id = collection["collection_id"]
-    document = StoredDocument(
-        document=Document(
-            document_id="doc_a",
-            original_filename="paper.pdf",
-            sha256="a" * 64,
-            media_type="application/pdf",
-            status="stored",
-            size_bytes=100,
-        ),
-        stored_filename="paper.pdf",
-        storage_key=f"{collection_id}/input/paper.pdf",
-        created_at="2026-09-09T00:00:00+00:00",
+async def prepared_inputs(postgres_session_factory, monkeypatch, collection_workspace):
+    await seed_collection(
+        postgres_session_factory, "prepare-papers", document_ids=("paper-a",)
     )
-    await collections.repository.add_documents(
-        collection_id,
-        (document,),
-        updated_at=document.created_at,
+    parse = AsyncMock(
+        return_value=SourceDocument(
+            document_id="paper-a",
+            document_order=0,
+            title="LPBF",
+            text="Methods and measured porosity",
+        )
     )
-    sources = MemorySourceArtifactRepository()
-    profiles = DocumentProfileService(
-        collections, sources, MemoryDocumentProfileRepository()
-    )
-    runs = PipelineRunService(MemoryPipelineRunRepository())
-    service = DocumentPreparationService(
-        collection_service=collections,
-        pipeline_run_service=runs,
-        source_artifact_repository=sources,
-        document_profile_service=profiles,
-        max_concurrency=1,
+    monkeypatch.setattr(preparation, "_parse_document_sources", parse)
+    monkeypatch.setattr(
+        preparation.source_reference_extraction_service,
+        "extract_source_references",
+        lambda _: (_ for _ in ()).throw(ValueError("no reference boundary")),
     )
     return SimpleNamespace(
-        service=service,
-        collections=collections,
-        sources=sources,
-        profiles=profiles,
-        runs=runs,
-        collection_id=collection_id,
-        document=document,
+        factory=postgres_session_factory, parse=parse, workspace=collection_workspace
     )
 
 
-@pytest.mark.parametrize("failure_stage", ["read", "running", "processing", "parse"])
-async def test_worker_failure_is_terminal_and_retryable(
-    preparation, monkeypatch, caplog, failure_stage
+async def test_profile_retry_preserves_sources_and_reuses_them(
+    prepared_inputs, monkeypatch
 ):
-    ctx = preparation
-    run = await ctx.runs.create_run(
-        ctx.collection_id,
-        "document_preparation",
-        scope_type="document",
-        scope_id="doc_a",
+    ctx = prepared_inputs
+    build = AsyncMock(
+        side_effect=[
+            DocumentProfile(
+                "paper-a",
+                "LPBF",
+                "uncertain",
+                ("document_profile_extraction_failed",),
+                0,
+                profile_status="extraction_failed",
+            ),
+            DocumentProfile("paper-a", "LPBF", "experimental", (), 0.9),
+        ]
     )
-    failure = OSError("internal path /private/provider/config is unavailable")
 
-    async def fail(*args, **kwargs):
-        raise failure
+    # Real Profile builder binds fingerprints; the boundary stub supplies the same facts.
+    async def profile(
+        owner, document_id, *, source_fingerprint, profile_fingerprint, extractor
+    ):
+        from dataclasses import replace
 
-    with monkeypatch.context() as patch:
-        if failure_stage == "read":
-            patch.setattr(ctx.collections, "get_document", fail)
-        elif failure_stage == "running":
-            original = ctx.runs.update_run
-
-            async def fail_start(*args, **kwargs):
-                if kwargs.get("status") == "running":
-                    raise failure
-                return await original(*args, **kwargs)
-
-            patch.setattr(ctx.runs, "update_run", fail_start)
-        elif failure_stage == "processing":
-            patch.setattr(ctx.collections, "update_document_preparation", fail)
-        else:
-            patch.setattr(ctx.service, "_parse_document", fail)
-        with pytest.raises(OSError) as raised:
-            await ctx.service.run_document_preparation(
-                run["run_id"], ctx.collection_id, "doc_a"
-            )
-        assert raised.value is failure
-
-    failed = await ctx.runs.get_run(run["run_id"])
-    assert failed["status"] == "failed"
-    assert failed["finished_at"] is not None
-    assert "/private/provider" not in str(failed)
-    assert "/private/provider" in caplog.text
-    _, created = await ctx.runs.get_or_create_document_run(
-        collection_id=ctx.collection_id,
-        document_id="doc_a",
-        pipeline_name="document_preparation",
-        input_fingerprint="retry",
-    )
-    assert created
-
-
-async def test_dispatch_failure_does_not_leave_queued_work(preparation, monkeypatch):
-    ctx = preparation
-
-    def fail_dispatch(coroutine):
-        raise RuntimeError("internal scheduler failure")
-
-    monkeypatch.setattr(
-        "application.source.document_preparation_service.create_task", fail_dispatch
-    )
-    with pytest.raises(RuntimeError, match="could not be scheduled"):
-        await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
-    runs = await ctx.runs.list_runs(collection_id=ctx.collection_id)
-    assert len(runs) == 1
-    assert runs[0]["status"] == "failed"
-    assert runs[0]["current_node"] == "dispatch_failed"
-    assert not ctx.service._active_workers
-
-
-@pytest.mark.parametrize("historical_status", [None, "completed", "partial_success"])
-async def test_classification_retry_reuses_source_not_failed_profile(
-    preparation, monkeypatch, historical_status
-):
-    ctx = preparation
-    parse_calls = 0
-
-    async def parse_document(*args):
-        nonlocal parse_calls
-        parse_calls += 1
-        return SourceDocument(
-            document_id="doc_a",
-            document_order=0,
-            title="Laser power and Ti-6Al-4V porosity",
-            text="We varied laser power and measured porosity of Ti-6Al-4V.",
+        result = await build()
+        return replace(
+            result,
+            source_fingerprint=source_fingerprint,
+            profile_fingerprint=profile_fingerprint,
         )
 
-    class Extractor:
-        calls = 0
-
-        def extract_document_profile(self, payload):
-            self.calls += 1
-            if self.calls == 1:
-                raise DocumentProfileExtractionError("temporary provider failure")
-            return DocumentProfileModelOutput(
-                doc_type="experimental", confidence=0.9, profile_warnings=[]
-            )
-
-        def consume_last_trace(self):
-            return None
-
-    extractor = Extractor()
-    ctx.profiles._document_profile_extractor = extractor
-    monkeypatch.setattr(ctx.service, "_parse_document", parse_document)
-    first = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
-    await asyncio.gather(*tuple(ctx.service._active_workers))
-    partial = await ctx.runs.get_run(first["run_id"])
-    assert partial["status"] == "partial_success"
-    assert partial["warnings"]
-    assert partial["nodes"]["document_profile"]["status"] == "failed"
+    monkeypatch.setattr(profiles, "build_document_profile", profile)
+    first = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    job = await PipelineRunRepo.claim_next_document_preparation_job(
+        worker_id="worker-a", lease_duration=timedelta(seconds=60)
+    )
+    result = await preparation.execute_document_preparation_job(
+        job,
+        workspace=ctx.workspace,
+        object_store=object(),
+        source_artifact_builder=object(),
+        profile_extractor=object(),
+    )
+    assert result.status == "partial_success"
     assert (
-        await ctx.collections.get_document(ctx.collection_id, "doc_a")
-    ).document.status == "stored"
-    source = await ctx.sources.read_document(ctx.collection_id, "doc_a")
-    assert source is not None
-    if historical_status:
-        await ctx.runs.finish_run(first["run_id"], status=historical_status)
-        source_id, profile_id = ctx.service.fingerprints_for(ctx.document.document)
-        await ctx.collections.update_document_preparation(
-            ctx.collection_id,
-            "doc_a",
-            status="ready",
-            source_fingerprint=source_id,
-            profile_fingerprint=profile_id,
-            preparation_fingerprint=profile_id,
-        )
-
-    retry = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
-    assert retry["run_id"] != first["run_id"]
-    await asyncio.gather(*tuple(ctx.service._active_workers))
-    completed = await ctx.runs.get_run(retry["run_id"])
-    assert completed["status"] == "completed"
-    assert completed["warnings"] == []
-    assert completed["nodes"]["document_profile"]["status"] == "succeeded"
+        await SourceArtifactRepo.read_document("prepare-papers", "paper-a") is not None
+    )
+    second = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    assert second.run_id != first.run_id
+    job = await PipelineRunRepo.claim_next_document_preparation_job(
+        worker_id="worker-b", lease_duration=timedelta(seconds=60)
+    )
+    result = await preparation.execute_document_preparation_job(
+        job,
+        workspace=ctx.workspace,
+        object_store=object(),
+        source_artifact_builder=object(),
+        profile_extractor=object(),
+    )
+    assert result.status == "completed"
     assert (
-        await ctx.collections.get_document(ctx.collection_id, "doc_a")
+        await collection_service.get_document("prepare-papers", "paper-a")
     ).document.status == "ready"
-    assert await ctx.sources.read_document(ctx.collection_id, "doc_a") == source
-    assert parse_calls == 1
-    assert extractor.calls == 2
-    reused = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
-    assert reused["run_id"] == retry["run_id"]
-    assert not ctx.service._active_workers
+    assert ctx.parse.await_count == 1
+    reused = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    assert reused.run_id == second.run_id
+    assert (
+        await PipelineRunRepo.claim_next_document_preparation_job(
+            worker_id="worker-c", lease_duration=timedelta(seconds=60)
+        )
+        is None
+    )
 
 
-async def test_completed_uncertain_classification_is_reusable(preparation, monkeypatch):
-    ctx = preparation
+async def test_parser_failure_is_terminal_and_safe(prepared_inputs, monkeypatch):
+    ctx = prepared_inputs
+    ctx.parse.side_effect = OSError("private provider path /private/key")
+    run = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    job = await PipelineRunRepo.claim_next_document_preparation_job(
+        worker_id="worker", lease_duration=timedelta(seconds=60)
+    )
+    failed = await preparation.execute_document_preparation_job(
+        job,
+        workspace=ctx.workspace,
+        object_store=object(),
+        source_artifact_builder=object(),
+        profile_extractor=object(),
+    )
+    assert failed.status == "failed"
+    assert "/private" not in str(failed)
+    assert (
+        await preparation.queue_document_preparation(
+            "prepare-papers", "paper-a", user_id="user-1"
+        )
+    ).run_id != run.run_id
 
-    async def parse_document(*args):
-        return SourceDocument(
-            document_id="doc_a", document_order=0, title="Paper", text=""
+
+async def test_submission_does_not_execute_in_web(prepared_inputs, monkeypatch):
+    execute = AsyncMock()
+    monkeypatch.setattr(preparation, "execute_document_preparation_job", execute)
+    first = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    again = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    assert first.status == "queued" and again.run_id == first.run_id
+    execute.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stage", ["source", "profile"])
+async def test_preparation_takeover_rejects_late_stage_publication(
+    prepared_inputs, monkeypatch, stage
+):
+    from datetime import datetime, timezone
+    from sqlalchemy import update
+    from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+    from repositories.document_profile_repository import DocumentProfileRepo
+    from repositories.pipeline_run_repository import PipelineLeaseLostError
+
+    ctx = prepared_inputs
+    run = await preparation.queue_document_preparation(
+        "prepare-papers", "paper-a", user_id="user-1"
+    )
+    original = await PipelineRunRepo.claim_next_document_preparation_job(
+        worker_id="original", lease_duration=timedelta(seconds=60)
+    )
+    replacements = []
+
+    async def take_over():
+        async with ctx.factory() as db, db.begin():
+            await db.execute(
+                update(PipelineRunORM)
+                .where(PipelineRunORM.run_id == run.run_id)
+                .values(
+                    lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)
+                )
+            )
+        replacements.append(
+            await PipelineRunRepo.claim_next_document_preparation_job(
+                worker_id="replacement", lease_duration=timedelta(seconds=60)
+            )
         )
 
-    monkeypatch.setattr(ctx.service, "_parse_document", parse_document)
-    first = await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a")
-    await asyncio.gather(*tuple(ctx.service._active_workers))
-    profile = await ctx.profiles.read_document_profile(ctx.collection_id, "doc_a")
-    assert profile.profile_status == "completed"
-    assert profile.doc_type == "uncertain"
-    assert (await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a"))[
-        "run_id"
-    ] == first["run_id"]
-    assert not ctx.service._active_workers
+    async def parse(*args, **kwargs):
+        if stage == "source" and not replacements:
+            await take_over()
+        return SourceDocument("paper-a", 0, "LPBF", "Methods and measured porosity")
+
+    async def profile(
+        owner, document_id, *, source_fingerprint, profile_fingerprint, extractor
+    ):
+        if stage == "profile" and not replacements:
+            await take_over()
+        return DocumentProfile(
+            document_id,
+            "LPBF",
+            "experimental",
+            (),
+            0.9,
+            source_fingerprint=source_fingerprint,
+            profile_fingerprint=profile_fingerprint,
+        )
+
+    ctx.parse.side_effect = parse
+    monkeypatch.setattr(profiles, "build_document_profile", profile)
+    resources = dict(
+        workspace=ctx.workspace,
+        object_store=object(),
+        source_artifact_builder=object(),
+        profile_extractor=object(),
+    )
+    with pytest.raises(PipelineLeaseLostError):
+        await preparation.execute_document_preparation_job(original, **resources)
+    assert await DocumentProfileRepo.read("prepare-papers", "paper-a") is None
+    source = await SourceArtifactRepo.read_document("prepare-papers", "paper-a")
+    assert (source is not None) == (stage == "profile")
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert (await PipelineRunRepo.read_run(run.run_id, db=db)).status == "running"
+    assert replacements[0].lease_version > original.lease_version
+
+    result = await preparation.execute_document_preparation_job(
+        replacements[0], **resources
+    )
+    assert result.status == "completed"
+    assert (
+        await collection_service.get_document("prepare-papers", "paper-a")
+    ).document.status == "ready"
+    assert ctx.parse.await_count == (2 if stage == "source" else 1)

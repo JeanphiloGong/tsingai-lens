@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from tests.unit.application.test_research_agent_runner import _Model as _DiscoveryModel
-from types import SimpleNamespace
+from application.chat.capabilities import research_planning
 
 import pytest
-from pydantic import ValidationError
-
 from application.chat import (
     AgentContext,
     CapabilityRegistry,
@@ -20,7 +17,13 @@ from application.chat.capabilities import (
     ReviseResearchPlanCapability,
 )
 from application.chat.capabilities.contracts import CapabilityExecutionContext
-
+from application.chat.capabilities.research_planning import (
+    ProposeResearchPlanToolRequest,
+)
+from domain.goal import ExperimentPlanRecord
+from exceptions import ResourceConflictException
+from pydantic import ValidationError
+from tests.unit.application.test_research_agent_runner import _Model as _DiscoveryModel
 
 pytestmark = pytest.mark.anyio
 
@@ -51,6 +54,7 @@ class _FindingFeedbackService:
         *,
         collection_id: str,
         objective_id: str,
+        user_id: str,
     ) -> dict:
         self.calls.append((collection_id, objective_id))
         return {
@@ -109,102 +113,89 @@ class _ExperimentPlanService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.plans = {
-            "exp-agent-1": SimpleNamespace(
+            "exp-agent-1": ExperimentPlanRecord(
                 plan_id="exp-agent-1",
+                collection_id="col-1",
+                objective_id="objective-1",
+                title="Initial plan",
+                content="Initial content",
                 status="draft",
+                source_message_id=None,
+                source_links=(),
                 metadata={
                     "source": "research_agent",
                     "source_findings": _source_snapshots(),
                 },
-                to_record=lambda: {
-                    "plan_id": "exp-agent-1",
-                    "collection_id": "col-1",
-                    "objective_id": "objective-1",
-                    "title": "Initial plan",
-                    "content": "Initial content",
-                    "status": "draft",
-                    "source_message_id": None,
-                    "source_links": [],
-                    "metadata": {
-                        "source": "research_agent",
-                        "source_findings": _source_snapshots(),
-                    },
-                    "created_by": "user-1",
-                    "created_at": "2026-09-06T00:00:00+00:00",
-                    "updated_at": "2026-09-06T00:00:00+00:00",
-                    "plan_version": 1,
-                    "parent_plan_id": None,
-                    "structured_plan": None,
-                    "updated_by": "user-1",
-                },
+                created_by="user-1",
+                created_at="2026-09-06T00:00:00+00:00",
+                updated_at="2026-09-06T00:00:00+00:00",
+                plan_version=1,
+                parent_plan_id=None,
+                structured_plan=None,
+                updated_by="user-1",
             )
         }
 
     async def create_agent_plan(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(
+        return ExperimentPlanRecord(
             plan_id="exp-agent-1",
+            collection_id=kwargs["collection_id"],
+            objective_id=kwargs["objective_id"],
+            title=kwargs["title"],
+            content=kwargs["content"],
             status="draft",
-            to_record=lambda: {
-                "plan_id": "exp-agent-1",
-                "collection_id": kwargs["collection_id"],
-                "objective_id": kwargs["objective_id"],
-                "title": kwargs["title"],
-                "content": kwargs["content"],
-                "status": "draft",
-                "source_message_id": None,
-                "source_links": kwargs["source_links"],
-                "metadata": {
-                    "source": "research_agent",
-                    "source_findings": kwargs["source_findings"],
-                },
-                "created_by": kwargs["created_by"],
-                "created_at": "2026-09-06T00:00:00+00:00",
-                "updated_at": "2026-09-06T00:00:00+00:00",
+            source_message_id=None,
+            source_links=tuple(kwargs["source_links"]),
+            metadata={
+                "source": "research_agent",
+                "source_findings": kwargs["source_findings"],
             },
+            created_by=kwargs["created_by"],
+            created_at="2026-09-06T00:00:00+00:00",
+            updated_at="2026-09-06T00:00:00+00:00",
         )
 
-    async def list_plans(self, collection_id, objective_id):
+    async def list_plans(self, collection_id, objective_id, *, user_id):
         assert (collection_id, objective_id) == ("col-1", "objective-1")
         return tuple(self.plans.values())
 
-    async def read_plan(self, collection_id, objective_id, plan_id):
+    async def read_plan(self, collection_id, objective_id, plan_id, *, user_id):
         assert (collection_id, objective_id) == ("col-1", "objective-1")
         return self.plans[plan_id]
 
     async def update_plan(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(
+        return ExperimentPlanRecord(
             plan_id="exp-agent-2",
+            collection_id=kwargs["collection_id"],
+            objective_id=kwargs["objective_id"],
+            title=kwargs["title"],
+            content=kwargs["content"],
             status="draft",
-            to_record=lambda: {
-                "plan_id": "exp-agent-2",
-                "collection_id": kwargs["collection_id"],
-                "objective_id": kwargs["objective_id"],
-                "title": kwargs["title"],
-                "content": kwargs["content"],
-                "status": "draft",
-                "source_message_id": None,
-                "source_links": kwargs["source_links"],
-                "metadata": {
-                    "source": "research_agent",
-                    "source_findings": kwargs["source_findings"],
-                },
-                "created_by": "user-1",
-                "created_at": "2026-09-06T00:00:00+00:00",
-                "updated_at": "2026-09-07T00:00:00+00:00",
-                "plan_version": 2,
-                "parent_plan_id": kwargs["plan_id"],
-                "structured_plan": kwargs["structured_plan"],
-                "updated_by": kwargs["updated_by"],
+            source_message_id=None,
+            source_links=tuple(kwargs["source_links"]),
+            metadata={
+                "source": "research_agent",
+                "source_findings": kwargs["source_findings"],
             },
+            created_by="user-1",
+            created_at="2026-09-06T00:00:00+00:00",
+            updated_at="2026-09-07T00:00:00+00:00",
+            plan_version=2,
+            parent_plan_id=kwargs["plan_id"],
+            structured_plan=kwargs["structured_plan"],
+            updated_by=kwargs["updated_by"],
         )
 
 
 class _StaleExperimentPlanService(_ExperimentPlanService):
     async def create_agent_plan(self, **kwargs):
         self.calls.append(kwargs)
-        raise ValueError("research plan sources are stale: concurrent update")
+        raise ResourceConflictException(
+            "research plan sources are stale: concurrent update",
+            data={"code": "research_plan_sources_stale"},
+        )
 
 
 class _Model(_DiscoveryModel):
@@ -219,18 +210,33 @@ class _Model(_DiscoveryModel):
             "create_research_plan",
         }
 
-    async def respond(self, *, context: tuple, tool_specs: tuple, text_delta_callback=None, timeout_seconds=180.0, max_output_tokens=16_384):
+    async def respond(
+        self,
+        *,
+        context: tuple,
+        tool_specs: tuple,
+        text_delta_callback=None,
+        timeout_seconds=180.0,
+        max_output_tokens=16_384,
+    ):
         messages = context.messages
         assert messages
         if any(spec.name == "discover_research_tools" for spec in tool_specs):
-            return await super().respond(context=context, tool_specs=tool_specs,
-                                         text_delta_callback=text_delta_callback,
-                                         timeout_seconds=timeout_seconds,
-                                         max_output_tokens=max_output_tokens)
+            return await super().respond(
+                context=context,
+                tool_specs=tool_specs,
+                text_delta_callback=text_delta_callback,
+                timeout_seconds=timeout_seconds,
+                max_output_tokens=max_output_tokens,
+            )
         # Once the final approval write has completed, the runner deliberately
         # gives the model an answer-only turn so it cannot repeat that write.
         expected_tools = self.expected_tools
-        next_call = self.turns[0].tool_calls[0] if self.turns and self.turns[0].tool_calls else None
+        next_call = (
+            self.turns[0].tool_calls[0]
+            if self.turns and self.turns[0].tool_calls
+            else None
+        )
         if next_call is not None and next_call.name == "create_research_plan":
             # After a transient proposal, only the exact approved write remains
             # available for the next model decision.
@@ -304,12 +310,36 @@ def _source_snapshots() -> list[dict]:
     ]
 
 
+def test_plan_input_preserves_exact_evidence_identities() -> None:
+    arguments = _plan_arguments()
+    arguments["evidence_ids"] = ["Evidence-A", "evidence-a", "Evidence-A"]
+    arguments["variables"][0]["basis_evidence_ids"] = ["Evidence-A", "evidence-a"]
+    arguments["variables"][1]["basis_evidence_ids"] = ["Evidence-A"]
+    request = ProposeResearchPlanToolRequest.model_validate(arguments)
+    assert request.evidence_ids == ["Evidence-A", "evidence-a"]
+    assert request.variables[0].basis_evidence_ids == ["Evidence-A", "evidence-a"]
+
+
+@pytest.mark.parametrize("field", ["controls", "evidence_ids", "finding_ids"])
+def test_plan_input_rejects_blank_entries(field: str) -> None:
+    arguments = _plan_arguments()
+    arguments[field].append("  ")
+    with pytest.raises(ValueError):
+        ProposeResearchPlanToolRequest.model_validate(arguments)
+
+
+def test_plan_variable_rejects_blank_planned_value() -> None:
+    arguments = _plan_arguments()
+    arguments["variables"][0]["planned_values"].append("  ")
+    with pytest.raises(ValueError):
+        ProposeResearchPlanToolRequest.model_validate(arguments)
+
+
 async def test_research_plan_draft_is_structured_traceable_and_transient() -> None:
     feedback_service = _FindingFeedbackService()
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = feedback_service
+    capability = ProposeResearchPlanCapability()
 
     result = await capability.execute(
         _context("call-plan-draft"),
@@ -349,10 +379,9 @@ async def test_research_plan_draft_is_structured_traceable_and_transient() -> No
 
 
 async def test_research_plan_draft_marks_unreviewed_findings_for_review() -> None:
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(label_status="unreviewed"),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = _FindingFeedbackService(label_status="unreviewed")
+    capability = ProposeResearchPlanCapability()
 
     result = await capability.execute(
         _context("call-plan-unreviewed"),
@@ -365,10 +394,9 @@ async def test_research_plan_draft_marks_unreviewed_findings_for_review() -> Non
 
 
 async def test_research_plan_draft_rejects_evidence_outside_selected_findings() -> None:
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = _FindingFeedbackService()
+    capability = ProposeResearchPlanCapability()
     payload = _plan_arguments()
     payload["evidence_ids"] = [
         "evidence-result",
@@ -388,10 +416,9 @@ async def test_research_plan_draft_rejects_evidence_outside_selected_findings() 
 
 
 def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = _FindingFeedbackService()
+    capability = ProposeResearchPlanCapability()
     payload = _plan_arguments()
     payload["controls"] = ["   "]
 
@@ -402,15 +429,11 @@ def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
 async def test_research_plan_write_waits_for_exact_approval_after_draft() -> None:
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    proposal = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-    )
-    writer = CreateResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = feedback_service
+    proposal = ProposeResearchPlanCapability()
+    research_planning.experiment_plan_service = plan_service
+    writer = CreateResearchPlanCapability()
     plan_arguments = _plan_arguments()
     write_arguments = {
         **plan_arguments,
@@ -419,26 +442,44 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
-                tool_calls=(ModelToolCall(
-                    name="propose_research_plan",
-                    arguments=plan_arguments,
-                ),)
+                tool_calls=(
+                    ModelToolCall(
+                        name="propose_research_plan",
+                        arguments=plan_arguments,
+                    ),
+                )
             ),
-            ModelTurn(tool_calls=(ModelToolCall(
-                name="update_execution_plan",
-                arguments={
-                    "steps": [{"step_id": "save", "action": "Save the reviewed plan", "status": "in_progress"}],
-                    "status": "in_progress",
-                    "explanation": "The reviewed plan is ready for approval.",
-                },
-            ),)),
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name="update_execution_plan",
+                        arguments={
+                            "steps": [
+                                {
+                                    "step_id": "save",
+                                    "action": "Save the reviewed plan",
+                                    "status": "in_progress",
+                                }
+                            ],
+                            "status": "in_progress",
+                            "explanation": "The reviewed plan is ready for approval.",
+                        },
+                    ),
+                )
+            ),
             ModelTurn(
                 content="The research plan draft is ready for approval.",
-                tool_calls=(ModelToolCall(
-                    name="create_research_plan",
-                    arguments=write_arguments,
-                ),),
+                tool_calls=(
+                    ModelToolCall(
+                        name="create_research_plan",
+                        arguments=write_arguments,
+                    ),
+                ),
             ),
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the approved research plan", "status": "completed"}],
+                "status": "completed", "explanation": "The exact approved write succeeded.",
+            }),)),
             ModelTurn(content="The approved research plan draft has been saved."),
         ),
         capabilities=CapabilityRegistry((proposal, writer)),
@@ -478,19 +519,21 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
     assert plan_service.calls[0]["created_by_tool_call_id"] == (
         proposed.pending_approval.tool_call_id
     )
-    assert plan_service.calls[0]["structured_plan"] == proposed.tool_results[1].data[
-        "structured_plan"
-    ]
+    assert (
+        plan_service.calls[0]["structured_plan"]
+        == proposed.tool_results[1].data["structured_plan"]
+    )
 
 
-async def test_research_plan_write_rejects_changed_source_snapshot_without_persistence() -> None:
+async def test_research_plan_write_rejects_changed_source_snapshot_without_persistence() -> (
+    None
+):
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    capability = CreateResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = feedback_service
+    research_planning.experiment_plan_service = plan_service
+    capability = CreateResearchPlanCapability()
     stale_snapshots = _source_snapshots()
     stale_snapshots[0]["finding_fingerprint"] = "finding.v2:old"
 
@@ -507,14 +550,15 @@ async def test_research_plan_write_rejects_changed_source_snapshot_without_persi
     assert plan_service.calls == []
 
 
-async def test_research_plan_write_preserves_stale_error_from_persistence_boundary() -> None:
+async def test_research_plan_write_preserves_stale_error_from_persistence_boundary() -> (
+    None
+):
     feedback_service = _FindingFeedbackService()
     plan_service = _StaleExperimentPlanService()
-    capability = CreateResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = feedback_service
+    research_planning.experiment_plan_service = plan_service
+    capability = CreateResearchPlanCapability()
 
     result = await capability.execute(
         _context("call-plan-race"),
@@ -533,10 +577,9 @@ async def test_research_plan_write_preserves_stale_error_from_persistence_bounda
 
 async def test_agent_can_inspect_current_or_named_research_plan_revision() -> None:
     plan_service = _ExperimentPlanService()
-    capability = InspectResearchPlansCapability(
-        collection_service=_CollectionService(),
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.experiment_plan_service = plan_service
+    capability = InspectResearchPlansCapability()
 
     listed = await capability.execute(
         _context("call-plan-list"),
@@ -554,46 +597,63 @@ async def test_agent_can_inspect_current_or_named_research_plan_revision() -> No
     assert listed.data["history_scope"] == "current_revisions"
     assert historical.data["plan"]["plan_version"] == 1
     assert historical.data["history_scope"] == "named_revision"
-    assert {ref.resource_type for ref in historical.resource_refs} == {
-        "research_plan"
-    }
+    assert {ref.resource_type for ref in historical.resource_refs} == {"research_plan"}
 
 
 @pytest.mark.parametrize("label_status", ["gold", "unreviewed"])
-async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(label_status) -> None:
-    proposal = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(label_status=label_status),
-    )
+async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(
+    label_status,
+) -> None:
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = _FindingFeedbackService(label_status=label_status)
+    proposal = ProposeResearchPlanCapability()
     model = _DiscoveryModel(
-        ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)),
-        ModelTurn(content=(
-            "The provisional plan is ready for your review and has not been saved."
-            + (" supporting conclusions still require researcher review." if label_status != "gold" else "")
-        )),
+        ModelTurn(
+            tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)
+        ),
+        ModelTurn(
+            content=(
+                "The provisional plan is ready for your review and has not been saved."
+                + (
+                    " supporting conclusions still require researcher review."
+                    if label_status != "gold"
+                    else ""
+                )
+            )
+        ),
     )
     chunks = []
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((proposal,))).run_turn(
-        context=AgentContext("chat-1", "user-1", "col-1"), previous_messages=(),
-        user_message="Propose a plan to test the conclusion. Do not save.", text_delta_callback=chunks.append,
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((proposal,))
+    ).run_turn(
+        context=AgentContext("chat-1", "user-1", "col-1"),
+        previous_messages=(),
+        user_message="Propose a plan to test the conclusion. Do not save.",
+        text_delta_callback=chunks.append,
     )
     assert result.status.value == "completed"
     assert result.pending_approval is None
-    draft = next(item for item in result.tool_results if item.data.get("structured_plan"))
+    draft = next(
+        item for item in result.tool_results if item.data.get("structured_plan")
+    )
     assert "not been saved" in result.messages[-1].content
-    assert ("supporting conclusions still require researcher review" in result.messages[-1].content) == (label_status != "gold")
+    assert (
+        "supporting conclusions still require researcher review"
+        in result.messages[-1].content
+    ) == (label_status != "gold")
     assert "".join(chunks) == result.messages[-1].content
     assert not model.turns
 
 
-async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service() -> None:
+async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service() -> (
+    None
+):
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    capability = ReviseResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_dataset_service = feedback_service
+    research_planning.experiment_plan_service = plan_service
+    capability = ReviseResearchPlanCapability()
     arguments = {
         **_plan_arguments(),
         "parent_plan_id": "exp-agent-1",
@@ -601,29 +661,56 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
     }
     runner = ResearchAgentRunner(
         model=_DiscoveryModel(
-            ModelTurn(tool_calls=(ModelToolCall(name="inspect_research_plans", arguments={
-                "objective_id": arguments["objective_id"], "plan_id": "exp-agent-1",
-            }),)),
-            ModelTurn(tool_calls=(ModelToolCall(
-                name="update_execution_plan",
-                arguments={
-                    "steps": [{"step_id": "save", "action": "Save the revised plan", "status": "in_progress"}],
-                    "status": "in_progress",
-                    "explanation": "The revision is ready for approval.",
-                },
-            ),)),
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name="inspect_research_plans",
+                        arguments={
+                            "objective_id": arguments["objective_id"],
+                            "plan_id": "exp-agent-1",
+                        },
+                    ),
+                )
+            ),
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name="update_execution_plan",
+                        arguments={
+                            "steps": [
+                                {
+                                    "step_id": "save",
+                                    "action": "Save the revised plan",
+                                    "status": "in_progress",
+                                }
+                            ],
+                            "status": "in_progress",
+                            "explanation": "The revision is ready for approval.",
+                        },
+                    ),
+                )
+            ),
             ModelTurn(
                 content="The revision is ready for approval.",
-                tool_calls=(ModelToolCall(
-                    name="revise_research_plan",
-                    arguments=arguments,
-                ),),
+                tool_calls=(
+                    ModelToolCall(
+                        name="revise_research_plan",
+                        arguments=arguments,
+                    ),
+                ),
             ),
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the approved research plan", "status": "completed"}],
+                "status": "completed", "explanation": "The exact approved write succeeded.",
+            }),)),
             ModelTurn(content="The approved revision has been saved."),
         ),
-        capabilities=CapabilityRegistry((capability, InspectResearchPlansCapability(
-            collection_service=_CollectionService(), experiment_plan_service=plan_service,
-        ))),
+        capabilities=CapabilityRegistry(
+            (
+                capability,
+                InspectResearchPlansCapability(),
+            )
+        ),
     )
     context = AgentContext("chat-1", "user-1", "col-1")
 

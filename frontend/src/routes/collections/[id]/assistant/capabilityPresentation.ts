@@ -75,7 +75,7 @@ export function capabilityRequestLabel(toolName: string | null, translate: Trans
 }
 export function numberValue(data: Record<string, unknown>, key: string) {
 	const value = data[key];
-	return typeof value === 'number' ? value : 0;
+	return typeof value === 'number' && Number.isFinite(value) ? value : '--';
 }
 
 export function paperSourceIssues(message: ChatMessage | null) {
@@ -84,15 +84,15 @@ export function paperSourceIssues(message: ChatMessage | null) {
 	return result.data.papers.flatMap((value) => {
 		if (!value || typeof value !== 'object') return [];
 		const paper = value as Record<string, unknown>;
-		const status = String(paper.source_status ?? '');
+		const status = paper.source_status;
 		if (
-			!['preparing', 'not_prepared', 'preparation_failed', 'unavailable', 'read_failed'].includes(
+			typeof status !== 'string' || !['preparing', 'not_prepared', 'preparation_failed', 'unavailable', 'read_failed'].includes(
 				status
 			)
 		) {
 			return [];
 		}
-		const documentId = String(paper.document_id ?? '');
+		const documentId = paper.document_id as string;
 		const resource = result.resource_refs.find(
 			(ref) => ref.resource_type === 'document' && ref.resource_id === documentId
 		);
@@ -130,8 +130,8 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 		const collection = result.data.collection;
 		const papers =
 			collection && typeof collection === 'object' && 'paper_count' in collection
-				? Number(collection.paper_count) || 0
-				: 0;
+				? numberValue(collection as Record<string, unknown>, 'paper_count')
+				: '--';
 		return translate('researchAgent.capability.paperCount', {
 			papers,
 			objectives: numberValue(result.data, 'objective_count')
@@ -148,10 +148,8 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 				: 'researchAgent.capability.paperBrowseCount',
 			{
 				count,
-				remaining: Math.max(
-					0,
-					numberValue(result.data, 'paper_total') - numberValue(result.data, 'next_offset')
-				)
+				remaining: typeof result.data.paper_total === 'number' && typeof result.data.next_offset === 'number'
+					? result.data.paper_total - result.data.next_offset : '--'
 			}
 		);
 	}
@@ -198,7 +196,7 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 		if (!process || typeof process !== 'object' || !('status' in process)) {
 			return translate('researchAgent.capability.researchProcessUnavailable');
 		}
-		switch (String(process.status)) {
+		switch (process.status) {
 			case 'not_started':
 				return translate('researchAgent.researchProcess.notStartedSummary');
 			case 'queued':
@@ -279,20 +277,11 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 		});
 	}
 	if (name === 'preview_research_scope') {
-		const counts = result.data.scope_counts;
+		const counts = result.data.scope_counts as Record<string, unknown> | undefined;
 		return translate('researchAgent.capability.scopeCount', {
-			likely:
-				counts && typeof counts === 'object' && 'likely_relevant' in counts
-					? Number(counts.likely_relevant) || 0
-					: 0,
-			review:
-				counts && typeof counts === 'object' && 'needs_inspection' in counts
-					? Number(counts.needs_inspection) || 0
-					: 0,
-			excluded:
-				counts && typeof counts === 'object' && 'confidently_out_of_scope' in counts
-					? Number(counts.confidently_out_of_scope) || 0
-					: 0
+			likely: counts ? numberValue(counts, 'likely_relevant') : '--',
+			review: counts ? numberValue(counts, 'needs_inspection') : '--',
+			excluded: counts ? numberValue(counts, 'confidently_out_of_scope') : '--'
 		});
 	}
 	if (name === 'inspect_objective_analysis' || name === 'start_objective_analysis') {
@@ -325,20 +314,15 @@ function objectiveAnalysisSummary(data: Record<string, unknown>, translate: Tran
 	if (!analysis || typeof analysis !== 'object' || !('status' in analysis)) {
 		return translate('researchAgent.capability.analysisNotStarted');
 	}
-	switch (String(analysis.status)) {
+	switch (analysis.status) {
 		case 'queued':
 			return translate('researchAgent.capability.analysisQueued');
 		case 'running': {
-			const progress = 'document_progress' in analysis ? analysis.document_progress : null;
+			const progress = 'document_progress' in analysis
+				? analysis.document_progress as Record<string, unknown> | null : null;
 			return translate('researchAgent.capability.analysisRunning', {
-				current:
-					progress && typeof progress === 'object' && 'current' in progress
-						? Number(progress.current) || 0
-						: 0,
-				total:
-					progress && typeof progress === 'object' && 'total' in progress
-						? Number(progress.total) || 0
-						: 0
+				current: progress ? numberValue(progress, 'current') : '--',
+				total: progress ? numberValue(progress, 'total') : '--'
 			});
 		}
 		case 'succeeded':

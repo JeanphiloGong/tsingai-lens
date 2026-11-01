@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
 PAPER_RESEARCH_MAP_WARNING_LIMIT = (2, 240)
 PAPER_RESEARCH_MAP_SCOPE_LIMIT = 4
@@ -24,20 +24,11 @@ _REVIEW_KNOWLEDGE_ITEM_LIMIT = 2
 _REVIEW_CITATION_LEAD_LIMIT = 3
 
 
-def _normalize_list(value: object) -> object:
-    return [] if value is None else value
-
-
 def _normalize_warnings(value: object) -> object:
-    if value is None:
-        return []
-    if not isinstance(value, list):
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         return value
-    normalized: list[object] = []
+    normalized: list[str] = []
     for item in value[: PAPER_RESEARCH_MAP_WARNING_LIMIT[0]]:
-        if not isinstance(item, str):
-            normalized.append(item)
-            continue
         text = item.strip()
         if text:
             normalized.append(text[: PAPER_RESEARCH_MAP_WARNING_LIMIT[1]])
@@ -64,7 +55,7 @@ def _bounded_unique_items(
                 separators=(",", ":"),
             )
         except (TypeError, ValueError):
-            identity = repr(item)
+            return value
         if identity in identities:
             continue
         identities.add(identity)
@@ -81,7 +72,13 @@ def _bounded_mapping_list(
     limit: int,
     path: str,
     overflows: list[str],
-) -> list[object]:
+) -> list[object] | None:
+    value = payload.get(field_name)
+    expected_type = str if field_name in {"material_scope", "process_context"} else dict
+    if not isinstance(value, list) or any(
+        not isinstance(item, expected_type) for item in value
+    ):
+        return None
     bounded = _bounded_unique_items(
         payload.get(field_name),
         limit=limit,
@@ -91,7 +88,7 @@ def _bounded_mapping_list(
     if isinstance(bounded, list):
         payload[field_name] = bounded
         return bounded
-    return []
+    return None
 
 
 def _mark_bounded_output(
@@ -117,9 +114,15 @@ def _mark_bounded_output(
         + overflow_summary
         + ". Retained source-grounded items within the paper-map contract."
     )[: PAPER_RESEARCH_MAP_WARNING_LIMIT[1]]
-    existing_warnings = (
-        payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
-    )
+    existing_warnings = payload.get("warnings", [])
+    if not isinstance(existing_warnings, list) or any(
+        not isinstance(item, str) for item in existing_warnings
+    ):
+        return payload
+    if "output_saturated" in payload and not isinstance(
+        payload["output_saturated"], bool
+    ):
+        return payload
     payload["warnings"] = [warning, *existing_warnings][
         : PAPER_RESEARCH_MAP_WARNING_LIMIT[0]
     ]
@@ -128,11 +131,4 @@ def _mark_bounded_output(
 
 
 class _PaperResearchMapResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    @field_validator("confidence", mode="before", check_fields=False)
-    @classmethod
-    def _normalize_default_confidence(cls, value: object) -> object:
-        if value is not None:
-            return value
-        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+    model_config = ConfigDict(extra="forbid", strict=True)

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
+from application.core.objectives import paper_experiment_authoring_service
+from repositories.chat_repository import ChatRepo
+
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from typing import Any, Literal
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
 from application.core.objectives.paper_experiment_authoring_service import (
-    PaperExperimentAuthoringService,
+    PaperExperimentAuthoringError,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _ScientificAttributeToolField(BaseModel):
@@ -149,8 +151,12 @@ class _PaperExperimentTestConditionToolField(BaseModel):
         min_length=1,
         description="Test or characterization category, such as tensile or microscopy.",
     )
-    method: str | None = Field(default=None, description="Reported method or instrument description.")
-    standard: str | None = Field(default=None, description="Reported standard, such as ASTM E8.")
+    method: str | None = Field(
+        default=None, description="Reported method or instrument description."
+    )
+    standard: str | None = Field(
+        default=None, description="Reported standard, such as ASTM E8."
+    )
     parameters: list[_ScientificAttributeToolField] = Field(
         default_factory=list,
         description=(
@@ -216,9 +222,15 @@ class _PaperExperimentMeasurementToolField(BaseModel):
         min_length=1,
         description="Required response-local key used by comparisons and interpretations.",
     )
-    variant_key: str | None = Field(default=None, description="Response-local variant key, when known.")
-    test_key: str | None = Field(default=None, description="Response-local test key, when known.")
-    outcome: str = Field(min_length=1, description="Measured or observed outcome label.")
+    variant_key: str | None = Field(
+        default=None, description="Response-local variant key, when known."
+    )
+    test_key: str | None = Field(
+        default=None, description="Response-local test key, when known."
+    )
+    outcome: str = Field(
+        min_length=1, description="Measured or observed outcome label."
+    )
     value: str | int | float | bool | None = Field(
         default=None,
         description="Reported scalar value; supply value or result_text. Omit or use null for a qualitative result.",
@@ -242,7 +254,9 @@ class _PaperExperimentMeasurementToolField(BaseModel):
             "Keep paper-native identifiers inside reported_identifiers."
         ),
     )
-    result_kind: Literal["measured", "observed", "simulated", "predicted", "unknown"] = Field(
+    result_kind: Literal[
+        "measured", "observed", "simulated", "predicted", "unknown"
+    ] = Field(
         default="measured",
         description="Nature of the reported result; use observed for qualitative observations.",
     )
@@ -284,12 +298,6 @@ class _PaperExperimentMeasurementToolField(BaseModel):
         default_factory=list,
         description="Other source-grounded limitations for this measurement.",
     )
-
-    @model_validator(mode="after")
-    def _require_reported_result(self) -> "_PaperExperimentMeasurementToolField":
-        if self.value is None and not self.result_text:
-            raise ValueError("measurement requires value or result_text")
-        return self
 
 
 class _PaperExperimentComparisonToolField(BaseModel):
@@ -398,7 +406,9 @@ class _PaperExperimentDraftExperimentField(BaseModel):
             "paper scope this experiment covers."
         ),
     )
-    series_key: str | None = Field(default=None, description="Response-local experiment series key.")
+    series_key: str | None = Field(
+        default=None, description="Response-local experiment series key."
+    )
     scope_kind: Literal[
         "parent",
         "matrix",
@@ -430,7 +440,9 @@ class _PaperExperimentDraftExperimentField(BaseModel):
         default_factory=list,
         description="Source-label records supporting an independent physical split.",
     )
-    design_type: Literal["parallel", "factorial", "dose_response", "observational", "unknown"] = Field(
+    design_type: Literal[
+        "parallel", "factorial", "dose_response", "observational", "unknown"
+    ] = Field(
         default="unknown",
         description="Paper-supported design shape; use unknown when the design is not stated.",
     )
@@ -457,15 +469,21 @@ class _PaperExperimentDraftExperimentField(BaseModel):
             "variants, both sides' measurement keys, and source-backed relation labels."
         ),
     )
-    reported_interpretations: list[_PaperExperimentReportedInterpretationToolField] = Field(
-        default_factory=list,
-        description=(
-            "Typed paper-author interpretations. Always provide statement, kind, and "
-            "source labels; these are not Lens Findings."
-        ),
+    reported_interpretations: list[_PaperExperimentReportedInterpretationToolField] = (
+        Field(
+            default_factory=list,
+            description=(
+                "Typed paper-author interpretations. Always provide statement, kind, and "
+                "source labels; these are not Lens Findings."
+            ),
+        )
     )
-    source_labels: list[str] = Field(default_factory=list, description="Sxxx labels supporting this experiment.")
-    unresolved_issues: list[dict[str, Any]] = Field(default_factory=list, description="Unknown or unresolved source facts.")
+    source_labels: list[str] = Field(
+        default_factory=list, description="Sxxx labels supporting this experiment."
+    )
+    unresolved_issues: list[dict[str, Any]] = Field(
+        default_factory=list, description="Unknown or unresolved source facts."
+    )
 
 
 class _PaperExperimentDraftFields(BaseModel):
@@ -491,7 +509,9 @@ class _PaperExperimentDraftFields(BaseModel):
 
     def raw_draft(self) -> dict[str, Any]:
         return {
-            "experiments": [item.model_dump(exclude_defaults=True) for item in self.experiments],
+            "experiments": [
+                item.model_dump(exclude_defaults=True) for item in self.experiments
+            ],
             "source_labels": self.source_labels,
             "unresolved_issues": self.unresolved_issues,
         }
@@ -505,13 +525,18 @@ class PaperExperimentRevisionToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     draft_id: str = Field(min_length=1, max_length=128)
-    draft_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    draft_digest: str = Field(
+        min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    )
 
 
 def _draft_id(context: CapabilityExecutionContext, digest: str) -> str:
-    return "pexp_draft_" + sha256(
-        f"{context.session_id}:{context.tool_call_id}:{digest}".encode("utf-8")
-    ).hexdigest()[:24]
+    return (
+        "pexp_draft_"
+        + sha256(
+            f"{context.session_id}:{context.tool_call_id}:{digest}".encode("utf-8")
+        ).hexdigest()[:24]
+    )
 
 
 _DRAFT_TTL = timedelta(hours=24)
@@ -559,10 +584,6 @@ class ProposePaperExperimentDraftCapability:
         input_model=PaperExperimentDraftToolRequest,
     )
 
-    def __init__(self, *, authoring_service: PaperExperimentAuthoringService, chat_repository: Any) -> None:
-        self.authoring_service = authoring_service
-        self.chat_repository = chat_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
@@ -574,13 +595,13 @@ class ProposePaperExperimentDraftCapability:
             complete_source_reads,
         )
 
-        prepared = await self.authoring_service.prepare(
+        prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
             collection_id=context.collection_id,
             user_id=context.user_id,
             document_id=arguments.document_id,
             raw_draft=arguments.raw_draft(),
         )
-        messages = await self.chat_repository.read_messages(context.session_id)
+        messages = await ChatRepo.read_messages(context.session_id)
         completed = complete_source_reads(_successful_results_by_name(messages))
         labels: set[str] = set()
 
@@ -600,15 +621,29 @@ class ProposePaperExperimentDraftCapability:
         missing = []
         for label in sorted(labels):
             source = prepared.output.output.source_labels[label]
-            identity = (arguments.document_id, source["source_kind"], source["source_ref"],
-                        prepared.source_digests[(source["source_kind"], source["source_ref"])])
+            identity = (
+                arguments.document_id,
+                source["source_kind"],
+                source["source_ref"],
+                prepared.source_digests[(source["source_kind"], source["source_ref"])],
+            )
             if identity not in completed:
-                missing.append({"source_label": label, "source_kind": source["source_kind"], "source_ref": source["source_ref"]})
+                missing.append(
+                    {
+                        "source_label": label,
+                        "source_kind": source["source_kind"],
+                        "source_ref": source["source_ref"],
+                    }
+                )
         if missing:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status="failed", error_code="source_read_incomplete",
-                error_message=("Read the current complete canonical Sources listed in sources_to_read. "
-                               "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."),
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="source_read_incomplete",
+                error_message=(
+                    "Read the current complete canonical Sources listed in sources_to_read. "
+                    "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."
+                ),
                 data={"document_id": arguments.document_id, "sources_to_read": missing},
             )
         for message in reversed(messages):
@@ -616,13 +651,17 @@ class ProposePaperExperimentDraftCapability:
             if prior is None or prior.status != "succeeded":
                 continue
             data = prior.data
-            if (data.get("document_id") != arguments.document_id
-                    or data.get("draft_digest") != prepared.draft_digest
-                    or data.get("source_fingerprint") != prepared.source_fingerprint
-                    or data.get("draft") != arguments.raw_draft()):
+            if (
+                data.get("document_id") != arguments.document_id
+                or data.get("draft_digest") != prepared.draft_digest
+                or data.get("source_fingerprint") != prepared.source_fingerprint
+                or data.get("draft") != arguments.raw_draft()
+            ):
                 continue
             try:
-                age = datetime.now(timezone.utc) - datetime.fromisoformat(str(data.get("draft_created_at") or ""))
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(
+                    str(data.get("draft_created_at") or "")
+                )
             except (ValueError, TypeError):
                 continue
             if timedelta(0) <= age <= _DRAFT_TTL and data.get("draft_id"):
@@ -630,7 +669,7 @@ class ProposePaperExperimentDraftCapability:
         draft_id = _draft_id(context, prepared.draft_digest)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft_id": draft_id,
                 "draft_digest": prepared.draft_digest,
@@ -638,7 +677,9 @@ class ProposePaperExperimentDraftCapability:
                 "status": "pending_approval",
                 "requires_user_approval": True,
                 "experiment_count": len(prepared.output.output.experiments),
-                "experiments": [item.payload for item in prepared.output.output.experiments],
+                "experiments": [
+                    item.payload for item in prepared.output.output.experiments
+                ],
                 "source_fingerprint": prepared.source_fingerprint,
                 "objective_id": arguments.objective_id,
                 "document_id": arguments.document_id,
@@ -676,23 +717,12 @@ class CreatePaperExperimentRevisionCapability:
         input_model=PaperExperimentRevisionToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        authoring_service: PaperExperimentAuthoringService,
-        chat_repository: Any | None = None,
-    ) -> None:
-        self.authoring_service = authoring_service
-        self.chat_repository = chat_repository
-
     async def _stored_draft(
         self,
         context: CapabilityExecutionContext,
         arguments: PaperExperimentRevisionToolRequest,
     ) -> tuple[str, dict[str, Any]]:
-        if self.chat_repository is None:
-            raise ValueError("paper experiment draft store is unavailable")
-        messages = await self.chat_repository.read_messages(context.session_id)
+        messages = await ChatRepo.read_messages(context.session_id)
         for message in reversed(messages):
             result = getattr(message, "tool_result", None)
             data = getattr(result, "data", None)
@@ -702,17 +732,26 @@ class CreatePaperExperimentRevisionCapability:
                 continue
             if getattr(result, "status", None) != "succeeded":
                 continue
-            if str(data.get("draft_digest") or "").casefold() != arguments.draft_digest.casefold():
-                raise ValueError("stored paper experiment draft digest does not match approval")
+            if (
+                str(data.get("draft_digest") or "").casefold()
+                != arguments.draft_digest.casefold()
+            ):
+                raise PaperExperimentAuthoringError(
+                    "stored paper experiment draft digest does not match approval"
+                )
             created_at = str(data.get("draft_created_at") or "")
             try:
-                is_expired = datetime.now(timezone.utc) - datetime.fromisoformat(
-                    created_at.replace("Z", "+00:00")
-                ) > _DRAFT_TTL
+                is_expired = (
+                    datetime.now(timezone.utc)
+                    - datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    > _DRAFT_TTL
+                )
             except (ValueError, TypeError):
                 is_expired = True
             if is_expired:
-                raise ValueError("paper experiment draft has expired; propose it again")
+                raise PaperExperimentAuthoringError(
+                    "paper experiment draft has expired; propose it again"
+                )
             draft = data.get("draft")
             if not isinstance(draft, dict):
                 continue
@@ -720,27 +759,31 @@ class CreatePaperExperimentRevisionCapability:
                 str(data.get("document_id") or ""),
                 draft,
             )
-        raise ValueError("paper experiment draft was not found in this session")
+        raise PaperExperimentAuthoringError(
+            "paper experiment draft was not found in this session"
+        )
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: PaperExperimentRevisionToolRequest,
     ) -> ChatToolResult:
-        document_id, raw_draft = await self._stored_draft(
-            context, arguments
-        )
+        document_id, raw_draft = await self._stored_draft(context, arguments)
         if not document_id:
-            raise ValueError("stored paper experiment draft is missing its scope")
-        prepared = await self.authoring_service.prepare(
+            raise PaperExperimentAuthoringError(
+                "stored paper experiment draft is missing its scope"
+            )
+        prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
             collection_id=context.collection_id,
             user_id=context.user_id,
             document_id=document_id,
             raw_draft=raw_draft,
         )
         if prepared.draft_digest.casefold() != arguments.draft_digest.casefold():
-            raise ValueError("paper experiment draft digest changed; review it again")
-        result = await self.authoring_service.write(
+            raise PaperExperimentAuthoringError(
+                "paper experiment draft digest changed; review it again"
+            )
+        result = await paper_experiment_authoring_service.write_prepared_paper_experiments(
             prepared=prepared,
             collection_id=context.collection_id,
             created_by=context.user_id,
@@ -759,10 +802,330 @@ class CreatePaperExperimentRevisionCapability:
             )
             for item in result.revisions
         ]
-        revisions = [item.revision.to_record() for item in result.revisions]
+        revisions = [
+            {
+                "experiment_id": item.revision.experiment_id,
+                "document_id": item.revision.document_id,
+                "experiment_version": item.revision.experiment_version,
+                "source_fingerprint": item.revision.source_fingerprint,
+                "label": item.revision.label,
+                "scope_description": item.revision.scope_description,
+                "design_type": item.revision.design_type,
+                "identity_status": item.revision.identity_status,
+                "binding_status": item.revision.binding_status,
+                "variants": [
+                    {
+                        "variant_key": item.variant_key,
+                        "variant_label": item.variant_label,
+                        "subject_attributes": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.subject_attributes
+                        ],
+                        "intervention_attributes": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.intervention_attributes
+                        ],
+                        "state": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.state
+                        ],
+                        "population_scope": (
+                            dict(item.population_scope)
+                            if item.population_scope is not None
+                            else None
+                        ),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                        "identity_specificity": item.identity_specificity,
+                        "missing_dimensions": list(item.missing_dimensions),
+                        "identity_evidence": list(item.identity_evidence),
+                    }
+                    for item in item.revision.variants
+                ],
+                "test_conditions": [
+                    {
+                        "test_key": item.test_key,
+                        "test_type": item.test_type,
+                        "parameters": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.parameters
+                        ],
+                        "population_scope": (
+                            dict(item.population_scope)
+                            if item.population_scope is not None
+                            else None
+                        ),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                        "protocol_specificity": item.protocol_specificity,
+                        "test_identity_status": item.test_identity_status,
+                        "protocol_completeness": item.protocol_completeness,
+                        "missing_parameters": list(item.missing_parameters),
+                        "method": item.method,
+                        "standard": item.standard,
+                        "outcome_scope": list(item.outcome_scope),
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "protocol_evidence": list(item.protocol_evidence),
+                    }
+                    for item in item.revision.test_conditions
+                ],
+                "measurements": [
+                    {
+                        "measurement_key": item.measurement_key,
+                        "outcome": item.outcome,
+                        "variant_key": item.variant_key,
+                        "test_key": item.test_key,
+                        "value": item.value,
+                        "unit": item.unit,
+                        "result_text": item.result_text,
+                        "statistics": dict(item.statistics),
+                        "measurement_scope": dict(item.measurement_scope),
+                        "result_kind": item.result_kind,
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                    }
+                    for item in item.revision.measurements
+                ],
+                "comparisons": [
+                    {
+                        "comparison_key": item.comparison_key,
+                        "baseline_variant_key": item.baseline_variant_key,
+                        "target_variant_key": item.target_variant_key,
+                        "outcome": item.outcome,
+                        "baseline_measurement_keys": list(
+                            item.baseline_measurement_keys
+                        ),
+                        "target_measurement_keys": list(item.target_measurement_keys),
+                        "changed_variables": [
+                            {
+                                "name": item.name,
+                                "baseline_value": item.baseline_value,
+                                "target_value": item.target_value,
+                                "unit": item.unit,
+                            }
+                            for item in item.changed_variables
+                        ],
+                        "matched_conditions": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.matched_conditions
+                        ],
+                        "basis": item.basis,
+                        "direction": item.direction,
+                        "reported_statement": item.reported_statement,
+                        "attribution_scope": item.attribution_scope,
+                        "status": item.status,
+                        "reasons": list(item.reasons),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "relation_status": item.relation_status,
+                    }
+                    for item in item.revision.comparisons
+                ],
+                "reported_interpretations": [
+                    {
+                        "statement": item.statement,
+                        "kind": item.kind,
+                        "measurement_keys": list(item.measurement_keys),
+                        "comparison_keys": list(item.comparison_keys),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                    }
+                    for item in item.revision.reported_interpretations
+                ],
+                "source_refs": [
+                    {
+                        "document_id": item.document_id,
+                        "source_fingerprint": item.source_fingerprint,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "quote": item.quote,
+                    }
+                    for item in item.revision.source_refs
+                ],
+                "unresolved_issues": [
+                    dict(item) for item in item.revision.unresolved_issues
+                ],
+            }
+            for item in result.revisions
+        ]
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "revision_saved": True,
                 "revisions": revisions,

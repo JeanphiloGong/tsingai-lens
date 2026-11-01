@@ -4,11 +4,13 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import pytest
-
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ResearchObjective,
+)
 
 
 @pytest.fixture
@@ -126,13 +128,29 @@ def run(probe, scenario, payload, *, finish_reason="stop"):
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
+
+    def with_options(**options):
+        assert options["max_retries"] == 0
+        assert 0 < options["timeout"] <= 30
+        return client
+
+    client.with_options = with_options
     runtime = SimpleNamespace(
         model="test-model",
         max_completion_tokens=8192,
         reasoning_effort=None,
         timeout_s=30,
     )
-    return probe.run_proposal(scenario, runtime, client), requests
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "scenarios.json"
+        path.write_text(json.dumps({"scenarios": [scenario]}), encoding="utf-8")
+        _, paper_maps = probe.load_scenarios(path)
+    return (
+        probe.run_proposal(
+            scenario, runtime, client, paper_maps=paper_maps[scenario["scenario_id"]]
+        ),
+        requests,
+    )
 
 
 def test_core_probe_preserves_reading_scope_original_sources_and_joint_factors(
@@ -160,20 +178,23 @@ def test_core_probe_preserves_reading_scope_original_sources_and_joint_factors(
 def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
     probe, monkeypatch
 ):
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "probe",
-            "objective_id": "objective-1",
-            "question": "How does preheat temperature affect elongation?",
-            "material_scope": ["316L"],
-            "variables": ["preheat temperature"],
-            "outcomes": ["elongation"],
-            "seed_document_ids": ["paper-1"],
-            "confirmation_status": "candidate",
-        }
+    objective = ResearchObjective(
+        collection_id="probe",
+        objective_id="objective-1",
+        question="How does preheat temperature affect elongation?",
+        material_scope=("316L",),
+        variables=("preheat temperature",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
     )
     monkeypatch.setattr(
-        probe.ObjectiveCandidateService,
+        probe.objective_candidate_service,
         "discover_candidate_facts",
         lambda *args, **kwargs: SimpleNamespace(research_objectives=(objective,)),
     )
@@ -182,6 +203,7 @@ def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
         {"papers": []},
         SimpleNamespace(model="test-model", reasoning_effort=None),
         object(),
+        paper_maps=(),
     )
 
     assert result["objectives"][0]["objective_id"] == "objective-1"

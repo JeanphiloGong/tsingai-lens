@@ -492,10 +492,8 @@
 <article class="finding-detail">
 	<header class="finding-header">
 		<div>
-			<span class="eyebrow"
-				>{$t('objectiveWorkspace.singleFinding')} · {originLabel(finding.origin)}</span
-			>
 			<h2>{finding.statement}</h2>
+			<span class="finding-origin">{originLabel(finding.origin)}</span>
 		</div>
 	</header>
 
@@ -812,7 +810,7 @@
 		display: block;
 		padding-bottom: 4px;
 	}
-	.eyebrow {
+	.finding-origin {
 		color: var(--text-secondary);
 		font-size: 12px;
 	}

@@ -5,11 +5,11 @@ one-Document preparation orchestration.
 
 ## Start Here
 
-- HTTP upload: `controllers/source/collections.py:upload_collection_document`
-- Import implementation: `SourceImportService.add_document()`
-- Queue preparation: `DocumentPreparationService.queue_document_preparation()`
-- Execute preparation: `DocumentPreparationService.run_document_preparation()`
-- Read prepared Source: `ArtifactInputService`
+- HTTP upload: `controllers/source/collection_routes.py:upload_collection_document`
+- Import implementation: `source_import_service.add_document()`
+- Queue preparation: `document_preparation_service.queue_document_preparation()`
+- Execute preparation: `document_preparation_service.execute_document_preparation_job()`
+- Read prepared Source: `artifact_input_service` module functions
 
 The preparation input is one stored Document. The output is the current
 `SourceDocument`, its `DocumentProfile`, and a `ready` Document status. PDF
@@ -45,7 +45,7 @@ selected ready Documents
   -> build or reuse a lightweight PaperMap for Objective discovery
 ```
 
-`DocumentPreparationService` owns the upload-time sequence through Source and
+`document_preparation_service` owns the upload-time sequence through Source and
 DocumentProfile. It prepares different Documents concurrently while allowing at
 most one active preparation run for the same Document. Failure updates only
 that Document and run; input loading preserves skipped-file failures in the
@@ -54,6 +54,20 @@ successfully parsed Source. PaperMap construction is owned by the Objective core
 and is lazy: discovery or analysis builds it only for the explicitly selected
 ready Documents, then reuses it while its document and PaperMap policy
 fingerprint still match.
+
+The queue function stores a `queued` Pipeline Run and returns immediately.
+`scripts/run_document_preparation.py` claims one queued or expired job at a time,
+creates the actual workspace, object store and Profile extractor, and executes
+the Source/Profile business function. Each stage commits only while the claimed
+worker ID and lease version remain current. The entry point owns its operation
+and heartbeat tasks and closes the client and database engine on exit. Run more
+worker processes for concurrency. A Web restart does not interrupt live workers.
+
+The app runtime creates one actual workspace and object store. Collection creation
+and deletion receive that workspace explicitly. Uploads, original-file downloads,
+archives, and Figure/Markdown reads receive the actual object store. Database-only
+reads use the concrete repositories directly. The collection module holds no file
+resources and has no runtime configuration hook.
 
 A technical Profile classification failure keeps the parsed Source readable,
 leaves the Document `stored`, and finishes its run as `partial_success` with a
@@ -72,22 +86,24 @@ classification. A completed but scientifically uncertain Profile is reusable.
 - `source_archive_service.py`: Original-file lookup and bounded reproduction
   archives. It verifies stored bytes but does not change Collection state.
 - `document_preparation_service.py`: Source/Profile preparation sequence,
-  concurrency, fingerprinting, and failure handling.
+  fingerprinting, staged publication, and failure handling.
 - `artifact_input_service.py`: current Source loading for downstream consumers.
 - `document_markdown_service.py`: display Markdown from the current Source tree.
 - `reference_extraction_service.py`: deterministic references from one prepared
-  Document.
+  Document through `extract_source_references()`. The reference workflow's
+  `get_collection_references()` reads the saved references after checking that
+  Sources are ready; it does not re-extract or write them.
 
 The parser implementation lives in [`../../infra/source/README.md`](../../infra/source/README.md).
 Scientific Objective analysis lives in [`../core/objectives/README.md`](../core/objectives/README.md).
 
 ## Changing This Module
 
-For upload behavior, start with `SourceImportService`.
-For reproduction downloads, start with `SourceArchiveService`. For readiness,
-retry, or stage reuse, start with `DocumentPreparationService`; its fingerprints
+For upload behavior, start with `source_import_service`.
+For reproduction downloads, start with `source_archive_service`. For readiness,
+retry, or stage reuse, start with `document_preparation_service`; its fingerprints
 decide which existing artifacts can be reused. Do not put these responsibilities
-back into `CollectionService` or reproduce them in an Agent capability.
+back into `collection_service` or reproduce them in an Agent capability.
 
 The HTTP handler checks the authenticated user's Collection ownership. A
 background preparation task inherits the existing request trace context, even
@@ -115,3 +131,9 @@ These cases cover upload, original-byte archive retrieval,
 partial preparation failure, stage reuse, and HTTP responses. Parser-specific
 tests live under `tests/unit/infra/source/`; fixture and database setup are
 described in [`../../tests/README.md`](../../tests/README.md).
+
+Collection reads, creation and updates return `StoredCollection`; uploads return
+`StoredDocument`. Application callers read the domain value and storage metadata
+directly. The Collection controller constructs the existing HTTP responses, and
+Agent capabilities construct their own observations. Markdown, archives and
+research use cases do not consume an HTTP-shaped Collection dictionary.

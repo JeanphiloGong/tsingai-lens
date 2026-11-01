@@ -9,6 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from domain.core.finding import Finding, FindingPaperContribution
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PreparedDocumentInput,
+    ResearchObjective,
+)
+from domain.core.scientific_fact import ScientificContext
+from repositories.objective_repository import ObjectiveAnalysis
 
 
 @pytest.fixture
@@ -148,39 +156,173 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 ) -> None:
     checker = _load_module()
 
-    class Record:
-        def __init__(self, **payload):
-            self.__dict__.update(payload)
+    monkeypatch.setenv("LENS_DATABASE_URL", "postgresql+psycopg://fixture@localhost/lens_test")
 
-        def to_record(self):
-            return dict(self.__dict__)
-
-    findings = [Record(finding_id="finding-1"), Record(finding_id="finding-2")]
+    findings = [
+        Finding(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            statement="The reported treatment changes strength.",
+            factors=("treatment",),
+            outcome="strength",
+            direction="unknown",
+            assertion_strength="descriptive",
+            attribution_scope="descriptive_only",
+            synthesis_status="insufficient_confirmation",
+            certainty=0.0,
+            display_rank=0,
+            mechanisms=(),
+            scientific_context=ScientificContext(),
+            limitations=(),
+            paper_contributions=(
+                FindingPaperContribution(
+                    document_id="paper-1",
+                    analysis_status="analyzed",
+                    supporting_evidence_ids=("ev-1",),
+                ),
+            ),
+        ),
+        Finding(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-2",
+            statement="The reported treatment changes strength.",
+            factors=("treatment",),
+            outcome="strength",
+            direction="unknown",
+            assertion_strength="descriptive",
+            attribution_scope="descriptive_only",
+            synthesis_status="insufficient_confirmation",
+            certainty=0.0,
+            display_rank=0,
+            mechanisms=(),
+            scientific_context=ScientificContext(),
+            limitations=(),
+            paper_contributions=(
+                FindingPaperContribution(
+                    document_id="paper-1",
+                    analysis_status="analyzed",
+                    supporting_evidence_ids=("ev-1",),
+                ),
+            ),
+        ),
+    ]
     published_evidence = [
-        Record(evidence_id="evidence-1"),
-        Record(evidence_id="evidence-2"),
-        Record(evidence_id="context-1"),
+        ObjectiveEvidence(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="evidence-1",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="results-1",
+            source_excerpt="The reported treatment changes strength.",
+            page_numbers=(),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="candidate",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=None,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="unknown",
+            failure_reason=None,
+            confidence=0.0,
+        ),
+        ObjectiveEvidence(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="evidence-2",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="results-1",
+            source_excerpt="The reported treatment changes strength.",
+            page_numbers=(),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="candidate",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=None,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="unknown",
+            failure_reason=None,
+            confidence=0.0,
+        ),
+        ObjectiveEvidence(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="context-1",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="results-1",
+            source_excerpt="The reported treatment changes strength.",
+            page_numbers=(),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="candidate",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=None,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="unknown",
+            failure_reason=None,
+            confidence=0.0,
+        ),
     ]
 
     class ObjectiveRepository:
         async def read_objective(self, _collection_id, _objective_id):
             from domain.core.research_objective import ResearchObjective
 
-            return ResearchObjective.from_mapping(
-                {
-                    "collection_id": "col-1",
-                    "objective_id": "objective-1",
-                    "question": "Does preheat affect elongation?",
-                    "variables": ["preheat"],
-                    "outcomes": ["elongation"],
-                    "confirmation_status": "confirmed",
-                    "active_analysis_version": 2,
-                    "published_analysis_version": 2,
-                }
+            return ResearchObjective(
+                collection_id="col-1",
+                objective_id="objective-1",
+                question="Does preheat affect elongation?",
+                material_scope=(),
+                variables=("preheat",),
+                outcomes=("elongation",),
+                mechanisms=(),
+                constraints=(),
+                requested_comparator=None,
+                seed_document_ids=(),
+                excluded_document_ids=(),
+                confidence=0.0,
+                reason=None,
+                confirmation_status="confirmed",
+                active_analysis_version=2,
+                published_analysis_version=2,
             )
 
         async def read_analysis(self, *_args):
-            return Record(analysis_version=2)
+            return ObjectiveAnalysis(
+                collection_id="col-1",
+                objective_id="objective-1",
+                analysis_version=2,
+                document_inputs=(
+                    PreparedDocumentInput(
+                        document_id="paper-1", preparation_fingerprint="prep-1"
+                    ),
+                ),
+                pipeline_version="test",
+                model_name=None,
+                prompt_versions={},
+                status="succeeded",
+                phase="completed",
+                processed_document_count=1,
+                total_document_count=1,
+            )
 
         async def list_contributions(self, *_args):
             return []
@@ -204,36 +346,37 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 
     database = __import__("infra.persistence.database", fromlist=["database"])
     objective_repository = __import__(
-        "infra.persistence.postgres.objective_repository",
+        "repositories.objective_repository",
         fromlist=["objective_repository"],
     )
     review_repository = __import__(
-        "infra.persistence.postgres.finding_review_repository",
+        "repositories.finding_review_repository",
         fromlist=["finding_review_repository"],
     )
-    evaluation = __import__("application.evaluation", fromlist=["evaluation"])
+    from application.evaluation import finding_dataset_service
+
     engine = SimpleNamespace(dispose=AsyncMock())
     monkeypatch.setattr(database, "build_database_engine", lambda _settings: engine)
-    monkeypatch.setattr(database, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(database.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         objective_repository,
-        "PostgresObjectiveRepository",
-        lambda _sessions: ObjectiveRepository(),
+        "ObjectiveRepository",
+        lambda: ObjectiveRepository(),
     )
     monkeypatch.setattr(
         review_repository,
-        "PostgresFindingReviewRepository",
-        lambda _sessions: ReviewRepository(),
+        "FindingReviewRepository",
+        lambda: ReviewRepository(),
     )
     monkeypatch.setattr(
-        evaluation,
-        "FindingFeedbackService",
-        lambda **_kwargs: SimpleNamespace(
-            export_dataset=AsyncMock(return_value={"items": []})
-        ),
+        finding_dataset_service,
+        "export_dataset",
+        AsyncMock(return_value={"items": []}),
     )
 
-    bundle = await checker._local_objective_bundle("col-1", "objective-1")
+    bundle = await checker._local_objective_bundle(
+        "col-1", "objective-1", user_id="reviewer-1"
+    )
 
     assert [item["evidence_id"] for item in bundle["evidence"]] == [
         "evidence-1",
@@ -334,9 +477,7 @@ def test_canonical_finding_and_source_excerpt_pass() -> None:
 def test_factor_unit_suffixes_do_not_change_axis_identity() -> None:
     checker = _load_module()
     bundle = _bundle()
-    bundle["findings"][0]["factors"] = [
-        "volumetric energy density [J/mm3]"
-    ]
+    bundle["findings"][0]["factors"] = ["volumetric energy density [J/mm3]"]
 
     result = checker.evaluate_objective_bundle(
         bundle,
@@ -498,7 +639,10 @@ def test_jointly_varied_factors_cannot_be_audited_as_isolated_ved() -> None:
     )
 
     failed = {check["check"] for check in result["checks"] if check["status"] == "fail"}
-    assert "Finding finding-1 factors cover every direct Evidence changed variable" in failed
+    assert (
+        "Finding finding-1 factors cover every direct Evidence changed variable"
+        in failed
+    )
     assert "Finding finding-1 attribution matches direct Evidence" in failed
     assert "Finding finding-1 does not overclaim coupled variables" in failed
 
@@ -738,8 +882,9 @@ def test_scalar_table_result_binds_to_its_exact_row_and_result_column() -> None:
     assert table_check["status"] == "pass"
 
 
-def test_pairwise_table_evidence_audits_related_rows_without_excerpt_concatenation(
-) -> None:
+def test_pairwise_table_evidence_audits_related_rows_without_excerpt_concatenation() -> (
+    None
+):
     checker = _load_module()
     bundle = _bundle()
     finding = bundle["findings"][0]
@@ -838,9 +983,7 @@ def test_pairwise_table_evidence_audits_related_rows_without_excerpt_concatenati
                 ],
             },
             ("paper-1", "table", "process-table"): {
-                "text": (
-                    "Condition | Sample | Scan strategy | Scanning speed (mm/s)"
-                ),
+                "text": ("Condition | Sample | Scan strategy | Scanning speed (mm/s)"),
                 "page": 2,
                 "rows": [
                     [
@@ -860,7 +1003,9 @@ def test_pairwise_table_evidence_audits_related_rows_without_excerpt_concatenati
     assert checks["all Evidence records have exact source locators"] == "pass"
     assert checks["all Evidence excerpts match Source artifacts"] == "pass"
     assert checks["all Evidence pages match Source artifacts"] == "pass"
-    assert checks["all table Evidence values bind to the named experiment rows"] == "pass"
+    assert (
+        checks["all table Evidence values bind to the named experiment rows"] == "pass"
+    )
 
 
 def test_table_audit_keeps_related_context_out_of_the_primary_excerpt() -> None:
@@ -870,8 +1015,7 @@ def test_table_audit_keeps_related_context_out_of_the_primary_excerpt() -> None:
         "source_kind": "table",
         "source_ref": "result-table",
         "source_excerpt": (
-            "Sample: A | Yield strength: 300\n"
-            "Sample: B | Yield strength: 340"
+            "Sample: A | Yield strength: 300\n" "Sample: B | Yield strength: 340"
         ),
         "page_numbers": [3],
         "evidence_role": "direct_result",
@@ -1308,9 +1452,7 @@ def test_table_row_summary_excerpt_matches_canonical_source_row() -> None:
             },
             ("paper-1", "table", "table-context"): {
                 "text": (
-                    "| Specimen | Test temperature |\n"
-                    "| A | 25 C |\n"
-                    "| B | 400 C |"
+                    "| Specimen | Test temperature |\n" "| A | 25 C |\n" "| B | 400 C |"
                 ),
                 "page": 3,
                 "rows": [
@@ -1400,7 +1542,11 @@ def test_table_audit_uses_flattened_headers_and_declared_data_row_indexes() -> N
                 "header_row_count": 2,
                 "rows": [
                     ["Sample", "Process", "Result"],
-                    ["Sample", "Volumetric energy density (J/mm3)", "Relative density (%)"],
+                    [
+                        "Sample",
+                        "Volumetric energy density (J/mm3)",
+                        "Relative density (%)",
+                    ],
                     ["A", "70", "95.4"],
                     ["B", "100", "99.6"],
                 ],
@@ -1448,16 +1594,12 @@ def test_as_slm_and_hip_slm_difference_cannot_be_attributed_to_ved() -> None:
 def test_paper_association_cannot_be_promoted_to_cross_paper_causality() -> None:
     checker = _load_module()
     failure = _failure_modes()["paper_association_cross_causality"]
-    bundle = _bundle(
-        synthesis_status=failure["incorrect_finding_synthesis_status"]
-    )
+    bundle = _bundle(synthesis_status=failure["incorrect_finding_synthesis_status"])
     finding = bundle["findings"][0]
     evidence = bundle["evidence_by_finding"]["finding-1"][0]
     evidence["attribution_scope"] = failure["evidence_attribution_scope"]
     finding["attribution_scope"] = failure["evidence_attribution_scope"]
-    finding["assertion_strength"] = failure[
-        "incorrect_finding_assertion_strength"
-    ]
+    finding["assertion_strength"] = failure["incorrect_finding_assertion_strength"]
 
     result = checker.evaluate_objective_bundle(
         bundle,
@@ -1526,7 +1668,9 @@ def test_direct_result_outcome_and_direction_must_match_finding() -> None:
     assert "Finding finding-1 outcome and direction match direct Evidence" in failed
 
 
-def test_unattributable_result_is_valid_only_as_insufficient_descriptive_finding() -> None:
+def test_unattributable_result_is_valid_only_as_insufficient_descriptive_finding() -> (
+    None
+):
     checker = _load_module()
     bundle = _bundle()
     evidence = bundle["evidence_by_finding"]["finding-1"][0]
@@ -1692,17 +1836,13 @@ def test_real_acceptance_manifest_covers_six_papers_and_multiple_objectives() ->
         for item in manifest["objectives"]
         if item["key"] == "preheating_microstructure"
     )
-    assert {
-        item["label"] for item in preheating["required_source_evidence"]
-    } == {
+    assert {item["label"] for item in preheating["required_source_evidence"]} == {
         "P002 preheating condition definition",
         "P002 fixed process context",
         "P002 observed cellular microstructure",
         "P002 cooling-rate and equiaxed-cellular conclusion",
     }
-    assert {
-        item["label"]: item for item in preheating["forbidden_direct_sources"]
-    } == {
+    assert {item["label"]: item for item in preheating["forbidden_direct_sources"]} == {
         "P002 cited background experiments": {
             "label": "P002 cited background experiments",
             "paper_id": "P002",
@@ -1790,6 +1930,7 @@ async def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
 
     try:
         await checker.check_objective_findings_projection(
+            user_id="reviewer-1",
             collection_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
             acceptance_manifest=manifest,
@@ -1933,9 +2074,7 @@ def test_researcher_parity_accepts_decision_source_as_related_lineage() -> None:
 def test_researcher_parity_reads_required_context_from_complete_evidence_map() -> None:
     checker = _load_module()
     bundle = _bundle()
-    methods_text = (
-        "The fixed process used 200 W laser power and 1833 mm/s scan speed."
-    )
+    methods_text = "The fixed process used 200 W laser power and 1833 mm/s scan speed."
     context = {
         "collection_id": "col-1",
         "objective_id": "objective-1",
@@ -2036,14 +2175,12 @@ def test_researcher_parity_rejects_prior_study_as_current_direct_evidence() -> N
 def test_researcher_parity_rejects_duplicate_source_grounded_facts() -> None:
     checker = _load_module()
     bundle = _bundle()
-    duplicate = json.loads(
-        json.dumps(bundle["evidence_by_finding"]["finding-1"][0])
-    )
+    duplicate = json.loads(json.dumps(bundle["evidence_by_finding"]["finding-1"][0]))
     duplicate["evidence_id"] = "evidence-duplicate"
     bundle["evidence_by_finding"]["finding-1"].append(duplicate)
-    bundle["findings"][0]["paper_contributions"][0][
-        "supporting_evidence_ids"
-    ].append("evidence-duplicate")
+    bundle["findings"][0]["paper_contributions"][0]["supporting_evidence_ids"].append(
+        "evidence-duplicate"
+    )
 
     result = checker.evaluate_objective_bundle(
         bundle,
@@ -2082,9 +2219,12 @@ def test_researcher_parity_requires_a_bounded_decision_ready_finding() -> None:
         expected_finding_requirements=[requirement],
     )
     check_name = "Finding includes P002 P150 cellular-structure observation"
-    assert next(
-        check for check in missing["checks"] if check["check"] == check_name
-    )["status"] == "fail"
+    assert (
+        next(check for check in missing["checks"] if check["check"] == check_name)[
+            "status"
+        ]
+        == "fail"
+    )
 
     finding = bundle["findings"][0]
     finding["statement"] = (
@@ -2103,9 +2243,12 @@ def test_researcher_parity_requires_a_bounded_decision_ready_finding() -> None:
         },
         expected_finding_requirements=[requirement],
     )
-    assert next(
-        check for check in bounded["checks"] if check["check"] == check_name
-    )["status"] == "pass"
+    assert (
+        next(check for check in bounded["checks"] if check["check"] == check_name)[
+            "status"
+        ]
+        == "pass"
+    )
 
     finding["assertion_strength"] = "causal"
     finding["attribution_scope"] = "isolated_effect"
@@ -2119,9 +2262,12 @@ def test_researcher_parity_requires_a_bounded_decision_ready_finding() -> None:
         },
         expected_finding_requirements=[requirement],
     )
-    assert next(
-        check for check in overclaimed["checks"] if check["check"] == check_name
-    )["status"] == "fail"
+    assert (
+        next(check for check in overclaimed["checks"] if check["check"] == check_name)[
+            "status"
+        ]
+        == "fail"
+    )
 
 
 def test_real_acceptance_allows_scientifically_equivalent_preheating_wording() -> None:
@@ -2162,9 +2308,12 @@ def test_real_acceptance_allows_scientifically_equivalent_preheating_wording() -
     )
 
     check_name = "Finding includes P002 preheating cellular-structure observation"
-    assert next(
-        check for check in result["checks"] if check["check"] == check_name
-    )["status"] == "pass"
+    assert (
+        next(check for check in result["checks"] if check["check"] == check_name)[
+            "status"
+        ]
+        == "pass"
+    )
 
 
 def test_required_review_statuses_are_checked_across_objectives() -> None:
@@ -2188,6 +2337,7 @@ async def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
 
     with pytest.raises(ValueError, match="acceptance_manifest is required"):
         await checker.check_objective_findings_projection(
+            user_id="reviewer-1",
             collection_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
         )
@@ -2199,6 +2349,7 @@ async def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
     manifest = checker.load_acceptance_manifest(manifest_path)
     with pytest.raises(ValueError, match="at least three objective_ids"):
         await checker.check_objective_findings_projection(
+            user_id="reviewer-1",
             collection_id="col-1",
             objective_ids=("objective-1",),
             acceptance_manifest=manifest,
@@ -2220,18 +2371,18 @@ async def test_real_acceptance_requires_three_distinct_manifest_objectives(
         checker,
         "_resolve_manifest_document_ids",
         AsyncMock(
-            return_value={
-                f"P{index:03d}": f"paper-{index}" for index in range(1, 7)
-            }
+            return_value={f"P{index:03d}": f"paper-{index}" for index in range(1, 7)}
         ),
     )
     monkeypatch.setattr(checker, "_load_source_index", AsyncMock(return_value={}))
     monkeypatch.setattr(
         checker,
         "_local_objective_bundle",
-        AsyncMock(side_effect=lambda _collection_id, objective_id: {
-            "objective": {"objective_id": objective_id, "question": same_question}
-        }),
+        AsyncMock(
+            side_effect=lambda _collection_id, objective_id, **_kwargs: {
+                "objective": {"objective_id": objective_id, "question": same_question}
+            }
+        ),
     )
     monkeypatch.setattr(
         checker,
@@ -2246,6 +2397,7 @@ async def test_real_acceptance_requires_three_distinct_manifest_objectives(
 
     with pytest.raises(ValueError, match="distinct acceptance objectives"):
         await checker.check_objective_findings_projection(
+            user_id="reviewer-1",
             collection_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
             acceptance_manifest=manifest,
@@ -2262,9 +2414,7 @@ async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
         / "fixtures/expert_gold/objective_finding_acceptance.json"
     )
     manifest = checker.load_acceptance_manifest(manifest_path)
-    document_ids = {
-        f"P{index:03d}": f"paper-{index}" for index in range(1, 7)
-    }
+    document_ids = {f"P{index:03d}": f"paper-{index}" for index in range(1, 7)}
     monkeypatch.setattr(
         checker,
         "_resolve_manifest_document_ids",
@@ -2280,7 +2430,7 @@ async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
         checker,
         "_local_objective_bundle",
         AsyncMock(
-            side_effect=lambda _collection_id, objective_id: {
+            side_effect=lambda _collection_id, objective_id, **_kwargs: {
                 "objective": {
                     "objective_id": objective_id,
                     "question": questions[objective_id],
@@ -2302,6 +2452,7 @@ async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
     monkeypatch.setattr(checker, "evaluate_objective_bundle", capture_evaluation)
 
     await checker.check_objective_findings_projection(
+        user_id="reviewer-1",
         collection_id="col-1",
         objective_ids=("objective-1", "objective-2", "objective-3"),
         acceptance_manifest=manifest,
@@ -2309,12 +2460,10 @@ async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
 
     assert calls[0]["expected_document_ids"] == set(document_ids.values())
     assert {
-        item["document_id"]
-        for item in calls[0]["expected_source_requirements"]
+        item["document_id"] for item in calls[0]["expected_source_requirements"]
     } == {"paper-2"}
     assert {
-        item["document_id"]
-        for item in calls[0]["forbidden_direct_source_requirements"]
+        item["document_id"] for item in calls[0]["forbidden_direct_source_requirements"]
     } == {"paper-2", "paper-3"}
 
 
@@ -2412,8 +2561,9 @@ def test_condition_dependent_requires_context_boundary_evidence() -> None:
     assert "Finding finding-1 synthesis status matches Evidence roles" in failed
 
 
-def test_condition_dependent_requires_a_disjoint_context_between_opposing_papers(
-) -> None:
+def test_condition_dependent_requires_a_disjoint_context_between_opposing_papers() -> (
+    None
+):
     checker = _load_module()
     bundle = _bundle(synthesis_status="condition_dependent")
     second_source = _add_second_direct_result(
@@ -2530,9 +2680,9 @@ def test_finding_and_evidence_require_complete_scoped_identity() -> None:
 def test_finding_statement_numbers_preserve_sign_and_bind_to_one_evidence() -> None:
     checker = _load_module()
     bundle = _bundle()
-    bundle["findings"][0]["statement"] = (
-        "Higher VED changed relative density by -99.6%."
-    )
+    bundle["findings"][0][
+        "statement"
+    ] = "Higher VED changed relative density by -99.6%."
 
     result = checker.evaluate_objective_bundle(
         bundle,
@@ -2545,7 +2695,9 @@ def test_finding_statement_numbers_preserve_sign_and_bind_to_one_evidence() -> N
     )
 
     failed = {check["check"] for check in result["checks"] if check["status"] == "fail"}
-    assert "Finding finding-1 statement values bind to one supporting Evidence" in failed
+    assert (
+        "Finding finding-1 statement values bind to one supporting Evidence" in failed
+    )
     assert checker._numbers("1.90x10^5 cycles") == (checker.Decimal("190000"),)
     assert checker._numbers("1.90×10^5 cycles") == (checker.Decimal("190000"),)
     assert checker._numbers("0,5 mm") == (checker.Decimal("0.5"),)
@@ -2556,9 +2708,9 @@ def test_finding_statement_numbers_preserve_sign_and_bind_to_one_evidence() -> N
 def test_finding_statement_cannot_use_a_number_only_present_in_result_text() -> None:
     checker = _load_module()
     bundle = _bundle()
-    bundle["findings"][0]["statement"] = (
-        "Higher VED increased relative density to 123.4%."
-    )
+    bundle["findings"][0][
+        "statement"
+    ] = "Higher VED increased relative density to 123.4%."
     bundle["evidence_by_finding"]["finding-1"][0]["reported_result"][
         "result_text"
     ] = "Relative density increased to 123.4%."
@@ -2574,7 +2726,9 @@ def test_finding_statement_cannot_use_a_number_only_present_in_result_text() -> 
     )
 
     failed = {check["check"] for check in result["checks"] if check["status"] == "fail"}
-    assert "Finding finding-1 statement values bind to one supporting Evidence" in failed
+    assert (
+        "Finding finding-1 statement values bind to one supporting Evidence" in failed
+    )
 
 
 def test_experiment_endpoint_may_be_grounded_in_exact_related_source() -> None:
@@ -2674,9 +2828,9 @@ def test_experiment_endpoint_absent_from_complete_lineage_still_fails() -> None:
 def test_finding_number_may_be_grounded_in_exact_related_source() -> None:
     checker = _load_module()
     bundle = _bundle()
-    bundle["findings"][0]["statement"] = (
-        "Preheating to 150 C was associated with higher relative density."
-    )
+    bundle["findings"][0][
+        "statement"
+    ] = "Preheating to 150 C was associated with higher relative density."
     evidence = bundle["evidence_by_finding"]["finding-1"][0]
     evidence["related_source_refs"] = [
         {
@@ -2713,9 +2867,9 @@ def test_finding_number_may_be_grounded_in_exact_related_source() -> None:
 def test_finding_number_absent_from_complete_lineage_still_fails() -> None:
     checker = _load_module()
     bundle = _bundle()
-    bundle["findings"][0]["statement"] = (
-        "Preheating to 400 C was associated with higher relative density."
-    )
+    bundle["findings"][0][
+        "statement"
+    ] = "Preheating to 400 C was associated with higher relative density."
     evidence = bundle["evidence_by_finding"]["finding-1"][0]
     evidence["related_source_refs"] = [
         {
@@ -2785,7 +2939,9 @@ def test_training_jsonl_excludes_latest_partial_feedback() -> None:
     )
 
     failed = {check["check"] for check in result["checks"] if check["status"] == "fail"}
-    assert "training_jsonl contains exactly the latest training-ready Findings" in failed
+    assert (
+        "training_jsonl contains exactly the latest training-ready Findings" in failed
+    )
 
 
 def test_training_jsonl_matches_latest_training_ready_dataset_item() -> None:
@@ -2814,9 +2970,7 @@ def test_training_jsonl_matches_latest_training_ready_dataset_item() -> None:
             "metadata": metadata,
         }
     )
-    bundle["training_jsonl_rows"] = [
-        {"messages": messages, "metadata": metadata}
-    ]
+    bundle["training_jsonl_rows"] = [{"messages": messages, "metadata": metadata}]
 
     result = checker.evaluate_objective_bundle(
         bundle,
@@ -2870,4 +3024,58 @@ def test_training_jsonl_validates_roles_evidence_and_training_target() -> None:
     )
 
     failed = {check["check"] for check in result["checks"] if check["status"] == "fail"}
-    assert "training_jsonl contains exactly the latest training-ready Findings" in failed
+    assert (
+        "training_jsonl contains exactly the latest training-ready Findings" in failed
+    )
+
+
+@pytest.mark.parametrize("code", [200, 200205])
+def test_api_reader_unwraps_success_and_rejects_http_200_business_failure(
+    monkeypatch, code
+):
+    from io import BytesIO
+
+    checker = _load_module()
+    response = BytesIO(
+        json.dumps(
+            {
+                "code": code,
+                "message": "unavailable" if code != 200 else "success",
+                "data": {"items": []},
+                "meta": None,
+            }
+        ).encode()
+    )
+    response.headers = {"Content-Type": "application/json"}
+    monkeypatch.setattr(
+        checker.request_url, "urlopen", lambda *_args, **_kwargs: response
+    )
+    if code == 200:
+        assert checker._api_json_request("http://test", "/api/v1/findings") == {
+            "items": []
+        }
+    else:
+        with pytest.raises(RuntimeError, match="200205 unavailable"):
+            checker._api_json_request("http://test", "/api/v1/findings")
+
+
+def test_training_download_rejects_json_business_failure(monkeypatch):
+    from io import BytesIO
+
+    checker = _load_module()
+    response = BytesIO(
+        json.dumps(
+            {
+                "code": 200301,
+                "message": "authentication required",
+                "data": {},
+                "meta": None,
+            }
+        ).encode()
+    )
+    response.headers = {"Content-Type": "application/json"}
+    monkeypatch.setattr(
+        checker.request_url, "urlopen", lambda *_args, **_kwargs: response
+    )
+    with pytest.raises(RuntimeError, match="200301 authentication required"):
+        checker._api_jsonl_request("http://test", "/api/v1/finding-dataset")

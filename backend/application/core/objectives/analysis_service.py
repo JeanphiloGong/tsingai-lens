@@ -1,24 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from asyncio import (
-    CancelledError,
-    Lock,
-    Semaphore,
-    Task,
-    create_task,
-    get_running_loop,
-    run_coroutine_threadsafe,
-    to_thread,
-)
-from collections.abc import AsyncIterator, Coroutine
-from contextlib import asynccontextmanager
-from dataclasses import replace
+from asyncio import Lock, get_running_loop, run_coroutine_threadsafe, to_thread
+from dataclasses import asdict, replace
 from time import perf_counter
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
-from application.core.document_profiles.service import DocumentProfileService
+from application.core.document_profiles import service as document_profile_service
+from application.core.objectives import (
+    objective_analysis_service as experiment_analysis_service,
+)
+from application.core.objectives import (
+    objective_input_service,
+)
+from application.core.objectives.analysis import (
+    experiment_analysis_writer,
+    experiment_projection,
+)
 from application.core.objectives.analysis.analysis_record_source import (
+    is_experiment_backed_analysis,
     should_read_experiment_projection,
 )
 from application.core.objectives.analysis.diagnostics import (
@@ -26,58 +27,62 @@ from application.core.objectives.analysis.diagnostics import (
     record_analysis_failure,
 )
 from application.core.objectives.analysis.experiment_analysis_writer import (
-    ExperimentAnalysisWriter,
+    ExperimentAnalysisWriteResult,
 )
-from application.core.objectives.analysis.experiment_compatibility_projection import (
-    ExperimentCompatibilityProjection,
+from application.core.objectives.analysis.experiment_projection import (
+    experiment_evidence_disposition,
+)
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentExtractor,
+)
+from application.core.objectives.analysis.source_screening import (
+    ObjectiveSourceScreener,
 )
 from application.core.objectives.analysis_errors import analysis_error_message
+from application.core.objectives.discovery.paper_understanding.workflow import (
+    PaperResearchMapExtractor,
+)
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.finding_summary import (
     MAX_SUMMARY_EVIDENCE,
     FindingSummaryUnavailable,
     summarize_finding_evidence,
 )
+from application.core.objectives.llm.structured_response import (
+    StructuredResponseClient,
+    build_default_structured_response_client,
+)
 from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
-    ObjectiveExperimentAnalysisService,
+    ResearchObjectiveNotFoundError,
 )
-from application.core.objectives.objective_input_service import ObjectiveInputService
-from application.repositories.objective_repository import (
-    ObjectiveAnalysis,
-    ObjectiveRepository,
-)
-from application.repositories.transaction import (
-    RepositoryTransaction,
-    RepositoryTransactionFactory,
-)
+from application.source import collection_service
 from domain.core import ResearchObjective
+from domain.core.finding import Finding
+from domain.core.research_objective import ObjectiveEvidence
+from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.llm.usage import capture_llm_usage
+from infra.persistence.database import AsyncSessionLocal
+from repositories.objective_repository import (
+    AnalysisLeaseLostError,
+    ObjectiveAnalysis,
+    ObjectiveAnalysisJobSnapshot,
+    ObjectiveRepo,
+    StoredObjective,
+)
 
 logger = logging.getLogger(__name__)
 
 _PIPELINE_VERSION = "objective-analysis.v2"
-_ANALYSIS_MAX_CONCURRENCY = 4
 
 
 _EVIDENCE_REVIEW_GAP_LIMIT = 200
 
 
-@asynccontextmanager
-async def _analysis_transaction(
-    factory: RepositoryTransactionFactory | None,
-) -> AsyncIterator[RepositoryTransaction | None]:
-    """Keep experiment records and Objective publication in one write scope."""
-
-    if factory is None:
-        yield None
-        return
-    async with factory.begin() as transaction:
-        yield transaction
-
-
 def _evidence_review_summary(
-    evidence_records: tuple[Any, ...],
+    evidence_records: tuple[ObjectiveEvidence, ...],
+    *,
+    experiment_backed: bool = False,
 ) -> dict[str, Any]:
     """Build the researcher-facing disposition of every published Evidence.
 
@@ -92,39 +97,37 @@ def _evidence_review_summary(
     result_count = 0
     gaps: list[dict[str, Any]] = []
     for evidence in evidence_records:
-        status = str(
-            _record_value(evidence, "evidence_status")
-            or _record_value(evidence, "resolution_status")
-            or "unknown"
+        status, reason = (
+            experiment_evidence_disposition(evidence)
+            if experiment_backed
+            else (evidence.evidence_status, evidence.evidence_status_reason)
         )
         status_counts[status] = status_counts.get(status, 0) + 1
-        if _record_value(evidence, "reported_result") is not None:
+        if evidence.reported_result is not None:
             result_count += 1
         if status == "comparable":
             continue
-        result = getattr(evidence, "reported_result", None)
-        if isinstance(evidence, dict):
-            result = evidence.get("reported_result")
+        result = evidence.reported_result
         gaps.append(
             {
-                "evidence_id": str(_record_value(evidence, "evidence_id") or ""),
-                "document_id": str(_record_value(evidence, "document_id") or ""),
-                "source_kind": str(_record_value(evidence, "source_kind") or ""),
-                "source_ref": str(_record_value(evidence, "source_ref") or ""),
-                "page_numbers": list(_record_value(evidence, "page_numbers") or ()),
+                "evidence_id": evidence.evidence_id,
+                "document_id": evidence.document_id,
+                "source_kind": evidence.source_kind,
+                "source_ref": evidence.source_ref,
+                "page_numbers": list(evidence.page_numbers),
                 "evidence_status": status,
                 "reason": str(
-                    _record_value(evidence, "evidence_status_reason")
+                    reason
                     or "Evidence is not ready for a strict cross-paper comparison."
                 ),
                 "outcome": (
-                    str(_record_value(result, "outcome") or "")
+                    result.outcome
                     if result is not None
                     else None
                 ),
-                "source_excerpt": str(
-                    _record_value(evidence, "source_excerpt") or ""
-                )[:1200],
+                "source_excerpt": evidence.source_excerpt[
+                    :1200
+                ],
             }
         )
     ordered_gaps = sorted(
@@ -147,25 +150,13 @@ def _evidence_review_summary(
     }
 
 
-def _record_value(record: Any, name: str) -> Any:
-    """Read a legacy domain object or a compatibility projection mapping."""
-
-    if isinstance(record, Mapping):
-        return record.get(name)
-    return getattr(record, name, None)
-
-
-def _record_dict(record: Any) -> dict[str, Any]:
-    if isinstance(record, Mapping):
-        return dict(record)
-    return record.to_record()
-
-
-def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
+def _experiment_abstention(
+    result: ExperimentAnalysisWriteResult,
+) -> tuple[str | None, str | None]:
     """Explain a successful experiment analysis with no published Finding."""
 
-    findings = tuple(getattr(result, "findings", ()) or ())
-    selections = tuple(getattr(result, "selections", ()) or ())
+    findings = result.findings
+    selections = result.selections
     if findings:
         return None, None
     if not selections:
@@ -175,23 +166,11 @@ def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
         # ``no_grounded_evidence`` would erase the distinction between
         # "nothing was recovered" and "something was recovered but needs
         # context".
-        revisions = tuple(getattr(result, "revisions", ()) or ())
+        revisions = result.revisions
         if any(
-            getattr(
-                getattr(revision, "revision", revision),
-                "measurements",
-                (),
-            )
-            or getattr(
-                getattr(revision, "revision", revision),
-                "comparisons",
-                (),
-            )
-            or getattr(
-                getattr(revision, "revision", revision),
-                "reported_interpretations",
-                (),
-            )
+            revision.revision.measurements
+            or revision.revision.comparisons
+            or revision.revision.reported_interpretations
             for revision in revisions
         ):
             return (
@@ -203,7 +182,7 @@ def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
             "No Objective-relevant experiment selection was recovered from the prepared Sources.",
         )
     comparison_count = sum(
-        bool(getattr(selection, "comparison_keys", ())) for selection in selections
+        bool(selection.comparison_keys) for selection in selections
     )
     if comparison_count:
         return (
@@ -216,958 +195,1577 @@ def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
     )
 
 
-class ObjectiveAnalysisDispatchError(RuntimeError):
-    """A queued Objective analysis could not be handed to an asyncio worker."""
-
-    def __init__(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> None:
-        super().__init__(
-            "Objective analysis could not be scheduled. Retry the analysis."
-        )
-        self.collection_id = collection_id
-        self.objective_id = objective_id
-        self.analysis_version = analysis_version
-
-
-class ObjectiveAnalysisService:
-    """Run and atomically publish one versioned ResearchObjective analysis."""
-
-    def __init__(
-        self,
-        *,
-        objective_repository: ObjectiveRepository,
-        experiment_analysis_service: ObjectiveExperimentAnalysisService,
-        objective_input_service: ObjectiveInputService,
-        document_profile_service: DocumentProfileService,
-        experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
-        experiment_analysis_transaction_factory: RepositoryTransactionFactory
-        | None = None,
-        experiment_compatibility_projection: ExperimentCompatibilityProjection
-        | None = None,
-        max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
-        task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
-    ) -> None:
-        if max_concurrency < 1:
-            raise ValueError("objective analysis concurrency must be positive")
-        self.objective_repository = objective_repository
-        self.experiment_analysis_service = experiment_analysis_service
-        self.objective_input_service = objective_input_service
-        self.document_profile_service = document_profile_service
-        self.experiment_analysis_writer = experiment_analysis_writer
-        self.experiment_analysis_transaction_factory = (
-            experiment_analysis_transaction_factory
-        )
-        self.experiment_compatibility_projection = experiment_compatibility_projection
-        self._analysis_semaphore = Semaphore(max_concurrency)
-        self._task_factory = task_factory
-        self._analysis_tasks: set[Any] = set()
-
-    async def recover_interrupted_analyses(self) -> int:
-        interrupted_count = (
-            await self.objective_repository.interrupt_active_analyses()
-        )
-        if interrupted_count:
-            logger.warning(
-                "Recovered interrupted Objective analyses count=%s",
-                interrupted_count,
-            )
-        return interrupted_count
-
-    async def start_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_ids: tuple[str, ...],
-    ) -> dict[str, Any]:
-        """Confirm, queue, and asynchronously dispatch one canonical analysis."""
-
-        payload = await self.queue_analysis(
-            collection_id,
-            objective_id,
-            document_ids,
-        )
-        analysis = payload.get("analysis")
-        if analysis is None or analysis.status != "queued":
-            return payload
-
-        coroutine = self._execute_scheduled_analysis(
-            collection_id,
-            objective_id,
-            analysis.analysis_version,
-        )
-        try:
-            task = self._task_factory(coroutine)
-        except Exception as exc:  # noqa: BLE001
-            coroutine.close()
-            logger.exception(
-                "Objective analysis dispatch failed collection_id=%s "
-                "objective_id=%s analysis_version=%s",
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            )
-            await self.fail_analysis_dispatch(
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            )
-            raise ObjectiveAnalysisDispatchError(
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            ) from exc
-        self._analysis_tasks.add(task)
-        task.add_done_callback(self._analysis_tasks.discard)
-        task.add_done_callback(self._log_unexpected_analysis_failure)
-        return payload
-
-    async def queue_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_ids: tuple[str, ...],
-    ) -> dict[str, Any]:
-        document_inputs = (
-            await self.objective_input_service.resolve_prepared_document_inputs(
-                collection_id,
-                document_ids,
-            )
-        )
-        objective, analysis = await self.objective_repository.queue_analysis(
-            collection_id,
-            objective_id,
-            document_inputs=document_inputs,
-            pipeline_version=_PIPELINE_VERSION,
-            model_name=None,
-            prompt_versions={},
-        )
-        return await self._result(collection_id, objective.objective_id, analysis=analysis)
-
-    async def fail_analysis_dispatch(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> dict[str, Any]:
-        objective = await self._require_objective(collection_id, objective_id)
-        analysis = await self.objective_repository.fail_analysis(
-            collection_id,
-            objective_id,
-            analysis_version,
-            error_code="analysis_dispatch_failed",
-            error_message=(
-                "Objective analysis could not be scheduled. Retry the analysis."
-            ),
-            expected_status="queued",
-        )
-        return await self._result(collection_id, objective.objective_id, analysis=analysis)
-
-    async def get_analysis_state(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> dict[str, Any]:
-        return await self._result(collection_id, objective_id)
-
-    async def get_analysis_status(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> dict[str, Any]:
-        """Read only the active analysis progress needed for polling."""
-
-        objective = await self._require_objective(collection_id, objective_id)
-        analysis = await self.objective_repository.read_analysis(
-            collection_id,
-            objective.objective_id,
-            objective.active_analysis_version,
-        )
-        if analysis is None:
-            return {
-                "collection_id": collection_id,
-                "objective_id": objective.objective_id,
-                "analysis_version": None,
-                "status": None,
-                "phase": None,
-                "processed_document_count": 0,
-                "total_document_count": 0,
-                "current_document_id": None,
-                "progress_message": None,
-                "error_code": None,
-                "error_message": None,
-                "created_at": None,
-                "started_at": None,
-                "completed_at": None,
-            }
-        return {
-            "collection_id": collection_id,
-            "objective_id": objective.objective_id,
-            "analysis_version": analysis.analysis_version,
-            "status": analysis.status,
-            "phase": analysis.phase,
-            "processed_document_count": analysis.processed_document_count,
-            "total_document_count": analysis.total_document_count,
-            "current_document_id": analysis.current_document_id,
-            "progress_message": analysis.progress_message,
-            "error_code": analysis.error_code,
-            "error_message": (
-                analysis_error_message(analysis.error_code)
-                if analysis.status == "failed"
-                else analysis.error_message
-            ),
-            "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
-            "started_at": analysis.started_at.isoformat() if analysis.started_at else None,
-            "completed_at": analysis.completed_at.isoformat() if analysis.completed_at else None,
-        }
-
-    async def list_findings(
-        self,
-        collection_id: str,
-        objective_id: str,
-        *,
-        analysis_version: int | None = None,
-        offset: int = 0,
-        limit: int = 50,
-    ) -> dict[str, Any]:
-        version = await self._published_version(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, version
+async def execute_objective_analysis_job(
+    job: ObjectiveAnalysisJobSnapshot,
+    *,
+    response_client: StructuredResponseClient,
+    source_screener: ObjectiveSourceScreener,
+    paper_map_extractor: PaperResearchMapExtractor,
+    paper_experiment_extractor: PaperExperimentExtractor,
+) -> dict[str, Any]:
+    collection_id, objective_id, analysis_version = job.analysis.key
+    try:
+        objective = await _require_objective(collection_id, objective_id)
+        claimed = job.analysis
+        async with AsyncSessionLocal() as db, db.begin():
+            await ObjectiveRepo.lock_analysis_job(db, job)
+            await ObjectiveRepo.check_analysis_inputs(db, claimed)
+        usage_started_at = perf_counter()
+        progress_callback = _build_progress_callback(job)
+        with (
+            capture_llm_usage() as usage,
+            capture_analysis_diagnostics() as diagnostics,
         ):
-            findings, total = await self.experiment_compatibility_projection.list_findings(
-                collection_id,
-                objective_id,
-                version,
-                offset=offset,
-                limit=limit,
-            )
-        else:
-            findings, total = await self.objective_repository.list_findings(
-                collection_id,
-                objective_id,
-                version,
-                offset=offset,
-                limit=limit,
-            )
-        return {
-            "collection_id": collection_id,
-            "objective_id": objective_id,
-            "analysis_version": version,
-            "items": [_record_dict(finding) for finding in findings],
-            "evidence_reviews": await self._finding_evidence_reviews(
-                collection_id, objective_id, version, findings
-            ),
-            "offset": offset,
-            "limit": limit,
-            "total": total,
-        }
-
-    async def get_finding(
-        self,
-        collection_id: str,
-        objective_id: str,
-        finding_id: str,
-        *,
-        analysis_version: int | None = None,
-    ) -> dict[str, Any]:
-        version = await self._published_version(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, version
-        ):
-            finding = await self.experiment_compatibility_projection.read_finding(
-                collection_id,
-                objective_id,
-                version,
-                finding_id,
-            )
-        else:
-            finding = await self.objective_repository.read_finding(
-                collection_id,
-                objective_id,
-                version,
-                finding_id,
-            )
-        if finding is None:
-            raise FileNotFoundError(
-                f"finding not found: {objective_id}/v{version}/{finding_id}"
-            )
-        return {
-            "collection_id": collection_id,
-            "objective_id": objective_id,
-            "analysis_version": version,
-            "finding": _record_dict(finding),
-            "evidence_review": (await self._finding_evidence_reviews(
-                collection_id, objective_id, version, (finding,)
-            ))[_record_value(finding, "finding_id")],
-        }
-
-    async def _finding_evidence_reviews(
-        self, collection_id: str, objective_id: str, version: int,
-        findings: tuple[Any, ...],
-    ) -> dict[str, Any]:
-        if not findings:
-            return {}
-        evidence = await self._all_published_evidence(collection_id, objective_id, version)
-        evidence_by_id = {
-            str(_record_value(item, "evidence_id") or ""): item for item in evidence
-        }
-        reviews = {}
-        for finding in findings:
-            if isinstance(finding, Mapping):
-                finding_id = str(finding.get("finding_id") or "")
-                replacements = {}
-            else:
-                finding_id = finding.finding_id
-                replacements = finding.evidence_replacements(evidence_by_id)
-            reviews[finding_id] = {
-                "needs_review": bool(replacements),
-                "evidence_replacements": replacements,
-            }
-        return reviews
-
-    async def summarize_finding(
-        self,
-        collection_id: str,
-        objective_id: str,
-        finding_id: str,
-        *,
-        analysis_version: int,
-        language: str,
-    ) -> dict[str, Any]:
-        detail = await self.get_finding(
-            collection_id, objective_id, finding_id, analysis_version=analysis_version
-        )
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, analysis_version
-        ):
-            records, total = await self.experiment_compatibility_projection.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                finding_id=finding_id,
-                offset=0,
-                limit=MAX_SUMMARY_EVIDENCE,
-            )
-        else:
-            records, total = await self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                finding_id=finding_id,
-                offset=0,
-                limit=MAX_SUMMARY_EVIDENCE,
-            )
-        if total > MAX_SUMMARY_EVIDENCE:
-            raise FindingSummaryUnavailable("summary_input_too_large")
-        result = await to_thread(
-            summarize_finding_evidence,
-            finding=detail["finding"],
-            evidence=[_record_dict(item) for item in records],
-            language=language,
-        )
-        await self._published_version(collection_id, objective_id, analysis_version)
-        return result
-
-    async def list_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        *,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
-        offset: int = 0,
-        limit: int = 100,
-    ) -> dict[str, Any]:
-        version = await self._published_version(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, version
-        ):
-            evidence, total = await self.experiment_compatibility_projection.list_evidence(
-                collection_id,
-                objective_id,
-                version,
-                finding_id=finding_id,
-                offset=offset,
-                limit=limit,
-            )
-        else:
-            evidence, total = await self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                version,
-                finding_id=finding_id,
-                offset=offset,
-                limit=limit,
-            )
-        return {
-            "collection_id": collection_id,
-            "objective_id": objective_id,
-            "analysis_version": version,
-            "finding_id": finding_id,
-            "items": [
-                {
-                    **_record_dict(item),
-                    "supports_finding": (
-                        item.get("supports_finding")
-                        if isinstance(item, Mapping)
-                        else item.supports_finding
-                    ),
-                    "eligible_for_finding_authoring": (
-                        item.get("eligible_for_finding_authoring")
-                        if isinstance(item, Mapping)
-                        else item.eligible_for_finding_authoring
-                    ),
-                }
-                for item in evidence
-            ],
-            "offset": offset,
-            "limit": limit,
-            "total": total,
-        }
-
-    async def get_evidence_map(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> dict[str, Any]:
-        objective = await self._require_objective(collection_id, objective_id)
-        version = await self._published_version(collection_id, objective_id, None)
-        analysis = await self.objective_repository.read_published_analysis(
-            collection_id,
-            objective_id,
-        )
-        if analysis is None:
-            raise ValueError("objective has no published analysis")
-
-        findings = await self._all_published_findings(
-            collection_id,
-            objective_id,
-            version,
-        )
-        evidence_records = await self._all_published_evidence(
-            collection_id,
-            objective_id,
-            version,
-        )
-        profiles = await self.document_profile_service.read_document_profiles(
-            collection_id,
-            tuple(item.document_id for item in analysis.document_inputs),
-        )
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, version
-        ):
-            return await self.experiment_compatibility_projection.build_evidence_map(
-                objective=objective,
-                analysis=analysis,
-                profiles=profiles,
-            )
-        return build_objective_evidence_map(
-            objective=objective,
-            analysis=analysis,
-            contributions=await self.objective_repository.list_contributions(
-                collection_id,
-                objective_id,
-                version,
-            ),
-            findings=findings,
-            evidence_records=evidence_records,
-            profiles=profiles,
-        )
-
-    async def _all_published_findings(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> tuple[Any, ...]:
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, analysis_version
-        ):
-            findings, _ = await self.experiment_compatibility_projection.list_findings(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=0,
-                limit=200,
-            )
-            return tuple(findings)
-        records: list[Any] = []
-        offset = 0
-        while True:
-            page, total = await self.objective_repository.list_findings(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=offset,
-                limit=200,
-            )
-            records.extend(page)
-            offset += len(page)
-            if offset >= total or not page:
-                return tuple(records)
-
-    async def _all_published_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> tuple[Any, ...]:
-        if await self._should_use_experiment_projection(
-            collection_id, objective_id, analysis_version
-        ):
-            evidence, _ = await self.experiment_compatibility_projection.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=0,
-                limit=500,
-            )
-            return tuple(evidence)
-        records: list[Any] = []
-        offset = 0
-        while True:
-            page, total = await self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=offset,
-                limit=500,
-            )
-            records.extend(page)
-            offset += len(page)
-            if offset >= total or not page:
-                return tuple(records)
-
-    async def execute_queued_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> dict[str, Any]:
-        try:
-            objective = await self._require_objective(collection_id, objective_id)
-            claimed = await self.objective_repository.claim_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-            )
-            if claimed is None:
-                return await self._result(collection_id, objective.objective_id)
-            usage_started_at = perf_counter()
-            progress_callback = self._build_progress_callback(claimed)
-            with (
-                capture_llm_usage() as usage,
-                capture_analysis_diagnostics() as diagnostics,
-            ):
-                artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
-                try:
-                    artifacts = (
-                        await self.experiment_analysis_service.generate_experiment_analysis_artifacts(
-                            collection_id,
-                            claimed,
-                            progress_callback=progress_callback,
-                        )
-                    )
-                    self._validate_artifacts(artifacts)
-                except Exception as exc:
-                    record_analysis_failure(
-                        exc,
-                        collection_id=collection_id,
-                        objective_id=objective_id,
-                        analysis_version=analysis_version,
-                        stage="generate_artifacts",
-                    )
-                    raise
-                finally:
-                    claimed = await self.objective_repository.update_analysis_execution_stats(
-                        collection_id,
-                        objective_id,
-                        analysis_version,
-                        stats=usage.execution_stats(
-                            duration_ms=round(
-                                (perf_counter() - usage_started_at) * 1000
-                            )
-                        ),
-                        model_name=(
-                            usage.model_name
-                            or (artifacts.model_name if artifacts is not None else None)
-                            or claimed.model_name
-                        ),
-                        prompt_versions=usage.prompt_versions,
-                        diagnostics=diagnostics.records,
-                    )
-            if self.experiment_analysis_writer is None:
-                raise RuntimeError(
-                    "experiment analysis writer is required for objective publication"
+            artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
+            try:
+                artifacts = await experiment_analysis_service.generate_experiment_analysis_artifacts(
+                    collection_id,
+                    claimed,
+                    progress_callback=progress_callback,
+                    job=job,
+                    response_client=response_client,
+                    source_screener=source_screener,
+                    paper_map_extractor=paper_map_extractor,
+                    paper_experiment_extractor=paper_experiment_extractor,
                 )
-            native_writer = getattr(
-                self.experiment_analysis_writer,
-                "write_experiment_analysis",
-                None,
-            )
-            if not callable(native_writer):
-                raise RuntimeError(
-                    "experiment analysis writer does not implement native publication"
+                _validate_artifacts(artifacts)
+            except Exception as exc:
+                record_analysis_failure(
+                    exc,
+                    collection_id=collection_id,
+                    objective_id=objective_id,
+                    analysis_version=analysis_version,
+                    stage="generate_artifacts",
                 )
-            async with _analysis_transaction(
-                self.experiment_analysis_transaction_factory
-            ) as transaction:
-                writer_kwargs: dict[str, Any] = {
-                    "collection_id": collection_id,
-                    "objective": objective,
-                    "analysis": claimed,
-                    "experiment_outputs": artifacts.experiment_outputs,
-                    "partial_experiment_outputs": artifacts.partial_experiment_outputs,
-                    "reused_revisions": artifacts.reused_revisions,
-                }
-                if transaction is not None:
-                    writer_kwargs["transaction"] = transaction
-                native_result = await native_writer(**writer_kwargs)
-                abstention_reason, abstention_note = _experiment_abstention(
-                    native_result
-                )
-                publish_kwargs: dict[str, Any] = {
-                    "contributions": artifacts.contributions,
-                    "abstention_reason": abstention_reason,
-                    "abstention_note": abstention_note,
-                }
-                if transaction is not None:
-                    publish_kwargs["transaction"] = transaction
-                objective, completed = (
-                    await self.objective_repository.publish_experiment_analysis(
-                        collection_id,
-                        objective_id,
-                        analysis_version,
-                        **publish_kwargs,
-                    )
-                )
-            return await self._result(collection_id, objective.objective_id, analysis=completed)
-        except Exception as exc:  # noqa: BLE001
-            record_analysis_failure(
-                exc,
-                collection_id=collection_id,
-                objective_id=objective_id,
-                analysis_version=analysis_version,
-                stage="execute_analysis",
-            )
-            logger.error(
-                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
-                collection_id,
-                objective_id,
-                analysis_version,
-                type(exc).__name__,
-            )
-            current = await self.objective_repository.read_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-            )
-            if current is not None and current.status in {"queued", "running"}:
-                current = await self.objective_repository.fail_analysis(
+                raise
+            finally:
+                claimed = await ObjectiveRepo.update_analysis_execution_stats(
                     collection_id,
                     objective_id,
                     analysis_version,
-                    error_code=self._error_code(exc),
-                    error_message=analysis_error_message(self._error_code(exc)),
+                    job=job,
+                    stats=usage.execution_stats(
+                        duration_ms=round((perf_counter() - usage_started_at) * 1000)
+                    ),
+                    model_name=(
+                        usage.model_name
+                        or (artifacts.model_name if artifacts is not None else None)
+                        or claimed.model_name
+                    ),
+                    prompt_versions=usage.prompt_versions,
+                    diagnostics=diagnostics.records,
                 )
-            return await self._result(collection_id, objective_id, analysis=current)
-
-    async def _execute_scheduled_analysis(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> dict[str, Any]:
-        async with self._analysis_semaphore:
-            return await self.execute_queued_analysis(
+        async with AsyncSessionLocal() as db, db.begin():
+            await ObjectiveRepo.lock_analysis_job(db, job)
+            await ObjectiveRepo.check_analysis_inputs(db, claimed)
+            native_result = await experiment_analysis_writer.write_experiment_analysis(
+                db=db,
+                collection_id=collection_id,
+                objective=objective,
+                analysis=claimed,
+                experiment_outputs=artifacts.experiment_outputs,
+                partial_experiment_outputs=artifacts.partial_experiment_outputs,
+                reused_revisions=artifacts.reused_revisions,
+            )
+            abstention_reason, abstention_note = _experiment_abstention(native_result)
+            objective, completed = await ObjectiveRepo.publish_experiment_analysis(
+                db,
                 collection_id,
                 objective_id,
                 analysis_version,
+                job=job,
+                contributions=artifacts.contributions,
+                abstention_reason=abstention_reason,
+                abstention_note=abstention_note,
             )
+        return await _result(collection_id, objective.objective_id, analysis=completed)
+    except AnalysisLeaseLostError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        record_analysis_failure(
+            exc,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            stage="execute_analysis",
+        )
+        logger.error(
+            "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
+            collection_id,
+            objective_id,
+            analysis_version,
+            type(exc).__name__,
+        )
+        current = await ObjectiveRepo.read_analysis(
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
+        if current is not None and current.status in {"queued", "running"}:
+            current = await ObjectiveRepo.fail_analysis(
+                collection_id,
+                objective_id,
+                analysis_version,
+                job=job,
+                error_code=_error_code(exc),
+                error_message=analysis_error_message(_error_code(exc)),
+            )
+        return await _result(collection_id, objective_id, analysis=current)
 
-    @staticmethod
-    def _log_unexpected_analysis_failure(task: Task[dict[str, Any]]) -> None:
+
+async def summarize_objective_finding(
+    collection_id: str,
+    objective_id: str,
+    finding_id: str,
+    *,
+    response_client: StructuredResponseClient | None = None,
+    user_id: str,
+    analysis_version: int,
+    language: str,
+) -> dict[str, Any]:
+    try:
+        detail = await get_finding(
+            collection_id,
+            objective_id,
+            finding_id,
+            analysis_version=analysis_version,
+            user_id=user_id,
+        )
+    except ResourceConflictException as exc:
+        raise ResourceConflictException(
+            "The published analysis has changed. Reload before generating a summary.",
+            data={"code": "summary_stale_analysis"},
+        ) from exc
+    experiment_backed = await should_read_experiment_projection(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=analysis_version,
+    )
+    if experiment_backed:
+        records, total = await experiment_projection.list_analysis_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=0,
+            limit=MAX_SUMMARY_EVIDENCE,
+        )
+    else:
+        records, total = await ObjectiveRepo.list_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id=finding_id,
+            offset=0,
+            limit=MAX_SUMMARY_EVIDENCE,
+        )
+    if total > MAX_SUMMARY_EVIDENCE:
+        raise FindingSummaryUnavailable("summary_input_too_large")
+    owns_client = response_client is None
+    if owns_client:
         try:
-            task.result()
-        except CancelledError:
-            logger.info("Objective analysis task cancelled during backend shutdown")
-        except Exception:  # noqa: BLE001
-            logger.exception("Objective analysis crashed after service scheduling")
-
-    @staticmethod
-    def _validate_artifacts(
-        artifacts: ObjectiveExperimentAnalysisArtifacts,
-    ) -> None:
-        if not artifacts.contributions:
-            raise RuntimeError("objective analysis produced no paper contributions")
-        relevant_contributions = tuple(
-            contribution
-            for contribution in artifacts.contributions
-            if contribution.analysis_status != "excluded"
+            response_client = build_default_structured_response_client()
+        except Exception as exc:
+            raise FindingSummaryUnavailable("summary_generation_failed") from exc
+    try:
+        if owns_client:
+            try:
+                response_client.client = response_client.client.with_options(
+                    timeout=60.0, max_retries=0
+                )
+            except Exception as exc:
+                raise FindingSummaryUnavailable("summary_generation_failed") from exc
+        summary_task = asyncio.create_task(
+            to_thread(
+                summarize_finding_evidence,
+                finding=detail["finding"],
+                evidence=[
+                    (
+                        {
+                            "collection_id": item.collection_id,
+                            "objective_id": item.objective_id,
+                            "analysis_version": item.analysis_version,
+                            "evidence_id": item.evidence_id,
+                            "document_id": item.document_id,
+                            "source_kind": item.source_kind,
+                            "source_ref": item.source_ref,
+                            "source_excerpt": item.source_excerpt,
+                            "page_numbers": list(item.page_numbers),
+                            "evidence_role": item.evidence_role,
+                            "selection_status": item.selection_status,
+                            "selection_reason": item.selection_reason,
+                            "evidence_status": (
+                                experiment_evidence_disposition(item)[0]
+                                if experiment_backed
+                                else item.evidence_status
+                            ),
+                            "evidence_status_reason": (
+                                experiment_evidence_disposition(item)[1]
+                                if experiment_backed
+                                else item.evidence_status_reason
+                            ),
+                            "changed_variables": [
+                                {
+                                    "name": variable.name,
+                                    "baseline_value": variable.baseline_value,
+                                    "target_value": variable.target_value,
+                                    "unit": variable.unit,
+                                }
+                                for variable in item.changed_variables
+                            ],
+                            "comparison": (
+                                {
+                                    "baseline_label": item.comparison.baseline_label,
+                                    "target_label": item.comparison.target_label,
+                                    "axis_names": list(item.comparison.axis_names),
+                                    "comparable": item.comparison.comparable,
+                                    "incomparability_reasons": list(
+                                        item.comparison.incomparability_reasons
+                                    ),
+                                }
+                                if item.comparison
+                                else None
+                            ),
+                            "reported_result": (
+                                {
+                                    "outcome": item.reported_result.outcome,
+                                    "value": item.reported_result.value,
+                                    "baseline_value": item.reported_result.baseline_value,
+                                    "target_value": item.reported_result.target_value,
+                                    "unit": item.reported_result.unit,
+                                    "direction": item.reported_result.direction,
+                                    "result_text": item.reported_result.result_text,
+                                    "result_kind": item.reported_result.result_kind,
+                                }
+                                if item.reported_result
+                                else None
+                            ),
+                            "attribution_scope": item.attribution_scope,
+                            "scientific_context": {
+                                "material": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.material
+                                ],
+                                "sample": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.sample
+                                ],
+                                "process": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.process
+                                ],
+                                "test": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.scientific_context.test
+                                ],
+                            },
+                            "resolution_status": item.resolution_status,
+                            "failure_reason": item.failure_reason,
+                            "confidence": item.confidence,
+                            "origin": item.origin,
+                            "source_analysis_version": item.source_analysis_version,
+                            "supersedes_evidence_id": item.supersedes_evidence_id,
+                            "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                            "created_by_user_id": item.created_by_user_id,
+                            "created_by_tool_call_id": item.created_by_tool_call_id,
+                            "created_at": (
+                                item.created_at.isoformat()
+                                if item.created_at is not None
+                                else None
+                            ),
+                            "authoring_note": item.authoring_note,
+                            **(
+                                {
+                                    "supports_finding": item.comparison is None
+                                    or item.comparison.comparable,
+                                    "eligible_for_finding_authoring": item.comparison
+                                    is None
+                                    or item.comparison.comparable,
+                                    "warnings": list(item.warnings),
+                                }
+                                if experiment_backed
+                                else {}
+                            ),
+                            **({"warnings": list(item.warnings)} if item.warnings else {}),
+                            **(
+                                {
+                                    "related_source_refs": [
+                                        dict(item) for item in item.related_source_refs
+                                    ]
+                                }
+                                if item.related_source_refs
+                                or item.related_source_refs_explicit
+                                else {}
+                            ),
+                        }
+                    )
+                    for item in records
+                ],
+                language=language,
+                response_client=response_client,
+            )
         )
-        if relevant_contributions and all(
-            contribution.analysis_status == "failed"
-            for contribution in relevant_contributions
+        try:
+            result = await asyncio.shield(summary_task)
+        except asyncio.CancelledError:
+            await asyncio.gather(summary_task, return_exceptions=True)
+            raise
+        try:
+            await _published_version(collection_id, objective_id, analysis_version)
+        except ResourceConflictException as exc:
+            raise ResourceConflictException(
+                "The published analysis has changed. Reload before generating a summary.",
+                data={"code": "summary_stale_analysis"},
+            ) from exc
+        return result
+    finally:
+        if owns_client:
+            response_client.client.close()
+
+
+async def start_objective_analysis(
+    collection_id: str,
+    objective_id: str,
+    document_ids: tuple[str, ...],
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    return await queue_analysis(collection_id, objective_id, document_ids)
+
+
+async def queue_analysis(
+    collection_id: str,
+    objective_id: str,
+    document_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    document_inputs = await objective_input_service.resolve_prepared_document_inputs(
+        collection_id,
+        document_ids,
+    )
+    objective, analysis = await ObjectiveRepo.queue_analysis(
+        collection_id,
+        objective_id,
+        document_inputs=document_inputs,
+        pipeline_version=_PIPELINE_VERSION,
+        model_name=None,
+        prompt_versions={},
+    )
+    return await _result(collection_id, objective.objective_id, analysis=analysis)
+
+
+async def list_objectives(
+    collection_id: str, *, user_id: str
+) -> tuple[StoredObjective, ...]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    return await ObjectiveRepo.list_objective_records(collection_id)
+
+
+async def get_analysis_state(
+    collection_id: str,
+    objective_id: str,
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    return await _result(collection_id, objective_id)
+
+
+async def get_analysis_status(
+    collection_id: str,
+    objective_id: str,
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    """Read only the active analysis progress needed for polling."""
+    await collection_service.get_collection_for_user(collection_id, user_id)
+
+    objective = await _require_objective(collection_id, objective_id)
+    analysis = await ObjectiveRepo.read_analysis(
+        collection_id,
+        objective.objective_id,
+        objective.active_analysis_version,
+    )
+    if analysis is None:
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": None,
+            "status": None,
+            "phase": None,
+            "processed_document_count": 0,
+            "total_document_count": 0,
+            "current_document_id": None,
+            "progress_message": None,
+            "error_code": None,
+            "error_message": None,
+            "created_at": None,
+            "started_at": None,
+            "completed_at": None,
+        }
+    return {
+        "collection_id": collection_id,
+        "objective_id": objective.objective_id,
+        "analysis_version": analysis.analysis_version,
+        "status": analysis.status,
+        "phase": analysis.phase,
+        "processed_document_count": analysis.processed_document_count,
+        "total_document_count": analysis.total_document_count,
+        "current_document_id": analysis.current_document_id,
+        "progress_message": analysis.progress_message,
+        "error_code": analysis.error_code,
+        "error_message": (
+            analysis_error_message(analysis.error_code)
+            if analysis.status == "failed"
+            else analysis.error_message
+        ),
+        "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
+        "started_at": analysis.started_at.isoformat() if analysis.started_at else None,
+        "completed_at": (
+            analysis.completed_at.isoformat() if analysis.completed_at else None
+        ),
+    }
+
+
+async def list_findings(
+    collection_id: str,
+    objective_id: str,
+    *,
+    user_id: str,
+    analysis_version: int | None = None,
+    offset: int = 0,
+    limit: int = 50,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    version = await _published_version(
+        collection_id,
+        objective_id,
+        analysis_version,
+    )
+    if await should_read_experiment_projection(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=version,
+    ):
+        findings, total = await experiment_projection.list_analysis_findings(
+            collection_id,
+            objective_id,
+            version,
+            offset=offset,
+            limit=limit,
+        )
+    else:
+        findings, total = await ObjectiveRepo.list_findings(
+            collection_id,
+            objective_id,
+            version,
+            offset=offset,
+            limit=limit,
+        )
+    return {
+        "collection_id": collection_id,
+        "objective_id": objective_id,
+        "analysis_version": version,
+        "items": [
+            (
+                {
+                    "collection_id": finding.collection_id,
+                    "objective_id": finding.objective_id,
+                    "analysis_version": finding.analysis_version,
+                    "finding_id": finding.finding_id,
+                    "statement": finding.statement,
+                    "factors": list(finding.factors),
+                    "outcome": finding.outcome,
+                    "direction": finding.direction,
+                    "assertion_strength": finding.assertion_strength,
+                    "attribution_scope": finding.attribution_scope,
+                    "synthesis_status": finding.synthesis_status,
+                    "certainty": finding.certainty,
+                    "display_rank": finding.display_rank,
+                    "mechanisms": [
+                        {
+                            "source_term": mechanism.source_term,
+                            "relation_type": mechanism.relation_type,
+                            "target_term": mechanism.target_term,
+                            "direction": mechanism.direction,
+                            "assertion_strength": mechanism.assertion_strength,
+                            "supporting_evidence_ids": list(
+                                mechanism.supporting_evidence_ids
+                            ),
+                        }
+                        for mechanism in finding.mechanisms
+                    ],
+                    "scientific_context": {
+                        "material": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in finding.scientific_context.material
+                        ],
+                        "sample": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in finding.scientific_context.sample
+                        ],
+                        "process": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in finding.scientific_context.process
+                        ],
+                        "test": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in finding.scientific_context.test
+                        ],
+                    },
+                    "limitations": list(finding.limitations),
+                    "paper_contributions": [
+                        {
+                            "document_id": contribution.document_id,
+                            "analysis_status": contribution.analysis_status,
+                            "supporting_evidence_ids": list(
+                                contribution.supporting_evidence_ids
+                            ),
+                            "contradicting_evidence_ids": list(
+                                contribution.contradicting_evidence_ids
+                            ),
+                            "context_evidence_ids": list(
+                                contribution.context_evidence_ids
+                            ),
+                            "condition_boundary_evidence_ids": list(
+                                contribution.condition_boundary_evidence_ids
+                            ),
+                        }
+                        for contribution in finding.paper_contributions
+                    ],
+                    "origin": finding.origin,
+                    "source_analysis_version": finding.source_analysis_version,
+                    "parent_finding_id": finding.parent_finding_id,
+                    "created_by_user_id": finding.created_by_user_id,
+                    "created_by_tool_call_id": finding.created_by_tool_call_id,
+                    "created_at": (
+                        finding.created_at.isoformat() if finding.created_at else None
+                    ),
+                    **(
+                        {"selection_ids": list(finding.selection_ids)}
+                        if finding.selection_ids
+                        else {}
+                    ),
+                    **(
+                        {"comparison_group_ids": list(finding.comparison_group_ids)}
+                        if finding.comparison_group_ids
+                        else {}
+                    ),
+                    **(
+                        {"warnings": list(finding.warnings)} if finding.warnings else {}
+                    ),
+                }
+            )
+            for finding in findings
+        ],
+        "evidence_reviews": await _finding_evidence_reviews(
+            collection_id, objective_id, version, findings
+        ),
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+    }
+
+
+async def get_finding(
+    collection_id: str,
+    objective_id: str,
+    finding_id: str,
+    *,
+    user_id: str,
+    analysis_version: int | None = None,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    version = await _published_version(
+        collection_id,
+        objective_id,
+        analysis_version,
+    )
+    if await should_read_experiment_projection(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=version,
+    ):
+        finding = await experiment_projection.read_analysis_finding(
+            collection_id,
+            objective_id,
+            version,
+            finding_id,
+        )
+    else:
+        finding = await ObjectiveRepo.read_finding(
+            collection_id,
+            objective_id,
+            version,
+            finding_id,
+        )
+    if finding is None:
+        raise ResourceNotFoundException(
+            "Published Finding not found.",
+            data={
+                "code": "finding_not_found",
+                "collection_id": collection_id,
+                "objective_id": objective_id,
+                "analysis_version": version,
+                "finding_id": finding_id,
+            },
+        )
+    return {
+        "collection_id": collection_id,
+        "objective_id": objective_id,
+        "analysis_version": version,
+        "finding": (
+            {
+                "collection_id": finding.collection_id,
+                "objective_id": finding.objective_id,
+                "analysis_version": finding.analysis_version,
+                "finding_id": finding.finding_id,
+                "statement": finding.statement,
+                "factors": list(finding.factors),
+                "outcome": finding.outcome,
+                "direction": finding.direction,
+                "assertion_strength": finding.assertion_strength,
+                "attribution_scope": finding.attribution_scope,
+                "synthesis_status": finding.synthesis_status,
+                "certainty": finding.certainty,
+                "display_rank": finding.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in finding.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.test
+                    ],
+                },
+                "limitations": list(finding.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in finding.paper_contributions
+                ],
+                "origin": finding.origin,
+                "source_analysis_version": finding.source_analysis_version,
+                "parent_finding_id": finding.parent_finding_id,
+                "created_by_user_id": finding.created_by_user_id,
+                "created_by_tool_call_id": finding.created_by_tool_call_id,
+                "created_at": (
+                    finding.created_at.isoformat() if finding.created_at else None
+                ),
+                **(
+                    {"selection_ids": list(finding.selection_ids)}
+                    if finding.selection_ids
+                    else {}
+                ),
+                **(
+                    {"comparison_group_ids": list(finding.comparison_group_ids)}
+                    if finding.comparison_group_ids
+                    else {}
+                ),
+                **({"warnings": list(finding.warnings)} if finding.warnings else {}),
+            }
+        ),
+        "evidence_review": (
+            await _finding_evidence_reviews(
+                collection_id, objective_id, version, (finding,)
+            )
+        )[finding.finding_id],
+    }
+
+
+async def _finding_evidence_reviews(
+    collection_id: str,
+    objective_id: str,
+    version: int,
+    findings: tuple[Finding, ...],
+) -> dict[str, Any]:
+    if not findings:
+        return {}
+    evidence = await _all_published_evidence(
+        collection_id, objective_id, version,
+        experiment_backed=await should_read_experiment_projection(
+            collection_id=collection_id, objective_id=objective_id, analysis_version=version,
+        ),
+    )
+    evidence_by_id = {
+        item.evidence_id: item for item in evidence
+    }
+    reviews = {}
+    for finding in findings:
+        finding_id = finding.finding_id
+        replacements = finding.evidence_replacements(evidence_by_id)
+        reviews[finding_id] = {
+            "needs_review": bool(replacements),
+            "evidence_replacements": replacements,
+        }
+    return reviews
+
+
+async def list_evidence(
+    collection_id: str,
+    objective_id: str,
+    *,
+    user_id: str,
+    analysis_version: int | None = None,
+    finding_id: str | None = None,
+    offset: int = 0,
+    limit: int = 100,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    version = await _published_version(
+        collection_id,
+        objective_id,
+        analysis_version,
+    )
+    experiment_backed = await should_read_experiment_projection(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=version,
+    )
+    if experiment_backed:
+        evidence, total = await experiment_projection.list_analysis_evidence(
+            collection_id,
+            objective_id,
+            version,
+            finding_id=finding_id,
+            offset=offset,
+            limit=limit,
+        )
+    else:
+        evidence, total = await ObjectiveRepo.list_evidence(
+            collection_id,
+            objective_id,
+            version,
+            finding_id=finding_id,
+            offset=offset,
+            limit=limit,
+        )
+    return {
+        "collection_id": collection_id,
+        "objective_id": objective_id,
+        "analysis_version": version,
+        "finding_id": finding_id,
+        "items": [
+            {
+                **(
+                    {
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "evidence_id": item.evidence_id,
+                        "document_id": item.document_id,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "source_excerpt": item.source_excerpt,
+                        "page_numbers": list(item.page_numbers),
+                        "evidence_role": item.evidence_role,
+                        "selection_status": item.selection_status,
+                        "selection_reason": item.selection_reason,
+                        "evidence_status": (
+                            experiment_evidence_disposition(item)[0]
+                            if experiment_backed else item.evidence_status
+                        ),
+                        "evidence_status_reason": (
+                            experiment_evidence_disposition(item)[1]
+                            if experiment_backed else item.evidence_status_reason
+                        ),
+                        "changed_variables": [
+                            {
+                                "name": variable.name,
+                                "baseline_value": variable.baseline_value,
+                                "target_value": variable.target_value,
+                                "unit": variable.unit,
+                            }
+                            for variable in item.changed_variables
+                        ],
+                        "comparison": (
+                            {
+                                "baseline_label": item.comparison.baseline_label,
+                                "target_label": item.comparison.target_label,
+                                "axis_names": list(item.comparison.axis_names),
+                                "comparable": item.comparison.comparable,
+                                "incomparability_reasons": list(
+                                    item.comparison.incomparability_reasons
+                                ),
+                            }
+                            if item.comparison
+                            else None
+                        ),
+                        "reported_result": (
+                            {
+                                "outcome": item.reported_result.outcome,
+                                "value": item.reported_result.value,
+                                "baseline_value": item.reported_result.baseline_value,
+                                "target_value": item.reported_result.target_value,
+                                "unit": item.reported_result.unit,
+                                "direction": item.reported_result.direction,
+                                "result_text": item.reported_result.result_text,
+                                "result_kind": item.reported_result.result_kind,
+                            }
+                            if item.reported_result
+                            else None
+                        ),
+                        "attribution_scope": item.attribution_scope,
+                        "scientific_context": {
+                            "material": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.material
+                            ],
+                            "sample": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.sample
+                            ],
+                            "process": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.process
+                            ],
+                            "test": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.test
+                            ],
+                        },
+                        "resolution_status": item.resolution_status,
+                        "failure_reason": item.failure_reason,
+                        "confidence": item.confidence,
+                        "origin": item.origin,
+                        "source_analysis_version": item.source_analysis_version,
+                        "supersedes_evidence_id": item.supersedes_evidence_id,
+                        "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                        "created_by_user_id": item.created_by_user_id,
+                        "created_by_tool_call_id": item.created_by_tool_call_id,
+                        "created_at": (
+                            item.created_at.isoformat()
+                            if item.created_at is not None
+                            else None
+                        ),
+                        "authoring_note": item.authoring_note,
+                        **({"warnings": list(item.warnings)} if experiment_backed else {}),
+                        **({"warnings": list(item.warnings)} if item.warnings else {}),
+                        **(
+                            {
+                                "related_source_refs": [
+                                    dict(item) for item in item.related_source_refs
+                                ]
+                            }
+                            if item.related_source_refs
+                            or item.related_source_refs_explicit
+                            else {}
+                        ),
+                    }
+                ),
+                "supports_finding": (
+                    item.comparison is None or item.comparison.comparable
+                    if experiment_backed else item.supports_finding
+                ),
+                "eligible_for_finding_authoring": (
+                    item.comparison is None or item.comparison.comparable
+                    if experiment_backed else item.eligible_for_finding_authoring
+                ),
+            }
+            for item in evidence
+        ],
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+    }
+
+
+async def get_evidence_map(
+    collection_id: str,
+    objective_id: str,
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    await collection_service.get_collection_for_user(collection_id, user_id)
+    objective = await _require_objective(collection_id, objective_id)
+    version = await _published_version(collection_id, objective_id, None)
+    analysis = await ObjectiveRepo.read_published_analysis(
+        collection_id,
+        objective_id,
+    )
+    if analysis is None:
+        raise ResourceConflictException(
+            "Objective has no published analysis.",
+            data={"code": "objective_analysis_not_published"},
+        )
+
+    findings = await _all_published_findings(
+        collection_id,
+        objective_id,
+        version,
+        experiment_backed=is_experiment_backed_analysis(analysis),
+    )
+    evidence_records = await _all_published_evidence(
+        collection_id,
+        objective_id,
+        version,
+        experiment_backed=is_experiment_backed_analysis(analysis),
+    )
+    profiles = await document_profile_service.read_document_profiles(
+        collection_id,
+        tuple(item.document_id for item in analysis.document_inputs),
+    )
+    if is_experiment_backed_analysis(analysis):
+        return await experiment_projection.build_evidence_map(
+            objective=objective,
+            analysis=analysis,
+            profiles=profiles,
+        )
+    return build_objective_evidence_map(
+        objective=objective,
+        analysis=analysis,
+        contributions=await ObjectiveRepo.list_contributions(
+            collection_id,
+            objective_id,
+            version,
+        ),
+        findings=findings,
+        evidence_records=evidence_records,
+        profiles=profiles,
+    )
+
+
+async def _all_published_findings(
+    collection_id: str,
+    objective_id: str,
+    analysis_version: int,
+    *,
+    experiment_backed: bool,
+) -> tuple[Finding, ...]:
+    if experiment_backed:
+        findings, _ = await experiment_projection.list_analysis_findings(
+            collection_id,
+            objective_id,
+            analysis_version,
+            offset=0,
+            limit=200,
+        )
+        return tuple(findings)
+    records: list[Any] = []
+    offset = 0
+    while True:
+        page, total = await ObjectiveRepo.list_findings(
+            collection_id,
+            objective_id,
+            analysis_version,
+            offset=offset,
+            limit=200,
+        )
+        records.extend(page)
+        offset += len(page)
+        if offset >= total or not page:
+            return tuple(records)
+
+
+async def _all_published_evidence(
+    collection_id: str,
+    objective_id: str,
+    analysis_version: int,
+    *,
+    experiment_backed: bool,
+) -> tuple[ObjectiveEvidence, ...]:
+    if experiment_backed:
+        evidence, _ = await experiment_projection.list_analysis_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            offset=0,
+            limit=500,
+        )
+        return tuple(evidence)
+    records: list[Any] = []
+    offset = 0
+    while True:
+        page, total = await ObjectiveRepo.list_evidence(
+            collection_id,
+            objective_id,
+            analysis_version,
+            offset=offset,
+            limit=500,
+        )
+        records.extend(page)
+        offset += len(page)
+        if offset >= total or not page:
+            return tuple(records)
+
+
+def _validate_artifacts(
+    artifacts: ObjectiveExperimentAnalysisArtifacts,
+) -> None:
+    if not artifacts.contributions:
+        raise RuntimeError("objective analysis produced no paper contributions")
+    relevant_contributions = tuple(
+        contribution
+        for contribution in artifacts.contributions
+        if contribution.analysis_status != "excluded"
+    )
+    if relevant_contributions and all(
+        contribution.analysis_status == "failed"
+        for contribution in relevant_contributions
+    ):
+        raise RuntimeError("objective analysis failed to extract every relevant paper")
+
+
+async def _result(
+    collection_id: str,
+    objective_id: str,
+    *,
+    analysis: ObjectiveAnalysis | None = None,
+) -> dict[str, Any]:
+    stored_objective = await ObjectiveRepo.read_objective_record(
+        collection_id, objective_id
+    )
+    if stored_objective is None:
+        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+    objective = stored_objective.objective
+    active = analysis
+    if active is None and objective.active_analysis_version is not None:
+        active = await ObjectiveRepo.read_analysis(
+            collection_id, objective_id, objective.active_analysis_version
+        )
+    published = None
+    if objective.published_analysis_version is not None:
+        if (
+            active is not None
+            and active.analysis_version == objective.published_analysis_version
         ):
-            raise RuntimeError(
-                "objective analysis failed to extract every relevant paper"
+            published = active
+        else:
+            published = await ObjectiveRepo.read_analysis(
+                collection_id, objective_id, objective.published_analysis_version
             )
-
-    async def _result(
-        self,
-        collection_id: str,
-        objective_id: str,
-        *,
-        analysis: ObjectiveAnalysis | None = None,
-    ) -> dict[str, Any]:
-        stored_objective = await self.objective_repository.read_objective_record(
-            collection_id, objective_id
+    if active is not None and active.error_code == "analysis_interrupted":
+        active = None
+    if active is not None and active.status == "failed":
+        active = replace(
+            active,
+            error_message=analysis_error_message(active.error_code),
         )
-        if stored_objective is None:
-            raise FileNotFoundError(
-                f"research objective not found: {collection_id}/{objective_id}"
+    findings = ()
+    finding_total = 0
+    paper_contributions = ()
+    evidence_records = ()
+    warnings: list[str] = []
+    if published is not None:
+        if is_experiment_backed_analysis(published):
+            paper_contributions = tuple(
+                {
+                    **asdict(item),
+                    "evidence_status_counts": dict(item.evidence_status_counts),
+                }
+                for item in await experiment_projection.list_analysis_contributions(
+                    collection_id, objective.objective_id, published.analysis_version,
+                )
             )
-        objective = stored_objective.objective
-        active = analysis
-        if active is None and objective.active_analysis_version is not None:
-            active = await self.objective_repository.read_analysis(
-                collection_id, objective_id, objective.active_analysis_version
-            )
-        published = None
-        if objective.published_analysis_version is not None:
-            if (
-                active is not None
-                and active.analysis_version == objective.published_analysis_version
-            ):
-                published = active
-            else:
-                published = await self.objective_repository.read_analysis(
-                    collection_id, objective_id, objective.published_analysis_version
-                )
-        if active is not None and active.error_code == "analysis_interrupted":
-            active = None
-        if active is not None and active.status == "failed":
-            active = replace(
-                active,
-                error_message=analysis_error_message(active.error_code),
-            )
-        findings = ()
-        finding_total = 0
-        paper_contributions = ()
-        evidence_records = ()
-        warnings: list[str] = []
-        if published is not None:
-            if (
-                published.uses_experiment_records
-                and self.experiment_compatibility_projection is not None
-            ):
-                paper_contributions = (
-                    await self.experiment_compatibility_projection.list_contributions(
-                        collection_id,
-                        objective.objective_id,
-                        published.analysis_version,
-                    )
-                )
-                findings, finding_total = (
-                    await self.experiment_compatibility_projection.list_findings(
-                        collection_id,
-                        objective.objective_id,
-                        published.analysis_version,
-                        offset=0,
-                        limit=50,
-                    )
-                )
-                evidence_records = await self._all_published_evidence(
-                    collection_id,
-                    objective.objective_id,
-                    published.analysis_version,
-                )
-            else:
-                paper_contributions = await self.objective_repository.list_contributions(
-                    collection_id,
-                    objective.objective_id,
-                    published.analysis_version,
-                )
-                findings, finding_total = await self.objective_repository.list_findings(
+            findings, finding_total = (
+                await experiment_projection.list_analysis_findings(
                     collection_id,
                     objective.objective_id,
                     published.analysis_version,
                     offset=0,
                     limit=50,
                 )
-                evidence_records = await self._all_published_evidence(
-                    collection_id,
-                    objective.objective_id,
-                    published.analysis_version,
-                )
-            seen_warnings: set[str] = set()
-            for contribution in paper_contributions:
-                document_id = str(_record_value(contribution, "document_id") or "")
-                for warning in (_record_value(contribution, "warnings") or ()):
-                    scoped_warning = f"{document_id}: {warning}"
-                    if scoped_warning in seen_warnings:
-                        continue
-                    seen_warnings.add(scoped_warning)
-                    warnings.append(scoped_warning)
-                status_counts = _record_value(contribution, "evidence_status_counts") or {}
-                if isinstance(status_counts, Mapping):
-                    status_counts = tuple(status_counts.items())
-                for status, count in status_counts:
-                    if status == "comparable" or count <= 0:
-                        continue
-                    scoped_status = (
-                        f"{document_id}: {count} Evidence item(s) "
-                        f"classified as {status}."
-                    )
-                    if scoped_status in seen_warnings:
-                        continue
-                    seen_warnings.add(scoped_status)
-                    warnings.append(scoped_status)
-            for evidence in evidence_records:
-                for warning in (_record_value(evidence, "warnings") or ()):
-                    scoped_warning = (
-                        f"{_record_value(evidence, 'document_id')}/"
-                        f"{_record_value(evidence, 'source_ref')}: {warning}"
-                    )
-                    if scoped_warning in seen_warnings:
-                        continue
-                    seen_warnings.add(scoped_warning)
-                    warnings.append(scoped_warning)
-            for finding in findings:
-                for warning in (_record_value(finding, "warnings") or ()):
-                    scoped_warning = (
-                        f"Finding {_record_value(finding, 'finding_id')}: {warning}"
-                    )
-                    if scoped_warning in seen_warnings:
-                        continue
-                    seen_warnings.add(scoped_warning)
-                    warnings.append(scoped_warning)
-        return {
-            "collection_id": collection_id,
-            "objective": stored_objective,
-            "analysis": active,
-            "published_analysis": published,
-            "findings": findings,
-            "finding_total": finding_total,
-            "omitted_finding_count": max(0, finding_total - len(findings)),
-            "paper_contributions": paper_contributions,
-            "evidence_review": _evidence_review_summary(evidence_records),
-            "warnings": warnings,
-        }
-
-    async def _require_objective(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ResearchObjective:
-        objective = await self.objective_repository.read_objective(
-            collection_id, objective_id
-        )
-        if objective is None:
-            raise FileNotFoundError(
-                f"research objective not found: {collection_id}/{objective_id}"
             )
-        return objective
-
-    async def _published_version(
-        self,
-        collection_id: str,
-        objective_id: str,
-        requested_version: int | None,
-    ) -> int:
-        objective = await self._require_objective(collection_id, objective_id)
-        published_version = objective.published_analysis_version
-        if published_version is None:
-            raise ValueError("objective has no published analysis")
-        if requested_version is not None and requested_version != published_version:
-            raise ValueError("requested analysis version is not published")
-        return published_version
-
-    async def _should_use_experiment_projection(
-        self,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-    ) -> bool:
-        """Select the scientific read owner for one fixed analysis version.
-
-        The production runtime always supplies the projection for automatic
-        analyses.  The ``None`` case remains usable for authored-only test and
-        memory runtimes; it must never make an automatic production analysis
-        silently switch its persisted scientific source because runtime
-        construction rejects that configuration.
-        """
-
-        return await should_read_experiment_projection(
-            objective_repository=self.objective_repository,
-            experiment_projection=self.experiment_compatibility_projection,
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-        )
-
-    def _build_progress_callback(
-        self,
-        analysis: ObjectiveAnalysis,
-    ) -> Callable[[dict[str, Any]], None]:
-        loop = get_running_loop()
-        completed_document_ids: set[str] = set()
-        progress_lock = Lock()
-
-        async def persist_progress(progress: dict[str, Any]) -> None:
-            # Worker events can overlap; count and persist them in the same order.
-            async with progress_lock:
-                active_document_id = progress.get("active_document_id")
-                if (
-                    progress.get("phase") == "objective_document_evidence_completed"
-                    and active_document_id
-                ):
-                    completed_document_ids.add(active_document_id)
-                await self.objective_repository.update_analysis_progress(
-                    analysis.collection_id,
-                    analysis.objective_id,
-                    analysis.analysis_version,
-                    phase=progress.get("phase") or "running",
-                    processed_document_count=max(
-                        analysis.processed_document_count,
-                        len(completed_document_ids),
-                    ),
-                    total_document_count=analysis.total_document_count,
-                    current_document_id=active_document_id,
-                    progress_message=progress.get("message"),
-                )
-
-        def update(progress: dict[str, Any]) -> None:
-            update_future = run_coroutine_threadsafe(
-                persist_progress(progress),
-                loop,
+            evidence_records = await _all_published_evidence(
+                collection_id,
+                objective.objective_id,
+                published.analysis_version,
+                experiment_backed=True,
             )
-            update_future.result()
+        else:
+            contributions = await ObjectiveRepo.list_contributions(
+                collection_id,
+                objective.objective_id,
+                published.analysis_version,
+            )
+            paper_contributions = tuple(
+                {
+                    **asdict(item),
+                    "evidence_status_counts": dict(item.evidence_status_counts),
+                }
+                for item in contributions
+            )
+            findings, finding_total = await ObjectiveRepo.list_findings(
+                collection_id,
+                objective.objective_id,
+                published.analysis_version,
+                offset=0,
+                limit=50,
+            )
+            evidence_records = await _all_published_evidence(
+                collection_id,
+                objective.objective_id,
+                published.analysis_version,
+                experiment_backed=False,
+            )
+        seen_warnings: set[str] = set()
+        for contribution in paper_contributions:
+            document_id = contribution["document_id"]
+            for warning in contribution["warnings"]:
+                scoped_warning = f"{document_id}: {warning}"
+                if scoped_warning in seen_warnings:
+                    continue
+                seen_warnings.add(scoped_warning)
+                warnings.append(scoped_warning)
+            for status, count in contribution["evidence_status_counts"].items():
+                if status == "comparable" or count <= 0:
+                    continue
+                scoped_status = (
+                    f"{document_id}: {count} Evidence item(s) "
+                    f"classified as {status}."
+                )
+                if scoped_status in seen_warnings:
+                    continue
+                seen_warnings.add(scoped_status)
+                warnings.append(scoped_status)
+        for evidence in evidence_records:
+            for warning in evidence.warnings:
+                scoped_warning = (
+                    f"{evidence.document_id}/"
+                    f"{evidence.source_ref}: {warning}"
+                )
+                if scoped_warning in seen_warnings:
+                    continue
+                seen_warnings.add(scoped_warning)
+                warnings.append(scoped_warning)
+        for finding in findings:
+            for warning in finding.warnings:
+                scoped_warning = (
+                    f"Finding {finding.finding_id}: {warning}"
+                )
+                if scoped_warning in seen_warnings:
+                    continue
+                seen_warnings.add(scoped_warning)
+                warnings.append(scoped_warning)
+    return {
+        "collection_id": collection_id,
+        "objective": stored_objective,
+        "analysis": active,
+        "published_analysis": published,
+        "findings": findings,
+        "finding_total": finding_total,
+        "omitted_finding_count": max(0, finding_total - len(findings)),
+        "paper_contributions": paper_contributions,
+        "evidence_review": _evidence_review_summary(
+            evidence_records, experiment_backed=is_experiment_backed_analysis(published),
+        ),
+        "warnings": warnings,
+    }
 
-        return update
 
-    @staticmethod
-    def _error_code(exc: Exception) -> str:
-        if isinstance(exc, TimeoutError):
-            return "provider_timeout"
-        if isinstance(exc, ValueError):
-            return "invalid_analysis_artifact"
-        return "objective_analysis_failed"
+async def _require_objective(
+    collection_id: str,
+    objective_id: str,
+) -> ResearchObjective:
+    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    if objective is None:
+        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+    return objective
 
 
-__all__ = ["ObjectiveAnalysisDispatchError", "ObjectiveAnalysisService"]
+async def _published_version(
+    collection_id: str,
+    objective_id: str,
+    requested_version: int | None,
+) -> int:
+    objective = await _require_objective(collection_id, objective_id)
+    published_version = objective.published_analysis_version
+    if published_version is None:
+        raise ResourceConflictException(
+            "Objective has no published analysis.",
+            data={"code": "objective_analysis_not_published"},
+        )
+    if requested_version is not None and requested_version != published_version:
+        raise ResourceConflictException(
+            "Requested analysis version is not published.",
+            data={
+                "code": "analysis_version_not_published",
+                "analysis_version": requested_version,
+                "published_analysis_version": published_version,
+            },
+        )
+    return published_version
+
+
+def _build_progress_callback(
+    job: ObjectiveAnalysisJobSnapshot,
+) -> Callable[[dict[str, Any]], None]:
+    analysis = job.analysis
+    loop = get_running_loop()
+    completed_document_ids: set[str] = set()
+    progress_lock = Lock()
+
+    async def persist_progress(progress: dict[str, Any]) -> None:
+        # Worker events can overlap; count and persist them in the same order.
+        async with progress_lock:
+            active_document_id = progress.get("active_document_id")
+            if (
+                progress.get("phase") == "objective_document_evidence_completed"
+                and active_document_id
+            ):
+                completed_document_ids.add(active_document_id)
+            await ObjectiveRepo.update_analysis_progress(
+                analysis.collection_id,
+                analysis.objective_id,
+                analysis.analysis_version,
+                job=job,
+                phase=progress.get("phase") or "running",
+                processed_document_count=max(
+                    analysis.processed_document_count,
+                    len(completed_document_ids),
+                ),
+                total_document_count=analysis.total_document_count,
+                current_document_id=active_document_id,
+                progress_message=progress.get("message"),
+            )
+
+    def update(progress: dict[str, Any]) -> None:
+        update_future = run_coroutine_threadsafe(
+            persist_progress(progress),
+            loop,
+        )
+        update_future.result()
+
+    return update
+
+
+def _error_code(exc: Exception) -> str:
+    if isinstance(exc, TimeoutError):
+        return "provider_timeout"
+    if isinstance(exc, ValueError):
+        return "invalid_analysis_artifact"
+    return "objective_analysis_failed"
+
+
+__all__ = [
+    "queue_analysis",
+    "get_analysis_state",
+    "get_analysis_status",
+    "list_objectives",
+    "list_findings",
+    "get_finding",
+    "list_evidence",
+    "get_evidence_map",
+]

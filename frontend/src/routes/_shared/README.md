@@ -8,20 +8,29 @@ This node owns browser-side helpers shared across frontend routes.
 - centralize authentication expiry and API error handling;
 - expose typed clients for Collection, Document preparation, Source,
   Objective/Finding, and Assistant resources;
-- keep formatting, translations, and Pipeline Run state shaping out
+- keep formatting, translations, and Pipeline Run state presentation out
   of route components.
 
 ## Important Files
 
 - `api.ts`
-  Base request helpers, shared HTTP error behavior, and same-origin blob
-  downloads used by source archives and Finding dataset exports.
+  Base request helpers and same-origin downloads. JSON uses HTTP 200 with
+  `{code,message,data,meta}`; `requestJson` unwraps `data`, and business failures
+  raise `ApiError(code, message, data)`. `isApiErrorCode` compares numeric business
+  codes and `getApiErrorReason` reads stable `data.code` strings. Authentication
+  expiry clears local auth and chat storage before redirecting, only for
+  `200301` plus `authentication_required`. Network
+  errors remain ordinary errors. `requestBlob` rejects JSON failures before
+  saving, unwraps ordinary JSON exports, and preserves file bytes identified
+  by Content-Disposition. `buildApiUrl` owns URLs for requests and streams.
 - `collections.ts`, `collectionDocuments.ts`, `pipelineRuns.ts`
   Collection upload, current Document, independent preparation, and Pipeline
   Run progress contracts. Collection history uses compact run summaries; one
   run read retains complete diagnostic state. `pipelineRuns.ts` also queues
-  collection-level research-question formation and normalizes its persisted
-  `objective_discovery` Pipeline Run.
+  collection-level research-question formation and reads its persisted
+  `objective_discovery` Pipeline Run directly. Clients reject invalid response
+  identities and required containers at the request boundary; they do not
+  fabricate missing states or rebuild valid server responses.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated
@@ -40,12 +49,21 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, streamed text
   deltas, capability results, exact write decisions, and the bounded pending
-  Source handoff between a document reader and its Collection Agent.
+  Source handoff between a document reader and its Collection Agent. JSON
+  rejection before stream start is handled before parsing SSE; after start,
+  `error` events and cancellation retain the existing recovery flow.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans
   may retain source provenance returned by the API.
 - `i18n.ts`
-  Shared labels for active routes and states.
+  Shared labels for active routes and states. The selected language also updates
+  the document language for assistive technology.
 
 There is one browser contract. Do not add alternate API origins, compatibility
 normalizers, or parallel Objective result types.
+
+`authState.ts` owns browser authentication state, cross-tab invalidation, and
+user-scoped storage cleanup without making network requests. `auth.ts` owns
+login, logout, and current-session requests and updates that state. `api.ts`
+imports invalidation directly from `authState.ts`, so the base request helper
+does not depend on the network auth module.

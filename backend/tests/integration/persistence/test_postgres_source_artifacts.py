@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+from infra.persistence import database
+from tests.support.postgres import seed_collection
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 
 import pytest
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import (
-    StoredCollection,
-    StoredDocument,
-)
 from domain.source import (
     Collection,
     Document,
@@ -25,12 +23,14 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
 )
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
+    StoredDocument,
 )
-from infra.persistence.postgres.source_artifact_repository import (
-    PostgresSourceArtifactRepository,
+from repositories.source_artifact_repository import (
+    SourceArtifactRepository,
 )
 
 pytestmark = pytest.mark.anyio
@@ -41,7 +41,7 @@ COLLECTION_ID = "col_source"
 
 @pytest.fixture
 async def source_repository(postgres_session_factory):
-    await PostgresAuthRepository(postgres_session_factory).add_user(
+    await AuthRepository().add_user(
         AuthUserRecord(
             user_id="user_source",
             email="source@example.com",
@@ -50,7 +50,7 @@ async def source_repository(postgres_session_factory):
             created_at=datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
         )
     )
-    collections = PostgresCollectionRepository(postgres_session_factory)
+    collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
             collection=Collection(
@@ -69,7 +69,7 @@ async def source_repository(postgres_session_factory):
         (_document("doc_a"), _document("doc_b")),
         updated_at=NOW,
     )
-    return PostgresSourceArtifactRepository(postgres_session_factory)
+    return SourceArtifactRepository()
 
 
 def _document(document_id: str) -> StoredDocument:
@@ -179,7 +179,9 @@ async def test_source_repository_round_trips_each_current_document_independently
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
 
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") == first
@@ -208,11 +210,11 @@ async def test_source_existence_does_not_load_artifact_json(
 
 async def test_profile_only_row_is_not_a_prepared_source(source_repository):
     from domain.core import DocumentProfile
-    from infra.persistence.postgres.document_profile_repository import (
-        PostgresDocumentProfileRepository,
+    from repositories.document_profile_repository import (
+        DocumentProfileRepository,
     )
 
-    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository()
     await profiles.replace(
         COLLECTION_ID,
         DocumentProfile(
@@ -232,7 +234,9 @@ async def test_source_repository_batch_read_is_exact_ordered_and_complete(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     selected = await source_repository.read_documents(
@@ -260,7 +264,9 @@ async def test_replacing_one_document_source_does_not_rebuild_other_documents(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     revised_first = replace(
@@ -274,6 +280,7 @@ async def test_replacing_one_document_source_does_not_rebuild_other_documents(
         table_cells=(),
         figures=(),
     )
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(revised_first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, revised_first)
 
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") == revised_first
@@ -284,6 +291,7 @@ async def test_source_repository_round_trips_document_references_and_tree(
     source_repository,
 ) -> None:
     source = _source("doc_a", title="Paper A")
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     references = SourceReferenceSet(
         entries=(
@@ -331,7 +339,9 @@ async def test_source_reference_batch_excludes_unselected_documents(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
     await source_repository.replace_document_references(
         "doc_a",
@@ -378,6 +388,7 @@ async def test_source_repository_rejects_cross_document_children_and_references(
             replace(source, blocks=(foreign_block,)),
         )
 
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     foreign_references = SourceReferenceSet(
         entries=(

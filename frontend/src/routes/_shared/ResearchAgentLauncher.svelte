@@ -102,10 +102,10 @@
 					</div>
 				{:else}
 					<ul class="workspace-list">
-						{#each $collections as collection (collection.id)}
+						{#each $collections as collection (collection.collection_id)}
 							<li>
 								<a
-									href={resolve('/collections/[id]/assistant', { id: collection.id })}
+									href={resolve('/collections/[id]/assistant', { id: collection.collection_id })}
 									on:click={closeWorkspacePicker}
 								>
 									<span class="workspace-list__name">

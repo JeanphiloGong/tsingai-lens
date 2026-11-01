@@ -9,9 +9,10 @@ from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.paper_experiment_contract import (
+    parse_paper_experiment_response,
     DraftReadiness,
-    PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     SOURCE_REPORTED_IDENTIFIER_FIELDS,
     assess_draft_readiness,
@@ -21,6 +22,9 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 from domain.core.research_objective import ResearchObjective
+from domain.source import (
+    SourceBlock, SourceDocumentTree, SourceFigure, SourceTable, SourceTableCell,
+)
 
 
 class ExtractedTestConditionModelOutput(BaseModel):
@@ -223,7 +227,7 @@ class PaperExperimentSourceBundle:
         if not self.document_id.strip() or not self.source_fingerprint.strip():
             raise ValueError("source bundle requires document and fingerprint")
         if set(self.source_catalog) != {
-            str(item.get("source_label") or "").strip()
+            item["source_label"]
             for item in self.prompt_sources
         }:
             raise ValueError("prompt Source labels must match the service catalog")
@@ -380,12 +384,12 @@ def build_bundle_from_routes(
     *,
     document_id: str,
     source_fingerprint: str,
-    routes: Sequence[Any],
-    blocks: list[Any],
-    tables: list[Any],
-    figures: list[Any],
-    document_tree: Any | None,
-    table_cells: list[Any],
+    routes: Sequence[EvidenceCandidate],
+    blocks: list[SourceBlock],
+    tables: list[SourceTable],
+    figures: list[SourceFigure],
+    document_tree: SourceDocumentTree | None,
+    table_cells: list[SourceTableCell],
     max_sources: int = 24,
     max_chars: int = 48_000,
 ) -> PaperExperimentSourceBundle:
@@ -399,13 +403,13 @@ def build_bundle_from_routes(
 
     candidates: list[Mapping[str, Any]] = []
     for route in routes:
-        if str(getattr(route, "document_id", "") or "") != document_id:
+        if route.document_id != document_id:
             continue
         # Routing may retain contextual or excluded candidates for audit, but
         # only extractable routes are part of the bounded Draft input.  Keep
         # this boundary identical to the routed Source accounting in the
         # Objective service.
-        if not bool(getattr(route, "extractable", False)):
+        if not route.extractable:
             continue
         payload = build_route_source_payload(
             route=route,
@@ -443,6 +447,7 @@ def build_bundle_from_routes(
         source_catalog=bundle.source_catalog,
         omitted_source_refs=tuple(dict.fromkeys(omitted)),
     )
+
 
 
 def _prompt(
@@ -703,7 +708,7 @@ class PaperExperimentExtractor:
                     raise ProviderTechnicalError(type(exc).__name__) from exc
 
                 raw = response.model_dump(mode="python", exclude_unset=True)
-                output = PaperExperimentModelOutput.from_model_mapping(
+                output = parse_paper_experiment_response(
                     raw,
                     document_id=bundle.document_id,
                     source_fingerprint=bundle.source_fingerprint,

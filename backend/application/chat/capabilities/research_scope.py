@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from application.source import collection_service
+from repositories.paper_map_repository import PaperMapRepo
+
+from domain.chat import ToolResultStatus
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -39,26 +42,22 @@ class PreviewResearchScopeCapability:
         input_model=PreviewResearchScopeToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, paper_map_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.paper_map_repository = paper_map_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: PreviewResearchScopeToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        paper_maps = await PaperMapRepo.list_collection(
             context.collection_id
         )
         if not paper_maps:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="paper_map_not_ready",
                 error_message=(
                     "The collection Paper Map is not ready. Prepare the literature "
@@ -68,17 +67,44 @@ class PreviewResearchScopeCapability:
 
         preview = screen_objective_scope(paper_maps, objective=arguments)
         likely_relevant = [
-            item.to_record()
+            {
+                "document_id": item.document_id,
+                "classification": item.classification,
+                "reason": item.reason,
+                "doc_role": item.doc_role,
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "support_basis": list(item.support_basis),
+                "is_seed": item.is_seed,
+            }
             for item in preview.decisions
             if item.classification == "likely_relevant"
         ]
         needs_inspection = [
-            item.to_record()
+            {
+                "document_id": item.document_id,
+                "classification": item.classification,
+                "reason": item.reason,
+                "doc_role": item.doc_role,
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "support_basis": list(item.support_basis),
+                "is_seed": item.is_seed,
+            }
             for item in preview.decisions
             if item.classification == "needs_inspection"
         ]
         confidently_out_of_scope = [
-            item.to_record()
+            {
+                "document_id": item.document_id,
+                "classification": item.classification,
+                "reason": item.reason,
+                "doc_role": item.doc_role,
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "support_basis": list(item.support_basis),
+                "is_seed": item.is_seed,
+            }
             for item in preview.decisions
             if item.classification == "confidently_out_of_scope"
         ]
@@ -125,7 +151,7 @@ class PreviewResearchScopeCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "question": arguments.question,
                 "likely_relevant": likely_relevant,

@@ -7,15 +7,18 @@ explicit operator-supplied endpoint. No environment file is loaded here.
 
 from __future__ import annotations
 
+from application.chat.capabilities import document_sources
+
+from application.chat.capabilities import collection_context
+
 import json
 import os
+from copy import deepcopy
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from openai import AsyncOpenAI
-
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.agent_runner import AgentRunLimits
 from application.chat.capabilities import (
@@ -27,14 +30,15 @@ from application.chat.capabilities import (
     ReadSourceCapability,
     SearchSourcesCapability,
 )
-from application.repositories.collection_repository import StoredDocument
-from domain.source import Document, SourceDocument
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
+from domain.source import (
+    Document,
 )
-
+from openai import AsyncOpenAI
+from repositories.collection_repository import StoredDocument
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.source_artifacts import build_source_documents
 
 _LIVE = os.environ.get("LENS_RUN_LIVE_PROMPT_TESTS") == "1"
 _FIXTURE = (
@@ -44,7 +48,10 @@ _FIXTURE = (
     / "source_document.json"
 )
 
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
 pytestmark = [
+    pytest.mark.usefixtures("scripted_chat_runner"),
     pytest.mark.anyio,
     pytest.mark.skipif(
         not _LIVE,
@@ -58,11 +65,19 @@ class _EmptyObjectiveRepository:
         return ()
 
 
-async def _fixture_collection(collection_service):
+async def _fixture_collection(
+    collection_service,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+):
+    from tests.support.postgres import seed_user
+
     user_id = "live-prompt-test-user"
+    await seed_user(postgres_session_factory, user_id)
     collection = await collection_service.create_collection(
         "P002 prompt behavior fixture",
-        "Isolated in-memory collection for the opt-in prompt check.",
+        "Isolated PostgreSQL collection for the opt-in prompt check.",
         owner_user_id=user_id,
     )
     record = json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -78,53 +93,51 @@ async def _fixture_collection(collection_service):
             size_bytes=1,
         ),
         stored_filename="P002-preheating.pdf",
-        storage_key=f"{collection['collection_id']}/P002-preheating.pdf",
+        storage_key=f"{collection.collection.collection_id}/P002-preheating.pdf",
         created_at=now,
         updated_at=now,
     )
-    await collection_service.repository.add_documents(
-        collection["collection_id"],
+    await collection_service.CollectionRepo.add_documents(
+        collection.collection.collection_id,
         (stored_document,),
         updated_at=now,
     )
-    sources = MemorySourceArtifactRepository()
+    sources = SourceArtifactRepository()
     await sources.replace_document(
-        collection["collection_id"], SourceDocument.from_record(record)
+        collection.collection.collection_id,
+        build_source_documents(
+            documents=[record],
+            text_units=record.get("text_units", ()),
+            blocks=record.get("blocks", ()),
+            tables=record.get("tables", ()),
+            table_rows=record.get("table_rows", ()),
+            table_cells=record.get("table_cells", ()),
+            figures=record.get("figures", ()),
+        )[0],
     )
-    return user_id, collection["collection_id"], document_id, sources
+    return user_id, collection.collection.collection_id, document_id, sources
 
 
-def _runner(*, client: AsyncOpenAI, collection_service, sources):
-    profiles = MemoryDocumentProfileRepository()
-    maps = MemoryPaperMapRepository()
+def _runner(
+    *, client: AsyncOpenAI, collection_service, sources, postgres_session_factory
+):
+    profiles = DocumentProfileRepository()
+    maps = PaperMapRepository()
     objective_repository = _EmptyObjectiveRepository()
+    collection_context.collection_service = collection_service
+    collection_context.ObjectiveRepo = objective_repository
+    collection_context.DocumentProfileRepo = profiles
+    collection_context.PaperMapRepo = maps
+    collection_context.SourceArtifactRepo = sources
+    document_sources.collection_service = collection_service
+    document_sources.SourceArtifactRepo = sources
     handlers = (
-        GetCollectionContextCapability(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-        ),
-        BrowseCollectionPapersCapability(
-            collection_service=collection_service,
-            document_profile_repository=profiles,
-            paper_map_repository=maps,
-            source_artifact_repository=sources,
-        ),
-        InspectDocumentSourcesCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
-        SearchSourcesCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
-        ReadSourceCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
-        InspectTableCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
+        GetCollectionContextCapability(),
+        BrowseCollectionPapersCapability(),
+        InspectDocumentSourcesCapability(),
+        SearchSourcesCapability(),
+        ReadSourceCapability(),
+        InspectTableCapability(),
     )
     from infra.llm.chat_model import OpenAIChatModel
 
@@ -146,6 +159,9 @@ def _runner(*, client: AsyncOpenAI, collection_service, sources):
 
 async def test_live_agent_reads_source_when_profile_and_map_are_missing(
     collection_service,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
     """A readable paper remains inspectable without optional navigation metadata."""
 
@@ -153,7 +169,8 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
     user_id, collection_id, document_id, sources = await _fixture_collection(
-        collection_service
+        collection_service, postgres_session_factory=postgres_session_factory,
+        collection_workspace=collection_workspace,
     )
     client = AsyncOpenAI(
         api_key=os.environ["LLM_API_KEY"],
@@ -165,6 +182,7 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
             client=client,
             collection_service=collection_service,
             sources=sources,
+            postgres_session_factory=postgres_session_factory,
         ).run_turn(
             context=AgentContext(
                 session_id="live-prompt-session",
@@ -197,18 +215,44 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
             )
         )
         for outcome in result.tool_results
-    ), [outcome.to_record() for outcome in result.tool_results]
+    ), [
+        {
+            "tool_call_id": outcome.tool_call_id,
+            "status": outcome.status.value,
+            "data": deepcopy(dict(outcome.data)),
+            "resource_refs": [
+                {
+                    "resource_type": item.resource_type,
+                    "resource_id": item.resource_id,
+                    "href": item.href,
+                }
+                for item in outcome.resource_refs
+            ],
+            "warnings": list(outcome.warnings),
+            "error_code": outcome.error_code,
+            "error_message": outcome.error_message,
+        }
+        for outcome in result.tool_results
+    ]
     answer = " ".join(message.content for message in result.messages if message.content)
     assert "72" in answer and "82" in answer
     assert not any(
         phrase in answer.casefold()
-        for phrase in ("build a paper map first", "manually review the pdf", "cannot inspect")
+        for phrase in (
+            "build a paper map first",
+            "manually review the pdf",
+            "cannot inspect",
+        )
     )
 
 
 @pytest.mark.parametrize("knowledge_scope", ["ordinary", "no_web", "supplied_only"])
 async def test_live_agent_respects_the_requested_knowledge_scope(
-    collection_service, knowledge_scope,
+    collection_service,
+    knowledge_scope,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
     """A trend supports arithmetic; explaining its mechanism needs allowed premises."""
 
@@ -216,7 +260,8 @@ async def test_live_agent_respects_the_requested_knowledge_scope(
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
     user_id, collection_id, _document_id, sources = await _fixture_collection(
-        collection_service
+        collection_service, postgres_session_factory=postgres_session_factory,
+        collection_workspace=collection_workspace,
     )
     scope_instruction = {
         "ordinary": "",
@@ -234,7 +279,10 @@ async def test_live_agent_respects_the_requested_knowledge_scope(
     )
     try:
         result = await _runner(
-            client=client, collection_service=collection_service, sources=sources,
+            client=client,
+            collection_service=collection_service,
+            sources=sources,
+            postgres_session_factory=postgres_session_factory,
         ).run_turn(
             context=AgentContext(
                 session_id=f"live-knowledge-{knowledge_scope}",
@@ -264,7 +312,7 @@ async def test_live_agent_respects_the_requested_knowledge_scope(
     assert not result.tool_calls
     answer = result.messages[-1].content.strip()
     if answer.startswith("```json") and answer.endswith("```"):
-        answer = answer[len("```json"): -len("```")].strip()
+        answer = answer[len("```json") : -len("```")].strip()
     payload = json.loads(answer)
     assert payload["elongation_change_pp"] == 5
     assert payload["mechanism_gap"].strip()
@@ -274,5 +322,6 @@ async def test_live_agent_respects_the_requested_knowledge_scope(
         assert hypotheses == [], payload
     else:
         assert hypotheses, payload
-        assert all(item["hypothesis"].strip() and item["basis"].strip()
-                   for item in hypotheses)
+        assert all(
+            item["hypothesis"].strip() and item["basis"].strip() for item in hypotheses
+        )

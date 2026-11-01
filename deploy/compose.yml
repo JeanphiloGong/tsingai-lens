@@ -31,6 +31,48 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  document-preparation-worker:
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
+    env_file:
+      - ./backend.env
+    environment:
+      LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+    volumes:
+      - ./data/backend:/app/data:Z
+    command: ["python", "scripts/run_document_preparation.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  objective-discovery-worker:
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
+    env_file:
+      - ./backend.env
+    environment:
+      LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+    volumes:
+      - ./data/backend:/app/data:Z
+    command: ["python", "scripts/run_objective_discovery.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  objective-analysis-worker:
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
+    env_file:
+      - ./backend.env
+    environment:
+      LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+    volumes:
+      - ./data/backend:/app/data:Z
+    command: ["python", "scripts/run_objective_analysis.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   feedback-analysis-worker:
     image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     env_file:

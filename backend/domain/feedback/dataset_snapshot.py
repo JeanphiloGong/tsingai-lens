@@ -44,20 +44,20 @@ class DatasetSnapshot:
         if version not in {"feedback-dataset.v2", "feedback-dataset.v3"}:
             raise ValueError("unsupported dataset snapshot version")
         for row in self.rows:
-            if not isinstance(row, dict) or row.get("record_type") != self.dataset_type:
+            if row.get("record_type") != self.dataset_type:
                 raise ValueError("snapshot rows require a dataset record type")
             if version == "feedback-dataset.v2" and row.get("split") not in _SPLITS:
                 raise ValueError("historical snapshot rows require train or eval split")
             if version == "feedback-dataset.v3" and "split" in row:
                 raise ValueError("export rows must not contain experiment splits")
         object.__setattr__(
-            self, "rows", deepcopy(tuple(dict(row) for row in self.rows))
+            self, "rows", deepcopy(self.rows)
         )
         object.__setattr__(
-            self, "exclusions", deepcopy(tuple(dict(item) for item in self.exclusions))
+            self, "exclusions", deepcopy(self.exclusions)
         )
-        object.__setattr__(self, "provenance", deepcopy(dict(self.provenance)))
-        object.__setattr__(self, "manifest", deepcopy(dict(self.manifest)))
+        object.__setattr__(self, "provenance", deepcopy(self.provenance))
+        object.__setattr__(self, "manifest", deepcopy(self.manifest))
 
     @property
     def row_count(self) -> int:
@@ -70,25 +70,6 @@ class DatasetSnapshot:
     @property
     def is_empty(self) -> bool:
         return not self.rows
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "dataset_id": self.dataset_id,
-            "owner_id": self.owner_id,
-            "collection_id": self.collection_id,
-            "dataset_type": self.dataset_type,
-            "rows": [deepcopy(row) for row in self.rows],
-            "exclusions": [deepcopy(item) for item in self.exclusions],
-            "provenance": deepcopy(self.provenance),
-            "manifest": deepcopy(self.manifest),
-            "manifest_digest": self.manifest_digest,
-            "provenance_digest": self.provenance_digest,
-            "content_digest": self.content_digest,
-            "row_count": self.row_count,
-            "excluded_count": self.excluded_count,
-            "is_empty": self.is_empty,
-            "created_at": self.created_at,
-        }
 
 
 __all__ = ["DatasetSnapshot", "DatasetType"]

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from application.chat.capabilities import paper_experiment_authoring
+
+import json
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
-
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.paper_experiment_authoring import (
     CreatePaperExperimentRevisionCapability,
@@ -16,13 +18,19 @@ from application.chat.capabilities.paper_experiment_authoring import (
     PaperExperimentRevisionToolRequest,
     ProposePaperExperimentDraftCapability,
 )
-from application.core.objectives.paper_experiment_authoring_service import (
-    PaperExperimentAuthoringService,
-)
+from application.core.objectives import paper_experiment_authoring_service
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraftValidationError,
 )
-from domain.chat import ChatMessage, ChatToolRequest, ChatToolResult
+from domain.chat import (
+    ChatMessage,
+    ChatMessageRole,
+    ChatToolRequest,
+    ChatToolResult,
+    ToolResultStatus,
+)
+from domain.core.paper_experiment import PaperExperimentRevision
+from pydantic import ValidationError
 
 pytestmark = pytest.mark.anyio
 
@@ -112,7 +120,10 @@ def test_agent_request_schema_describes_structured_test_parameters() -> None:
         ],
     )
     raw = request.raw_draft()
-    assert raw["experiments"][0]["test_conditions"][0]["parameters"][1]["name"] == "strain_rate"
+    assert (
+        raw["experiments"][0]["test_conditions"][0]["parameters"][1]["name"]
+        == "strain_rate"
+    )
 
 
 def test_agent_request_allows_omitted_protocol_completeness() -> None:
@@ -135,9 +146,10 @@ def test_agent_request_allows_omitted_protocol_completeness() -> None:
 
     test_condition = request.experiments[0].test_conditions[0]
     assert test_condition.protocol_completeness == "unknown"
-    assert "protocol_completeness" not in request.raw_draft()["experiments"][0][
-        "test_conditions"
-    ][0]
+    assert (
+        "protocol_completeness"
+        not in request.raw_draft()["experiments"][0]["test_conditions"][0]
+    )
 
 
 def test_agent_request_schema_describes_the_complete_scientific_graph() -> None:
@@ -155,9 +167,9 @@ def test_agent_request_schema_describes_the_complete_scientific_graph() -> None:
     )
     experiment_schema = schema["$defs"]["_PaperExperimentDraftExperimentField"]
     comparison_schema = schema["$defs"]["_PaperExperimentComparisonToolField"]
-    interpretation_schema = schema[
-        "$defs"
-    ]["_PaperExperimentReportedInterpretationToolField"]
+    interpretation_schema = schema["$defs"][
+        "_PaperExperimentReportedInterpretationToolField"
+    ]
     measurement_schema = schema["$defs"]["_PaperExperimentMeasurementToolField"]
 
     assert {"label", "scope_description"}.issubset(experiment_schema["required"])
@@ -190,7 +202,9 @@ def test_agent_request_schema_describes_the_complete_scientific_graph() -> None:
     }.issubset(measurement_schema["required"])
 
 
-def test_agent_request_rejects_missing_interpretation_kind_and_experiment_scope() -> None:
+def test_agent_request_rejects_missing_interpretation_kind_and_experiment_scope() -> (
+    None
+):
     with pytest.raises(ValidationError):
         PaperExperimentDraftToolRequest(
             objective_id="objective-1",
@@ -204,28 +218,8 @@ def test_agent_request_rejects_missing_interpretation_kind_and_experiment_scope(
                     "measurements": [],
                     "comparisons": [],
                     "reported_interpretations": [
-                        {"statement": "The treatment improved the outcome.", "source_labels": ["S001"]}
-                    ],
-                }
-            ],
-        )
-
-
-def test_agent_request_rejects_measurement_without_a_reported_result() -> None:
-    with pytest.raises(ValidationError, match="measurement requires value or result_text"):
-        PaperExperimentDraftToolRequest(
-            objective_id="objective-1",
-            document_id="paper-1",
-            experiments=[
-                {
-                    "label": "Tensile series",
-                    "scope_description": "One tensile test condition.",
-                    "measurements": [
                         {
-                            "measurement_key": "m1",
-                            "outcome": "elongation",
-                            "value": None,
-                            "result_text": None,
+                            "statement": "The treatment improved the outcome.",
                             "source_labels": ["S001"],
                         }
                     ],
@@ -234,33 +228,61 @@ def test_agent_request_rejects_measurement_without_a_reported_result() -> None:
         )
 
 
-@pytest.mark.parametrize("reported_result", [{"value": 0}, {"result_text": "Ductile dimples"}])
-def test_agent_request_accepts_numeric_or_qualitative_result_without_unused_field(reported_result) -> None:
+@pytest.mark.parametrize("missing_result", [{"value": None, "result_text": None}, {}])
+async def test_authoring_prepare_rejects_measurement_without_a_reported_result(
+    missing_result,
+) -> None:
+    draft = _draft()
+    draft["experiments"][0]["measurements"] = [
+        {
+            "measurement_key": "m1",
+            "outcome": "elongation",
+            "source_labels": ["S001"],
+            **missing_result,
+        }
+    ]
+    request = PaperExperimentDraftToolRequest(
+        objective_id="objective-1", document_id="paper-1", **draft
+    )
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
+    with pytest.raises(PaperExperimentDraftValidationError, match="has no result"):
+        await service.prepare_paper_experiment_draft(
+            collection_id="collection-1",
+            user_id="user-1",
+            document_id=request.document_id,
+            raw_draft=request.raw_draft(),
+        )
+
+
+@pytest.mark.parametrize(
+    "reported_result", [{"value": 0}, {"result_text": "Ductile dimples"}]
+)
+def test_agent_request_accepts_numeric_or_qualitative_result_without_unused_field(
+    reported_result,
+) -> None:
     request = PaperExperimentDraftToolRequest(
         objective_id="objective-1",
         document_id="paper-1",
-        experiments=[{
-            "label": "316L tensile series",
-            "scope_description": "One source-reported specimen cohort.",
-            "measurements": [{
-                "measurement_key": "m1", "outcome": "reported result",
-                "source_labels": ["S001"], **reported_result,
-            }],
-        }],
+        experiments=[
+            {
+                "label": "316L tensile series",
+                "scope_description": "One source-reported specimen cohort.",
+                "measurements": [
+                    {
+                        "measurement_key": "m1",
+                        "outcome": "reported result",
+                        "source_labels": ["S001"],
+                        **reported_result,
+                    }
+                ],
+            }
+        ],
     )
     measurement = request.raw_draft()["experiments"][0]["measurements"][0]
     assert all(measurement[key] == value for key, value in reported_result.items())
-
-
-def test_agent_request_rejects_omitted_numeric_and_qualitative_result() -> None:
-    with pytest.raises(ValidationError, match="measurement requires value or result_text"):
-        PaperExperimentDraftToolRequest(
-            objective_id="objective-1", document_id="paper-1",
-            experiments=[{
-                "label": "316L tensile series", "scope_description": "One specimen cohort.",
-                "measurements": [{"measurement_key": "m1", "outcome": "elongation", "source_labels": ["S001"]}],
-            }],
-        )
 
 
 @pytest.mark.anyio
@@ -283,12 +305,11 @@ async def test_agent_request_parameters_survive_authoring_prepare() -> None:
     request = PaperExperimentDraftToolRequest(
         objective_id="objective-1", document_id="paper-1", **draft
     )
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceRepository(),
-        experiment_analysis_writer=object(),
-    )
-    prepared = await service.prepare(
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
+    prepared = await service.prepare_paper_experiment_draft(
         collection_id="collection-1",
         user_id="user-1",
         document_id=request.document_id,
@@ -304,36 +325,41 @@ async def test_agent_request_parameters_survive_authoring_prepare() -> None:
     ]
 
 
-async def test_prepare_reports_comparison_outcome_validation_as_repairable_error() -> None:
+async def test_prepare_reports_comparison_outcome_validation_as_repairable_error() -> (
+    None
+):
     draft = deepcopy(_draft())
     experiment = draft["experiments"][0]
-    experiment["measurements"].append({
-        "measurement_key": "m2",
-        "variant_key": "control",
-        "outcome": "hardness",
-        "value": 10,
-        "result_text": None,
-        "unit": "HV",
-        "source_labels": ["S001"],
-    })
-    experiment["comparisons"] = [{
-        "comparison_key": "mixed-outcomes",
-        "baseline_variant_key": "control",
-        "target_variant_key": "control",
-        "outcome": "outcome",
-        "baseline_measurement_keys": ["m1"],
-        "target_measurement_keys": ["m2"],
-        "source_labels": ["S001"],
-        "binding_source_labels": ["S001"],
-    }]
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceRepository(),
-        experiment_analysis_writer=object(),
+    experiment["measurements"].append(
+        {
+            "measurement_key": "m2",
+            "variant_key": "control",
+            "outcome": "hardness",
+            "value": 10,
+            "result_text": None,
+            "unit": "HV",
+            "source_labels": ["S001"],
+        }
     )
+    experiment["comparisons"] = [
+        {
+            "comparison_key": "mixed-outcomes",
+            "baseline_variant_key": "control",
+            "target_variant_key": "control",
+            "outcome": "outcome",
+            "baseline_measurement_keys": ["m1"],
+            "target_measurement_keys": ["m2"],
+            "source_labels": ["S001"],
+            "binding_source_labels": ["S001"],
+        }
+    ]
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
 
     with pytest.raises(PaperExperimentDraftValidationError) as error:
-        await service.prepare(
+        await service.prepare_paper_experiment_draft(
             collection_id="collection-1",
             user_id="user-1",
             document_id="paper-1",
@@ -359,17 +385,21 @@ class _CollectionService:
 
 
 async def test_review_digest_is_stable_without_objective_context():
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(), source_artifact_repository=_SourceRepository(),
-        experiment_analysis_writer=object(),
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
+    first = await service.prepare_paper_experiment_draft(
+        collection_id="collection-1",
+        user_id="user-1",
+        document_id="paper-1",
+        raw_draft=_draft(),
     )
-    first = await service.prepare(
-        collection_id="collection-1", user_id="user-1",
-        document_id="paper-1", raw_draft=_draft()
-    )
-    second = await service.prepare(
-        collection_id="collection-1", user_id="user-1",
-        document_id="paper-1", raw_draft=_draft()
+    second = await service.prepare_paper_experiment_draft(
+        collection_id="collection-1",
+        user_id="user-1",
+        document_id="paper-1",
+        raw_draft=_draft(),
     )
     assert second.draft_digest == first.draft_digest
 
@@ -397,7 +427,7 @@ class _SourceRepository:
 
 class _Writer:
     async def write_paper_experiment_revisions(self, **kwargs):
-        self.transaction = kwargs.get("transaction")
+        self.db = kwargs.get("db")
         self.output_count = len(kwargs["experiment_outputs"])
         return SimpleNamespace(revisions=(), selections=(), groups=(), findings=())
 
@@ -405,19 +435,24 @@ class _Writer:
 @pytest.mark.parametrize("change", ["source", "payload", "collection"])
 async def test_review_digest_invalidated_by_content_or_scope_change(change):
     sources = _SourceRepository()
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(), source_artifact_repository=sources,
-        experiment_analysis_writer=object(),
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = sources
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
+    arguments = dict(
+        collection_id="collection-1",
+        user_id="user-1",
+        document_id="paper-1",
+        raw_draft=_draft(),
     )
-    arguments = dict(collection_id="collection-1", user_id="user-1", document_id="paper-1", raw_draft=_draft())
-    first = await service.prepare(**arguments)
+    first = await service.prepare_paper_experiment_draft(**arguments)
     if change == "source":
         sources.text = "The control treatment was measured again."
     elif change == "payload":
         arguments["raw_draft"]["experiments"][0]["measurements"][0]["value"] = 2
     else:
         arguments["collection_id"] = "collection-2"
-    second = await service.prepare(**arguments)
+    second = await service.prepare_paper_experiment_draft(**arguments)
     assert first.source_fingerprint == second.source_fingerprint
     assert first.draft_digest != second.draft_digest
 
@@ -427,17 +462,31 @@ async def test_prepare_rejects_foreign_collection_before_reading_sources():
         async def get_collection_for_user(self, collection_id, user_id):
             raise PermissionError("not the collection owner")
 
-    service = PaperExperimentAuthoringService(
-        collection_service=DeniedCollection(), source_artifact_repository=object(),
-        experiment_analysis_writer=object(),
-    )
+    paper_experiment_authoring_service.collection_service = DeniedCollection()
+    paper_experiment_authoring_service.SourceArtifactRepo = object()
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
     with pytest.raises(PermissionError):
-        await service.prepare(collection_id="collection-1", user_id="other-user", document_id="paper-1", raw_draft=_draft())
+        await service.prepare_paper_experiment_draft(
+            collection_id="collection-1",
+            user_id="other-user",
+            document_id="paper-1",
+            raw_draft=_draft(),
+        )
 
 
 class _TransactionFactory:
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
     def __init__(self):
-        self.handle = object()
+        self.handle = self
         self.events = []
 
     @asynccontextmanager
@@ -453,30 +502,34 @@ class _TransactionFactory:
 
 
 @pytest.mark.anyio
-async def test_write_saves_paper_experiment_without_objective_analysis():
+async def test_write_saves_paper_experiment_without_objective_analysis(
+    monkeypatch,
+):
     writer = _Writer()
     transactions = _TransactionFactory()
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceRepository(),
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transactions,
+    monkeypatch.setattr(
+        "application.core.objectives.paper_experiment_authoring_service.AsyncSessionLocal",
+        transactions,
     )
-    prepared = await service.prepare(
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.experiment_analysis_writer = writer
+    service = paper_experiment_authoring_service
+    prepared = await service.prepare_paper_experiment_draft(
         collection_id="collection-1",
         user_id="user-1",
         document_id="paper-1",
         raw_draft=_draft(),
     )
 
-    result = await service.write(
+    result = await service.write_prepared_paper_experiments(
         prepared=prepared,
         collection_id="collection-1",
         created_by="user-1",
     )
 
     assert transactions.events == ["begin", "commit"]
-    assert writer.transaction is transactions.handle
+    assert writer.db is transactions.handle
     assert writer.output_count == 1
     assert result.selections == ()
     assert result.findings == ()
@@ -484,12 +537,11 @@ async def test_write_saves_paper_experiment_without_objective_analysis():
 
 @pytest.mark.anyio
 async def test_prepare_reloads_source_context_and_rejects_formal_ids():
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceRepository(),
-        experiment_analysis_writer=object(),
-    )
-    prepared = await service.prepare(
+    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.experiment_analysis_writer = object()
+    service = paper_experiment_authoring_service
+    prepared = await service.prepare_paper_experiment_draft(
         collection_id="collection-1",
         user_id="user-1",
         document_id="paper-1",
@@ -502,7 +554,7 @@ async def test_prepare_reloads_source_context_and_rejects_formal_ids():
     invalid = _draft()
     invalid["experiments"][0]["experiment_id"] = "model-owned-id"
     with pytest.raises(ValueError, match="formal identity"):
-        await service.prepare(
+        await service.prepare_paper_experiment_draft(
             collection_id="collection-1",
             user_id="user-1",
             document_id="paper-1",
@@ -516,18 +568,20 @@ class _AuthoringStub:
         self.prepare_calls = []
         self.write_calls = []
 
-    async def prepare(self, **kwargs):
+    async def prepare_paper_experiment_draft(self, **kwargs):
         self.prepare_calls.append(kwargs)
         return self.prepared
 
-    async def write(self, **kwargs):
+    async def write_prepared_paper_experiments(self, **kwargs):
         self.write_calls.append(kwargs)
         revision = SimpleNamespace(
-            revision=SimpleNamespace(
+            revision=PaperExperimentRevision(
                 experiment_id="pexp-1",
                 experiment_version=1,
                 document_id="paper-1",
-                to_record=lambda: {"experiment_id": "pexp-1", "experiment_version": 1},
+                source_fingerprint="prep-1",
+                label="Reported experiment",
+                scope_description="Reported process and measurement conditions",
             )
         )
         return SimpleNamespace(revisions=(revision,), selections=(), findings=())
@@ -547,59 +601,129 @@ def _prepared_for_capability(draft):
         draft_digest="a" * 64,
         source_fingerprint="prep-1",
         source_digests={("text_window", "block-1"): sha256(b"Methods").hexdigest()},
-        output=SimpleNamespace(output=SimpleNamespace(experiments=(experiment,), source_labels={
-            "S001": {"source_ref": "block-1", "source_kind": "text_window"},
-        })),
+        output=SimpleNamespace(
+            output=SimpleNamespace(
+                experiments=(experiment,),
+                source_labels={
+                    "S001": {"source_ref": "block-1", "source_kind": "text_window"},
+                },
+            )
+        ),
     )
 
 
 def _read_messages(content="Methods", complete=True):
+    tool_result = ChatToolResult(
+        tool_call_id="read-1",
+        status=ToolResultStatus.SUCCEEDED,
+        data={
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "source_digest": sha256(content.encode()).hexdigest(),
+            "content": content,
+            "content_truncated": not complete,
+        },
+    )
     return (
-        ChatMessage.assistant_tool_calls(message_id="read-request", session_id="session-1", content="", created_at="2026-09-30T00:00:00Z",
-            tool_calls=(ChatToolRequest(tool_call_id="read-1", name="read_source", arguments={}, position=0),)),
-        ChatMessage.from_tool_result(message_id="read-result", session_id="session-1", created_at="2026-09-30T00:00:01Z",
-            result=ChatToolResult(tool_call_id="read-1", status="succeeded", data={
-                "document_id": "paper-1", "source_kind": "text_window", "source_ref": "block-1",
-                "source_digest": sha256(content.encode()).hexdigest(), "content": content, "content_truncated": not complete,
-            })),
+        ChatMessage.assistant_tool_calls(
+            message_id="read-request",
+            session_id="session-1",
+            content="",
+            created_at="2026-09-30T00:00:00Z",
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id="read-1", name="read_source", arguments={}, position=0
+                ),
+            ),
+        ),
+        ChatMessage(
+            message_id="read-result",
+            session_id="session-1",
+            role=ChatMessageRole.TOOL,
+            content=json.dumps(
+                asdict(tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-09-30T00:00:01Z",
+            tool_call_id=tool_result.tool_call_id,
+            tool_result=tool_result,
+        ),
     )
 
 
-@pytest.mark.parametrize(("content", "complete", "expected_status"), [
-    ("Methods", True, "succeeded"),
-    ("Old Methods", True, "failed"),
-    ("Methods", False, "failed"),
-])
-async def test_experiment_draft_requires_current_complete_read_for_every_cited_source(content, complete, expected_status):
+@pytest.mark.parametrize(
+    ("content", "complete", "expected_status"),
+    [
+        ("Methods", True, "succeeded"),
+        ("Old Methods", True, "failed"),
+        ("Methods", False, "failed"),
+    ],
+)
+async def test_experiment_draft_requires_current_complete_read_for_every_cited_source(
+    content, complete, expected_status
+):
     draft = _draft()
     authoring = _AuthoringStub(_prepared_for_capability(draft))
-    capability = ProposePaperExperimentDraftCapability(authoring_service=authoring, chat_repository=_ChatRepository(_read_messages(content, complete)))
+    paper_experiment_authoring.paper_experiment_authoring_service = authoring
+    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages(content, complete))
+    capability = ProposePaperExperimentDraftCapability()
     result = await capability.execute(
-        CapabilityExecutionContext(session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="draft-1"),
-        PaperExperimentDraftToolRequest(objective_id="objective-1", document_id="paper-1", **draft),
+        CapabilityExecutionContext(
+            session_id="session-1",
+            user_id="user-1",
+            collection_id="collection-1",
+            tool_call_id="draft-1",
+        ),
+        PaperExperimentDraftToolRequest(
+            objective_id="objective-1", document_id="paper-1", **draft
+        ),
     )
     assert result.status.value == expected_status
     assert not authoring.write_calls
     if expected_status == "failed":
         assert result.error_code == "source_read_incomplete"
-        assert result.data["sources_to_read"] == [{"source_label": "S001", "source_kind": "text_window", "source_ref": "block-1"}]
+        assert result.data["sources_to_read"] == [
+            {
+                "source_label": "S001",
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            }
+        ]
         assert "Keep the experiment facts" in result.error_message
 
 
 async def test_experiment_draft_does_not_treat_one_read_as_coverage_for_another_source():
     draft = _draft()
     prepared = _prepared_for_capability(draft)
-    prepared.output.output.source_labels["S002"] = {"source_ref": "results-1", "source_kind": "text_window"}
+    prepared.output.output.source_labels["S002"] = {
+        "source_ref": "results-1",
+        "source_kind": "text_window",
+    }
     prepared.source_digests["text_window", "results-1"] = sha256(b"Results").hexdigest()
     draft["experiments"][0]["measurements"][0]["source_labels"] = ["S002"]
-    result = await ProposePaperExperimentDraftCapability(
-        authoring_service=_AuthoringStub(prepared), chat_repository=_ChatRepository(_read_messages()),
-    ).execute(
-        CapabilityExecutionContext(session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="draft-1"),
-        PaperExperimentDraftToolRequest(objective_id="objective-1", document_id="paper-1", **draft),
+    paper_experiment_authoring.paper_experiment_authoring_service = _AuthoringStub(prepared)
+    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages())
+    result = await ProposePaperExperimentDraftCapability().execute(
+        CapabilityExecutionContext(
+            session_id="session-1",
+            user_id="user-1",
+            collection_id="collection-1",
+            tool_call_id="draft-1",
+        ),
+        PaperExperimentDraftToolRequest(
+            objective_id="objective-1", document_id="paper-1", **draft
+        ),
     )
     assert result.status.value == "failed"
-    assert result.data["sources_to_read"] == [{"source_label": "S002", "source_kind": "text_window", "source_ref": "results-1"}]
+    assert result.data["sources_to_read"] == [
+        {
+            "source_label": "S002",
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -612,28 +736,32 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
         collection_id="collection-1",
         tool_call_id="call-propose",
     )
-    proposed = await ProposePaperExperimentDraftCapability(
-        authoring_service=authoring, chat_repository=_ChatRepository(_read_messages())
-    ).execute(
+    paper_experiment_authoring.paper_experiment_authoring_service = authoring
+    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages())
+    proposed = await ProposePaperExperimentDraftCapability().execute(
         context,
-        PaperExperimentDraftToolRequest(
-            document_id="paper-1", **draft
-        ),
+        PaperExperimentDraftToolRequest(document_id="paper-1", **draft),
     )
     assert proposed.data["status"] == "pending_approval"
     assert proposed.data["requires_user_approval"] is True
 
-    message = ChatMessage.from_tool_result(
+    message = ChatMessage(
         message_id="message-1",
         session_id="session-1",
-        result=proposed,
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(proposed),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-28T00:00:00+00:00",
+        tool_call_id=proposed.tool_call_id,
+        tool_result=proposed,
     )
     repository = _ChatRepository((message,))
-    created = await CreatePaperExperimentRevisionCapability(
-        authoring_service=authoring,
-        chat_repository=repository,
-    ).execute(
+    paper_experiment_authoring.paper_experiment_authoring_service = authoring
+    paper_experiment_authoring.ChatRepo = repository
+    created = await CreatePaperExperimentRevisionCapability().execute(
         context.__class__(
             session_id="session-1",
             user_id="user-1",
@@ -657,37 +785,53 @@ async def test_agent_save_rejects_stale_or_unapproved_draft(change):
     prepared = _prepared_for_capability(_draft())
     authoring = _AuthoringStub(prepared)
     context = CapabilityExecutionContext(
-        session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="call-1",
+        session_id="session-1",
+        user_id="user-1",
+        collection_id="collection-1",
+        tool_call_id="call-1",
     )
-    proposed = await ProposePaperExperimentDraftCapability(
-        authoring_service=authoring, chat_repository=_ChatRepository(_read_messages()),
-    ).execute(context, PaperExperimentDraftToolRequest(document_id="paper-1", **_draft()))
+    paper_experiment_authoring.paper_experiment_authoring_service = authoring
+    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages())
+    proposed = await ProposePaperExperimentDraftCapability().execute(
+        context, PaperExperimentDraftToolRequest(document_id="paper-1", **_draft())
+    )
     arguments = PaperExperimentRevisionToolRequest(
-        draft_id=proposed.data["draft_id"], draft_digest=proposed.data["draft_digest"],
+        draft_id=proposed.data["draft_id"],
+        draft_digest=proposed.data["draft_digest"],
     )
     if change == "digest":
         arguments.draft_digest = "b" * 64
     elif change == "expired":
-        proposed.data["draft_created_at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        proposed.data["draft_created_at"] = (
+            datetime.now(timezone.utc) - timedelta(days=2)
+        ).isoformat()
     else:
         prepared.draft_digest = "b" * 64
-    message = ChatMessage.from_tool_result(
-        message_id="draft-result", session_id="session-1", result=proposed,
+    message = ChatMessage(
+        message_id="draft-result",
+        session_id="session-1",
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(proposed),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at=datetime.now(timezone.utc).isoformat(),
+        tool_call_id=proposed.tool_call_id,
+        tool_result=proposed,
     )
     with pytest.raises(ValueError, match="digest|expired"):
-        await CreatePaperExperimentRevisionCapability(
-            authoring_service=authoring, chat_repository=_ChatRepository((message,)),
-        ).execute(context, arguments)
+        paper_experiment_authoring.paper_experiment_authoring_service = authoring
+        paper_experiment_authoring.ChatRepo = _ChatRepository((message,))
+        await CreatePaperExperimentRevisionCapability().execute(context, arguments)
     assert authoring.write_calls == []
 
 
 async def test_agent_experiment_revision_rejects_unknown_or_changed_draft():
     authoring = _AuthoringStub(_prepared_for_capability(_draft()))
-    capability = CreatePaperExperimentRevisionCapability(
-        authoring_service=authoring,
-        chat_repository=_ChatRepository(),
-    )
+    paper_experiment_authoring.paper_experiment_authoring_service = authoring
+    paper_experiment_authoring.ChatRepo = _ChatRepository()
+    capability = CreatePaperExperimentRevisionCapability()
     context = CapabilityExecutionContext(
         session_id="session-1",
         user_id="user-1",

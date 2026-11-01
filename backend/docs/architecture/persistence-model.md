@@ -207,6 +207,18 @@ erDiagram
   `20260924_0071`-`20260924_0074` add the feedback workbench aggregates, and
   `20260924_0075` classifies retired per-document checkpoints for manual review.
 
+## Research Execution Leases
+
+Preparation and discovery use the existing Pipeline Run; automatic analysis
+uses the existing Objective analysis version. Claimed repository snapshots pair
+these values with execution ownership. Each stage commits its results and job
+state in a short shared transaction after checking the lease and fixed inputs.
+A failed later analysis preserves the previous published result. Lease metadata
+stays outside scientific domain models and HTTP responses.
+
+Column and index definitions belong to [the database catalog](database.md#research-execution-leases).
+Process commands and shutdown behavior belong to [the worker entry points](../../scripts/README.md#research-workers).
+
 ## Implementation Boundary
 
 Repositories map domain records directly to SQLAlchemy rows. Do not add a

@@ -412,7 +412,7 @@ _PRESERVED_PROPERTY_QUALIFIERS = frozenset(
 _SINGLE_TOKEN_PROPERTY_QUALIFIERS = frozenset(
     {"average", "material", "relative", "surface", "total", "uniform"}
 )
-def normalize_property_label(value: Any) -> str | None:
+def normalize_property_label(value: str | int | float | bool | None) -> str | None:
     text = _label_without_unit_suffix(value)
     text = text.replace("_", " ").replace("-", " ").strip()
     normalized = " ".join(text.split()).casefold()
@@ -594,7 +594,7 @@ def _fatigue_strength_variants_conflict(left: Any, right: Any) -> bool:
 
 
 def normalize_objective_unit_property(
-    value: Any,
+    value: str | None,
     *,
     objective_context: ResearchObjective | None,
 ) -> str | None:
@@ -622,7 +622,7 @@ def normalize_objective_unit_property(
 
 
 def normalize_objective_result_property(
-    value: Any,
+    value: str | None,
     *,
     objective_context: ResearchObjective | None,
 ) -> str | None:
@@ -659,7 +659,7 @@ def normalize_objective_result_property(
 
 
 def normalize_source_defined_objective_property(
-    value: Any,
+    value: str | None,
     *,
     source_text: str,
     objective_context: ResearchObjective | None,
@@ -680,16 +680,16 @@ def normalize_source_defined_objective_property(
     if (
         not normalized
         or objective_context is None
-        or not str(source_text or "").strip()
+        or not source_text.strip()
     ):
         return normalized
-    target_axes = tuple(str(axis).strip() for axis in objective_context.outcomes if str(axis).strip())
+    target_axes = tuple(axis.strip() for axis in objective_context.outcomes if axis.strip())
     if not target_axes or property_matches_target_axes(
         normalized,
         target_axes=objective_outcomes(objective_context),
     ):
         return normalized
-    alias_key = axis_key(str(value or ""))
+    alias_key = axis_key(value)
     if not alias_key:
         return normalized
     matched_axes: list[str] = []
@@ -1381,8 +1381,13 @@ def _source_text_mentions_single_axis(text: str, axis: str) -> bool:
     )
 
 
-def _label_without_unit_suffix(value: Any) -> str:
-    text = str(value or "").strip()
+def _label_without_unit_suffix(value: str | int | float | bool | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float, bool)):
+        text = str(value) if value else ""
+    else:
+        text = value.strip()
     if not text:
         return ""
     text = re.sub(r"\s*>\s*(?=[\[(])", " ", text).strip()

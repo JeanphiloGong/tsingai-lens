@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from application.feedback.sample_builder_support import (
     question_from_snapshot,
+    messages_from_snapshot,
     readable_sources,
     snapshot_digest,
     SampleContentGenerator,
-    generation_missing_reasons,
 )
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.dataset import Dataset
@@ -18,7 +19,6 @@ from domain.feedback.dataset_sample import DatasetSample
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.sample_revision import (
     EvaluationRevisionContent,
-    EvaluationMode,
     strip_internal_references,
 )
 
@@ -49,39 +49,34 @@ class EvaluationSampleBuilder:
         annotation: FeedbackAnnotation | None,
         review_note: str | None = None,
     ) -> EvaluationBuildCandidate | EvaluationBuildNeedsInput:
-        snapshot = dict(case.context_snapshot or {})
+        snapshot = case.context_snapshot
         question = question_from_snapshot(snapshot)
         if not question:
             return EvaluationBuildNeedsInput(("question_missing",))
         sources, source_provenance = readable_sources(snapshot, annotation)
-        mode = _mode(snapshot)
-        if mode is None:
+        mode = snapshot.get("evaluation_mode", "reference")
+        if mode not in {"reference", "rubric"}:
             return EvaluationBuildNeedsInput(("evaluation_mode_invalid",))
-        criteria = _criteria(snapshot)
-        reference = _reference(snapshot)
+        criteria = tuple(
+            strip_internal_references(item) for item in snapshot.get("evaluation_criteria", ())
+        )
+        reference = strip_internal_references(
+            snapshot.get("evaluation_reference") or snapshot.get("candidate_target")
+            or snapshot.get("corrected_answer")
+        )
         generated = False
-        if sources and self.generator is not None and (not criteria or (mode == "reference" and not reference) or review_note):
+        if self.generator is not None and (not criteria or (mode == "reference" and not reference) or review_note):
             value = await self.generator.generate(
                 task_type="evaluation", question=question, context=sources, snapshot=snapshot,
                 construction_spec=dataset.construction_spec, review_note=review_note,
             )
-            reasons = generation_missing_reasons(value)
+            reasons = tuple(value.missing_reasons)
             if reasons:
                 return EvaluationBuildNeedsInput(reasons)
-            raw_criteria = value.get("criteria")
-            if not isinstance(raw_criteria, list) or any(not isinstance(item, str) or not item.strip() for item in raw_criteria):
-                raise ValueError("sample_generation_criteria_invalid")
-            criteria = tuple(dict.fromkeys(strip_internal_references(item) for item in raw_criteria))
-            reference_value = value.get("reference", "")
-            if not isinstance(reference_value, str):
-                raise ValueError("sample_generation_reference_invalid")
-            reference = strip_internal_references(reference_value)
-            if not criteria or (mode == "reference" and not reference):
-                raise ValueError("sample_generation_evaluation_incomplete")
+            criteria = tuple(value.criteria)
+            reference = value.reference or ""
             generated = True
         missing: list[str] = []
-        if not sources:
-            missing.append("readable_evidence_missing")
         if not criteria:
             missing.append("evaluation_criteria_missing")
         if mode == "reference" and not reference:
@@ -89,8 +84,8 @@ class EvaluationSampleBuilder:
         if missing:
             return EvaluationBuildNeedsInput(tuple(missing))
 
-        messages = ({"role": "user", "content": question},)
-        context = tuple(sources)
+        messages = messages_from_snapshot(snapshot)
+        context = sources
         content = EvaluationRevisionContent(
             schema_version="literature-evaluation.v1",
             messages=messages,
@@ -119,49 +114,8 @@ class EvaluationSampleBuilder:
         return EvaluationBuildCandidate(content=content, provenance=provenance)
 
 
-def validate_evaluation(value: Mapping[str, Any]) -> EvaluationRevisionContent:
-    criteria = tuple(
-        strip_internal_references(item)
-        for item in value.get("criteria", ())
-        if str(item).strip()
-    )
-    mode = str(value.get("evaluation_mode") or "reference")
-    if not criteria:
-        raise ValueError("evaluation_criteria_or_reference_missing")
-    if mode == "reference" and not str(value.get("reference") or "").strip():
-        raise ValueError("evaluation_reference_missing")
-    if mode not in {"reference", "rubric"}:
-        raise ValueError("evaluation_mode_invalid")
-    return EvaluationRevisionContent.from_mapping({**dict(value), "criteria": criteria})
-
-
-def _mode(snapshot: Mapping[str, Any]) -> EvaluationMode | None:
-    value = str(snapshot.get("evaluation_mode") or "reference").strip().lower()
-    if value not in {"reference", "rubric"}:
-        return None
-    return value  # type: ignore[return-value]
-
-
-def _criteria(snapshot: Mapping[str, Any]) -> tuple[str, ...]:
-    values = snapshot.get("evaluation_criteria", snapshot.get("criteria", ()))
-    if isinstance(values, str):
-        values = [values]
-    if not isinstance(values, (list, tuple)):
-        return ()
-    return tuple(dict.fromkeys(strip_internal_references(item) for item in values if str(item).strip()))
-
-
-def _reference(snapshot: Mapping[str, Any]) -> str:
-    for key in ("evaluation_reference", "reference", "reference_answer", "candidate_target", "corrected_answer"):
-        value = strip_internal_references(snapshot.get(key))
-        if value:
-            return value
-    return ""
-
-
 __all__ = [
     "EvaluationBuildCandidate",
     "EvaluationBuildNeedsInput",
     "EvaluationSampleBuilder",
-    "validate_evaluation",
 ]

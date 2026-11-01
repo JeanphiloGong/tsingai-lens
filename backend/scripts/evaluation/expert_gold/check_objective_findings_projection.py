@@ -23,8 +23,7 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _SPACE_RE = re.compile(r"\s+")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _NUMBER_RE = re.compile(
-    r"(?<![\w.])[-+]?(?:\d+(?:[.,]\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
-    r"(?!\w|\.\d)"
+    r"(?<![\w.])[-+]?(?:\d+(?:[.,]\d*)?|\.\d+)(?:[eE][-+]?\d+)?" r"(?!\w|\.\d)"
 )
 _MULTIPLICATION_SCIENTIFIC_RE = re.compile(
     r"(?<![\w.])([-+]?(?:\d+(?:[.,]\d*)?|\.\d+))\s*[x×]\s*"
@@ -64,7 +63,7 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
         raise ValueError("acceptance manifest must be a JSON object")
     if payload.get("schema_version") != "objective_finding_material_acceptance.v1":
         raise ValueError("unsupported acceptance manifest schema_version")
-    documents = _mapping_list(payload.get("documents"))
+    documents = payload.get("documents") or []
     document_hashes = {_text(item.get("sha256")) for item in documents}
     paper_ids = {_text(item.get("paper_id")) for item in documents}
     if (
@@ -76,7 +75,7 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
         raise ValueError(
             "acceptance manifest requires exactly six papers with unique documents"
         )
-    objectives = _mapping_list(payload.get("objectives"))
+    objectives = payload.get("objectives") or []
     objective_keys = {_text(item.get("key")) for item in objectives}
     if (
         len(objectives) < 3
@@ -97,10 +96,9 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
             "forbidden_direct_sources",
             "required_finding_claims",
         ):
-            for requirement in _mapping_list(objective.get(field)):
-                if (
-                    _text(requirement.get("paper_id")) not in paper_ids
-                    or not _text(requirement.get("label"))
+            for requirement in objective.get(field) or []:
+                if _text(requirement.get("paper_id")) not in paper_ids or not _text(
+                    requirement.get("label")
                 ):
                     raise ValueError(
                         "acceptance requirements need an approved paper and label"
@@ -110,15 +108,14 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
                         raise ValueError(
                             "acceptance Finding requirements need statement term groups"
                         )
-                elif (
-                    not _text(requirement.get("source_kind"))
-                    or not requirement.get("source_term_groups")
+                elif not _text(requirement.get("source_kind")) or not requirement.get(
+                    "source_term_groups"
                 ):
                     raise ValueError(
                         "acceptance Source requirements need a source kind and "
                         "Source term groups"
                     )
-    statuses = set(_text_list(payload.get("required_review_statuses")))
+    statuses = set((payload.get("required_review_statuses") or []))
     if statuses != {"correct", "partial", "incorrect"}:
         raise ValueError("acceptance manifest requires correct, partial, and incorrect")
     return payload
@@ -132,6 +129,9 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--collection-id", required=True)
+    parser.add_argument(
+        "--user-id", help="Acting user; required for local database reads."
+    )
     parser.add_argument(
         "--objective-id",
         action="append",
@@ -162,6 +162,7 @@ async def main_async() -> None:
         collection_id=args.collection_id,
         objective_ids=tuple(args.objective_ids),
         api_base_url=args.api_base_url,
+        user_id=args.user_id,
         acceptance_manifest=manifest,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -174,6 +175,7 @@ async def check_objective_findings_projection(
     collection_id: str,
     objective_ids: tuple[str, ...],
     api_base_url: str | None = None,
+    user_id: str | None = None,
     acceptance_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not collection_id.strip():
@@ -183,17 +185,21 @@ async def check_objective_findings_projection(
     if acceptance_manifest is None:
         raise ValueError("acceptance_manifest is required for real expert acceptance")
     if len(set(objective_ids)) < 3:
-        raise ValueError("at least three objective_ids are required for real acceptance")
+        raise ValueError(
+            "at least three objective_ids are required for real acceptance"
+        )
+    if not api_base_url and not user_id:
+        raise ValueError("user_id is required for local database reads")
     backend_root = str(DEFAULT_BACKEND_ROOT)
     if backend_root not in sys.path:
         sys.path.insert(0, backend_root)
     manifest_objectives: list[dict[str, Any]] = []
     expected_document_ids: set[str] | None = None
     required_review_statuses: set[str] = set()
-    manifest_objectives = _mapping_list(acceptance_manifest["objectives"])
+    manifest_objectives = acceptance_manifest["objectives"] or []
     document_ids_by_paper = await _resolve_manifest_document_ids(
         collection_id,
-        _mapping_list(acceptance_manifest["documents"]),
+        (acceptance_manifest["documents"] or []),
     )
     expected_document_ids = set(document_ids_by_paper.values())
     required_review_statuses = set(acceptance_manifest["required_review_statuses"])
@@ -211,10 +217,12 @@ async def check_objective_findings_projection(
                 objective_id=objective_id,
             )
         else:
-            payload = await _local_objective_bundle(collection_id, objective_id)
+            payload = await _local_objective_bundle(
+                collection_id, objective_id, user_id=user_id
+            )
         expectation = (
             _manifest_objective_for_question(
-                _text(_mapping(payload.get("objective")).get("question")),
+                _text((payload.get("objective") or {}).get("question")),
                 manifest_objectives,
             )
             if manifest_objectives
@@ -239,9 +247,7 @@ async def check_objective_findings_projection(
                         _text(requirement.get("paper_id"))
                     ],
                 }
-                for requirement in _mapping_list(
-                    expectation.get("required_source_evidence")
-                )
+                for requirement in (expectation.get("required_source_evidence") or [])
             ],
             expected_finding_requirements=[
                 {
@@ -250,9 +256,7 @@ async def check_objective_findings_projection(
                         _text(requirement.get("paper_id"))
                     ],
                 }
-                for requirement in _mapping_list(
-                    expectation.get("required_finding_claims")
-                )
+                for requirement in (expectation.get("required_finding_claims") or [])
             ],
             forbidden_direct_source_requirements=[
                 {
@@ -261,9 +265,7 @@ async def check_objective_findings_projection(
                         _text(requirement.get("paper_id"))
                     ],
                 }
-                for requirement in _mapping_list(
-                    expectation.get("forbidden_direct_sources")
-                )
+                for requirement in (expectation.get("forbidden_direct_sources") or [])
             ],
         )
         objectives.append(result)
@@ -298,27 +300,27 @@ def evaluate_objective_bundle(
     expected_finding_requirements: list[dict[str, Any]] | None = None,
     forbidden_direct_source_requirements: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    objective = _mapping(payload.get("objective"))
-    analysis = _mapping(payload.get("published_analysis"))
-    paper_contributions = _mapping_list(payload.get("paper_contributions"))
-    findings = _mapping_list(payload.get("findings"))
+    objective = payload.get("objective") or {}
+    analysis = payload.get("published_analysis") or {}
+    paper_contributions = payload.get("paper_contributions") or []
+    findings = payload.get("findings") or []
     evidence_by_finding = {
-        str(finding_id): _mapping_list(records)
-        for finding_id, records in _mapping(payload.get("evidence_by_finding")).items()
+        str(finding_id): (records or [])
+        for finding_id, records in (payload.get("evidence_by_finding") or {}).items()
     }
     feedback_by_finding = {
-        str(finding_id): _mapping_list(records)
-        for finding_id, records in _mapping(payload.get("feedback_by_finding")).items()
+        str(finding_id): (records or [])
+        for finding_id, records in (payload.get("feedback_by_finding") or {}).items()
     }
     curations_by_finding = {
-        str(finding_id): _mapping_list(records)
-        for finding_id, records in _mapping(payload.get("curations_by_finding")).items()
+        str(finding_id): (records or [])
+        for finding_id, records in (payload.get("curations_by_finding") or {}).items()
     }
     dataset_by_finding = {
         _text(item.get("finding_id")): item
-        for item in _mapping_list(payload.get("dataset_items"))
+        for item in (payload.get("dataset_items") or [])
     }
-    training_rows = _mapping_list(payload.get("training_jsonl_rows"))
+    training_rows = payload.get("training_jsonl_rows") or []
     collection_id = _text(objective.get("collection_id"))
     objective_id = _text(objective.get("objective_id"))
     analysis_version = _int(analysis.get("analysis_version"))
@@ -406,7 +408,7 @@ def evaluate_objective_bundle(
         finding_id = _text(finding.get("finding_id"))
         evidence = evidence_by_finding.get(finding_id, [])
         all_evidence.extend(evidence)
-        contributions = _mapping_list(finding.get("paper_contributions"))
+        contributions = finding.get("paper_contributions") or []
         referenced_ids = {
             evidence_id
             for contribution in contributions
@@ -416,19 +418,18 @@ def evaluate_objective_bundle(
                 "context_evidence_ids",
                 "condition_boundary_evidence_ids",
             )
-            for evidence_id in _text_list(contribution.get(field))
+            for evidence_id in (contribution.get(field) or [])
         }
         direct_ids = {
             evidence_id
             for contribution in contributions
             for field in ("supporting_evidence_ids", "contradicting_evidence_ids")
-            for evidence_id in _text_list(contribution.get(field))
+            for evidence_id in (contribution.get(field) or [])
         }
         direct_records = [
             item
             for item in evidence
-            if item.get("evidence_role")
-            in {"direct_result", "contradictory_result"}
+            if item.get("evidence_role") in {"direct_result", "contradictory_result"}
             and _text(item.get("evidence_id")) in direct_ids
         ]
         direct_document_by_id = {
@@ -436,21 +437,19 @@ def evaluate_objective_bundle(
             for item in direct_records
         }
         factor_keys = {
-            _table_header_key(item) for item in _text_list(finding.get("factors"))
+            _table_header_key(item) for item in (finding.get("factors") or [])
         }
         direct_factor_sets = [
             {
                 _table_header_key(variable.get("name"))
-                for variable in _mapping_list(item.get("changed_variables"))
+                for variable in (item.get("changed_variables") or [])
             }
             for item in direct_records
         ]
         supporting_ids = {
             evidence_id
             for contribution in contributions
-            for evidence_id in _text_list(
-                contribution.get("supporting_evidence_ids")
-            )
+            for evidence_id in (contribution.get("supporting_evidence_ids") or [])
         }
         contradicting_ids = direct_ids - supporting_ids
         supporting_scopes = {
@@ -463,8 +462,7 @@ def evaluate_objective_bundle(
             evidence_scopes=supporting_scopes,
         )
         has_coupled_variables = any(
-            len(_mapping_list(item.get("changed_variables"))) > 1
-            for item in direct_records
+            len((item.get("changed_variables") or [])) > 1 for item in direct_records
         )
         direct_result_issues = _direct_result_issues(
             finding,
@@ -484,8 +482,8 @@ def evaluate_objective_bundle(
             if any(
                 evidence_id in direct_ids
                 for evidence_id in (
-                    _text_list(contribution.get("supporting_evidence_ids"))
-                    + _text_list(contribution.get("contradicting_evidence_ids"))
+                    (contribution.get("supporting_evidence_ids") or [])
+                    + (contribution.get("contradicting_evidence_ids") or [])
                 )
             )
         }
@@ -494,7 +492,7 @@ def evaluate_objective_bundle(
             == _text(contribution.get("document_id"))
             for contribution in contributions
             for field in ("supporting_evidence_ids", "contradicting_evidence_ids")
-            for evidence_id in _text_list(contribution.get(field))
+            for evidence_id in (contribution.get(field) or [])
         )
         synthesis_status = _text(finding.get("synthesis_status"))
         synthesis_issues = _synthesis_status_issues(
@@ -540,7 +538,7 @@ def evaluate_objective_bundle(
                 _check(
                     objective_id,
                     f"Finding {finding_id} has factors and one outcome",
-                    bool(_text_list(finding.get("factors")))
+                    bool((finding.get("factors") or []))
                     and bool(_text(finding.get("outcome"))),
                     blocker=True,
                 ),
@@ -658,7 +656,7 @@ def evaluate_objective_bundle(
 
     if "training_jsonl_rows" in payload:
         training_issues = _training_export_issues(
-            dataset_items=_mapping_list(payload.get("dataset_items")),
+            dataset_items=(payload.get("dataset_items") or []),
             training_rows=training_rows,
             collection_id=collection_id,
             objective_id=objective_id,
@@ -675,7 +673,7 @@ def evaluate_objective_bundle(
             )
         )
 
-    published_evidence = _mapping_list(payload.get("evidence"))
+    published_evidence = payload.get("evidence") or []
     if not published_evidence:
         published_evidence = list(
             {
@@ -727,9 +725,7 @@ def evaluate_objective_bundle(
             objective_id,
             "Evidence contains no duplicate source-grounded facts",
             not (
-                duplicate_facts := _duplicate_source_grounded_facts(
-                    published_evidence
-                )
+                duplicate_facts := _duplicate_source_grounded_facts(published_evidence)
             ),
             f"duplicate_evidence_ids={duplicate_facts}",
             blocker=True,
@@ -738,11 +734,14 @@ def evaluate_objective_bundle(
     for requirement in expected_source_requirements or []:
         label = _text(requirement.get("label")) or "required decision Source"
         source_keys = _matching_source_keys(requirement, source_index)
-        allowed_roles = set(_text_list(requirement.get("allowed_evidence_roles")))
+        allowed_roles = set((requirement.get("allowed_evidence_roles") or []))
         lineage_matches = [
             _text(evidence.get("evidence_id"))
             for evidence in published_evidence
-            if (not allowed_roles or _text(evidence.get("evidence_role")) in allowed_roles)
+            if (
+                not allowed_roles
+                or _text(evidence.get("evidence_role")) in allowed_roles
+            )
             and any(
                 source_key in _evidence_lineage_keys(evidence)
                 for source_key in source_keys
@@ -765,18 +764,11 @@ def evaluate_objective_bundle(
         label = _text(requirement.get("label")) or "required decision Finding"
         document_id = _text(requirement.get("document_id"))
         term_groups = [
-            _text_list(group)
-            for group in requirement.get("statement_term_groups") or []
+            (group or []) for group in requirement.get("statement_term_groups") or []
         ]
-        allowed_strengths = set(
-            _text_list(requirement.get("allowed_assertion_strengths"))
-        )
-        allowed_scopes = set(
-            _text_list(requirement.get("allowed_attribution_scopes"))
-        )
-        allowed_statuses = set(
-            _text_list(requirement.get("allowed_synthesis_statuses"))
-        )
+        allowed_strengths = set((requirement.get("allowed_assertion_strengths") or []))
+        allowed_scopes = set((requirement.get("allowed_attribution_scopes") or []))
+        allowed_statuses = set((requirement.get("allowed_synthesis_statuses") or []))
         matching_finding_ids = []
         for finding in findings:
             statement = _normalized_text(finding.get("statement"))
@@ -785,24 +777,25 @@ def evaluate_objective_bundle(
                 for group in term_groups
             ):
                 continue
-            if allowed_strengths and _text(
-                finding.get("assertion_strength")
-            ) not in allowed_strengths:
+            if (
+                allowed_strengths
+                and _text(finding.get("assertion_strength")) not in allowed_strengths
+            ):
                 continue
-            if allowed_scopes and _text(
-                finding.get("attribution_scope")
-            ) not in allowed_scopes:
+            if (
+                allowed_scopes
+                and _text(finding.get("attribution_scope")) not in allowed_scopes
+            ):
                 continue
-            if allowed_statuses and _text(
-                finding.get("synthesis_status")
-            ) not in allowed_statuses:
+            if (
+                allowed_statuses
+                and _text(finding.get("synthesis_status")) not in allowed_statuses
+            ):
                 continue
             if not any(
                 _text(contribution.get("document_id")) == document_id
-                and bool(_text_list(contribution.get("supporting_evidence_ids")))
-                for contribution in _mapping_list(
-                    finding.get("paper_contributions")
-                )
+                and bool((contribution.get("supporting_evidence_ids") or []))
+                for contribution in (finding.get("paper_contributions") or [])
             ):
                 continue
             matching_finding_ids.append(_text(finding.get("finding_id")))
@@ -849,7 +842,7 @@ def evaluate_objective_bundle(
                 " ".join(
                     [
                         _text(item.get("statement")),
-                        *_text_list(item.get("factors")),
+                        *(item.get("factors") or []),
                         _text(item.get("outcome")),
                     ]
                 )
@@ -893,30 +886,29 @@ def evaluate_objective_bundle(
 async def _local_objective_bundle(
     collection_id: str,
     objective_id: str,
+    *,
+    user_id: str,
 ) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
-        from application.evaluation import FindingFeedbackService  # noqa: PLC0415
+
+        from application.evaluation import finding_dataset_service
         from infra.persistence.database import (  # noqa: PLC0415
+            AsyncSessionLocal,
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
         )
-        from infra.persistence.postgres.finding_review_repository import (  # noqa: PLC0415
-            PostgresFindingReviewRepository,
+        from repositories.finding_review_repository import (  # noqa: PLC0415
+            FindingReviewRepository,
         )
-        from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
-            PostgresObjectiveRepository,
+        from repositories.objective_repository import (  # noqa: PLC0415
+            ObjectiveRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
-            session_factory = build_session_factory(engine)
-            repository = PostgresObjectiveRepository(session_factory)
-            review_repository = PostgresFindingReviewRepository(session_factory)
-            feedback_service = FindingFeedbackService(
-                review_repository=review_repository,
-                objective_repository=repository,
-            )
+            repository = ObjectiveRepository()
+            review_repository = FindingReviewRepository()
             objective = await repository.read_objective(collection_id, objective_id)
             if objective is None or objective.published_analysis_version is None:
                 raise FileNotFoundError(
@@ -952,23 +944,385 @@ async def _local_objective_bundle(
                     limit=1000,
                 )
                 evidence_by_finding[finding.finding_id] = [
-                    item.to_record() for item in finding_evidence
+                    {
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "evidence_id": item.evidence_id,
+                        "document_id": item.document_id,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "source_excerpt": item.source_excerpt,
+                        "page_numbers": list(item.page_numbers),
+                        "evidence_role": item.evidence_role,
+                        "selection_status": item.selection_status,
+                        "selection_reason": item.selection_reason,
+                        "evidence_status": item.evidence_status,
+                        "evidence_status_reason": item.evidence_status_reason,
+                        "changed_variables": [
+                            {
+                                "name": variable.name,
+                                "baseline_value": variable.baseline_value,
+                                "target_value": variable.target_value,
+                                "unit": variable.unit,
+                            }
+                            for variable in item.changed_variables
+                        ],
+                        "comparison": (
+                            {
+                                "baseline_label": item.comparison.baseline_label,
+                                "target_label": item.comparison.target_label,
+                                "axis_names": list(item.comparison.axis_names),
+                                "comparable": item.comparison.comparable,
+                                "incomparability_reasons": list(
+                                    item.comparison.incomparability_reasons
+                                ),
+                            }
+                            if item.comparison
+                            else None
+                        ),
+                        "reported_result": (
+                            {
+                                "outcome": item.reported_result.outcome,
+                                "value": item.reported_result.value,
+                                "baseline_value": item.reported_result.baseline_value,
+                                "target_value": item.reported_result.target_value,
+                                "unit": item.reported_result.unit,
+                                "direction": item.reported_result.direction,
+                                "result_text": item.reported_result.result_text,
+                                "result_kind": item.reported_result.result_kind,
+                            }
+                            if item.reported_result
+                            else None
+                        ),
+                        "attribution_scope": item.attribution_scope,
+                        "scientific_context": {
+                            "material": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.material
+                            ],
+                            "sample": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.sample
+                            ],
+                            "process": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.process
+                            ],
+                            "test": [
+                                {
+                                    "name": attribute.name,
+                                    "value": attribute.value,
+                                    "unit": attribute.unit,
+                                    **(
+                                        {"context_scope": attribute.context_scope}
+                                        if attribute.context_scope != "unknown"
+                                        else {}
+                                    ),
+                                    **(
+                                        {
+                                            "applies_to_outcomes": list(
+                                                attribute.applies_to_outcomes
+                                            )
+                                        }
+                                        if attribute.applies_to_outcomes
+                                        else {}
+                                    ),
+                                }
+                                for attribute in item.scientific_context.test
+                            ],
+                        },
+                        "resolution_status": item.resolution_status,
+                        "failure_reason": item.failure_reason,
+                        "confidence": item.confidence,
+                        "origin": item.origin,
+                        "source_analysis_version": item.source_analysis_version,
+                        "supersedes_evidence_id": item.supersedes_evidence_id,
+                        "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                        "created_by_user_id": item.created_by_user_id,
+                        "created_by_tool_call_id": item.created_by_tool_call_id,
+                        "created_at": (
+                            item.created_at.isoformat()
+                            if item.created_at is not None
+                            else None
+                        ),
+                        "authoring_note": item.authoring_note,
+                        **({"warnings": list(item.warnings)} if item.warnings else {}),
+                        **(
+                            {
+                                "related_source_refs": [
+                                    dict(item) for item in item.related_source_refs
+                                ]
+                            }
+                            if item.related_source_refs
+                            or item.related_source_refs_explicit
+                            else {}
+                        ),
+                    }
+                    for item in finding_evidence
                 ]
                 feedback_by_finding[finding.finding_id] = [
-                    item.to_record()
+                    {
+                        "feedback_id": item.feedback_id,
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "finding_id": item.finding_id,
+                        "review_status": item.review_status,
+                        "issue_type": item.issue_type,
+                        "note": item.note,
+                        "reviewer": item.reviewer,
+                        "created_at": item.created_at,
+                    }
                     for item in await review_repository.list_feedback(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
                 curations_by_finding[finding.finding_id] = [
-                    item.to_record()
+                    {
+                        "curation_id": item.curation_id,
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "finding_id": item.finding_id,
+                        "curated_status": item.curated_status,
+                        "curated_finding": {
+                            "collection_id": item.curated_finding.collection_id,
+                            "objective_id": item.curated_finding.objective_id,
+                            "analysis_version": item.curated_finding.analysis_version,
+                            "finding_id": item.curated_finding.finding_id,
+                            "statement": item.curated_finding.statement,
+                            "factors": list(item.curated_finding.factors),
+                            "outcome": item.curated_finding.outcome,
+                            "direction": item.curated_finding.direction,
+                            "assertion_strength": item.curated_finding.assertion_strength,
+                            "attribution_scope": item.curated_finding.attribution_scope,
+                            "synthesis_status": item.curated_finding.synthesis_status,
+                            "certainty": item.curated_finding.certainty,
+                            "display_rank": item.curated_finding.display_rank,
+                            "mechanisms": [
+                                {
+                                    "source_term": mechanism.source_term,
+                                    "relation_type": mechanism.relation_type,
+                                    "target_term": mechanism.target_term,
+                                    "direction": mechanism.direction,
+                                    "assertion_strength": mechanism.assertion_strength,
+                                    "supporting_evidence_ids": list(
+                                        mechanism.supporting_evidence_ids
+                                    ),
+                                }
+                                for mechanism in item.curated_finding.mechanisms
+                            ],
+                            "scientific_context": {
+                                "material": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.material
+                                ],
+                                "sample": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.sample
+                                ],
+                                "process": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.process
+                                ],
+                                "test": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.test
+                                ],
+                            },
+                            "limitations": list(item.curated_finding.limitations),
+                            "paper_contributions": [
+                                {
+                                    "document_id": contribution.document_id,
+                                    "analysis_status": contribution.analysis_status,
+                                    "supporting_evidence_ids": list(
+                                        contribution.supporting_evidence_ids
+                                    ),
+                                    "contradicting_evidence_ids": list(
+                                        contribution.contradicting_evidence_ids
+                                    ),
+                                    "context_evidence_ids": list(
+                                        contribution.context_evidence_ids
+                                    ),
+                                    "condition_boundary_evidence_ids": list(
+                                        contribution.condition_boundary_evidence_ids
+                                    ),
+                                }
+                                for contribution in item.curated_finding.paper_contributions
+                            ],
+                            "origin": item.curated_finding.origin,
+                            "source_analysis_version": item.curated_finding.source_analysis_version,
+                            "parent_finding_id": item.curated_finding.parent_finding_id,
+                            "created_by_user_id": item.curated_finding.created_by_user_id,
+                            "created_by_tool_call_id": item.curated_finding.created_by_tool_call_id,
+                            "created_at": (
+                                item.curated_finding.created_at.isoformat()
+                                if item.curated_finding.created_at
+                                else None
+                            ),
+                            **(
+                                {
+                                    "selection_ids": list(
+                                        item.curated_finding.selection_ids
+                                    )
+                                }
+                                if item.curated_finding.selection_ids
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "comparison_group_ids": list(
+                                        item.curated_finding.comparison_group_ids
+                                    )
+                                }
+                                if item.curated_finding.comparison_group_ids
+                                else {}
+                            ),
+                            **(
+                                {"warnings": list(item.curated_finding.warnings)}
+                                if item.curated_finding.warnings
+                                else {}
+                            ),
+                        },
+                        "note": item.note,
+                        "reviewer": item.reviewer,
+                        "updated_at": item.updated_at,
+                    }
                     for item in await review_repository.list_curations(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
-            dataset = await feedback_service.export_dataset(
+            dataset = await finding_dataset_service.export_dataset(
                 collection_id=collection_id,
                 objective_id=objective_id,
+                user_id=user_id,
             )
         finally:
             await engine.dispose()
@@ -977,10 +1331,431 @@ async def _local_objective_bundle(
             key: list(value) if isinstance(value, tuple) else value
             for key, value in asdict(objective).items()
         },
-        "published_analysis": analysis.to_record() if analysis else None,
-        "paper_contributions": [item.to_record() for item in paper_contributions],
-        "findings": [item.to_record() for item in findings],
-        "evidence": [item.to_record() for item in published_evidence],
+        "published_analysis": (
+            {
+                "collection_id": analysis.collection_id,
+                "objective_id": analysis.objective_id,
+                "analysis_version": analysis.analysis_version,
+                "document_inputs": [
+                    {
+                        "document_id": document_input.document_id,
+                        "preparation_fingerprint": document_input.preparation_fingerprint,
+                    }
+                    for document_input in analysis.document_inputs
+                ],
+                "pipeline_version": analysis.pipeline_version,
+                "model_name": analysis.model_name,
+                "prompt_versions": dict(analysis.prompt_versions),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
+                "status": analysis.status,
+                "phase": analysis.phase,
+                "processed_document_count": analysis.processed_document_count,
+                "total_document_count": analysis.total_document_count,
+                "current_document_id": analysis.current_document_id,
+                "progress_message": analysis.progress_message,
+                "error_code": analysis.error_code,
+                "error_message": analysis.error_message,
+                "created_at": (
+                    analysis.created_at.isoformat()
+                    if analysis.created_at is not None
+                    else None
+                ),
+                "started_at": (
+                    analysis.started_at.isoformat()
+                    if analysis.started_at is not None
+                    else None
+                ),
+                "completed_at": (
+                    analysis.completed_at.isoformat()
+                    if analysis.completed_at is not None
+                    else None
+                ),
+                "origin": analysis.origin,
+                "scientific_record_source": analysis.scientific_record_source,
+                "source_analysis_version": analysis.source_analysis_version,
+                "created_by_user_id": analysis.created_by_user_id,
+                "created_by_tool_call_id": analysis.created_by_tool_call_id,
+                "abstention_reason": analysis.abstention_reason,
+                "abstention_note": analysis.abstention_note,
+            }
+            if analysis
+            else None
+        ),
+        "paper_contributions": [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "document_id": item.document_id,
+                "analysis_status": item.analysis_status,
+                "relevance": item.relevance,
+                "paper_role": item.paper_role,
+                "contribution_summary": item.contribution_summary,
+                "material_match": list(item.material_match),
+                "changed_variables": list(item.changed_variables),
+                "measured_property_scope": list(item.measured_property_scope),
+                "test_environment_scope": list(item.test_environment_scope),
+                "exclusion_reason": item.exclusion_reason,
+                "warnings": list(item.warnings),
+                "confidence": item.confidence,
+                "evidence_disposition": item.evidence_disposition,
+                "routed_source_count": item.routed_source_count,
+                "extracted_source_count": item.extracted_source_count,
+                "comparable_evidence_count": item.comparable_evidence_count,
+                "failed_source_count": item.failed_source_count,
+                "uninspected_source_count": item.uninspected_source_count,
+                "evidence_disposition_reason": item.evidence_disposition_reason,
+                "evidence_status_counts": {
+                    status: count for status, count in item.evidence_status_counts
+                },
+                "inspected_source_refs": [
+                    {
+                        "source_kind": source_ref.source_kind,
+                        "source_ref": source_ref.source_ref,
+                        "source_digest": source_ref.source_digest,
+                    }
+                    for source_ref in item.inspected_source_refs
+                ],
+            }
+            for item in paper_contributions
+        ],
+        "findings": [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "finding_id": item.finding_id,
+                "statement": item.statement,
+                "factors": list(item.factors),
+                "outcome": item.outcome,
+                "direction": item.direction,
+                "assertion_strength": item.assertion_strength,
+                "attribution_scope": item.attribution_scope,
+                "synthesis_status": item.synthesis_status,
+                "certainty": item.certainty,
+                "display_rank": item.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in item.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.test
+                    ],
+                },
+                "limitations": list(item.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in item.paper_contributions
+                ],
+                "origin": item.origin,
+                "source_analysis_version": item.source_analysis_version,
+                "parent_finding_id": item.parent_finding_id,
+                "created_by_user_id": item.created_by_user_id,
+                "created_by_tool_call_id": item.created_by_tool_call_id,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                **(
+                    {"selection_ids": list(item.selection_ids)}
+                    if item.selection_ids
+                    else {}
+                ),
+                **(
+                    {"comparison_group_ids": list(item.comparison_group_ids)}
+                    if item.comparison_group_ids
+                    else {}
+                ),
+                **({"warnings": list(item.warnings)} if item.warnings else {}),
+            }
+            for item in findings
+        ],
+        "evidence": [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "evidence_id": item.evidence_id,
+                "document_id": item.document_id,
+                "source_kind": item.source_kind,
+                "source_ref": item.source_ref,
+                "source_excerpt": item.source_excerpt,
+                "page_numbers": list(item.page_numbers),
+                "evidence_role": item.evidence_role,
+                "selection_status": item.selection_status,
+                "selection_reason": item.selection_reason,
+                "evidence_status": item.evidence_status,
+                "evidence_status_reason": item.evidence_status_reason,
+                "changed_variables": [
+                    {
+                        "name": variable.name,
+                        "baseline_value": variable.baseline_value,
+                        "target_value": variable.target_value,
+                        "unit": variable.unit,
+                    }
+                    for variable in item.changed_variables
+                ],
+                "comparison": (
+                    {
+                        "baseline_label": item.comparison.baseline_label,
+                        "target_label": item.comparison.target_label,
+                        "axis_names": list(item.comparison.axis_names),
+                        "comparable": item.comparison.comparable,
+                        "incomparability_reasons": list(
+                            item.comparison.incomparability_reasons
+                        ),
+                    }
+                    if item.comparison
+                    else None
+                ),
+                "reported_result": (
+                    {
+                        "outcome": item.reported_result.outcome,
+                        "value": item.reported_result.value,
+                        "baseline_value": item.reported_result.baseline_value,
+                        "target_value": item.reported_result.target_value,
+                        "unit": item.reported_result.unit,
+                        "direction": item.reported_result.direction,
+                        "result_text": item.reported_result.result_text,
+                        "result_kind": item.reported_result.result_kind,
+                    }
+                    if item.reported_result
+                    else None
+                ),
+                "attribution_scope": item.attribution_scope,
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.test
+                    ],
+                },
+                "resolution_status": item.resolution_status,
+                "failure_reason": item.failure_reason,
+                "confidence": item.confidence,
+                "origin": item.origin,
+                "source_analysis_version": item.source_analysis_version,
+                "supersedes_evidence_id": item.supersedes_evidence_id,
+                "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                "created_by_user_id": item.created_by_user_id,
+                "created_by_tool_call_id": item.created_by_tool_call_id,
+                "created_at": (
+                    item.created_at.isoformat() if item.created_at is not None else None
+                ),
+                "authoring_note": item.authoring_note,
+                **({"warnings": list(item.warnings)} if item.warnings else {}),
+                **(
+                    {
+                        "related_source_refs": [
+                            dict(item) for item in item.related_source_refs
+                        ]
+                    }
+                    if item.related_source_refs or item.related_source_refs_explicit
+                    else {}
+                ),
+            }
+            for item in published_evidence
+        ],
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,
         "curations_by_finding": curations_by_finding,
@@ -1010,7 +1785,7 @@ def _api_objective_bundle(
         f"/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis",
         cookie=cookie,
     )
-    analysis = _mapping(state.get("published_analysis"))
+    analysis = state.get("published_analysis") or {}
     version = _int(analysis.get("analysis_version"))
     if version < 1:
         raise RuntimeError(f"Objective has no published analysis: {objective_id}")
@@ -1020,10 +1795,8 @@ def _api_objective_bundle(
         f"/api/v1/collections/{collection_id}/objectives/{objective_id}/findings?{query}",
         cookie=cookie,
     )
-    findings = _mapping_list(finding_page.get("items"))
-    evidence_query = urlencode(
-        {"analysis_version": version, "offset": 0, "limit": 500}
-    )
+    findings = finding_page.get("items") or []
+    evidence_query = urlencode({"analysis_version": version, "offset": 0, "limit": 500})
     evidence_page = _api_json_request(
         base,
         (
@@ -1033,7 +1806,7 @@ def _api_objective_bundle(
         cookie=cookie,
     )
     paper_contributions = (
-        _mapping_list(findings[0].get("paper_contributions")) if findings else []
+        (findings[0].get("paper_contributions") or []) if findings else []
     )
     evidence_by_finding = {}
     feedback_by_finding = {}
@@ -1053,7 +1826,7 @@ def _api_objective_bundle(
             f"/api/v1/collections/{collection_id}/objectives/{objective_id}/evidence?{evidence_query}",
             cookie=cookie,
         )
-        evidence_by_finding[finding_id] = _mapping_list(page.get("items"))
+        evidence_by_finding[finding_id] = page.get("items") or []
         review_query = urlencode({"analysis_version": version})
         feedback_page = _api_json_request(
             base,
@@ -1063,7 +1836,7 @@ def _api_objective_bundle(
             ),
             cookie=cookie,
         )
-        feedback_by_finding[finding_id] = _mapping_list(feedback_page.get("items"))
+        feedback_by_finding[finding_id] = feedback_page.get("items") or []
         curation_page = _api_json_request(
             base,
             (
@@ -1072,7 +1845,7 @@ def _api_objective_bundle(
             ),
             cookie=cookie,
         )
-        curations_by_finding[finding_id] = _mapping_list(curation_page.get("items"))
+        curations_by_finding[finding_id] = curation_page.get("items") or []
     dataset = _api_json_request(
         base,
         f"/api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset",
@@ -1091,11 +1864,11 @@ def _api_objective_bundle(
         "published_analysis": analysis,
         "paper_contributions": paper_contributions,
         "findings": findings,
-        "evidence": _mapping_list(evidence_page.get("items")),
+        "evidence": (evidence_page.get("items") or []),
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,
         "curations_by_finding": curations_by_finding,
-        "dataset_items": _mapping_list(dataset.get("items")),
+        "dataset_items": (dataset.get("items") or []),
         "training_jsonl_rows": training_rows,
     }
 
@@ -1105,19 +1878,20 @@ async def _load_source_index(
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     with contextlib.redirect_stdout(io.StringIO()):
         from infra.persistence.database import (  # noqa: PLC0415
+            AsyncSessionLocal,
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
         )
-        from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
-            PostgresSourceArtifactRepository,
+        from repositories.source_artifact_repository import (  # noqa: PLC0415
+            SourceArtifactRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
-            documents = await PostgresSourceArtifactRepository(
-                build_session_factory(engine)
-            ).read_collection_documents(collection_id)
+            documents = await SourceArtifactRepository().read_collection_documents(
+                collection_id
+            )
         finally:
             await engine.dispose()
     index: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -1127,8 +1901,10 @@ async def _load_source_index(
             "page": getattr(block, "page", None),
         }
     for table in (item for document in documents for item in document.tables):
-        record = table.to_record()
-        metadata = _mapping(record.get("metadata"))
+        from infra.source.artifact_bundle import source_table_payload
+
+        record = source_table_payload(table)
+        metadata = record.get("metadata") or {}
         index[(table.document_id, "table", table.table_id)] = {
             "text": _text(
                 record.get("table_markdown")
@@ -1155,34 +1931,36 @@ async def _resolve_manifest_document_ids(
 ) -> dict[str, str]:
     expected_hashes = {_text(item.get("sha256")) for item in documents}
     with contextlib.redirect_stdout(io.StringIO()):
-        from sqlalchemy import select  # noqa: PLC0415
-
         from infra.persistence.database import (  # noqa: PLC0415
+            AsyncSessionLocal,
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
         )
         from infra.persistence.postgres.models.document import (  # noqa: PLC0415
-            Document,
+            DocumentORM,
         )
         from infra.persistence.postgres.models.document_preparation import (  # noqa: PLC0415
-            DocumentPreparationRow,
+            DocumentPreparationORM,
         )
+        from sqlalchemy import select  # noqa: PLC0415
 
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
-            async with build_session_factory(engine)() as session:
-                rows = (await session.execute(
-                    select(DocumentPreparationRow.document_id, Document.sha256)
-                    .join(
-                        Document,
-                        Document.document_id == DocumentPreparationRow.document_id,
+            async with AsyncSessionLocal() as db:
+                rows = (
+                    await db.execute(
+                        select(DocumentPreparationORM.document_id, DocumentORM.sha256)
+                        .join(
+                            DocumentORM,
+                            DocumentORM.document_id == DocumentPreparationORM.document_id,
+                        )
+                        .where(
+                            DocumentORM.collection_id == collection_id,
+                            DocumentORM.sha256.in_(expected_hashes),
+                        )
                     )
-                    .where(
-                        Document.collection_id == collection_id,
-                        Document.sha256.in_(expected_hashes),
-                    )
-                )).all()
+                ).all()
         finally:
             await engine.dispose()
     document_ids_by_hash: dict[str, set[str]] = {}
@@ -1213,7 +1991,7 @@ def _matching_source_keys(
     document_id = _text(requirement.get("document_id"))
     source_kind = _text(requirement.get("source_kind"))
     term_groups = [
-        _text_list(group) for group in requirement.get("source_term_groups") or []
+        (group or []) for group in requirement.get("source_term_groups") or []
     ]
     matches: list[tuple[str, str, str]] = []
     for key, source in source_index.items():
@@ -1250,7 +2028,7 @@ def _evidence_lineage_keys(
             _text(reference.get("source_kind")),
             _text(reference.get("source_ref")),
         )
-        for reference in _mapping_list(evidence.get("related_source_refs"))
+        for reference in (evidence.get("related_source_refs") or [])
     )
     return keys
 
@@ -1303,7 +2081,7 @@ def _audit_source_record(
     related_sources: dict[str, dict[str, Any]] = {}
     related_locators_match = True
     related_pages_match = True
-    for ref in _mapping_list(evidence.get("related_source_refs")):
+    for ref in evidence.get("related_source_refs") or []:
         source_ref = _text(ref.get("source_ref"))
         source_kind = _text(ref.get("source_kind"))
         if not source_ref or not source_kind:
@@ -1323,10 +2101,8 @@ def _audit_source_record(
     table_sources = {key[2]: source} if source else {}
     table_sources.update(
         {
-            _text(ref.get("source_ref")): related_sources[
-                _text(ref.get("source_ref"))
-            ]
-            for ref in _mapping_list(evidence.get("related_source_refs"))
+            _text(ref.get("source_ref")): related_sources[_text(ref.get("source_ref"))]
+            for ref in (evidence.get("related_source_refs") or [])
             if _text(ref.get("source_kind")) == "table"
             and _text(ref.get("source_ref")) in related_sources
         }
@@ -1338,7 +2114,7 @@ def _audit_source_record(
     if key[1] == "table" and source is not None:
         primary_table_refs = [
             ref
-            for ref in _mapping_list(evidence.get("related_source_refs"))
+            for ref in (evidence.get("related_source_refs") or [])
             if _text(ref.get("source_kind")) == "table"
             and _text(ref.get("source_ref")) == key[2]
         ]
@@ -1346,10 +2122,7 @@ def _audit_source_record(
             ref
             for ref in primary_table_refs
             if ref.get("col_index") is not None
-            or {
-                _text(value)
-                for value in ref.get("supports") or ()
-            }
+            or {_text(value) for value in ref.get("supports") or ()}
             & {"reported_result", "changed_variables", "comparison"}
         ]
         if primary_fact_refs:
@@ -1366,7 +2139,7 @@ def _audit_source_record(
             source,
             row_indexes=primary_row_indexes,
             repair_attestations=[
-                _mapping(ref.get("table_matrix_repair_attestation"))
+                (ref.get("table_matrix_repair_attestation") or {})
                 for ref in primary_table_refs
                 if isinstance(ref.get("table_matrix_repair_attestation"), dict)
             ],
@@ -1378,9 +2151,8 @@ def _audit_source_record(
     table_binding_matches = True
     if (
         evidence.get("source_kind") == "table"
-        and evidence.get("evidence_role")
-        in {"direct_result", "contradictory_result"}
-        and bool(_mapping(evidence.get("reported_result")))
+        and evidence.get("evidence_role") in {"direct_result", "contradictory_result"}
+        and bool((evidence.get("reported_result") or {}))
     ):
         table_binding_matches = (
             _composite_table_evidence_binding_matches(evidence, table_sources)
@@ -1470,12 +2242,9 @@ def _repaired_table_excerpt_matches_attestation(
     repaired_matrix_hashes: set[str] = set()
     for attestation in attestations:
         if (
-            attestation.get("schema_version")
-            != "objective_table_repair_attestation.v1"
+            attestation.get("schema_version") != "objective_table_repair_attestation.v1"
             or attestation.get("raw_matrix_sha256") != raw_matrix_sha256
-            or _SHA256_RE.fullmatch(
-                _text(attestation.get("repaired_matrix_sha256"))
-            )
+            or _SHA256_RE.fullmatch(_text(attestation.get("repaired_matrix_sha256")))
             is None
             or _SHA256_RE.fullmatch(_text(attestation.get("repaired_row_sha256")))
             is None
@@ -1487,18 +2256,13 @@ def _repaired_table_excerpt_matches_attestation(
         if attested_visual_hash and attested_visual_hash != visual_text_sha256:
             return False
         repaired_matrix_hashes.add(_text(attestation.get("repaired_matrix_sha256")))
-        attested_excerpt_hashes.append(
-            _text(attestation.get("source_excerpt_sha256"))
-        )
+        attested_excerpt_hashes.append(_text(attestation.get("source_excerpt_sha256")))
         attested_row_indexes.append(_int(attestation.get("repaired_row_index")))
     return (
         len(repaired_matrix_hashes) == 1
         and sorted(attested_excerpt_hashes) == expected_excerpt_hashes
         and all(row_index > 0 for row_index in attested_row_indexes)
-        and (
-            not row_indexes
-            or sorted(attested_row_indexes) == sorted(row_indexes)
-        )
+        and (not row_indexes or sorted(attested_row_indexes) == sorted(row_indexes))
     )
 
 
@@ -1526,7 +2290,7 @@ def _table_audit_rows(source: dict[str, Any]) -> list[list[str]]:
         for row in source.get("rows") or []
         if isinstance(row, list)
     ]
-    flattened_headers = _text_list(source.get("column_headers"))
+    flattened_headers = source.get("column_headers") or []
     if not flattened_headers:
         return raw_rows
     try:
@@ -1545,7 +2309,7 @@ def _composite_table_evidence_binding_matches(
     sources: dict[str, dict[str, Any]],
 ) -> bool:
     row_indexes_by_source: dict[str, list[int]] = {}
-    for ref in _mapping_list(evidence.get("related_source_refs")):
+    for ref in evidence.get("related_source_refs") or []:
         source_ref = _text(ref.get("source_ref"))
         row_index = _int(ref.get("row_index"))
         if source_ref not in sources or row_index <= 0:
@@ -1559,13 +2323,11 @@ def _composite_table_evidence_binding_matches(
         rows = _table_audit_rows(sources[source_ref])
         if len(row_indexes) != 2 or any(index >= len(rows) for index in row_indexes):
             continue
-        endpoint_rows.append(
-            (rows[0], rows[row_indexes[0]], rows[row_indexes[1]])
-        )
+        endpoint_rows.append((rows[0], rows[row_indexes[0]], rows[row_indexes[1]]))
     if not endpoint_rows:
         return False
 
-    comparison = _mapping(evidence.get("comparison"))
+    comparison = evidence.get("comparison") or {}
     if not any(
         _row_contains_value(baseline_row, comparison.get("baseline_label"))
         and _row_contains_value(target_row, comparison.get("target_label"))
@@ -1573,7 +2335,7 @@ def _composite_table_evidence_binding_matches(
     ):
         return False
 
-    for variable in _mapping_list(evidence.get("changed_variables")):
+    for variable in evidence.get("changed_variables") or []:
         if not any(
             _table_variable_values_bind(
                 variable,
@@ -1585,7 +2347,7 @@ def _composite_table_evidence_binding_matches(
         ):
             return False
 
-    reported_result = _mapping(evidence.get("reported_result"))
+    reported_result = evidence.get("reported_result") or {}
     return any(
         any(
             index < len(target_row)
@@ -1609,9 +2371,7 @@ def _table_variable_values_bind(
     variable_columns = [
         index
         for index, header in enumerate(headers)
-        if _table_factor_matches_header(
-            variable.get("name"), _table_header_key(header)
-        )
+        if _table_factor_matches_header(variable.get("name"), _table_header_key(header))
     ]
     return bool(variable_columns) and any(
         index < len(baseline_row)
@@ -1628,7 +2388,7 @@ def _table_evidence_binding_matches(
     if source is None:
         return False
     rows = _table_audit_rows(source)
-    comparison = _mapping(evidence.get("comparison"))
+    comparison = evidence.get("comparison") or {}
     if not rows:
         return False
     if not comparison:
@@ -1656,16 +2416,16 @@ def _table_scalar_result_binding_matches(
     source: dict[str, Any],
     rows: list[list[str]],
 ) -> bool:
-    if _mapping_list(evidence.get("changed_variables")):
+    if evidence.get("changed_variables") or []:
         return False
-    result = _mapping(evidence.get("reported_result"))
+    result = evidence.get("reported_result") or {}
     outcome = result.get("outcome")
     value = result.get("value")
     if not _text(outcome) or value is None:
         return False
     table_refs = [
         ref
-        for ref in _mapping_list(evidence.get("related_source_refs"))
+        for ref in (evidence.get("related_source_refs") or [])
         if _text(ref.get("source_kind")) == "table"
         and _text(ref.get("source_ref")) == _text(evidence.get("source_ref"))
     ]
@@ -1676,13 +2436,11 @@ def _table_scalar_result_binding_matches(
             0 < row_index < len(rows)
             and 0 <= col_index < len(rows[0])
             and col_index < len(rows[row_index])
-            and _table_header_is_result(
-                _table_header_key(rows[0][col_index]), outcome
-            )
+            and _table_header_is_result(_table_header_key(rows[0][col_index]), outcome)
             and _value_matches_cell(value, rows[row_index][col_index])
         ):
             return True
-        attestation = _mapping(ref.get("table_matrix_repair_attestation"))
+        attestation = ref.get("table_matrix_repair_attestation") or {}
         if (
             attestation
             and _table_header_is_result(
@@ -1706,7 +2464,7 @@ def _table_comparison_rows(
 ) -> tuple[list[str], list[str], set[int]] | None:
     row_indexes: list[int] = []
     result_columns: set[int] = set()
-    for ref in _mapping_list(evidence.get("related_source_refs")):
+    for ref in evidence.get("related_source_refs") or []:
         row_index = _int(ref.get("row_index"))
         col_index = _int(ref.get("col_index"))
         if 0 < row_index < len(rows) and row_index not in row_indexes:
@@ -1725,7 +2483,7 @@ def _table_row_values_bind(
     baseline_row: list[str],
     target_row: list[str],
 ) -> bool:
-    for variable in _mapping_list(evidence.get("changed_variables")):
+    for variable in evidence.get("changed_variables") or []:
         variable_columns = [
             index
             for index, header in enumerate(headers)
@@ -1747,7 +2505,7 @@ def _table_row_values_bind(
             for index in variable_columns
         ):
             return False
-    reported_result = _mapping(evidence.get("reported_result"))
+    reported_result = evidence.get("reported_result") or {}
     result_columns = [
         index
         for index, header in enumerate(headers)
@@ -1768,7 +2526,7 @@ def _table_named_comparison_rows_bind(
     if len(rows) < 2:
         return False
     headers = rows[0]
-    comparison = _mapping(evidence.get("comparison"))
+    comparison = evidence.get("comparison") or {}
     baseline_rows = [
         row
         for row in rows[1:]
@@ -1799,10 +2557,10 @@ def _table_row_delta_is_explained(
     target_row: list[str],
     result_columns: set[int],
 ) -> bool:
-    variables = _mapping_list(evidence.get("changed_variables"))
-    outcome = _mapping(evidence.get("reported_result")).get("outcome")
+    variables = evidence.get("changed_variables") or []
+    outcome = (evidence.get("reported_result") or {}).get("outcome")
     reasons = " ".join(
-        _text_list(_mapping(evidence.get("comparison")).get("incomparability_reasons"))
+        ((evidence.get("comparison") or {}).get("incomparability_reasons") or [])
     )
     for index, header in enumerate(headers):
         if index >= len(baseline_row) or index >= len(target_row):
@@ -1812,14 +2570,14 @@ def _table_row_delta_is_explained(
         if _normalized_text(baseline_value) == _normalized_text(target_value):
             continue
         header_key = _table_header_key(header)
-        if (
-            index in result_columns
-            or _table_header_is_result(header_key, outcome)
-        ):
+        if index in result_columns or _table_header_is_result(header_key, outcome):
             continue
-        if header_key in _TABLE_SAMPLE_HEADERS and _sample_values_are_opaque_identifiers(
-            baseline_value,
-            target_value,
+        if (
+            header_key in _TABLE_SAMPLE_HEADERS
+            and _sample_values_are_opaque_identifiers(
+                baseline_value,
+                target_value,
+            )
         ):
             continue
         if any(
@@ -1836,7 +2594,13 @@ def _table_row_delta_is_explained(
 
 
 def _table_header_key(value: Any) -> str:
-    text = _text(value).casefold().translate(str.maketrans({"α": "alpha", "β": "beta", "θ": "theta", "ɵ": "theta"}))
+    text = (
+        _text(value)
+        .casefold()
+        .translate(
+            str.maketrans({"α": "alpha", "β": "beta", "θ": "theta", "ɵ": "theta"})
+        )
+    )
     text = re.sub(r"\s*(?:\[[^\]]*\]|\([^)]*\))\s*$", "", text).strip()
     normalized = _normalized_term(text)
     return _TABLE_SYMBOL_AXES.get(normalized, normalized)
@@ -1858,10 +2622,9 @@ def _table_header_is_result(header_key: str, outcome: Any) -> bool:
     normalized_header = (
         property_matching.normalize_property_label(header_key) or header_key
     )
-    normalized_outcome = (
-        property_matching.normalize_property_label(outcome)
-        or _normalized_term(outcome)
-    )
+    normalized_outcome = property_matching.normalize_property_label(
+        outcome
+    ) or _normalized_term(outcome)
     header_tokens = set(normalized_header.split()) - _RESULT_QUALIFIERS
     outcome_tokens = set(normalized_outcome.split()) - _RESULT_QUALIFIERS
     return bool(
@@ -1889,8 +2652,7 @@ def _sample_values_are_opaque_identifiers(*values: Any) -> bool:
         re.sub(r"[^a-z0-9]+", "", _text(value).casefold()) for value in values
     ]
     return bool(normalized) and all(
-        value and re.fullmatch(r"[a-z]?\d+|[a-z]", value)
-        for value in normalized
+        value and re.fullmatch(r"[a-z]?\d+|[a-z]", value) for value in normalized
     )
 
 
@@ -1935,7 +2697,12 @@ def _api_json_request(
     )
     try:
         with request_url.urlopen(request, timeout=60) as response:
-            data = json.loads(response.read().decode("utf-8") or "{}")
+            envelope = json.loads(response.read().decode("utf-8"))
+            if envelope["code"] != 200:
+                raise RuntimeError(
+                    f"Lens API rejected the request: {envelope['code']} {envelope['message']}"
+                )
+            data = envelope["data"]
             return (
                 {"payload": data, "headers": response.headers}
                 if include_headers
@@ -1960,13 +2727,19 @@ def _api_jsonl_request(
     )
     try:
         with request_url.urlopen(api_request, timeout=60) as response:
-            lines = response.read().decode("utf-8").splitlines()
+            text = response.read().decode("utf-8")
+            if "application/json" in response.headers.get("Content-Type", ""):
+                envelope = json.loads(text)
+                raise RuntimeError(
+                    f"Lens API rejected the request: {envelope['code']} {envelope['message']}"
+                )
+            lines = text.splitlines()
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Lens API returned HTTP {exc.code}: {detail}") from exc
     except URLError as exc:
         raise RuntimeError(f"Lens API request failed: {exc}") from exc
-    return _mapping_list(json.loads(line) for line in lines if line.strip())
+    return [json.loads(line) for line in lines if line.strip()]
 
 
 def _check(
@@ -2061,21 +2834,20 @@ def _synthesis_status_issues(
     boundary_ids = {
         evidence_id
         for contribution in contributions
-        for evidence_id in _text_list(
-            contribution.get("condition_boundary_evidence_ids")
-        )
+        for evidence_id in (contribution.get("condition_boundary_evidence_ids") or [])
     }
     evidence_by_id = {_text(item.get("evidence_id")): item for item in evidence}
     valid_boundary_ids = {
         evidence_id
         for evidence_id in boundary_ids
         if (record := evidence_by_id.get(evidence_id)) is not None
-        and record.get("evidence_role")
-        in {"direct_result", "contradictory_result"}
+        and record.get("evidence_role") in {"direct_result", "contradictory_result"}
         and evidence_id in supporting_ids | contradicting_ids
     }
     if synthesis_status == "insufficient_confirmation":
-        return [] if len(direct_documents) < 2 else ["two direct papers require synthesis"]
+        return (
+            [] if len(direct_documents) < 2 else ["two direct papers require synthesis"]
+        )
     if synthesis_status == "agreement":
         issues = []
         if len(supporting_documents) < 2:
@@ -2132,9 +2904,7 @@ def _direct_results_have_disjoint_context_boundary(
         if _text(item.get("evidence_id")) in contradicting_ids
     ]
     supporting_documents = {_text(item.get("document_id")) for item in supporting}
-    contradicting_documents = {
-        _text(item.get("document_id")) for item in contradicting
-    }
+    contradicting_documents = {_text(item.get("document_id")) for item in contradicting}
     if (
         not supporting_documents
         or not contradicting_documents
@@ -2145,9 +2915,9 @@ def _direct_results_have_disjoint_context_boundary(
     def values(records: list[dict[str, Any]]) -> dict[tuple[str, str, str], set[str]]:
         result: dict[tuple[str, str, str], set[str]] = {}
         for record in records:
-            context = _mapping(record.get("scientific_context"))
+            context = record.get("scientific_context") or {}
             for section in ("material", "sample", "process", "test"):
-                for attribute in _mapping_list(context.get(section)):
+                for attribute in context.get(section) or []:
                     key = (
                         section,
                         _normalized_term(attribute.get("name")),
@@ -2205,7 +2975,7 @@ def _training_export_issues(
     }
     actual: dict[str, dict[str, Any]] = {}
     for row in training_rows:
-        metadata = _mapping(row.get("metadata"))
+        metadata = row.get("metadata") or {}
         finding_id = _text(metadata.get("finding_id"))
         if not finding_id or finding_id in actual:
             issues.append("training_jsonl has a missing or duplicate finding_id")
@@ -2217,8 +2987,10 @@ def _training_export_issues(
             or _int(metadata.get("analysis_version")) != analysis_version
         ):
             issues.append(f"{finding_id}: training metadata identity differs")
-        messages = _mapping_list(row.get("messages"))
-        if len(messages) != 2 or any(not _text(item.get("content")) for item in messages):
+        messages = row.get("messages") or []
+        if len(messages) != 2 or any(
+            not _text(item.get("content")) for item in messages
+        ):
             issues.append(f"{finding_id}: training messages are incomplete")
             continue
         if [item.get("role") for item in messages] != ["user", "assistant"]:
@@ -2240,16 +3012,14 @@ def _training_export_issues(
         )
     for finding_id in set(actual) & set(expected):
         item = expected[finding_id]
-        expected_messages = _mapping_list(item.get("training_messages"))
+        expected_messages = item.get("training_messages") or []
         if not expected_messages:
             issues.append(f"{finding_id}: training-ready dataset item has no messages")
-        if _mapping_list(actual[finding_id].get("messages")) != expected_messages:
+        if (actual[finding_id].get("messages") or []) != expected_messages:
             issues.append(f"{finding_id}: JSONL messages differ from the JSON dataset")
-        if _mapping(actual[finding_id].get("metadata")) != _mapping(
-            item.get("metadata")
-        ):
+        if (actual[finding_id].get("metadata") or {}) != (item.get("metadata") or {}):
             issues.append(f"{finding_id}: JSONL metadata differs from the JSON dataset")
-        messages = _mapping_list(actual[finding_id].get("messages"))
+        messages = actual[finding_id].get("messages") or []
         if len(messages) != 2:
             continue
         try:
@@ -2279,7 +3049,7 @@ def _direct_result_issues(
     )
     for evidence in evidence_records:
         evidence_id = _text(evidence.get("evidence_id"))
-        result = _mapping(evidence.get("reported_result"))
+        result = evidence.get("reported_result") or {}
         result_direction = _text(result.get("direction"))
         if _normalized_term(result.get("outcome")) != outcome:
             issues.append(f"{evidence_id}: outcome differs from Finding")
@@ -2294,9 +3064,10 @@ def _direct_result_issues(
             _OPPOSING_DIRECTIONS.get(direction) or set()
         ):
             issues.append(f"{evidence_id}: contradiction does not oppose Finding")
-    if finding.get("assertion_strength") == "causal" and finding.get(
-        "attribution_scope"
-    ) != "isolated_effect":
+    if (
+        finding.get("assertion_strength") == "causal"
+        and finding.get("attribution_scope") != "isolated_effect"
+    ):
         issues.append("causal assertion lacks isolated-effect Evidence")
     return issues
 
@@ -2310,7 +3081,7 @@ def _experiment_binding_issues(
     for evidence in evidence_records:
         evidence_id = _text(evidence.get("evidence_id"))
         source_text = _evidence_lineage_source_text(evidence, source_index)
-        for variable in _mapping_list(evidence.get("changed_variables")):
+        for variable in evidence.get("changed_variables") or []:
             for field in ("baseline_value", "target_value"):
                 value = variable.get(field)
                 if _numbers(value) and not _numbers_grounded(value, source_text):
@@ -2318,7 +3089,7 @@ def _experiment_binding_issues(
                         f"{evidence_id}: {variable.get('name')} {field}={value!r} "
                         "is absent from Evidence lineage Sources"
                     )
-        result_value = _mapping(evidence.get("reported_result")).get("value")
+        result_value = (evidence.get("reported_result") or {}).get("value")
         if _numbers(result_value) and not _numbers_grounded(result_value, source_text):
             issues.append(
                 f"{evidence_id}: result value={result_value!r} is absent from "
@@ -2342,7 +3113,7 @@ def _sample_state_confounding_issues(
             continue
         factors = {
             _normalized_term(item.get("name"))
-            for item in _mapping_list(evidence.get("changed_variables"))
+            for item in (evidence.get("changed_variables") or [])
         }
         if not any(
             term in factor
@@ -2364,14 +3135,12 @@ def _numbers_grounded(value: Any, source: str) -> bool:
 
 def _numbers(value: Any) -> tuple[Decimal, ...]:
     result: list[Decimal] = []
-    source = _text(value).replace("−", "-")
+    source = (str(value) if value is not None else "").replace("−", "-")
     for match in _MULTIPLICATION_SCIENTIFIC_RE.finditer(source):
         try:
             coefficient = _decimal_number(match.group(1))
             exponent = int(
-                match.group(2).translate(
-                    str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
-                )
+                match.group(2).translate(str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+"))
             )
             number = coefficient * (Decimal(10) ** exponent)
         except (InvalidOperation, ValueError):
@@ -2407,9 +3176,7 @@ def _failed_source_ids(results: list[dict[str, Any]], field: str) -> str:
     return f"failed={[item['evidence_id'] for item in results if not item[field]]}"
 
 
-def _finding_attribution_scope(
-    *, factor_count: int, evidence_scopes: set[str]
-) -> str:
+def _finding_attribution_scope(*, factor_count: int, evidence_scopes: set[str]) -> str:
     if "not_attributable" in evidence_scopes:
         return "descriptive_only"
     if "descriptive_only" in evidence_scopes:
@@ -2428,12 +3195,10 @@ def _expected_dataset_status(
     curations: list[dict[str, Any]],
 ) -> tuple[str, str, dict[str, Any] | None]:
     events = [
-        (_event_time(item.get("created_at")), 0, "feedback", item)
-        for item in feedback
+        (_event_time(item.get("created_at")), 0, "feedback", item) for item in feedback
     ]
     events.extend(
-        (_event_time(item.get("updated_at")), 1, "curation", item)
-        for item in curations
+        (_event_time(item.get("updated_at")), 1, "curation", item) for item in curations
     )
     if not events:
         return "candidate", "review_candidate", None
@@ -2457,7 +3222,7 @@ def _event_time(value: Any) -> datetime:
 
 
 def _normalized_text(value: Any) -> str:
-    return _SPACE_RE.sub(" ", _text(value)).casefold()
+    return _SPACE_RE.sub(" ", str(value) if value is not None else "").casefold()
 
 
 def _normalized_lines(value: Any) -> tuple[str, ...]:
@@ -2472,21 +3237,8 @@ def _normalized_term(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", _text(value).casefold()))
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _mapping_list(value: Any) -> list[dict[str, Any]]:
-    return [dict(item) for item in value or [] if isinstance(item, dict)]
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _text_list(value: Any) -> list[str]:
-    values = value if isinstance(value, (list, tuple, set)) else [value]
-    return [text for item in values if (text := _text(item))]
+def _text(value: str | None) -> str:
+    return (value or "").strip()
 
 
 def _int(value: Any) -> int:

@@ -4,12 +4,9 @@ import pytest
 
 from domain.goal import (
     ExperimentPlanRecord,
-    ExperimentPlanRevisionConflictError,
 )
-from tests.support.experiment_plan_repository import (
-    InMemoryExperimentPlanRepository,
-)
-
+from exceptions import ResourceConflictException
+from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -28,7 +25,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "content": "Initial approved plan.",
         "status": "draft",
         "source_message_id": None,
-        "source_links": [],
+        "source_links": (),
         "metadata": {"source": "manual"},
         "created_by": "researcher-1",
         "created_at": "2026-09-07T00:00:00+00:00",
@@ -37,11 +34,11 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "structured_plan": {"hypothesis": "Initial hypothesis"},
     }
     payload.update(overrides)
-    return ExperimentPlanRecord.from_mapping(payload)
+    return ExperimentPlanRecord(**payload)
 
 
-async def test_append_preserves_history_and_lists_only_the_leaf_revision() -> None:
-    repository = InMemoryExperimentPlanRepository()
+async def test_append_preserves_history_and_lists_only_the_leaf_revision(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository()
     parent = _plan()
     child = _plan(
         plan_id="plan-v2",
@@ -62,8 +59,8 @@ async def test_append_preserves_history_and_lists_only_the_leaf_revision() -> No
     assert await repository.list_plans("col-1", "objective-1") == (child,)
 
 
-async def test_append_rejects_a_second_successor_of_the_same_revision() -> None:
-    repository = InMemoryExperimentPlanRepository()
+async def test_append_rejects_a_second_successor_of_the_same_revision(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository()
     parent = _plan()
     first_child = _plan(
         plan_id="plan-v2-a",
@@ -80,18 +77,51 @@ async def test_append_rejects_a_second_successor_of_the_same_revision() -> None:
     await repository.upsert_plan(parent)
     await repository.append_plan_revision(first_child)
 
-    with pytest.raises(ExperimentPlanRevisionConflictError):
+    with pytest.raises(ResourceConflictException) as rejected:
         await repository.append_plan_revision(competing_child)
 
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "experiment_plan_revision_superseded"
+    assert rejected.value.data["parent_plan_id"] == parent.plan_id
+    assert await repository.read_plan("col-1", "objective-1", competing_child.plan_id) is None
     assert await repository.list_plans("col-1", "objective-1") == (first_child,)
 
 
-async def test_existing_revision_is_immutable() -> None:
-    repository = InMemoryExperimentPlanRepository()
+async def test_append_rejects_an_existing_revision_identity(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository()
+    parent = _plan()
+    occupied = _plan(plan_id="occupied-plan")
+    await repository.upsert_plan(parent)
+    await repository.upsert_plan(occupied)
+
+    with pytest.raises(ResourceConflictException) as rejected:
+        await repository.append_plan_revision(
+            _plan(plan_id=occupied.plan_id, plan_version=2, parent_plan_id=parent.plan_id),
+        )
+
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "experiment_plan_revision_identity_conflict"
+    assert await repository.read_plan("col-1", "objective-1", occupied.plan_id) == occupied
+
+
+async def test_existing_revision_is_immutable(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository()
     original = _plan()
     await repository.upsert_plan(original)
 
-    with pytest.raises(ExperimentPlanRevisionConflictError):
+    with pytest.raises(ResourceConflictException) as rejected:
         await repository.upsert_plan(_plan(title="Silently overwritten"))
 
+    assert rejected.value.code == 200204
+    assert rejected.value.data["code"] == "experiment_plan_revision_immutable"
+    assert rejected.value.data["plan_id"] == original.plan_id
     assert await repository.read_plan("col-1", "objective-1", original.plan_id) == original
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_objective, seed_user
+
+    await seed_objective(postgres_session_factory, "col-1", "objective-1")
+    for user_id in ("researcher-1", "researcher-2", "researcher-3"):
+        await seed_user(postgres_session_factory, user_id)

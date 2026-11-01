@@ -1,16 +1,37 @@
+from tests.support.research_jobs import analysis_job_fixture, claim_analysis_fixture
+from exceptions import ProjectException
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from controllers.exception_router import project_exception_handler, http_exception_handler, request_validation_handler, general_exception_handler
+from infra.persistence import database
+
+
 """Moved execution records preserve publication and failure history in PostgreSQL."""
 
-import pytest
 
-from application.repositories.objective_repository import ObjectiveAnalysis
-from application.repositories.pipeline_run_repository import (
-    ExecutionStats,
-    ModelUsage,
-    TokenUsage,
+import pytest
+from domain.core import (
+    ObjectiveFactSet,
+    PaperContribution,
+    PreparedDocumentInput,
+    ResearchObjective,
 )
-from domain.core import ObjectiveFactSet, PaperContribution, PreparedDocumentInput, ResearchObjective
-from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
-from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID, _source
+from domain.core.finding import (
+    PAPER_CONTRIBUTION_STATUSES,
+)
+from domain.core.research_objective import (
+    PaperContribution,
+    ResearchObjective,
+    build_research_objective_id,
+    normalize_objective_terms,
+)
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
+
+from tests.integration.persistence.test_postgres_source_artifacts import (
+    COLLECTION_ID,
+    _source,
+)
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -22,104 +43,144 @@ OBJECTIVE_ID = "objective-laser-power-strength"
 async def objective_repository(source_repository):
     for document_id in ("doc_a", "doc_b"):
         await source_repository.replace_document(
-            COLLECTION_ID, _source(document_id, title=document_id),
+            COLLECTION_ID,
+            _source(document_id, title=document_id),
         )
-    repository = PostgresObjectiveRepository(source_repository.session_factory)
-    objective = ResearchObjective.from_mapping({
-        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
-        "question": "How does laser power affect tensile strength?",
-        "material_scope": ["Ti-6Al-4V"], "variables": ["laser power"],
-        "outcomes": ["tensile strength"], "seed_document_ids": ["doc_a", "doc_b"],
-    })
-    await repository.replace(COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,)))
+    repository = ObjectiveRepository()
+    objective = ResearchObjective(
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID
+        or build_research_objective_id(
+            question="How does laser power affect tensile strength?",
+            material_scope=("Ti-6Al-4V",),
+            variables=("laser power",),
+            outcomes=("tensile strength",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does laser power affect tensile strength?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("tensile strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc_a", "doc_b"),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+    )
+    await repository.replace(
+        COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,))
+    )
     return repository
 
 
 async def _queue_and_claim(repository):
     objective, queued = await repository.queue_analysis(
-        COLLECTION_ID, OBJECTIVE_ID,
+        COLLECTION_ID,
+        OBJECTIVE_ID,
         document_inputs=(
-            PreparedDocumentInput("doc_a", "fingerprint-doc-a"),
-            PreparedDocumentInput("doc_b", "fingerprint-doc-b"),
+            PreparedDocumentInput(
+                document_id="doc_a", preparation_fingerprint="fingerprint-doc-a"
+            ),
+            PreparedDocumentInput(
+                document_id="doc_b", preparation_fingerprint="fingerprint-doc-b"
+            ),
         ),
-        pipeline_version="objective-analysis.v1", model_name="test-model",
+        pipeline_version="objective-analysis.v1",
+        model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
-    claimed = await repository.claim_analysis(COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version)
+    claimed = await claim_analysis_fixture(
+        repository, COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version
+    )
     assert claimed is not None
     return objective, claimed
 
 
 def _contribution(version: int, document_id: str) -> PaperContribution:
-    return PaperContribution.from_mapping({
-        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
-        "analysis_version": version, "document_id": document_id,
-        "analysis_status": "analyzed", "relevance": "high",
-        "paper_role": "primary_experiment",
-        "contribution_summary": "Reports a controlled laser-power comparison.",
-        "material_match": ["Ti-6Al-4V"], "changed_variables": ["laser power"],
-        "measured_property_scope": ["tensile strength"],
-        "test_environment_scope": ["room temperature"], "confidence": 0.9,
-        "evidence_disposition": "comparable_evidence",
-        "routed_source_count": 1, "extracted_source_count": 1,
-        "comparable_evidence_count": 1, "failed_source_count": 0,
-    })
+    return PaperContribution(
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=version or 0,
+        document_id=document_id or "",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary="Reports a controlled laser-power comparison.",
+        material_match=("Ti-6Al-4V",),
+        changed_variables=("laser power",),
+        measured_property_scope=("tensile strength",),
+        test_environment_scope=("room temperature",),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="comparable_evidence",
+        routed_source_count=1,
+        extracted_source_count=1,
+        comparable_evidence_count=1,
+        failed_source_count=0,
+    )
 
 
-async def test_finding_http_revision_and_abstention_are_persisted(source_repository, tmp_path):
+async def test_finding_http_revision_and_abstention_are_persisted(
+    source_repository, tmp_path
+):
+    from application.core.objectives import finding_authoring_service
+    from application.core.objectives.analysis import (
+        experiment_analysis_writer,
+        experiment_query_service,
+    )
+    from application.source import collection_service
+    from controllers.core.finding_review_routes import finding_review_router as router
+    from controllers.dependencies.auth import get_current_user_id
+    from domain.core import PaperContribution
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
 
-    from application.core.objectives.analysis.experiment_analysis_writer import (
-        ExperimentAnalysisWriter,
+    from repositories.collection_repository import (
+        CollectionRepository,
     )
-    from application.core.objectives.analysis.experiment_query_service import (
-        ExperimentQueryService,
+    from repositories.comparison_group_repository import (
+        ComparisonGroupRepository,
     )
-    from application.core.objectives.finding_authoring_service import (
-        FindingAuthoringService,
+    from repositories.experiment_analysis_repository import (
+        ExperimentAnalysisRepository,
     )
-    from application.source.collection_service import CollectionService
-    from controllers.core.finding_review import router
-    from domain.core import PaperContribution
-    from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-    from infra.persistence.postgres.collection_repository import (
-        PostgresCollectionRepository,
+    from repositories.experiment_finding_repository import (
+        ExperimentFindingRepository,
     )
-    from infra.persistence.postgres.comparison_group_repository import (
-        PostgresComparisonGroupRepository,
+    from repositories.objective_experiment_selection_repository import (
+        ObjectiveExperimentSelectionRepository,
     )
-    from infra.persistence.postgres.experiment_analysis_repository import (
-        PostgresExperimentAnalysisRepository,
-    )
-    from infra.persistence.postgres.experiment_analysis_transaction import (
-        PostgresExperimentAnalysisTransactionFactory,
-    )
-    from infra.persistence.postgres.experiment_finding_repository import (
-        PostgresExperimentFindingRepository,
-    )
-    from infra.persistence.postgres.objective_experiment_selection_repository import (
-        PostgresObjectiveExperimentSelectionRepository,
-    )
-    from infra.persistence.postgres.paper_experiment_repository import (
-        PostgresPaperExperimentRepository,
+    from repositories.paper_experiment_repository import (
+        PaperExperimentRepository,
     )
     from tests.unit.application.test_experiment_analysis_writer import (
         _comparison_experiment,
     )
 
-    sessions = source_repository.session_factory
-    repository = PostgresObjectiveRepository(sessions)
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": "preheat-elongation",
-            "question": "Does preheat change elongation in 316L?",
-            "material_scope": ["316L"],
-            "variables": ["preheat"],
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-        }
+    sessions = database.AsyncSessionLocal
+    repository = ObjectiveRepository()
+    objective = ResearchObjective(
+        collection_id=COLLECTION_ID or "",
+        objective_id="preheat-elongation",
+        question="Does preheat change elongation in 316L?",
+        material_scope=("316L",),
+        variables=("preheat",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
     )
     await repository.replace(
         COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,))
@@ -134,64 +195,74 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         model_name=None,
         prompt_versions={},
     )
-    analysis = await repository.claim_analysis(COLLECTION_ID, objective.objective_id, 1)
-    experiments = PostgresPaperExperimentRepository(sessions)
-    writer = ExperimentAnalysisWriter(
-        paper_experiment_repository=experiments,
-        experiment_analysis_repository=PostgresExperimentAnalysisRepository(sessions),
+    analysis = await claim_analysis_fixture(
+        repository, COLLECTION_ID, objective.objective_id, 1
     )
-    source = await writer.write_experiment_analysis(
-        collection_id=COLLECTION_ID,
-        objective=objective,
-        analysis=analysis,
-        experiment_outputs=(_comparison_experiment("doc_a"),),
-    )
+    experiments = PaperExperimentRepository()
+    experiment_analysis_writer.PaperExperimentRepo = experiments
+    experiment_analysis_writer.ExperimentAnalysisRepo = ExperimentAnalysisRepository()
+    writer = experiment_analysis_writer
+    async with database.AsyncSessionLocal() as db, db.begin():
+        source = await writer.write_experiment_analysis(
+            db=db,
+            collection_id=COLLECTION_ID,
+            objective=objective,
+            analysis=analysis,
+            experiment_outputs=(_comparison_experiment("doc_a"),),
+        )
     coverage = tuple(
-        PaperContribution.from_mapping(
-            {
-                "collection_id": COLLECTION_ID,
-                "objective_id": objective.objective_id,
-                "analysis_version": 1,
-                "document_id": doc,
-                "analysis_status": "analyzed" if doc == "doc_a" else "excluded",
-                "warnings": (
-                    [] if doc == "doc_a" else ["No comparable elongation measurement."]
-                ),
-            }
+        PaperContribution(
+            collection_id=COLLECTION_ID or "",
+            objective_id=objective.objective_id or "",
+            analysis_version=1,
+            document_id=doc or "",
+            analysis_status="analyzed" if doc == "doc_a" else "excluded",
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=normalize_objective_terms(
+                [] if doc == "doc_a" else ["No comparable elongation measurement."]
+            ),
+            confidence=0.0,
         )
         for doc in ("doc_a", "doc_b")
     )
-    await repository.publish_experiment_analysis(
-        COLLECTION_ID,
-        objective.objective_id,
-        1,
-        contributions=coverage,
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await repository.publish_experiment_analysis(
+            db,
+            COLLECTION_ID,
+            objective.objective_id,
+            1,
+            contributions=coverage,
+            job=analysis_job_fixture(
+                repository, COLLECTION_ID, objective.objective_id, 1
+            ),
+        )
+    experiment_query_service.PaperExperimentRepo = experiments
+    experiment_query_service.ObjectiveExperimentSelectionRepo = (
+        ObjectiveExperimentSelectionRepository()
     )
-    query = ExperimentQueryService(
-        experiments,
-        PostgresObjectiveExperimentSelectionRepository(sessions),
-        PostgresComparisonGroupRepository(sessions),
-        PostgresExperimentFindingRepository(sessions),
-        objective_repository=repository,
-    )
+    experiment_query_service.ComparisonGroupRepo = ComparisonGroupRepository()
+    experiment_query_service.ExperimentFindingRepo = ExperimentFindingRepository()
+    experiment_query_service.ObjectiveRepo = repository
+    query = experiment_query_service
     app = FastAPI()
+    app.add_exception_handler(ProjectException, project_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(Exception, general_exception_handler)
     app.include_router(router, prefix="/api/v1")
-    app.state.finding_authoring_service = FindingAuthoringService(
-        collection_service=CollectionService(
-            PostgresCollectionRepository(sessions), FileCollectionWorkspace(tmp_path)
-        ),
-        objective_repository=repository,
-        experiment_query_service=query,
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=PostgresExperimentAnalysisTransactionFactory(
-            sessions
-        ),
-    )
-
-    @app.middleware("http")
-    async def authenticate(request, call_next):
-        request.state.current_user = {"user_id": "user_source"}
-        return await call_next(request)
+    finding_authoring_service.collection_service = collection_service
+    finding_authoring_service.ObjectiveRepo = repository
+    finding_authoring_service.experiment_query_service = query
+    finding_authoring_service.experiment_analysis_writer = writer
+    collection_service.CollectionRepo = CollectionRepository()
+    app.dependency_overrides[get_current_user_id] = lambda: "user_source"
 
     path = f"/api/v1/collections/{COLLECTION_ID}/objectives/{objective.objective_id}/findings"
     async with AsyncClient(
@@ -208,7 +279,9 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
                 ],
             },
         )
-        assert revised.status_code == 201, revised.text
+        assert revised.status_code == 200 and revised.json()["code"] == 200, (
+            revised.text
+        )
         current = await query.read_analysis_bundle(
             COLLECTION_ID, objective.objective_id, 2
         )
@@ -216,41 +289,72 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         assert current.findings[0].origin == "hybrid"
         assert current.findings[0].created_by_user_id == "user_source"
         assert current.findings[0].source_analysis_version == 1
-        assert "Supported only within the tested preheat conditions." in current.findings[0].limitations
+        assert (
+            "Supported only within the tested preheat conditions."
+            in current.findings[0].limitations
+        )
         assert current.findings[0].created_at is not None
-        abstained = await client.post(path, json={
-            "source_analysis_version": 2, "abstention_reason": "insufficient_evidence",
-            "limitations": ["The second paper lacks a comparable elongation measurement."],
-        })
-        assert abstained.status_code == 201, abstained.text
-        assert abstained.json()["finding"] is None
-        assert abstained.json()["abstention_reason"] == "insufficient_evidence"
+        abstained = await client.post(
+            path,
+            json={
+                "source_analysis_version": 2,
+                "abstention_reason": "insufficient_evidence",
+                "limitations": [
+                    "The second paper lacks a comparable elongation measurement."
+                ],
+            },
+        )
+        assert abstained.status_code == 200 and abstained.json()["code"] == 200, (
+            abstained.text
+        )
+        assert abstained.json()["data"]["finding"] is None
+        assert abstained.json()["data"]["abstention_reason"] == "insufficient_evidence"
     stored = await repository.read_analysis(COLLECTION_ID, objective.objective_id, 3)
     assert stored.abstention_reason == "insufficient_evidence"
-    assert stored.abstention_note == "The second paper lacks a comparable elongation measurement."
-    assert (await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 3)).findings == ()
-    assert (await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 1)).findings == source.findings
-    assert {item.document_id for item in await repository.list_contributions(COLLECTION_ID, objective.objective_id, 3)} == {"doc_a", "doc_b"}
+    assert (
+        stored.abstention_note
+        == "The second paper lacks a comparable elongation measurement."
+    )
+    assert (
+        await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 3)
+    ).findings == ()
+    assert (
+        await query.read_analysis_bundle(COLLECTION_ID, objective.objective_id, 1)
+    ).findings == source.findings
+    assert {
+        item.document_id
+        for item in await repository.list_contributions(
+            COLLECTION_ID, objective.objective_id, 3
+        )
+    } == {"doc_a", "doc_b"}
 
 
 async def test_published_evidence_gap_survives_a_failed_followup(
     source_repository,
 ) -> None:
-    repository = PostgresObjectiveRepository(source_repository.session_factory)
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": "laser-power-porosity",
-            "question": "How does laser power affect porosity in Ti-6Al-4V?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["porosity"],
-            "seed_document_ids": ["doc_a", "doc_b"],
-        }
+    repository = ObjectiveRepository()
+    objective = ResearchObjective(
+        collection_id=COLLECTION_ID or "",
+        objective_id="laser-power-porosity",
+        question="How does laser power affect porosity in Ti-6Al-4V?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("porosity",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc_a", "doc_b"),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
     )
     inputs = (
-        PreparedDocumentInput("doc_a", "prepared-a"),
-        PreparedDocumentInput("doc_b", "prepared-b"),
+        PreparedDocumentInput(
+            document_id="doc_a", preparation_fingerprint="prepared-a"
+        ),
+        PreparedDocumentInput(
+            document_id="doc_b", preparation_fingerprint="prepared-b"
+        ),
     )
     await repository.replace(
         COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,))
@@ -277,10 +381,20 @@ async def test_published_evidence_gap_survives_a_failed_followup(
     assert isinstance(queued, ObjectiveAnalysis)
     assert queued_objective.active_analysis_version == queued.analysis_version
     assert await repository.read_analysis(*queued.key) == queued
-    with pytest.raises(ValueError, match="only running"):
-        await repository.publish_experiment_analysis(*queued.key)
+    from repositories.objective_repository import (
+        ObjectiveAnalysisJobSnapshot,
+        AnalysisLeaseLostError,
+    )
 
-    running = await repository.claim_analysis(*queued.key)
+    with pytest.raises(AnalysisLeaseLostError):
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await repository.publish_experiment_analysis(
+                db,
+                *queued.key,
+                job=ObjectiveAnalysisJobSnapshot(queued, "not-a-worker", 0),
+            )
+
+    running = await claim_analysis_fixture(repository, *queued.key)
     assert running.status == "running"
     stats = ExecutionStats(
         duration_ms=100,
@@ -292,12 +406,16 @@ async def test_published_evidence_gap_survives_a_failed_followup(
         model_name="analysis-model",
         prompt_versions={},
         diagnostics=(),
+        job=analysis_job_fixture(repository, *queued.key),
     )
-    published_objective, published = await repository.publish_experiment_analysis(
-        *queued.key,
-        abstention_reason="no_comparable_evidence",
-        abstention_note="The selected papers report power settings but no comparable porosity measurements.",
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        published_objective, published = await repository.publish_experiment_analysis(
+            db,
+            *queued.key,
+            abstention_reason="no_comparable_evidence",
+            abstention_note="The selected papers report power settings but no comparable porosity measurements.",
+            job=analysis_job_fixture(repository, *queued.key),
+        )
     assert published_objective.published_analysis_version == queued.analysis_version
     assert published.status == "succeeded"
     assert published.stats.token_usage == TokenUsage(32, 16, 48)
@@ -314,11 +432,12 @@ async def test_published_evidence_gap_survives_a_failed_followup(
         model_name="analysis-model",
         prompt_versions={},
     )
-    await repository.claim_analysis(*retry.key)
+    await claim_analysis_fixture(repository, *retry.key)
     failed = await repository.fail_analysis(
         *retry.key,
         error_code="provider_timeout",
         error_message="The source analysis timed out.",
+        job=analysis_job_fixture(repository, *retry.key),
     )
     assert failed.status == "failed"
     assert failed.abstention_reason is None

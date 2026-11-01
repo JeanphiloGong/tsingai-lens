@@ -18,19 +18,12 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
-from application.repositories.collection_repository import CollectionRepository
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
-    build_session_factory,
+    AsyncSessionLocal,
 )
 from infra.persistence.file.object_store import FileObjectStore
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
-from infra.persistence.postgres.source_artifact_repository import (
-    PostgresSourceArtifactRepository,
-)
 from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -44,6 +37,19 @@ from infra.source.contracts.artifact_schemas import (
 from infra.source.parsers.docling_pdf import (
     build_pdf_bundle,
     build_pdf_converter,
+)
+from repositories.collection_repository import CollectionRepository
+from repositories.source_artifact_repository import (
+    SourceArtifactRepository,
+)
+from infra.source.artifact_bundle import (
+    source_document_payload,
+    source_text_unit_payload,
+    source_block_payload,
+    source_figure_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_table_cell_payload,
 )
 
 
@@ -105,13 +111,12 @@ async def main_async() -> None:
     artifact_dir = collection_dir / "output"
     if args.reparse_inputs:
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
             frames = await _reparse_collection_inputs(
                 backend_root=backend_root,
                 collection_dir=collection_dir,
-                collection_repository=PostgresCollectionRepository(
-                    build_session_factory(engine)
-                ),
+                collection_repository=CollectionRepository(),
                 document_id=args.document_id,
                 limit=args.limit,
             )
@@ -157,39 +162,72 @@ async def _load_existing_artifacts(
 ) -> dict[str, pd.DataFrame]:
     collection_id = collection_dir.name
     engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await PostgresSourceArtifactRepository(
-            build_session_factory(engine)
-        ).read_collection_documents(collection_id)
+        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
     finally:
         await engine.dispose()
     if not documents:
         raise SystemExit(f"source artifacts not found: {collection_id}")
     return {
-        "documents": _records_to_frame(documents),
-        "text_units": _records_to_frame(
-            tuple(item for document in documents for item in document.text_units)
+        "documents": _normalize_frame(
+            pd.DataFrame([source_document_payload(document) for document in documents])
         ),
-        "blocks": _records_to_frame(
-            tuple(item for document in documents for item in document.blocks)
+        "text_units": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_text_unit_payload(item)
+                    for document in documents
+                    for item in document.text_units
+                ]
+            )
         ),
-        "figures": _records_to_frame(
-            tuple(item for document in documents for item in document.figures)
+        "blocks": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_block_payload(item)
+                    for document in documents
+                    for item in document.blocks
+                ]
+            )
         ),
-        "tables": _records_to_frame(
-            tuple(item for document in documents for item in document.tables)
+        "figures": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_figure_payload(item)
+                    for document in documents
+                    for item in document.figures
+                ]
+            )
         ),
-        "table_rows": _records_to_frame(
-            tuple(item for document in documents for item in document.table_rows)
+        "tables": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_table_payload(item)
+                    for document in documents
+                    for item in document.tables
+                ]
+            )
         ),
-        "table_cells": _records_to_frame(
-            tuple(item for document in documents for item in document.table_cells)
+        "table_rows": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_table_row_payload(item)
+                    for document in documents
+                    for item in document.table_rows
+                ]
+            )
+        ),
+        "table_cells": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_table_cell_payload(item)
+                    for document in documents
+                    for item in document.table_cells
+                ]
+            )
         ),
     }
-
-
-def _records_to_frame(records: tuple[Any, ...]) -> pd.DataFrame:
-    return _normalize_frame(pd.DataFrame([record.to_record() for record in records]))
 
 
 async def _reparse_collection_inputs(

@@ -54,7 +54,6 @@ export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
 export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
-export DOCUMENT_PREPARATION_MAX_CONCURRENCY=3
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
 export LENS_AGENT_MAX_TURN_SECONDS=300
 export LENS_AGENT_MAX_TOOL_CALLS=96
@@ -63,7 +62,7 @@ export LENS_AGENT_NO_PROGRESS_LIMIT=2
 export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
 export LENS_AGENT_MAX_MODEL_RETRIES=5
 export LENS_AGENT_MAX_REQUEST_SECONDS=180
-export LENS_AGENT_CONTEXT_TOKENS=65536
+export LENS_AGENT_CONTEXT_TOKENS=200000
 export LENS_AGENT_MAX_PARALLEL_READS=4
 export LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS=16384
 export LENS_AGENT_MAX_FINALIZATION_SECONDS=300
@@ -74,11 +73,13 @@ export LLM_MAX_RETRIES=2
 
 `CORE_EXTRACTION_MAX_CONCURRENCY` is optional. When unset, Core extraction uses
 `4`.
-`DOCUMENT_PREPARATION_MAX_CONCURRENCY` is optional. When unset, up to `3`
-different Documents prepare concurrently in one backend process. This leaves
-database connections available for run finalization and status polling. The
-database still admits only one active preparation Pipeline Run for the same
-Document.
+Preparation, discovery and Objective analysis execute in independent workers.
+Start `scripts/run_document_preparation.py`, `scripts/run_objective_discovery.py`
+and `scripts/run_objective_analysis.py` using the same environment, PostgreSQL
+and shared object directory as Web. See [worker commands](../../scripts/README.md#research-workers).
+Each process claims one job at a time; process count controls concurrency.
+Stop the old in-Web execution processes before applying `20261031_0090` and
+starting the new entry points. Do not run both execution models together.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
 `LLM_REASONING_EFFORT` is optional and applies to both Core extraction and Chat,
@@ -86,9 +87,11 @@ including streamed Chat responses. Set it to a value supported by the model
 provider, such as `none`, when a reasoning model must reserve its bounded
 completion budget for structured output. When unset, the provider default is
 used. A Chat request must not silently ignore this operator setting.
-`LLM_MODEL` selects the model used by Core extraction and Research Agent Chat.
-It must match one of the model ids returned by the configured OpenAI-compatible
-endpoint, for example:
+`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` configure Core extraction and
+explicitly injected environment-based clients. Database-backed Research Agent
+Chat selects the address, model, and key reference from an enabled
+`model_connections` row; reasoning effort continues to use `LLM_REASONING_EFFORT`.
+Core model IDs must match the configured endpoint, for example:
 
 ```bash
 curl "$LLM_BASE_URL/models"
@@ -149,7 +152,7 @@ applies. Finalization cannot resume tools or execute an unchecked draft. These g
 limits include reasoning tokens. A provider `length` finish reason is a
 truncated response, not a completed answer or executable tool request.
 
-`LENS_AGENT_CONTEXT_TOKENS` is the total request window, default 65,536.
+`LENS_AGENT_CONTEXT_TOKENS` is the total request window, default 200,000.
 Configure it for the deployed model; it is not inferred from cumulative usage.
 System instructions, tools, complete message envelopes, review payloads and
 reserved output all count. Estimates use cl100k with 20% reserve and a protocol
@@ -321,3 +324,128 @@ lease. Source changes invalidate confirmation while retaining human revisions.
   `analysis_interrupted`. Unpublished interrupted work is exposed as
   `not_started`; any previously published analysis remains readable until a new
   analysis succeeds and is published atomically.
+
+
+## Shared Model Connection Registry
+
+Migration `20261025_0089` adds one PostgreSQL `model_connections` table. Operators
+maintain it with their approved database tools; the application exposes no
+configuration CLI, administrator API, or configuration write route. Migration
+`20261101_0091` removes configuration revisions: `connection_id` is the primary
+key, and each row is one complete address/model/key-reference configuration.
+Multiple models at the same address use distinct connection IDs. Enabling a row
+does not verify the provider.
+
+The address and model are configuration, not credentials. Store only an
+`api_key_ref`, such as `env:LENS_MODEL_KEY_LAB_A`, and provision its value in the
+server environment. A NULL reference is reserved for services that require no
+API key. Never put a real key in SQL history, database exports, browser state, or
+model audit payloads.
+
+Insert configurations directly. The following values show two models at one
+provider address in a disposable database:
+
+```sql
+INSERT INTO model_connections (
+  connection_id, display_name, base_url, model, api_key_ref,
+  enabled, context_window_tokens, max_output_tokens,
+  request_timeout_seconds, created_at, updated_at
+)
+VALUES
+  ('lab-a', 'Lab A', 'https://model.example.invalid/v1', 'lab-chat-a',
+   'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now()),
+  ('lab-b', 'Lab B', 'https://model.example.invalid/v1', 'lab-chat-b',
+   'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now());
+```
+
+`list_enabled()` and `read_enabled(connection_id)` expose enabled configurations;
+`read(connection_id)` also reads disabled rows. To hide a configuration from
+selection, set `enabled = false` and update `updated_at`. There is no revision
+allocation or configuration history. This registry alone does not connect Chat
+requests to a selected model.
+
+Before upgrading an existing registry, check for repeated IDs:
+
+```sql
+SELECT connection_id, COUNT(*)
+FROM model_connections
+GROUP BY connection_id
+HAVING COUNT(*) > 1;
+```
+
+Migration `20261101_0091` stops before changing the table if IDs repeat. Assign
+distinct IDs to the configurations to retain, then rerun the migration; it never
+chooses or deletes a row automatically. Other configuration values are preserved.
+Downgrading this migration restores the old schema with revision 1 for every
+row; discarded revision numbers cannot be recovered. Migration `20261025_0089`
+still refuses to drop a nonempty registry.
+
+Treat `connection_id` as a stable configuration identity. If an address or
+model must change, insert a new row with a new ID. Disabling the old row can
+happen immediately; keep its address/model intact while a response depends on
+it. The application does not maintain configuration history.
+
+
+### Chat Binding and Operational Recovery
+
+Before enabling registry-backed Chat, add the intended enabled connection and
+set `LENS_DEFAULT_MODEL_CONNECTION_ID` for callers that omit a choice. An omitted
+choice without a configured default fails with
+`model_connection_default_unavailable`; there is no fallback to `LLM_MODEL`.
+API clients may send an explicit selection on each new question. The browser
+lists enabled connections in the composer and sends the selected connection ID.
+Running answers and pending approvals retain the selected `connection_id` in their
+response snapshot; model-call audits record the same binding. Disabling a row
+only blocks new questions. It does not cancel generation or revoke credentials.
+An event-stream reconnect only reads saved state and never selects a model.
+
+Drain or explicitly interrupt unfinished pre-registry answers before rollout.
+Completed history without a binding remains readable. An old unbound approval
+must not be assigned a fabricated connection; it fails with
+`model_connection_binding_missing`. Keep a referenced row readable while a
+response or approval still depends on it. A missing row fails explicitly rather
+than substituting another enabled choice. If the environment key is absent, restore
+the intended secret reference; construction fails before an approved write is
+claimed, so the approved action remains unexecuted. If either a saved approval
+or rejection has no result, the trajectory exposes it as `retryable_decision`.
+After restoring the original configuration, resubmit the saved decision and
+`arguments_digest` to the existing tool-call decision endpoint. The browser retry
+control is a later frontend step. Reloading, reconnecting or choosing a model
+for the next question never starts this action. Retry preserves the exact
+decision, call digest and bound connection ID; a rejected action is never
+executed. Once a result exists, `retryable_decision` becomes null and repeated
+submissions cannot run it again.
+
+JSON selection failures use HTTP 200 with the existing business error envelope:
+`200204` for an unavailable selection, `200205` for configuration/key failures,
+and a stable reason under `data.code`. After an SSE response has started, the same
+failure is an `error` event. Check the envelope/event, not HTTP status alone. `model_unavailable` after dispatch denotes
+a provider/runtime failure and keeps existing research results; it is not a
+claim that the literature has no evidence. Credentials and provider response
+bodies must remain outside browser errors and audit request JSON.
+
+
+### Per-Connection Request Limits
+
+The three nullable limit fields use NULL to mean no connection-specific value,
+not unlimited. Agent defaults come from `LENS_AGENT_CONTEXT_TOKENS` (200000),
+`LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS` (16384),
+`LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS` (8192), and
+`LENS_AGENT_MAX_REQUEST_SECONDS` (180 seconds); parentheses give built-in values
+when the environment variable is absent. Context and both output limits take
+the smaller of the global Agent value and the selected row's non-NULL value.
+Raise the global cap as well when enabling a larger context window.
+
+The SDK timeout uses `request_timeout_seconds` when set, otherwise
+`LLM_REQUEST_TIMEOUT_SECONDS`, otherwise 180 seconds. The actual request is
+further bounded by the Agent timeout passed for that call. For example, with
+an Agent cap of 90 seconds and SDK environment timeout of 40 seconds, a NULL
+row timeout yields 40 seconds, a row value of 20 yields 20, and a row value of
+180 yields 90. The per-response Runner does not change shared global limits.
+
+Provider usage records consumption for each request, not context capacity.
+Budget the current complete input plus reserved output and safety headroom;
+do not subtract cumulative usage over previous calls from the window. Operators
+obtain capacity from the actual model/provider specification. Missing defaults,
+missing bound rows, and missing referenced keys still fail explicitly;
+limit fallback never substitutes another provider or credential.

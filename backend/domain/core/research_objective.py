@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import json
-import math
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha1
-from typing import Any, Final, Mapping
+from typing import Any, Final, Iterable, Mapping
 
 from domain.core.scientific_fact import (
     ScientificComparison,
@@ -141,42 +139,6 @@ class PaperResearchSourceRef:
     source_kind: str
     source_ref: str
 
-    def __post_init__(self) -> None:
-        if not self.source_kind.strip() or not self.source_ref.strip():
-            raise ValueError("paper research Source reference cannot be empty")
-        if self.source_kind not in _PAPER_RESEARCH_SOURCE_KINDS:
-            raise ValueError(
-                f"unsupported paper research Source kind: {self.source_kind}"
-            )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSourceRef":
-        return cls(
-            source_kind=_text(payload.get("source_kind")) or "",
-            source_ref=_text(payload.get("source_ref")) or "",
-        )
-
-    def to_record(self) -> dict[str, str]:
-        return {
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-        }
-
-
-def _paper_research_source_refs(value: Any) -> tuple[PaperResearchSourceRef, ...]:
-    refs: list[PaperResearchSourceRef] = []
-    seen: set[tuple[str, str]] = set()
-    for item in value or ():
-        if not isinstance(item, Mapping):
-            continue
-        source_ref = PaperResearchSourceRef.from_mapping(item)
-        key = (source_ref.source_kind, source_ref.source_ref)
-        if key in seen:
-            continue
-        seen.add(key)
-        refs.append(source_ref)
-    return tuple(refs)
-
 
 @dataclass(frozen=True)
 class ReviewKnowledgeItem:
@@ -191,33 +153,8 @@ class ReviewKnowledgeItem:
     confidence: float
 
     def __post_init__(self) -> None:
-        if not self.content.strip():
-            raise ValueError("review knowledge content cannot be empty")
         if not self.source_refs:
             raise ValueError("review knowledge requires a source reference")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ReviewKnowledgeItem":
-        return cls(
-            content=_text(payload.get("content")) or "",
-            material_scope=normalize_objective_terms(payload.get("material_scope")),
-            variables=normalize_objective_terms(payload.get("variables")),
-            outcomes=normalize_objective_terms(payload.get("outcomes")),
-            conditions=normalize_objective_terms(payload.get("conditions")),
-            source_refs=_paper_research_source_refs(payload.get("source_refs")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "content": self.content,
-            "material_scope": list(self.material_scope),
-            "variables": list(self.variables),
-            "outcomes": list(self.outcomes),
-            "conditions": list(self.conditions),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "confidence": self.confidence,
-        }
 
 
 @dataclass(frozen=True)
@@ -229,14 +166,6 @@ class ReviewSynthesisMap:
     evidence_gaps: tuple[ReviewKnowledgeItem, ...] = ()
     citation_leads: tuple[ReviewKnowledgeItem, ...] = ()
 
-    def __post_init__(self) -> None:
-        for field_name in (
-            "synthesis_claims",
-            "disputes",
-            "evidence_gaps",
-            "citation_leads",
-        ):
-            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
 
     @property
     def is_empty(self) -> bool:
@@ -248,35 +177,6 @@ class ReviewSynthesisMap:
                 self.citation_leads,
             )
         )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any] | None) -> "ReviewSynthesisMap":
-        source = payload or {}
-
-        def items(field_name: str) -> tuple[ReviewKnowledgeItem, ...]:
-            return tuple(
-                ReviewKnowledgeItem.from_mapping(item)
-                for item in source.get(field_name) or ()
-                if isinstance(item, Mapping)
-            )
-
-        return cls(
-            synthesis_claims=items("synthesis_claims"),
-            disputes=items("disputes"),
-            evidence_gaps=items("evidence_gaps"),
-            citation_leads=items("citation_leads"),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            field_name: [item.to_record() for item in getattr(self, field_name)]
-            for field_name in (
-                "synthesis_claims",
-                "disputes",
-                "evidence_gaps",
-                "citation_leads",
-            )
-        }
 
 
 @dataclass(frozen=True)
@@ -290,64 +190,12 @@ class PaperResearchRelationship:
     confidence: float
 
     def __post_init__(self) -> None:
-        if not self.relationship_id.strip():
-            raise ValueError("paper research relationship requires relationship_id")
         if not self.varied_factors:
             raise ValueError("paper research relationship requires varied factors")
-        if not self.outcome.strip():
-            raise ValueError("paper research relationship requires an outcome")
         if not self.source_refs:
             raise ValueError(
                 "paper research relationship requires a source reference"
             )
-
-    @classmethod
-    def from_mapping(
-        cls,
-        payload: Mapping[str, Any],
-        *,
-        parent_study_boundary: str | None = None,
-    ) -> "PaperResearchRelationship":
-        varied_factors = normalize_objective_terms(payload.get("varied_factors"))
-        outcome = _text(payload.get("outcome")) or ""
-        source_refs = _paper_research_source_refs(payload.get("source_refs"))
-        relationship_id = _text(payload.get("relationship_id"))
-        if relationship_id is None:
-            identity = json.dumps(
-                {
-                    "document_id": (_text(payload.get("document_id")) or "").casefold(),
-                    "parent_study_boundary": parent_study_boundary,
-                    "varied_factors": sorted(
-                        value.casefold() for value in varied_factors
-                    ),
-                    "outcome": outcome.casefold(),
-                    "source_refs": sorted(
-                        (item.source_kind, item.source_ref) for item in source_refs
-                    ),
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            relationship_id = (
-                f"relationship_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-            )
-        return cls(
-            relationship_id=relationship_id,
-            varied_factors=varied_factors,
-            outcome=outcome,
-            source_refs=source_refs,
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "relationship_id": self.relationship_id,
-            "varied_factors": list(self.varied_factors),
-            "outcome": self.outcome,
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "confidence": self.confidence,
-        }
 
 
 _PAPER_RESEARCH_DESIGN_TYPES = frozenset(
@@ -378,103 +226,11 @@ class PaperResearchScope:
     def __post_init__(self) -> None:
         if not self.study_id.strip() or not self.document_id.strip():
             raise ValueError("paper research scope requires study and document ids")
-        if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
-            raise ValueError(
-                f"unsupported paper research design type: {self.design_type}"
-            )
-        if self.claim_scope not in _PAPER_RESEARCH_CLAIM_SCOPES:
-            raise ValueError(
-                f"unsupported paper research claim scope: {self.claim_scope}"
-            )
-        object.__setattr__(self, "relationships", tuple(self.relationships))
         if not self.relationships:
             raise ValueError("paper research scope requires at least one relationship")
         relationship_ids = [item.relationship_id for item in self.relationships]
         if len(relationship_ids) != len(set(relationship_ids)):
             raise ValueError("paper research relationship ids must be unique")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchScope":
-        document_id = _text(payload.get("document_id")) or ""
-        design_type = _text(payload.get("design_type")) or "uncertain"
-        claim_scope = _text(payload.get("claim_scope")) or "uncertain"
-        experiment_label = _text(payload.get("experiment_label"))
-        material_scope = normalize_objective_terms(payload.get("material_scope"))
-        process_context = normalize_objective_terms(payload.get("process_context"))
-        parent_study_boundary = json.dumps(
-            {
-                "document_id": document_id.casefold(),
-                "design_type": design_type,
-                "claim_scope": claim_scope,
-                "experiment_label": (
-                    experiment_label.casefold() if experiment_label else None
-                ),
-                "material_scope": sorted(value.casefold() for value in material_scope),
-                "process_context": sorted(
-                    value.casefold() for value in process_context
-                ),
-            },
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        relationships = tuple(
-            PaperResearchRelationship.from_mapping(
-                {**dict(item), "document_id": document_id},
-                parent_study_boundary=parent_study_boundary,
-            )
-            for item in payload.get("relationships") or ()
-            if isinstance(item, Mapping)
-        )
-        study_id = _text(payload.get("study_id"))
-        if study_id is None:
-            identity = json.dumps(
-                {
-                    "document_id": document_id.casefold(),
-                    "design_type": design_type,
-                    "claim_scope": claim_scope,
-                    "experiment_label": (
-                        experiment_label.casefold() if experiment_label else None
-                    ),
-                    "material_scope": sorted(
-                        value.casefold() for value in material_scope
-                    ),
-                    "process_context": sorted(
-                        value.casefold() for value in process_context
-                    ),
-                    "relationship_ids": sorted(
-                        item.relationship_id for item in relationships
-                    ),
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            study_id = f"study_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        return cls(
-            study_id=study_id,
-            document_id=document_id,
-            design_type=design_type,
-            claim_scope=claim_scope,
-            experiment_label=experiment_label,
-            material_scope=material_scope,
-            process_context=process_context,
-            relationships=relationships,
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "study_id": self.study_id,
-            "document_id": self.document_id,
-            "design_type": self.design_type,
-            "claim_scope": self.claim_scope,
-            "experiment_label": self.experiment_label,
-            "material_scope": list(self.material_scope),
-            "process_context": list(self.process_context),
-            "relationships": [item.to_record() for item in self.relationships],
-            "confidence": self.confidence,
-        }
 
 
 class PaperStudyDispositionStatus(StrEnum):
@@ -502,52 +258,18 @@ class PaperStudyDisposition:
             raise ValueError(
                 "paper study disposition requires document, study, and relationship ids"
             )
-        object.__setattr__(self, "status", self._status(self.status))
         if self.status is PaperStudyDispositionStatus.PROMOTED:
-            if not _text(self.objective_id):
+            if not self.objective_id:
                 raise ValueError("promoted paper study disposition requires objective_id")
-            if _text(self.reason):
+            if self.reason:
                 raise ValueError("promoted paper study disposition cannot have a reason")
         elif self.status is PaperStudyDispositionStatus.REJECTED:
-            if _text(self.objective_id):
+            if self.objective_id:
                 raise ValueError("rejected paper study disposition cannot link an objective")
-            if not _text(self.reason):
+            if not self.reason:
                 raise ValueError("rejected paper study disposition requires a reason")
-        elif _text(self.objective_id) or _text(self.reason):
+        elif self.objective_id or self.reason:
             raise ValueError("pending paper study disposition cannot have a result")
-
-    @staticmethod
-    def _status(value: Any) -> PaperStudyDispositionStatus:
-        if isinstance(value, PaperStudyDispositionStatus):
-            return value
-        try:
-            return PaperStudyDispositionStatus(str(value))
-        except ValueError as exc:
-            raise ValueError(f"unsupported paper study disposition status: {value}") from exc
-
-    @classmethod
-    def from_mapping(
-        cls,
-        payload: Mapping[str, Any],
-    ) -> "PaperStudyDisposition":
-        return cls(
-            document_id=_text(payload.get("document_id")) or "",
-            study_id=_text(payload.get("study_id")) or "",
-            relationship_id=_text(payload.get("relationship_id")) or "",
-            status=cls._status(payload.get("status") or "pending"),
-            objective_id=_text(payload.get("objective_id")),
-            reason=_text(payload.get("reason")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "study_id": self.study_id,
-            "relationship_id": self.relationship_id,
-            "status": self.status.value,
-            "objective_id": self.objective_id,
-            "reason": self.reason,
-        }
 
 
 @dataclass(frozen=True)
@@ -568,100 +290,14 @@ class PaperResearchSignal:
     reason: str | None = None
 
     def __post_init__(self) -> None:
-        if self.signal_type not in {"variable", "outcome"}:
-            raise ValueError("paper research signal type must be variable or outcome")
         if self.signal_type == "variable" and (
             self.variable_role not in _PAPER_RESEARCH_VARIABLE_ROLES
         ):
             raise ValueError("variable signal requires a scientific variable role")
         if self.signal_type == "outcome" and self.variable_role != "not_applicable":
             raise ValueError("outcome signal variable role must be not_applicable")
-        if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
-            raise ValueError(
-                f"unsupported paper research signal design type: {self.design_type}"
-            )
-        if self.claim_scope not in _PAPER_RESEARCH_CLAIM_SCOPES:
-            raise ValueError(
-                f"unsupported paper research signal claim scope: {self.claim_scope}"
-            )
-        if not self.label.strip():
-            raise ValueError("paper research signal label cannot be empty")
         if not self.source_refs:
             raise ValueError("paper research signal requires at least one source")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSignal":
-        signal_type = _text(payload.get("signal_type")) or ""
-        label = _text(payload.get("label")) or ""
-        variable_role = _text(payload.get("variable_role")) or (
-            "not_applicable" if signal_type == "outcome" else "uncertain"
-        )
-        design_type = _text(payload.get("design_type")) or "uncertain"
-        claim_scope = _text(payload.get("claim_scope")) or "uncertain"
-        experiment_label = _text(payload.get("experiment_label"))
-        material_scope = normalize_objective_terms(payload.get("material_scope"))
-        process_context = normalize_objective_terms(payload.get("process_context"))
-        source_refs = _paper_research_source_refs(payload.get("source_refs"))
-        signal_id = _text(payload.get("signal_id"))
-        if signal_id is None:
-            identity = json.dumps(
-                {
-                    "document_id": (
-                        _text(payload.get("document_id")) or ""
-                    ).casefold(),
-                    "signal_type": signal_type,
-                    "label": label.casefold(),
-                    "variable_role": variable_role,
-                    "design_type": design_type,
-                    "claim_scope": claim_scope,
-                    "experiment_label": (
-                        experiment_label.casefold() if experiment_label else None
-                    ),
-                    "material_scope": sorted(
-                        value.casefold() for value in material_scope
-                    ),
-                    "process_context": sorted(
-                        value.casefold() for value in process_context
-                    ),
-                    "source_refs": sorted(
-                        (item.source_kind, item.source_ref) for item in source_refs
-                    ),
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            signal_id = f"signal_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        return cls(
-            signal_id=signal_id,
-            signal_type=signal_type,
-            label=label,
-            variable_role=variable_role,
-            design_type=design_type,
-            claim_scope=claim_scope,
-            experiment_label=experiment_label,
-            material_scope=material_scope,
-            process_context=process_context,
-            source_refs=source_refs,
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            reason=_text(payload.get("reason")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "signal_id": self.signal_id,
-            "signal_type": self.signal_type,
-            "label": self.label,
-            "variable_role": self.variable_role,
-            "design_type": self.design_type,
-            "claim_scope": self.claim_scope,
-            "experiment_label": self.experiment_label,
-            "material_scope": list(self.material_scope),
-            "process_context": list(self.process_context),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "confidence": self.confidence,
-            "reason": self.reason,
-        }
 
 
 class PaperSourceUnitCoverageStatus(StrEnum):
@@ -693,55 +329,18 @@ class PaperSourceUnitCoverage:
             )
         ):
             raise ValueError("paper Source-unit coverage fields cannot be empty")
-        if self.source_kind not in _PAPER_RESEARCH_SOURCE_KINDS:
-            raise ValueError(
-                f"unsupported paper Source-unit kind: {self.source_kind}"
-            )
-        object.__setattr__(self, "status", self._status(self.status))
         if self.status in {
             PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL,
             PaperSourceUnitCoverageStatus.EXTRACTION_FAILED,
         }:
-            if not _text(self.reason):
+            if not self.reason:
                 raise ValueError(
                     f"{self.status.value} Source-unit coverage requires a reason"
                 )
-        elif _text(self.reason):
+        elif self.reason:
             raise ValueError(
                 f"{self.status.value} Source-unit coverage cannot have a reason"
             )
-
-    @staticmethod
-    def _status(value: Any) -> PaperSourceUnitCoverageStatus:
-        if isinstance(value, PaperSourceUnitCoverageStatus):
-            return value
-        try:
-            return PaperSourceUnitCoverageStatus(str(value))
-        except ValueError as exc:
-            raise ValueError(
-                f"unsupported paper Source-unit coverage status: {value}"
-            ) from exc
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperSourceUnitCoverage":
-        return cls(
-            source_unit_id=_text(payload.get("source_unit_id")) or "",
-            window_id=_text(payload.get("window_id")) or "",
-            source_kind=_text(payload.get("source_kind")) or "",
-            source_ref=_text(payload.get("source_ref")) or "",
-            status=cls._status(payload.get("status")),
-            reason=_text(payload.get("reason")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "source_unit_id": self.source_unit_id,
-            "window_id": self.window_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "status": self.status.value,
-            "reason": self.reason,
-        }
 
 
 @dataclass(frozen=True)
@@ -766,24 +365,6 @@ class PaperResearchMap:
     def __post_init__(self) -> None:
         if not self.document_id.strip():
             raise ValueError("paper research map requires document_id")
-        object.__setattr__(self, "studies", tuple(self.studies))
-        object.__setattr__(self, "unresolved_signals", tuple(self.unresolved_signals))
-        object.__setattr__(
-            self,
-            "source_unit_coverage",
-            tuple(self.source_unit_coverage),
-        )
-        if self.map_status not in {"unknown", "sufficient", "insufficient_map"}:
-            raise ValueError(f"unsupported paper map status: {self.map_status}")
-        object.__setattr__(
-            self,
-            "map_limitations",
-            normalize_objective_terms(self.map_limitations),
-        )
-        if not isinstance(self.review_synthesis, ReviewSynthesisMap):
-            raise TypeError(
-                "paper research map review_synthesis must be a ReviewSynthesisMap"
-            )
         if self.doc_role != "review" and not self.review_synthesis.is_empty:
             raise ValueError("review synthesis requires a review paper")
         if any(study.document_id != self.document_id for study in self.studies):
@@ -806,70 +387,6 @@ class PaperResearchMap:
             for item in self.source_unit_coverage
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchMap":
-        document_id = _text(payload.get("document_id") or payload.get("paper_id")) or ""
-        return cls(
-            document_id=document_id,
-            doc_role=_text(payload.get("doc_role")) or "uncertain",
-            studies=tuple(
-                PaperResearchScope.from_mapping(
-                    {**dict(item), "document_id": item.get("document_id", document_id)}
-                )
-                for item in payload.get("studies") or ()
-                if isinstance(item, Mapping)
-            ),
-            evidence_density=_text(payload.get("evidence_density")) or "unknown",
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-            unresolved_signals=tuple(
-                PaperResearchSignal.from_mapping(
-                    {**dict(item), "document_id": document_id}
-                )
-                for item in payload.get("unresolved_signals") or ()
-                if isinstance(item, Mapping)
-            ),
-            source_unit_coverage=tuple(
-                PaperSourceUnitCoverage.from_mapping(item)
-                for item in payload.get("source_unit_coverage") or ()
-                if isinstance(item, Mapping)
-            ),
-            map_status=_text(payload.get("map_status")) or "unknown",
-            map_limitations=normalize_objective_terms(
-                payload.get("map_limitations")
-            ),
-            review_synthesis=ReviewSynthesisMap.from_mapping(
-                payload.get("review_synthesis")
-                if isinstance(payload.get("review_synthesis"), Mapping)
-                else None
-            ),
-            input_fingerprint=_text(payload.get("input_fingerprint")) or None,
-            map_version=_text(payload.get("map_version")) or None,
-            generated_at=_text(payload.get("generated_at")) or None,
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "doc_role": self.doc_role,
-            "studies": [study.to_record() for study in self.studies],
-            "evidence_density": self.evidence_density,
-            "confidence": self.confidence,
-            "warnings": list(self.warnings),
-            "unresolved_signals": [
-                signal.to_record() for signal in self.unresolved_signals
-            ],
-            "source_unit_coverage": [
-                item.to_record() for item in self.source_unit_coverage
-            ],
-            "map_status": self.map_status,
-            "map_limitations": list(self.map_limitations),
-            "review_synthesis": self.review_synthesis.to_record(),
-            "input_fingerprint": self.input_fingerprint,
-            "map_version": self.map_version,
-            "generated_at": self.generated_at,
-        }
-
 
 @dataclass(frozen=True)
 class PreparedDocumentInput:
@@ -877,29 +394,6 @@ class PreparedDocumentInput:
 
     document_id: str
     preparation_fingerprint: str
-
-    def __post_init__(self) -> None:
-        if not _text(self.document_id):
-            raise ValueError("prepared document input requires document_id")
-        if not _text(self.preparation_fingerprint):
-            raise ValueError(
-                "prepared document input requires preparation_fingerprint"
-            )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PreparedDocumentInput":
-        return cls(
-            document_id=_text(payload.get("document_id")) or "",
-            preparation_fingerprint=(
-                _text(payload.get("preparation_fingerprint")) or ""
-            ),
-        )
-
-    def to_record(self) -> dict[str, str]:
-        return {
-            "document_id": self.document_id,
-            "preparation_fingerprint": self.preparation_fingerprint,
-        }
 
 
 @dataclass(frozen=True)
@@ -930,11 +424,11 @@ class ResearchObjective:
     created_by_tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not _text(self.collection_id):
+        if not self.collection_id:
             raise ValueError("research objective requires collection_id")
-        if not _text(self.objective_id):
+        if not self.objective_id:
             raise ValueError("research objective requires objective_id")
-        if not _text(self.question):
+        if not self.question:
             raise ValueError("research objective requires question")
         if not self.variables:
             raise ValueError("research objective requires at least one variable")
@@ -961,15 +455,9 @@ class ResearchObjective:
                 "objective constraints duplicate variables or outcomes: "
                 + ", ".join(sorted(duplicate_constraints))
             )
-        if self.confirmation_status not in OBJECTIVE_CONFIRMATION_STATUSES:
-            raise ValueError(
-                f"unsupported objective confirmation status: {self.confirmation_status}"
-            )
-        if self.origin not in OBJECTIVE_ORIGINS:
-            raise ValueError(f"unsupported objective origin: {self.origin}")
         creator_values = (
-            _text(self.created_by_user_id),
-            _text(self.created_by_tool_call_id),
+            self.created_by_user_id,
+            self.created_by_tool_call_id,
         )
         if self.origin == "chat_assisted" and not all(creator_values):
             raise ValueError(
@@ -979,7 +467,7 @@ class ResearchObjective:
             raise ValueError(
                 "system-discovered objective cannot have Chat creator provenance"
             )
-        parent_objective_id = _text(self.parent_objective_id)
+        parent_objective_id = self.parent_objective_id
         if parent_objective_id is not None and parent_objective_id == self.objective_id:
             raise ValueError("objective cannot derive from itself")
         if (parent_objective_id is None) != (self.parent_analysis_version is None):
@@ -988,11 +476,12 @@ class ResearchObjective:
             )
         if self.parent_analysis_version is not None and self.parent_analysis_version < 1:
             raise ValueError("parent_analysis_version must be a positive integer")
-        basis = _objective_derivation_basis(self.derivation_basis)
+        basis = self.derivation_basis
         if basis and parent_objective_id is None:
             raise ValueError("derivation basis requires a parent objective")
-        object.__setattr__(self, "parent_objective_id", parent_objective_id)
-        object.__setattr__(self, "derivation_basis", basis)
+        basis_refs = [(item["kind"], item["reference_id"]) for item in basis]
+        if len(basis_refs) != len(set(basis_refs)):
+            raise ValueError("objective derivation basis references must be unique")
         overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
         if overlap:
             raise ValueError(
@@ -1017,76 +506,6 @@ class ResearchObjective:
         ):
             raise ValueError("published analysis cannot be newer than active analysis")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchObjective":
-        question = _text(payload.get("question")) or ""
-        material_scope = normalize_objective_terms(payload.get("material_scope"))
-        variables = normalize_objective_terms(payload.get("variables"))
-        outcomes = normalize_objective_terms(payload.get("outcomes"))
-        mechanisms = normalize_objective_terms(payload.get("mechanisms"))
-        constraints = normalize_objective_terms(payload.get("constraints"))
-        requested_comparator = _text(payload.get("requested_comparator"))
-        return cls(
-            collection_id=_text(payload.get("collection_id")) or "",
-            objective_id=_text(payload.get("objective_id"))
-            or build_research_objective_id(
-                question=question,
-                material_scope=material_scope,
-                variables=variables,
-                outcomes=outcomes,
-                mechanisms=mechanisms,
-                constraints=constraints,
-                requested_comparator=requested_comparator,
-                parent_objective_id=_text(payload.get("parent_objective_id")),
-                parent_analysis_version=_positive_int_or_none(
-                    payload.get("parent_analysis_version")
-                ),
-            ),
-            question=question,
-            material_scope=material_scope,
-            variables=variables,
-            outcomes=outcomes,
-            mechanisms=mechanisms,
-            constraints=constraints,
-            requested_comparator=requested_comparator,
-            seed_document_ids=normalize_objective_terms(
-                payload.get("seed_document_ids")
-            ),
-            excluded_document_ids=normalize_objective_terms(
-                payload.get("excluded_document_ids")
-            ),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            reason=_text(payload.get("reason")),
-            source_relationship_ids=normalize_objective_terms(
-                payload.get("source_relationship_ids")
-            ),
-            parent_objective_id=_text(payload.get("parent_objective_id")),
-            parent_analysis_version=_positive_int_or_none(
-                payload.get("parent_analysis_version")
-            ),
-            derivation_basis=_objective_derivation_basis(
-                payload.get("derivation_basis")
-            ),
-            rank=_positive_int_or_none(payload.get("rank")),
-            confirmation_status=_choice(
-                payload.get("confirmation_status"),
-                OBJECTIVE_CONFIRMATION_STATUSES,
-                "candidate",
-            ),
-            active_analysis_version=_positive_int_or_none(
-                payload.get("active_analysis_version")
-            ),
-            published_analysis_version=_positive_int_or_none(
-                payload.get("published_analysis_version")
-            ),
-            origin=_choice(
-                payload.get("origin"),
-                OBJECTIVE_ORIGINS,
-                "system_discovered",
-            ),
-            created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
-        )
 
     def confirm(self) -> "ResearchObjective":
         if self.confirmation_status != "candidate":
@@ -1135,56 +554,6 @@ class InspectedObjectiveSourceRef:
     source_ref: str
     source_digest: str | None = None
 
-    def __post_init__(self) -> None:
-        if self.source_kind not in SOURCE_KIND_VALUES:
-            raise ValueError(f"unsupported inspected Source kind: {self.source_kind}")
-        if not _text(self.source_ref):
-            raise ValueError("inspected Source reference cannot be empty")
-        if self.source_digest is not None and not re.fullmatch(
-            r"[0-9a-fA-F]{64}", self.source_digest
-        ):
-            raise ValueError("inspected Source digest must be a SHA-256 hex digest")
-
-    @classmethod
-    def from_mapping(
-        cls, payload: Mapping[str, Any]
-    ) -> "InspectedObjectiveSourceRef":
-        return cls(
-            source_kind=_text(payload.get("source_kind")) or "",
-            source_ref=_text(payload.get("source_ref")) or "",
-            source_digest=_text(payload.get("source_digest")),
-        )
-
-    def to_record(self) -> dict[str, str | None]:
-        return {
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "source_digest": self.source_digest,
-        }
-
-
-def _inspected_objective_source_refs(
-    value: Any,
-) -> tuple[InspectedObjectiveSourceRef, ...]:
-    records: list[InspectedObjectiveSourceRef] = []
-    seen: set[tuple[str, str]] = set()
-    for item in value or ():
-        record = (
-            item
-            if isinstance(item, InspectedObjectiveSourceRef)
-            else InspectedObjectiveSourceRef.from_mapping(item)
-            if isinstance(item, Mapping)
-            else None
-        )
-        if record is None:
-            continue
-        identity = (record.source_kind, record.source_ref)
-        if identity in seen:
-            raise ValueError(f"duplicate inspected Source: {record.source_kind}/{record.source_ref}")
-        seen.add(identity)
-        records.append(record)
-    return tuple(records)
-
 
 @dataclass(frozen=True)
 class PaperContribution:
@@ -1217,20 +586,12 @@ class PaperContribution:
 
     def __post_init__(self) -> None:
         if not all(
-            _text(value)
+            value
             for value in (self.collection_id, self.objective_id, self.document_id)
         ):
             raise ValueError("paper contribution requires scoped identity")
         if self.analysis_version < 1:
             raise ValueError("paper contribution requires positive analysis_version")
-        if self.analysis_status not in PAPER_CONTRIBUTION_STATUSES:
-            raise ValueError(
-                f"unsupported paper contribution status: {self.analysis_status}"
-            )
-        if self.relevance not in PAPER_RELEVANCE_VALUES:
-            raise ValueError(f"unsupported paper relevance: {self.relevance}")
-        if self.paper_role not in PAPER_ROLE_VALUES:
-            raise ValueError(f"unsupported paper role: {self.paper_role}")
         if self.analysis_status in {"excluded", "failed"} and not (
             self.exclusion_reason
             or self.warnings
@@ -1239,11 +600,14 @@ class PaperContribution:
             raise ValueError(
                 "excluded or failed paper contribution requires a reason or warning"
             )
-        object.__setattr__(
-            self,
-            "inspected_source_refs",
-            _inspected_objective_source_refs(self.inspected_source_refs),
-        )
+        seen_sources: set[tuple[str, str]] = set()
+        for source in self.inspected_source_refs:
+            identity = (source.source_kind, source.source_ref)
+            if identity in seen_sources:
+                raise ValueError(
+                    f"duplicate inspected Source: {source.source_kind}/{source.source_ref}"
+                )
+            seen_sources.add(identity)
         self._validate_evidence_accounting()
         if self.uninspected_source_count is not None and self.uninspected_source_count < 0:
             raise ValueError("uninspected source count cannot be negative")
@@ -1369,98 +733,6 @@ class PaperContribution:
             self.document_id,
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperContribution":
-        return cls(
-            collection_id=_text(payload.get("collection_id")) or "",
-            objective_id=_text(payload.get("objective_id")) or "",
-            analysis_version=_positive_int_or_none(payload.get("analysis_version"))
-            or 0,
-            document_id=_text(payload.get("document_id")) or "",
-            analysis_status=_choice(
-                payload.get("analysis_status"),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            relevance=_choice(
-                payload.get("relevance"), PAPER_RELEVANCE_VALUES, "uncertain"
-            ),
-            paper_role=_choice(
-                payload.get("paper_role"), PAPER_ROLE_VALUES, "uncertain"
-            ),
-            contribution_summary=_text(payload.get("contribution_summary")),
-            material_match=normalize_objective_terms(payload.get("material_match")),
-            changed_variables=normalize_objective_terms(
-                payload.get("changed_variables")
-            ),
-            measured_property_scope=normalize_objective_terms(
-                payload.get("measured_property_scope")
-            ),
-            test_environment_scope=normalize_objective_terms(
-                payload.get("test_environment_scope")
-            ),
-            exclusion_reason=_text(payload.get("exclusion_reason")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            evidence_disposition=_text(payload.get("evidence_disposition")),
-            routed_source_count=_non_negative_int_or_none(
-                payload.get("routed_source_count")
-            ),
-            extracted_source_count=_non_negative_int_or_none(
-                payload.get("extracted_source_count")
-            ),
-            comparable_evidence_count=_non_negative_int_or_none(
-                payload.get("comparable_evidence_count")
-            ),
-            failed_source_count=_non_negative_int_or_none(
-                payload.get("failed_source_count")
-            ),
-            uninspected_source_count=_non_negative_int_or_none(
-                payload.get("uninspected_source_count")
-            ),
-            evidence_disposition_reason=_text(
-                payload.get("evidence_disposition_reason")
-            ),
-            evidence_status_counts=_evidence_status_counts(
-                payload.get("evidence_status_counts")
-            ),
-            inspected_source_refs=_inspected_objective_source_refs(
-                payload.get("inspected_source_refs")
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "document_id": self.document_id,
-            "analysis_status": self.analysis_status,
-            "relevance": self.relevance,
-            "paper_role": self.paper_role,
-            "contribution_summary": self.contribution_summary,
-            "material_match": list(self.material_match),
-            "changed_variables": list(self.changed_variables),
-            "measured_property_scope": list(self.measured_property_scope),
-            "test_environment_scope": list(self.test_environment_scope),
-            "exclusion_reason": self.exclusion_reason,
-            "warnings": list(self.warnings),
-            "confidence": self.confidence,
-            "evidence_disposition": self.evidence_disposition,
-            "routed_source_count": self.routed_source_count,
-            "extracted_source_count": self.extracted_source_count,
-            "comparable_evidence_count": self.comparable_evidence_count,
-            "failed_source_count": self.failed_source_count,
-            "uninspected_source_count": self.uninspected_source_count,
-            "evidence_disposition_reason": self.evidence_disposition_reason,
-            "evidence_status_counts": {
-                status: count for status, count in self.evidence_status_counts
-            },
-            "inspected_source_refs": [
-                item.to_record() for item in self.inspected_source_refs
-            ],
-        }
-
 
 @dataclass(frozen=True)
 class ObjectiveEvidence:
@@ -1505,7 +777,7 @@ class ObjectiveEvidence:
 
     def __post_init__(self) -> None:
         if not all(
-            _text(value)
+            value
             for value in (
                 self.collection_id,
                 self.objective_id,
@@ -1516,28 +788,8 @@ class ObjectiveEvidence:
             )
         ):
             raise ValueError("objective evidence requires scoped identity and source")
-        if len(self.evidence_id) > 128:
-            raise ValueError("objective evidence ID exceeds 128 characters")
         if self.analysis_version < 1:
             raise ValueError("objective evidence requires positive analysis_version")
-        if self.source_kind not in SOURCE_KIND_VALUES:
-            raise ValueError(f"unsupported objective evidence source: {self.source_kind}")
-        if self.evidence_role not in EVIDENCE_ROLE_VALUES:
-            raise ValueError(f"unsupported objective evidence role: {self.evidence_role}")
-        if self.selection_status not in OBJECTIVE_EVIDENCE_STATES:
-            raise ValueError(
-                f"unsupported objective evidence state: {self.selection_status}"
-            )
-        if self.attribution_scope not in EVIDENCE_ATTRIBUTION_SCOPES:
-            raise ValueError(
-                f"unsupported objective evidence attribution: {self.attribution_scope}"
-            )
-        if self.resolution_status not in EVIDENCE_RESOLUTION_STATUS_VALUES:
-            raise ValueError(
-                f"unsupported evidence resolution status: {self.resolution_status}"
-            )
-        if self.origin not in EVIDENCE_ORIGINS:
-            raise ValueError(f"unsupported objective evidence origin: {self.origin}")
         if self.source_analysis_version is not None and self.source_analysis_version < 1:
             raise ValueError("objective evidence source version must be positive")
         if self.supersedes_evidence_id == self.evidence_id:
@@ -1555,33 +807,37 @@ class ObjectiveEvidence:
         ):
             raise ValueError("system-generated evidence cannot contain authoring provenance")
         if self.origin == "agent_authored":
-            if not _text(self.created_by_user_id) or not _text(
-                self.created_by_tool_call_id
-            ):
+            if not self.created_by_user_id or not self.created_by_tool_call_id:
                 raise ValueError(
                     "agent-authored evidence requires user and tool-call provenance"
                 )
             if self.created_at is None:
                 raise ValueError("authored evidence requires creation time")
         elif self.origin != "system_generated":
-            if self.source_analysis_version is None or not _text(self.created_by_user_id):
+            if self.source_analysis_version is None or not self.created_by_user_id:
                 raise ValueError(
                     "authored evidence requires source version and authenticated creator"
                 )
             if self.created_at is None:
                 raise ValueError("authored evidence requires creation time")
-        if self.origin == "human_revised" and not _text(
-            self.supersedes_evidence_id
-        ):
+        if self.origin == "human_revised" and not self.supersedes_evidence_id:
             raise ValueError("revised evidence requires supersession lineage")
-        if self.selection_status == "failed" and not _text(self.failure_reason):
+        if self.selection_status == "failed" and not self.failure_reason:
             raise ValueError("failed objective evidence requires failure_reason")
         if self.selection_status == "extracted":
             if self.resolution_status not in {"resolved", "partial"}:
                 raise ValueError("extracted evidence must be resolved or partial")
             if not self._has_scientific_content():
                 raise ValueError("extracted evidence requires scientific content")
-        self._validate_attribution()
+        self._validate_attribution(
+            evidence_role=self.evidence_role,
+            selection_status=self.selection_status,
+            attribution_scope=self.attribution_scope,
+            has_reported_result=self.reported_result is not None,
+            comparison_comparable=(self.comparison.comparable if self.comparison else None),
+            comparison_axes=self.comparison.axis_names if self.comparison else (),
+            changed_variables=self.changed_variables,
+        )
 
     @property
     def key(self) -> tuple[str, str, int, str]:
@@ -1667,99 +923,6 @@ class ObjectiveEvidence:
             return "The Source reports an outcome without a source-local comparison."
         return self.selection_reason or "Relevant Source retained while same-paper context is needed."
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidence":
-        collection_id = _text(payload.get("collection_id")) or ""
-        objective_id = _text(payload.get("objective_id")) or ""
-        analysis_version = _positive_int_or_none(payload.get("analysis_version")) or 0
-        document_id = _text(payload.get("document_id")) or ""
-        source_kind = _choice(
-            payload.get("source_kind"), SOURCE_KIND_VALUES, "text_window"
-        )
-        source_ref = _text(payload.get("source_ref")) or ""
-        evidence_role = _choice(
-            payload.get("evidence_role"), EVIDENCE_ROLE_VALUES, "irrelevant"
-        )
-        reported_result_payload = payload.get("reported_result")
-        reported_result = (
-            ScientificResult.from_mapping(reported_result_payload)
-            if isinstance(reported_result_payload, Mapping)
-            else None
-        )
-        evidence_id = _text(payload.get("evidence_id")) or _scoped_id(
-            "oev",
-            collection_id,
-            objective_id,
-            analysis_version,
-            document_id,
-            source_kind,
-            source_ref,
-            evidence_role,
-            payload.get("semantic_slot")
-            or (reported_result.outcome if reported_result is not None else None),
-        )
-        return cls(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-            evidence_id=evidence_id,
-            document_id=document_id,
-            source_kind=source_kind,
-            source_ref=source_ref,
-            source_excerpt=_text(payload.get("source_excerpt")) or "",
-            page_numbers=_positive_ints(payload.get("page_numbers")),
-            related_source_refs=_mapping_tuple(payload.get("related_source_refs")),
-            evidence_role=evidence_role,
-            selection_status=_choice(
-                payload.get("selection_status"),
-                OBJECTIVE_EVIDENCE_STATES,
-                "candidate",
-            ),
-            selection_reason=_text(payload.get("selection_reason")),
-            changed_variables=_scientific_variables(payload.get("changed_variables")),
-            comparison=(
-                ScientificComparison.from_mapping(payload["comparison"])
-                if isinstance(payload.get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=reported_result,
-            attribution_scope=_choice(
-                payload.get("attribution_scope"),
-                EVIDENCE_ATTRIBUTION_SCOPES,
-                "not_attributable",
-            ),
-            scientific_context=(
-                ScientificContext.from_mapping(payload["scientific_context"])
-                if isinstance(payload.get("scientific_context"), Mapping)
-                else ScientificContext()
-            ),
-            resolution_status=_choice(
-                payload.get("resolution_status"),
-                EVIDENCE_RESOLUTION_STATUS_VALUES,
-                "unknown",
-            ),
-            failure_reason=_text(payload.get("failure_reason")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            related_source_refs_explicit="related_source_refs" in payload,
-            origin=_choice(
-                payload.get("origin"), EVIDENCE_ORIGINS, "system_generated"
-            ),
-            source_analysis_version=_positive_int_or_none(
-                payload.get("source_analysis_version")
-            ),
-            supersedes_evidence_id=_text(payload.get("supersedes_evidence_id")),
-            superseded_by_evidence_id=_text(
-                payload.get("superseded_by_evidence_id")
-            ),
-            created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(
-                payload.get("created_by_tool_call_id")
-            ),
-            created_at=_datetime_or_none(payload.get("created_at")),
-            authoring_note=_text(payload.get("authoring_note")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-        )
-
     def select(
         self,
         *,
@@ -1771,7 +934,7 @@ class ObjectiveEvidence:
         return self._transition(
             "selected",
             evidence_role=evidence_role,
-            selection_reason=_text(reason),
+            selection_reason=reason,
         )
 
     def mark_extracted(self, **scientific_content: Any) -> "ObjectiveEvidence":
@@ -1782,15 +945,19 @@ class ObjectiveEvidence:
         return self._transition("extracted", **scientific_content)
 
     def reject(self, reason: str) -> "ObjectiveEvidence":
+        if not reason.strip():
+            raise ValueError("rejected evidence requires reason")
         return self._transition(
             "rejected",
-            selection_reason=_required_text(reason, "rejected evidence requires reason"),
+            selection_reason=reason,
         )
 
     def fail(self, reason: str) -> "ObjectiveEvidence":
+        if not reason.strip():
+            raise ValueError("failed evidence requires reason")
         return self._transition(
             "failed",
-            failure_reason=_required_text(reason, "failed evidence requires reason"),
+            failure_reason=reason,
         )
 
     def _transition(self, target: str, **changes: Any) -> "ObjectiveEvidence":
@@ -1809,85 +976,55 @@ class ObjectiveEvidence:
             or self.scientific_context.has_content
         )
 
-    def _validate_attribution(self) -> None:
-        result_role = self.evidence_role in {"direct_result", "contradictory_result"}
-        if self.selection_status == "extracted" and result_role:
-            if self.reported_result is None:
+    @staticmethod
+    def _validate_attribution(
+        *,
+        evidence_role: str,
+        selection_status: str,
+        attribution_scope: str,
+        has_reported_result: bool,
+        comparison_comparable: bool | None,
+        comparison_axes: Iterable[str],
+        changed_variables: tuple[ScientificVariable, ...],
+    ) -> None:
+        names = [item.name.casefold() for item in changed_variables]
+        if len(names) != len(set(names)):
+            raise ValueError("objective evidence changed variables must be unique")
+        result_role = evidence_role in {"direct_result", "contradictory_result"}
+        if selection_status == "extracted" and result_role:
+            if not has_reported_result:
                 raise ValueError("result evidence requires one reported result")
-        if not result_role and self.reported_result is not None:
+        if not result_role and has_reported_result:
             raise ValueError("context evidence cannot report an experimental result")
-        if not result_role and self.attribution_scope in {
+        if not result_role and attribution_scope in {
             "isolated_effect",
             "joint_effect",
         }:
             raise ValueError("context evidence cannot claim experimental attribution")
-        if self.comparison is not None and not self.comparison.comparable:
-            if self.attribution_scope != "not_attributable":
+        if comparison_comparable is False:
+            if attribution_scope != "not_attributable":
                 raise ValueError("incomparable evidence cannot be attributed")
-        if self.attribution_scope not in {"isolated_effect", "joint_effect"}:
+        if attribution_scope not in {"isolated_effect", "joint_effect"}:
             return
-        if self.comparison is None or not self.comparison.comparable:
+        if comparison_comparable is not True:
             raise ValueError("experimental attribution requires a comparable comparison")
-        variable_names = {item.name.casefold() for item in self.changed_variables}
-        axis_names = {item.casefold() for item in self.comparison.axis_names}
+        variable_names = {item.name.casefold() for item in changed_variables}
+        axis_names = {item.casefold() for item in comparison_axes}
         if variable_names != axis_names:
             raise ValueError("comparison axes must match all changed variables")
         if any(
             item.baseline_value is None or item.target_value is None
-            for item in self.changed_variables
+            for item in changed_variables
         ):
             raise ValueError("experimental attribution requires baseline and target values")
         if any(
-            item.baseline_value == item.target_value for item in self.changed_variables
+            item.baseline_value == item.target_value for item in changed_variables
         ):
             raise ValueError("experimental attribution requires changed variable values")
-        if self.attribution_scope == "isolated_effect" and len(variable_names) != 1:
+        if attribution_scope == "isolated_effect" and len(variable_names) != 1:
             raise ValueError("isolated effect requires exactly one changed variable")
-        if self.attribution_scope == "joint_effect" and len(variable_names) < 2:
+        if attribution_scope == "joint_effect" and len(variable_names) < 2:
             raise ValueError("joint effect requires at least two changed variables")
-
-    def to_record(self) -> dict[str, Any]:
-        record = {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "evidence_id": self.evidence_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "source_excerpt": self.source_excerpt,
-            "page_numbers": list(self.page_numbers),
-            "evidence_role": self.evidence_role,
-            "selection_status": self.selection_status,
-            "selection_reason": self.selection_reason,
-            "evidence_status": self.evidence_status,
-            "evidence_status_reason": self.evidence_status_reason,
-            "changed_variables": [item.to_record() for item in self.changed_variables],
-            "comparison": self.comparison.to_record() if self.comparison else None,
-            "reported_result": (
-                self.reported_result.to_record() if self.reported_result else None
-            ),
-            "attribution_scope": self.attribution_scope,
-            "scientific_context": self.scientific_context.to_record(),
-            "resolution_status": self.resolution_status,
-            "failure_reason": self.failure_reason,
-            "confidence": self.confidence,
-            "origin": self.origin,
-            "source_analysis_version": self.source_analysis_version,
-            "supersedes_evidence_id": self.supersedes_evidence_id,
-            "superseded_by_evidence_id": self.superseded_by_evidence_id,
-            "created_by_user_id": self.created_by_user_id,
-            "created_by_tool_call_id": self.created_by_tool_call_id,
-            "created_at": _datetime_record(self.created_at),
-            "authoring_note": self.authoring_note,
-        }
-        if self.warnings:
-            record["warnings"] = list(self.warnings)
-        if self.related_source_refs or self.related_source_refs_explicit:
-            record["related_source_refs"] = [
-                dict(item) for item in self.related_source_refs
-            ]
-        return record
 
 
 @dataclass(frozen=True)
@@ -1900,17 +1037,6 @@ class ObjectiveFactSet:
     study_dispositions: tuple[PaperStudyDisposition, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "document_inputs", tuple(self.document_inputs))
-        object.__setattr__(
-            self,
-            "research_objectives",
-            tuple(self.research_objectives),
-        )
-        object.__setattr__(
-            self,
-            "study_dispositions",
-            tuple(self.study_dispositions),
-        )
         document_ids = [item.document_id for item in self.document_inputs]
         if len(document_ids) != len(set(document_ids)):
             raise ValueError("objective discovery document inputs must be unique")
@@ -1997,7 +1123,7 @@ def build_research_objective_id(
     parent_objective_id: str | None = None,
     parent_analysis_version: int | None = None,
 ) -> str:
-    normalized_question = (_text(question) or "unspecified").lower()
+    normalized_question = (question.strip() or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
     if not slug:
         slug = "unspecified"
@@ -2029,8 +1155,8 @@ def build_research_objective_id(
     return f"obj_{slug[:72].strip('-')}_{digest}"
 
 
-def _is_question_shaped(value: Any) -> bool:
-    question = (_text(value) or "").lower()
+def _is_question_shaped(value: str) -> bool:
+    question = value.strip().lower()
     return bool(
         question.endswith(("?", "？"))
         or any(term in question for term in _QUESTION_SIGNAL_TERMS)
@@ -2041,19 +1167,11 @@ def is_question_shaped_objective(objective: ResearchObjective) -> bool:
     return _is_question_shaped(objective.question)
 
 
-def normalize_objective_terms(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, Mapping):
-        items = value.values()
-    elif isinstance(value, (list, tuple, set)):
-        items = value
-    else:
-        items = (value,)
+def normalize_objective_terms(values: Iterable[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     seen: set[str] = set()
-    for item in items:
-        text = _text(item)
+    for value in values:
+        text = value.strip()
         if not text:
             continue
         key = text.casefold()
@@ -2064,156 +1182,18 @@ def normalize_objective_terms(value: Any) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def normalize_objective_confidence(value: Any) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    if math.isnan(numeric):
-        return 0.0
-    return round(min(1.0, max(0.0, numeric)), 4)
 
 
-def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
-    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
-    return normalized if normalized in allowed else default
 
 
-def _text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
-def _required_text(value: Any, message: str) -> str:
-    text = _text(value)
-    if text is None:
-        raise ValueError(message)
-    return text
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(dict(item) for item in value if isinstance(item, Mapping))
 
 
-def _objective_derivation_basis(value: Any) -> tuple[dict[str, Any], ...]:
-    """Normalize scientific provenance attached to a derived Objective."""
-
-    if not isinstance(value, (list, tuple)):
-        return ()
-    records: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for item in value:
-        if not isinstance(item, Mapping):
-            raise ValueError("objective derivation basis entries must be mappings")
-        record = deepcopy(dict(item))
-        kind = _text(record.get("kind"))
-        reference_id = _text(record.get("reference_id"))
-        rationale = _text(record.get("rationale"))
-        if kind not in OBJECTIVE_DERIVATION_BASIS_KINDS:
-            raise ValueError(f"unsupported objective derivation basis kind: {kind}")
-        if reference_id is None or rationale is None:
-            raise ValueError(
-                "objective derivation basis requires reference_id and rationale"
-            )
-        identity = (kind, reference_id)
-        if identity in seen:
-            raise ValueError(
-                "objective derivation basis references must be unique"
-            )
-        seen.add(identity)
-        record["kind"] = kind
-        record["reference_id"] = reference_id
-        record["rationale"] = rationale
-        records.append(record)
-    return tuple(records)
-
-
-def _scientific_variables(value: Any) -> tuple[ScientificVariable, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    variables = tuple(
-        ScientificVariable.from_mapping(item)
-        for item in value
-        if isinstance(item, Mapping)
-    )
-    names = [item.name.casefold() for item in variables]
-    if len(names) != len(set(names)):
-        raise ValueError("objective evidence changed variables must be unique")
-    return variables
-
-
-def _positive_int_or_none(value: Any) -> int | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return None
-    return numeric if numeric > 0 else None
-
-
-def _non_negative_int_or_none(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        raise ValueError("paper evidence count must be an integer")
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("paper evidence count must be an integer") from exc
-    if numeric < 0:
-        raise ValueError("paper evidence count cannot be negative")
-    return numeric
-
-
-def _evidence_status_counts(value: Any) -> tuple[tuple[str, int], ...]:
-    if not isinstance(value, Mapping):
-        return ()
-    counts: list[tuple[str, int]] = []
-    for status, count in sorted(value.items(), key=lambda item: str(item[0])):
-        normalized_status = str(status or "").strip()
-        if not normalized_status:
-            continue
-        normalized_count = _non_negative_int_or_none(count)
-        if normalized_count is None:
-            raise ValueError("evidence status count must be a non-negative integer")
-        counts.append((normalized_status, normalized_count))
-    return tuple(counts)
-
-
-def _positive_ints(value: Any) -> tuple[int, ...]:
-    if not isinstance(value, (list, tuple, set)):
-        value = () if value is None else (value,)
-    result: list[int] = []
-    for item in value:
-        numeric = _positive_int_or_none(item)
-        if numeric is not None and numeric not in result:
-            result.append(numeric)
-    return tuple(result)
-
-
-def _datetime_or_none(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    text = _text(value)
-    if text is None:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"invalid datetime value: {text}") from exc
-
-
-def _datetime_record(value: datetime | None) -> str | None:
-    return value.isoformat() if value is not None else None
 
 
 def _stable_text(value: Any) -> str:
@@ -2228,3 +1208,165 @@ def _scoped_id(prefix: str, *parts: Any) -> str:
     payload = "|".join(_stable_text(part) for part in parts if part is not None)
     digest = sha1((payload or prefix).encode("utf-8")).hexdigest()[:20]
     return f"{prefix}_{digest}"
+
+
+def build_paper_research_relationship(
+    *,
+    document_id: str,
+    varied_factors: tuple[str, ...],
+    outcome: str,
+    source_refs: tuple[PaperResearchSourceRef, ...],
+    confidence: float,
+    parent_study_boundary: str | None = None,
+) -> PaperResearchRelationship:
+    identity = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'parent_study_boundary': parent_study_boundary,
+            'varied_factors': sorted((value.casefold() for value in varied_factors)),
+            'outcome': outcome.casefold(),
+            'source_refs': sorted(((item.source_kind, item.source_ref) for item in source_refs)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    relationship_id = f"relationship_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+    return PaperResearchRelationship(
+        relationship_id=relationship_id,
+        varied_factors=varied_factors,
+        outcome=outcome,
+        source_refs=source_refs,
+        confidence=confidence,
+    )
+
+
+def build_paper_research_scope(
+    *,
+    document_id: str,
+    design_type: str,
+    claim_scope: str,
+    experiment_label: str | None,
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    relationships: tuple[PaperResearchRelationship, ...],
+    confidence: float,
+) -> PaperResearchScope:
+    parent_study_boundary = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'design_type': design_type,
+            'claim_scope': claim_scope,
+            'experiment_label': experiment_label.casefold() if experiment_label else None,
+            'material_scope': sorted((value.casefold() for value in material_scope)),
+            'process_context': sorted((value.casefold() for value in process_context)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    relationships = tuple(build_paper_research_relationship(
+        document_id=document_id,
+        varied_factors=item.varied_factors,
+        outcome=item.outcome,
+        source_refs=item.source_refs,
+        confidence=item.confidence,
+        parent_study_boundary=parent_study_boundary,
+    ) for item in relationships)
+    study_id = build_paper_research_scope_id(
+        document_id=document_id,
+        design_type=design_type,
+        claim_scope=claim_scope,
+        experiment_label=experiment_label,
+        material_scope=material_scope,
+        process_context=process_context,
+        relationships=relationships,
+    )
+    return PaperResearchScope(
+        study_id=study_id,
+        document_id=document_id,
+        design_type=design_type,
+        claim_scope=claim_scope,
+        experiment_label=experiment_label,
+        material_scope=material_scope,
+        process_context=process_context,
+        relationships=relationships,
+        confidence=confidence,
+    )
+
+
+def build_paper_research_signal(
+    *,
+    document_id: str,
+    signal_type: str,
+    label: str,
+    variable_role: str,
+    design_type: str,
+    claim_scope: str,
+    experiment_label: str | None,
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    source_refs: tuple[PaperResearchSourceRef, ...],
+    confidence: float,
+    reason: str | None = None,
+) -> PaperResearchSignal:
+    identity = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'signal_type': signal_type,
+            'label': label.casefold(),
+            'variable_role': variable_role,
+            'design_type': design_type,
+            'claim_scope': claim_scope,
+            'experiment_label': experiment_label.casefold() if experiment_label else None,
+            'material_scope': sorted((value.casefold() for value in material_scope)),
+            'process_context': sorted((value.casefold() for value in process_context)),
+            'source_refs': sorted(((item.source_kind, item.source_ref) for item in source_refs)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    signal_id = f"signal_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+    return PaperResearchSignal(
+        signal_id=signal_id,
+        signal_type=signal_type,
+        label=label,
+        variable_role=variable_role,
+        design_type=design_type,
+        claim_scope=claim_scope,
+        experiment_label=experiment_label,
+        material_scope=material_scope,
+        process_context=process_context,
+        source_refs=source_refs,
+        confidence=confidence,
+        reason=reason,
+    )
+
+
+def build_paper_research_scope_id(
+    *,
+    document_id: str,
+    design_type: str,
+    claim_scope: str,
+    experiment_label: str | None,
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    relationships: tuple[PaperResearchRelationship, ...],
+) -> str:
+    identity = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'design_type': design_type,
+            'claim_scope': claim_scope,
+            'experiment_label': experiment_label.casefold() if experiment_label else None,
+            'material_scope': sorted((value.casefold() for value in material_scope)),
+            'process_context': sorted((value.casefold() for value in process_context)),
+            'relationship_ids': sorted((item.relationship_id for item in relationships)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    study_id = f"study_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+    return study_id

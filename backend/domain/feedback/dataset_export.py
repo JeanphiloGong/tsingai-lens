@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -48,37 +49,17 @@ class ExportMember:
             raise ValueError("export member identity is required")
         if self.revision_no < 1:
             raise ValueError("export member revision number must be positive")
-        if not isinstance(
-            self.content,
-            (SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent),
-        ):
-            raise ValueError("unsupported export member content")
         if not _is_sha256(self.content_digest) or not _is_sha256(self.input_digest):
             raise ValueError("export member digests must be sha256")
-        if not isinstance(self.provenance, dict):
-            raise ValueError("export member provenance must be an object")
         if self.content_digest != content_digest_for(self.content):
             raise ValueError("export member content digest does not match content")
-        object.__setattr__(self, "provenance", _copy(self.provenance))
+        object.__setattr__(self, "provenance", deepcopy(self.provenance))
 
     @property
     def row_key(self) -> str:
         return sha256(
             f"{self.sample_id}:{self.revision_id}".encode("utf-8")
         ).hexdigest()
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "sample_id": self.sample_id,
-            "source_case_id": self.source_case_id,
-            "revision_id": self.revision_id,
-            "revision_no": self.revision_no,
-            "content": self.content.to_record(),
-            "content_digest": self.content_digest,
-            "input_digest": self.input_digest,
-            "provenance": _copy(self.provenance),
-            "row_key": self.row_key,
-        }
 
 
 @dataclass(frozen=True)
@@ -88,15 +69,6 @@ class ExportIssue:
     code: str
     message: str
     question: str = ""
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "sample_id": self.sample_id,
-            "revision_id": self.revision_id,
-            "code": self.code,
-            "message": self.message,
-            "question": self.question,
-        }
 
 
 @dataclass(frozen=True)
@@ -129,11 +101,68 @@ class ExportPreview:
         created_at: str,
         expires_at: str,
     ) -> "ExportPreview":
+        member_values = []
+        for member in members:
+            content_value = member.content
+            if isinstance(content_value, SftRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "target": content_value.target,
+                }
+            elif isinstance(content_value, PreferenceRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "response_a": content_value.response_a,
+                    "response_b": content_value.response_b,
+                    "suggested_preference": content_value.suggested_preference,
+                    "rationale": content_value.rationale,
+                    "human_preference": content_value.human_preference,
+                }
+            else:
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "reference": content_value.reference,
+                    "criteria": list(content_value.criteria),
+                    "evaluation_mode": content_value.evaluation_mode,
+                }
+            member_values.append(
+                {
+                    "sample_id": member.sample_id,
+                    "source_case_id": member.source_case_id,
+                    "revision_id": member.revision_id,
+                    "revision_no": member.revision_no,
+                    "content": content_payload,
+                    "content_digest": member.content_digest,
+                    "input_digest": member.input_digest,
+                    "provenance": member.provenance,
+                    "row_key": member.row_key,
+                }
+            )
         digest_basis = {
-            "schema_versions": sorted({member.content.schema_version for member in members}),
+            "schema_versions": sorted(
+                {member.content.schema_version for member in members}
+            ),
             "dataset_id": dataset_id,
-            "members": [member.to_record() for member in members],
-            "issues": [issue.to_record() for issue in issues],
+            "members": (member_values),
+            "issues": [
+                {
+                    "sample_id": issue.sample_id,
+                    "revision_id": issue.revision_id,
+                    "code": issue.code,
+                    "message": issue.message,
+                    "question": issue.question,
+                }
+                for issue in issues
+            ],
         }
         return cls(
             preview_id=preview_id,
@@ -144,19 +173,6 @@ class ExportPreview:
             created_at=created_at,
             expires_at=expires_at,
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "preview_id": self.preview_id,
-            "dataset_id": self.dataset_id,
-            "requested_count": self.requested_count,
-            "exportable_count": self.exportable_count,
-            "issues": [issue.to_record() for issue in self.issues],
-            "members": [member.to_record() for member in self.members],
-            "preview_digest": self.preview_digest,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -186,8 +202,6 @@ class DatasetExport:
             raise ValueError("export identity is required")
         if self.export_no < 1:
             raise ValueError("export number must be positive")
-        if self.schema_version not in EXPORT_SCHEMA_VERSIONS:
-            raise ValueError("unsupported export schema version")
         for digest in (
             self.preview_digest,
             self.member_digest,
@@ -205,30 +219,13 @@ class DatasetExport:
             raise ValueError("export provenance digest does not match provenance")
         if self.manifest_digest != digest_for_value(self.manifest):
             raise ValueError("export manifest digest does not match manifest")
-        object.__setattr__(self, "rows", tuple(_copy(row) for row in self.rows))
-        object.__setattr__(self, "provenance", tuple(_copy(row) for row in self.provenance))
-        object.__setattr__(self, "manifest", _copy(self.manifest))
+        object.__setattr__(self, "rows", tuple(deepcopy(row) for row in self.rows))
+        object.__setattr__(self, "provenance", tuple(deepcopy(row) for row in self.provenance))
+        object.__setattr__(self, "manifest", deepcopy(self.manifest))
 
     @property
     def row_count(self) -> int:
         return len(self.rows)
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "export_id": self.export_id,
-            "dataset_id": self.dataset_id,
-            "export_no": self.export_no,
-            "schema_version": self.schema_version,
-            "row_count": self.row_count,
-            "content_digest": self.content_digest,
-            "provenance_digest": self.provenance_digest,
-            "manifest_digest": self.manifest_digest,
-            "manifest": _copy(self.manifest),
-            "preview_id": self.preview_id,
-            "preview_digest": self.preview_digest,
-            "created_by": self.created_by,
-            "created_at": self.created_at,
-        }
 
 
 def member_digest(members: tuple[ExportMember, ...]) -> str:
@@ -274,10 +271,6 @@ def _digest(value: Any) -> str:
         "utf-8"
     )
     return sha256(encoded).hexdigest()
-
-
-def _copy(value: Any) -> Any:
-    return json.loads(json.dumps(value, ensure_ascii=False))
 
 
 def _is_sha256(value: str) -> bool:

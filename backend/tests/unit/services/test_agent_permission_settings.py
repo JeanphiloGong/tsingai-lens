@@ -1,14 +1,21 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
-from application.source.collection_service import CollectionService
+from application.source import collection_service
 from domain.chat.permissions import AUTO_ACTIONS
-from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.memory import MemoryCollectionRepository
+from exceptions import ResourceConflictException, ResourceNotFoundException
 
+
+from repositories.collection_repository import CollectionRepository
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+async def collection_owner(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_user
+
+    await seed_user(postgres_session_factory, "owner")
 
 
 @pytest.fixture
@@ -16,16 +23,21 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_collection_default_permission_round_trips_and_expands_all_actions(tmp_path) -> None:
-    service = CollectionService(
-        repository=MemoryCollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+async def test_collection_default_permission_round_trips_and_expands_all_actions(
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    service = collection_service
+    collection = await service.create_collection(
+        "Agent settings", owner_user_id="owner",
     )
-    collection = await service.create_collection("Agent settings", owner_user_id="owner")
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 
     saved = await service.set_agent_default_permission_for_user(
-        collection["collection_id"],
+        collection.collection.collection_id,
         "owner",
         mode="auto",
         actions=[],
@@ -35,20 +47,28 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     )
 
     assert saved["actions"] == sorted(AUTO_ACTIONS)
-    assert await service.get_agent_default_permission_for_user(
-        collection["collection_id"], "owner"
-    ) == saved
-
-
-async def test_collection_default_permission_can_be_persistent(tmp_path) -> None:
-    service = CollectionService(
-        repository=MemoryCollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+    assert (
+        await service.get_agent_default_permission_for_user(
+            collection.collection.collection_id, "owner"
+        )
+        == saved
     )
-    collection = await service.create_collection("Persistent Agent settings", owner_user_id="owner")
+
+
+async def test_collection_default_permission_can_be_persistent(
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    service = collection_service
+    collection = await service.create_collection(
+        "Persistent Agent settings", owner_user_id="owner",
+    )
 
     saved = await service.set_agent_default_permission_for_user(
-        collection["collection_id"],
+        collection.collection.collection_id,
         "owner",
         mode="auto",
         actions=["create_finding_version"],
@@ -57,43 +77,56 @@ async def test_collection_default_permission_can_be_persistent(tmp_path) -> None
     )
 
     assert saved["expires_at"] is None
-    assert await service.get_agent_default_permission_for_user(
-        collection["collection_id"], "owner"
-    ) == saved
-
-
-async def test_collection_default_permission_hides_collection_from_other_users(tmp_path) -> None:
-    service = CollectionService(
-        repository=MemoryCollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
-    )
-    collection = await service.create_collection("Private settings", owner_user_id="owner")
-
-    with pytest.raises(FileNotFoundError):
+    assert (
         await service.get_agent_default_permission_for_user(
-            collection["collection_id"], "other-user"
+            collection.collection.collection_id, "owner"
+        )
+        == saved
+    )
+
+
+async def test_collection_default_permission_hides_collection_from_other_users(
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    service = collection_service
+    collection = await service.create_collection(
+        "Private settings", owner_user_id="owner",
+    )
+
+    with pytest.raises(ResourceNotFoundException):
+        await service.get_agent_default_permission_for_user(
+            collection.collection.collection_id, "other-user"
         )
 
 
-async def test_collection_default_permission_rejects_stale_revision(tmp_path) -> None:
-    service = CollectionService(
-        repository=MemoryCollectionRepository(),
-        workspace=FileCollectionWorkspace(tmp_path / "collections"),
+async def test_collection_default_permission_rejects_stale_revision(
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+) -> None:
+    collection_service.CollectionRepo = CollectionRepository()
+    service = collection_service
+    collection = await service.create_collection(
+        "Concurrent settings", owner_user_id="owner",
     )
-    collection = await service.create_collection("Concurrent settings", owner_user_id="owner")
     expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
     await service.set_agent_default_permission_for_user(
-        collection["collection_id"],
+        collection.collection.collection_id,
         "owner",
         mode="read_only",
         actions=[],
         expires_at=None,
         expected_revision=0,
     )
-    with pytest.raises(ValueError, match="permission_revision_conflict"):
+    with pytest.raises(ResourceConflictException, match="permission_revision_conflict"):
         await service.set_agent_default_permission_for_user(
-            collection["collection_id"],
+            collection.collection.collection_id,
             "owner",
             mode="auto",
             actions=["create_finding_version"],

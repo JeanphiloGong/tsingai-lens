@@ -19,7 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from infra.persistence.postgres.base import Base
 
 
-class Document(Base):
+class DocumentORM(Base):
     __tablename__ = "documents"
     __table_args__ = (
         CheckConstraint("length(sha256) = 64", name="sha256_length"),
@@ -51,4 +51,4 @@ class Document(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-__all__ = ["Document"]
+__all__ = ["DocumentORM"]

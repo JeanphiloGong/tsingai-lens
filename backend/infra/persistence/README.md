@@ -1,6 +1,8 @@
-# Persistence Adapters
+# Persistence Infrastructure
 
-This node owns storage-specific repository implementations. The authoritative
+This node owns database connections, ORM tables, shared transactions, file
+workspaces, and object storage. Concrete SQL repositories live in
+[`repositories/`](../../repositories/README.md). The authoritative
 identity model is [`../../docs/architecture/persistence-model.md`](../../docs/architecture/persistence-model.md).
 
 ## Runtime Boundary
@@ -9,32 +11,46 @@ identity model is [`../../docs/architecture/persistence-model.md`](../../docs/ar
 - Object storage owns uploaded and extracted bytes.
 - Local output and cache paths are disposable scratch.
 - Alembic is the only runtime schema-change path.
-- Memory repositories exist only for isolated tests.
+- Test doubles live under `tests/support/`, outside runtime infrastructure.
 
-Maintained runtime composition uses one SQLAlchemy `AsyncEngine`, one
-`async_sessionmaker`, and explicit PostgreSQL repositories from `main.py`. Each
-operation creates a short task-local `AsyncSession`.
+`database.py` exposes the native `AsyncSessionLocal` factory with
+`expire_on_commit=False`. `main.py` creates one SQLAlchemy `AsyncEngine` during
+startup and calls `AsyncSessionLocal.configure(bind=engine)` before bootstrap.
+Imports do not create engines; startup failure and normal shutdown dispose the
+owned engine. The engine is available as `database.engine`; file resources are
+initialized as `collection_workspace.Workspace` and `object_store.Store` in
+their own modules. File-facing application functions reference these instances
+directly, while independent workers create and pass their own resources.
+The process uses one database binding, so overlapping runtimes
+cannot configure different databases in the same process.
+
+Standalone reads create a task-local session with `AsyncSessionLocal() as db`;
+writes add `db.begin()`. Application operations that publish several related
+records open one transaction and pass a required `db: AsyncSession` to all
+participants. No optional transaction scope or transaction factory wrapper is
+maintained. Test fixtures replace the factory at each consumer with an isolated
+native test factory, without rebinding a running application's factory.
 
 ## Current Aggregate Ownership
 
-- `PostgresCollectionRepository`: `Collection -> current Documents`, including
+- `CollectionRepository`: `Collection -> current Documents`, including
   file metadata and preparation state.
-- `PostgresPipelineRunRepository`: observable Collection- or Document-scoped
+- `PipelineRunRepository`: observable Collection- or Document-scoped
   execution and nested node telemetry in one row.
-- `PostgresSourceArtifactRepository`: the current Source aggregate for each
+- `SourceArtifactRepository`: the current Source aggregate for each
   Document, stored in the Source section of `document_preparations`.
-- `PostgresDocumentProfileRepository`: one current profile per Document,
+- `DocumentProfileRepository`: one current profile per Document,
   stored in `document_preparations.profile_json` with its own input fingerprint.
-- `PostgresPaperMapRepository`: reads and writes the embedded Paper Map fields
+- `PaperMapRepository`: reads and writes the embedded Paper Map fields
   on `document_preparations`, after a profile exists.
-- `PostgresObjectiveRepository`: Collection discovery fields, Objective records,
+- `ObjectiveRepository`: Collection discovery fields, Objective records,
   and analysis lifecycle metadata. Automatic scientific facts belong to the
   PaperExperiment, ObjectiveExperimentSelection, ComparisonGroup, and Finding
   repositories; authored snapshots remain in the analysis payload.
-- `PostgresChatRepository`: Agent sessions, messages, tool calls, embedded
+- `ChatRepository`: Agent sessions, messages, tool calls, embedded
   results, and approval decisions.
-- `PostgresFindingReviewRepository`, `PostgresExperimentPlanRepository`, and
-  `PostgresEvaluationRepository`: their named downstream records.
+- `FindingReviewRepository`, `ExperimentPlanRepository`, and
+  `EvaluationRepository`: their named downstream records.
 
 ## Objective Aggregate
 
@@ -60,9 +76,19 @@ artifact provenance. A profile without a known input fingerprint remains
 unversioned; a preparation row without a Source artifact is not a parsed Source.
 
 SQLAlchemy models own storage shape, domain records own scientific invariants,
-and Pydantic models own HTTP payloads. Repository contracts and their dedicated
-query results live together in
-[`application/repositories/`](../../application/repositories/README.md).
-Implementations return those results or domain objects, never ORM rows or HTTP
+and Pydantic models own HTTP payloads. Concrete repository classes, SQL,
+mappings and dedicated query results live together in
+[`repositories/`](../../repositories/README.md).
+Repositories return those results or domain objects, never ORM rows or HTTP
 response models. Do not add a generic repository, storage
 selector, compatibility wrapper, dual write, schema probe, or fallback store.
+
+SQLAlchemy table mappings use the `ORM` suffix (for example, `CollectionORM`
+and `ChatModelCallORM`). Domain values and repository results such as
+`Collection` and `StoredCollection` keep their existing names.
+
+Within `postgres/models/`, `chat.py` owns model-call audit mappings,
+`analysis_job.py` owns shared worker scheduling, `finding_review.py` owns expert
+Finding feedback and curation, and `experiment_plan.py` owns experiment plans.
+Feedback outcomes remain in `feedback.py`; evaluation lineage stays in
+`evaluation.py`. Moving a mapping does not change its SQL table.

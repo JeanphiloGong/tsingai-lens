@@ -2592,9 +2592,69 @@ test.describe('page interaction audit', () => {
 
 		await expect(page.getByRole('banner')).toBeVisible();
 		expect(await visibleElementsFitViewport(page, 'header.site-header')).toBe(true);
-		expect(await visibleElementsFitViewport(page, '.global-search')).toBe(true);
+		await expect(page.getByRole('textbox', { name: 'Global search', exact: true })).toHaveCount(0);
 		expect(await visibleElementsFitViewport(page, '.header-actions')).toBe(true);
 		expect(await visibleElementsFitViewport(page, '.header-actions button')).toBe(true);
+	});
+
+	test('language preference updates document language and restores focus', async ({ page }) => {
+		await page.goto('/');
+		await expect(page.locator('.collections-table')).toContainText('316L LPBF evidence set');
+		const trigger = page.locator('.lang-menu > button');
+		await trigger.click();
+		await page.locator('#language-options').getByRole('button', { name: '中文' }).click();
+		await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+		await expect(trigger).toBeFocused();
+		await trigger.click();
+		await expect(page.locator('#language-options button').last()).toHaveAttribute('aria-pressed', 'true');
+		await page.locator('#language-options').getByRole('button', { name: 'EN', exact: true }).click();
+		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+	});
+
+	test('create collection keeps the background inert and restores focus', async ({ page }) => {
+		await page.goto('/');
+		await expect(page.locator('.collections-table')).toContainText('316L LPBF evidence set');
+		const trigger = page.getByRole('button', { name: 'Create collection', exact: true });
+		await trigger.click();
+		const dialog = page.getByRole('dialog', { name: 'Create collection', exact: true });
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByLabel('Collection name', { exact: true })).toBeFocused();
+		await trigger.focus();
+		await expect(dialog.getByLabel('Collection name', { exact: true })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(dialog.locator('textarea')).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(dialog.getByRole('button', { name: 'Create', exact: true })).toBeFocused();
+		await page.keyboard.press('Escape');
+		await expect(dialog).not.toBeVisible();
+		await expect(trigger).toBeFocused();
+	});
+
+	test('narrow collection cards keep their actions reachable', async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 844 });
+		await page.goto('/');
+		await expect(page.locator('.collection-list-card').first()).toBeVisible();
+		expect(await visibleElementsFitViewport(page, '.collection-list-card')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.collection-list-card__actions a')).toBe(true);
+	});
+
+	test('collection navigation identifies the active route and exposes secondary destinations', async ({ page }) => {
+		await page.goto(`/collections/${collectionId}/objectives`);
+		await expect(page.getByRole('heading', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })).toBeVisible();
+		const nav = page.getByRole('navigation', { name: 'Collection navigation', exact: true });
+		await expect(nav.getByRole('link', { name: 'Objectives', exact: true })).toHaveAttribute('aria-current', 'page');
+		const more = nav.locator('summary');
+		await more.click();
+		const graph = nav.getByRole('link', { name: 'Evidence Map', exact: true });
+		await graph.focus();
+		await page.keyboard.press('Escape');
+		await expect(graph).not.toBeVisible();
+		await expect(more).toBeFocused();
+		await more.click();
+		await graph.click();
+		await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/graph$`));
 	});
 
 	test('mobile document reader exposes Source modes without clipping', async ({ page }) => {

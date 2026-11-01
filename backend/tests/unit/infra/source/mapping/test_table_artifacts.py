@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from infra.source.mapping.table_artifacts import (
     build_docling_header_paths,
     build_docling_header_row_count,
@@ -79,7 +81,8 @@ def test_docling_continuation_label_is_not_a_scientific_header_parent():
     assert build_docling_header_row_count(document_table) == 2
 
 
-def test_extract_pdf_table_visual_text_preserves_continuous_page_layout():
+@pytest.mark.parametrize("page_number", [1, 1.0, "1"])
+def test_extract_pdf_table_visual_text_preserves_continuous_page_layout(page_number):
     import fitz
 
     pdf = fitz.open()
@@ -97,7 +100,7 @@ def test_extract_pdf_table_visual_text_preserves_continuous_page_layout():
         b = 120
 
     table = SimpleNamespace(
-        prov=[SimpleNamespace(page_no=1, bbox=FakeBBox())],
+        prov=[SimpleNamespace(page_no=page_number, bbox=FakeBBox())],
     )
 
     visual_text = extract_pdf_table_visual_text(payload=payload, table=table)
@@ -106,6 +109,20 @@ def test_extract_pdf_table_visual_text_preserves_continuous_page_layout():
     assert "Specimens" in visual_text
     assert "as-SLM(100/" in visual_text
     assert "441.5" in visual_text
+
+
+@pytest.mark.parametrize("page_number", [0, -1, 1.5, None, "invalid"])
+def test_extract_pdf_table_visual_text_skips_invalid_page(page_number):
+    import fitz
+
+    with fitz.open() as pdf:
+        pdf.new_page()
+        payload = pdf.tobytes()
+    table = SimpleNamespace(
+        prov=[SimpleNamespace(page_no=page_number, bbox=SimpleNamespace())]
+    )
+
+    assert extract_pdf_table_visual_text(payload=payload, table=table) is None
 
 
 def test_pdf_table_visual_text_keeps_wrapped_label_block_together():

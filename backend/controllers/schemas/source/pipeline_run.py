@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Literal
+
+from application.pipeline.pipeline_run_service import document_preparation_error_message
+from repositories.pipeline_run_repository import PipelineRun, PipelineRunSummary
 
 from pydantic import BaseModel, Field
 
@@ -62,7 +66,78 @@ class PipelineRunListResponse(BaseModel):
     items: list[PipelineRunSummaryResponse] = Field(default_factory=list)
 
 
+def pipeline_run_response(run: PipelineRun | PipelineRunSummary) -> dict[str, Any]:
+    """Build the existing HTTP/SSE run shape from one domain run."""
+
+    if isinstance(run, PipelineRunSummary):
+        return _sanitize_preparation_errors(asdict(run))
+
+    return _sanitize_preparation_errors(
+        {
+            **{key: value for key, value in asdict(run).items() if key != "timestamps"},
+            "status": run.status.value,
+            "nodes": {
+                node.name: {
+                    **asdict(node),
+                    "dependencies": list(node.dependencies),
+                    "status": node.status.value,
+                    "errors": list(node.errors),
+                    "warnings": list(node.warnings),
+                    "stats": {
+                        "duration_ms": node.stats.duration_ms,
+                        "token_usage": (
+                            asdict(node.stats.token_usage)
+                            if node.stats.token_usage is not None
+                            else None
+                        ),
+                        "model_usage": [asdict(item) for item in node.stats.model_usage],
+                        "unreported_request_count": node.stats.unreported_request_count,
+                        "prompt_versions": dict(node.stats.prompt_versions),
+                    },
+                    "timestamps": {
+                        key: value
+                        for key, value in asdict(node.timestamps).items()
+                        if value is not None or key in ("started_at", "finished_at")
+                    },
+                }
+                for node in run.nodes
+            },
+            "errors": list(run.errors),
+            "warnings": list(run.warnings),
+            "stats": {
+                "duration_ms": run.stats.duration_ms,
+                "token_usage": (
+                    asdict(run.stats.token_usage)
+                    if run.stats.token_usage is not None
+                    else None
+                ),
+                "model_usage": [asdict(item) for item in run.stats.model_usage],
+                "unreported_request_count": run.stats.unreported_request_count,
+                "prompt_versions": dict(run.stats.prompt_versions),
+            },
+            "created_at": run.timestamps.created_at,
+            "updated_at": run.timestamps.updated_at,
+            "started_at": run.timestamps.started_at,
+            "finished_at": run.timestamps.finished_at,
+        }
+    )
+
+
+def _sanitize_preparation_errors(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload["pipeline_name"] != "document_preparation":
+        return payload
+    if payload["errors"]:
+        payload["errors"] = [
+            document_preparation_error_message(payload["current_node"])
+        ]
+    for name, node in payload.get("nodes", {}).items():
+        if node["errors"]:
+            node["errors"] = [document_preparation_error_message(name)]
+    return payload
+
+
 __all__ = [
+    "pipeline_run_response",
     "PipelineNodeResponse",
     "PipelineNodeStatus",
     "PipelineRunListResponse",

@@ -3,7 +3,8 @@
 	import { writable } from 'svelte/store';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { authState } from '../../../_shared/auth';
+	import { authState } from '../../../_shared/authState';
+
 	import { collections } from '../../../_shared/collections';
 	import { t } from '../../../_shared/i18n';
 	import {
@@ -55,7 +56,7 @@
 	$: collectionId = $page.params.id ?? '';
 	$: documentId = $page.params.document_id ?? '';
 	$: collectionName =
-		$collections.find((item) => item.id === collectionId)?.name || $t('collection.unknownName');
+		$collections.find((item) => item.collection_id === collectionId)?.name || $t('collection.unknownName');
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
 	$: currentOwner = `${userId}:${collectionId}`;
 	$: if (currentOwner !== owner) {

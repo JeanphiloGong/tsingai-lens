@@ -21,8 +21,12 @@ research process; they are not a substitute for understanding the question the
 researcher is trying to answer.
 
 <p align="center">
-  <img src="assets/readme/lens_overview.png" alt="Lens overview workflow" width="960">
+  <img src="assets/readme/lens_overview.png" alt="Lens research purpose: define a decision, investigate the available knowledge, compare evidence and conditions, and judge what is supported and what to investigate next" width="960">
 </p>
+
+The overview describes the research process Lens serves. Its current v1 focus
+is traceable cross-paper comparison; the interface is one way to support that
+work.
 
 ---
 
@@ -58,12 +62,10 @@ conditions are missing, and which judgments need review.
 The current workflow is:
 
 ```text
-Paper collection
-  -> document preparation and Source
-  -> Document Profile
-  -> researcher selects ready papers
-  -> optional Paper Map for navigation
-  -> research question and Objective
+Research question and intended decision
+  -> paper collection / research workspace
+  -> independent document preparation, Sources, and Document Profiles
+  -> explicit ready-paper selection and Objective scope confirmation
   -> source inspection
   -> PaperExperiment facts and source bindings
   -> comparison and Finding
@@ -87,6 +89,13 @@ The current product includes:
 - Finding review and source traceback
 - a collection-bound Research Agent for read-only investigation and
   reviewable drafts, with explicit approval for durable writes
+
+The proposed interface brings conversation, files, research objectives,
+comparisons, and Findings into one workspace. Papers belong directly to that
+workspace. Conversation helps form and investigate a question, while the
+research records remain accessible for review and reuse. This is an interface
+direction, not a claim that every proposed screen has shipped; the current
+Collection scope, explicit paper selection, and write approvals still apply.
 
 ## Research State
 
@@ -167,32 +176,34 @@ research pattern extensible to other experimental and technical domains.
 
 ## Longer-Term Direction
 
-The longer-term direction is a supervised research loop that can move from a
-research goal through existing knowledge, hypotheses, experiment choices, new
-observations, and updated decisions. The loop is deliberately incremental:
+The longer-term goal is a supervised research loop: start with a problem and
+the available knowledge, form a supported judgment, identify the important
+gaps, choose the next investigation, and use new observations to revise that
+judgment.
 
-```text
-Research problem and constraints
-              |
-              v
-Available knowledge and methods
-              |
-              v
-Source-grounded research state
-              |
-              v
-Judgment, uncertainty, and knowledge gap
-              |
-              v
-Next useful investigation or experiment
-              |
-              v
-New observation -> updated research state
-```
+Research knowledge should accumulate across that loop. Traceable facts,
+conditions, comparisons, and reviewed judgments should become reusable across
+questions and collections, supporting later structured retrieval and research
+tools for both researchers and agents.
+
+Verifiable tools and researcher-reviewed experiments could extend what Lens
+can investigate. Their inputs, methods, results, and failures must remain
+inspectable; a completed run alone does not establish a scientific conclusion.
+New observations should return to the research context with their conditions
+and uncertainty, so they can be assessed against the earlier evidence.
+
+<p align="center">
+  <img src="assets/readme/lens_roadmap.png" alt="Lens direction: prove traceable literature judgments, accumulate reusable research knowledge, and extend toward supervised tools, experiments, and feedback" width="960">
+</p>
 
 This is a future direction, not a claim that Lens already runs experiments or
 continues autonomously without review. The current v1 evidence and comparison
 workflow is the foundation that makes the future loop credible.
+
+The diagrams have editable sources in
+[`lens_overview.svg`](assets/readme/lens_overview.svg) and
+[`lens_roadmap.svg`](assets/readme/lens_roadmap.svg); the PNG files are their
+rendered README assets.
 
 ## Documentation
 

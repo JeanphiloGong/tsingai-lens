@@ -14,10 +14,16 @@ Objective analysis. It does not run a separate paper-fact extraction pipeline.
 
 ## Boundary
 
-Text and table facts are extracted by
-[`../objectives/analysis/source_extraction.py`](../objectives/analysis/source_extraction.py)
-for a confirmed Objective. The former text-window and table-batch mention
-contracts, complete fact bundle, and their benchmark have been removed.
+The confirmed Objective chain screens and routes Sources, builds a bounded
+Source bundle, and uses
+[`PaperExperimentExtractor`](../objectives/analysis/paper_experiment_extraction.py)
+to extract paper-reported experiments. The former text-window and table-batch
+mention contracts, complete fact bundle, and their benchmark have been removed.
+
+Provider-parse output can fall back to bounded JSON-text repair for malformed
+JSON, schema rejection, explicit output rejection, or output saturation.
+Authentication, transport failures, provider refusals, and programming errors
+propagate without a second format-repair request.
 
 Table repair changes parsed layout, not scientific values. It does not own
 Objective confirmation, versioned analysis, Finding synthesis, HTTP schemas,

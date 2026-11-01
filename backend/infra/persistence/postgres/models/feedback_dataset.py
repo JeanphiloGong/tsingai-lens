@@ -25,7 +25,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class FeedbackDatasetRow(Base):
+class FeedbackDatasetORM(Base):
     __tablename__ = "feedback_datasets"
     __table_args__ = (
         CheckConstraint(
@@ -61,7 +61,7 @@ class FeedbackDatasetRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackDatasetSampleRow(Base):
+class FeedbackDatasetSampleORM(Base):
     """Mutable sample identity pointing at immutable content revisions."""
 
     __tablename__ = "feedback_dataset_samples"
@@ -149,7 +149,7 @@ class FeedbackDatasetSampleRow(Base):
     )
 
 
-class FeedbackSampleRevisionRow(Base):
+class FeedbackSampleRevisionORM(Base):
     """Append-only task content and provenance for one sample."""
 
     __tablename__ = "feedback_sample_revisions"
@@ -212,7 +212,7 @@ class FeedbackSampleRevisionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackSampleActionRow(Base):
+class FeedbackSampleActionORM(Base):
     """One user operation and its idempotent result at submission time."""
 
     __tablename__ = "feedback_sample_actions"
@@ -249,7 +249,7 @@ class FeedbackSampleActionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackDatasetExportPreviewRow(Base):
+class FeedbackDatasetExportPreviewORM(Base):
     """Short-lived server-side member and issue snapshot used before publish."""
 
     __tablename__ = "feedback_export_previews"
@@ -274,7 +274,7 @@ class FeedbackDatasetExportPreviewRow(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackDatasetExportRow(Base):
+class FeedbackDatasetExportORM(Base):
     """Immutable model-facing rows and provenance for one published export."""
 
     __tablename__ = "feedback_dataset_exports"
@@ -330,7 +330,7 @@ class FeedbackDatasetExportRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class FeedbackDatasetExportMemberRow(Base):
+class FeedbackDatasetExportMemberORM(Base):
     """Stable relation from each frozen row to its confirmed revision."""
 
     __tablename__ = "feedback_export_members"
@@ -366,7 +366,7 @@ class FeedbackDatasetExportMemberRow(Base):
     provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
-class FeedbackDatasetMigrationRunRow(Base):
+class FeedbackDatasetMigrationRunORM(Base):
     """Audit record for one legacy feedback-dataset migration invocation."""
 
     __tablename__ = "feedback_dataset_migration_runs"
@@ -398,12 +398,12 @@ class FeedbackDatasetMigrationRunRow(Base):
 
 
 __all__ = [
-    "FeedbackDatasetRow",
-    "FeedbackDatasetSampleRow",
-    "FeedbackSampleRevisionRow",
-    "FeedbackSampleActionRow",
-    "FeedbackDatasetExportPreviewRow",
-    "FeedbackDatasetExportRow",
-    "FeedbackDatasetExportMemberRow",
-    "FeedbackDatasetMigrationRunRow",
+    "FeedbackDatasetORM",
+    "FeedbackDatasetSampleORM",
+    "FeedbackSampleRevisionORM",
+    "FeedbackSampleActionORM",
+    "FeedbackDatasetExportPreviewORM",
+    "FeedbackDatasetExportORM",
+    "FeedbackDatasetExportMemberORM",
+    "FeedbackDatasetMigrationRunORM",
 ]

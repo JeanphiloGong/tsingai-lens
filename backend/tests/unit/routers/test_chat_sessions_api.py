@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from application.chat import session_service as shared_chat_service
+
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
+from exceptions import ProjectException, ResourceConflictException
 
 try:
     from fastapi import HTTPException
@@ -16,14 +20,13 @@ from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
-from application.pipeline import PipelineRunService
-from application.repositories.chat_repository import ChatSessionSummary
-from controllers.chat import sessions as sessions_controller
+from application.pipeline import pipeline_run_service
+from controllers.chat import chat_session_routes as sessions_controller
 from controllers.chat.schemas import (
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatToolDecisionRequest,
-    ChatTurnRequest,
+    SendChatMessageRequest,
 )
 from domain.chat import (
     ChatMessage,
@@ -33,11 +36,10 @@ from domain.chat import (
     ToolPermissionMode,
     ToolRisk,
 )
-from infra.persistence.memory import (
-    MemoryObjectiveRepository,
-    MemoryPipelineRunRepository,
-)
 from main import create_app
+from repositories.chat_repository import ChatRepository, ChatSessionSummary
+from repositories.objective_repository import ObjectiveRepository
+from repositories.pipeline_run_repository import PipelineRunRepository
 
 
 class _Service:
@@ -100,10 +102,17 @@ class _Service:
     ):
         assert collection_id == "col-1"
         assert user_id == "user-1"
-        return (ChatSessionSummary(
-            session=self.session,
-            title=self.messages[0].content if self.messages else None,
-        ),)
+        return (
+            ChatSessionSummary(
+                session=self.session,
+                title=(
+                    self.messages[0].content.strip().split("\n", 1)[0].strip()[:160]
+                    or None
+                    if self.messages
+                    else None
+                ),
+            ),
+        )
 
     async def list_messages_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
@@ -111,21 +120,29 @@ class _Service:
 
     async def get_trajectory_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
-        return {"branches": [], "branch_draft": None, "running": False,
-                "messages": self.messages, "pending_approval": self.pending, "feedback": ()}
+        return {
+            "branches": [],
+            "branch_draft": None,
+            "running": False,
+            "messages": self.messages,
+            "pending_approval": self.pending,
+            "feedback": (),
+        }
 
     async def get_pending_approval_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
         return self.pending
 
-    async def post_message_for_user(
+    async def send_message(
         self,
         session_id: str,
         user_id: str,
         *,
         message: str,
+        model_connection_id: str | None = None,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
+        branch_revision: int | None = None,
     ) -> dict:
         await self.get_session_for_user(session_id, user_id)
         self.permission_mode = permission_mode
@@ -156,21 +173,25 @@ class _Service:
             "error_code": None,
         }
 
-    async def stream_message_for_user(
+    async def send_message_stream(
         self,
         session_id: str,
         user_id: str,
         *,
         message: str,
+        model_connection_id: str | None = None,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
+        branch_revision: int | None = None,
     ):
-        turn = await self.post_message_for_user(
+        turn = await self.send_message(
             session_id,
             user_id,
             message=message,
+            model_connection_id=model_connection_id,
             source_contexts=source_contexts,
             permission_mode=permission_mode,
+            branch_revision=branch_revision,
         )
 
         async def events():
@@ -191,7 +212,10 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         assert tool_call_id == "call-1"
         if arguments_digest != self.pending.arguments_digest:
-            raise ValueError("approval arguments digest does not match stored arguments")
+            raise ResourceConflictException(
+                "approval arguments digest does not match stored arguments",
+                data={"code": "chat_tool_decision_conflict"},
+            )
         assert decision == "approved"
         return {
             "status": "completed",
@@ -201,34 +225,66 @@ class _Service:
         }
 
 
-def _request(service: _Service, user_id: str = "user-1") -> SimpleNamespace:
+def _request(monkeypatch, service: _Service, user_id: str = "user-1") -> SimpleNamespace:
+    monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     return SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(chat_session_service=service)),
-        state=SimpleNamespace(current_user={"user_id": user_id}),
-        headers={},
+        state=SimpleNamespace(current_user={"user_id": user_id}), headers={}
     )
 
 
-def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
+def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat(monkeypatch) -> None:
     service = _Service()
-    request = _request(service)
+    request = _request(monkeypatch, service)
 
-    created = asyncio.run(
-        sessions_controller.create_chat_session(
-            ChatSessionCreateRequest(collection_id="col-1"),
-            request,
-        )
+    created = sessions_controller.ChatSessionResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.create_chat_session(
+                        payload=ChatSessionCreateRequest(collection_id="col-1"),
+                        user_id=request.state.current_user["user_id"],
+                    )
+                )
+            ).body
+        )["data"]
     )
-    read = asyncio.run(sessions_controller.get_chat_session("chat-1", request))
-    turn = asyncio.run(
-        sessions_controller.post_chat_message(
-            "chat-1",
-            ChatTurnRequest(message="你好"),
-            request,
-        )
+    read = sessions_controller.ChatSessionResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.get_chat_session(
+                        session_id="chat-1",
+                        user_id=request.state.current_user["user_id"],
+                    )
+                )
+            ).body
+        )["data"]
     )
-    messages = asyncio.run(
-        sessions_controller.list_chat_messages("chat-1", request)
+    turn = sessions_controller.ChatTurnResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.send_chat_message(
+                        session_id="chat-1",
+                        payload=SendChatMessageRequest(message="你好"),
+                        request=request,
+                        user_id=request.state.current_user["user_id"],
+                    )
+                )
+            ).body
+        )["data"]
+    )
+    messages = sessions_controller.ChatMessageListResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.list_chat_messages(
+                        session_id="chat-1",
+                        user_id=request.state.current_user["user_id"],
+                    )
+                )
+            ).body
+        )["data"]
     )
 
     assert created.session_id == "chat-1"
@@ -239,11 +295,20 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert messages.pending_approval.tool_call_id == "call-1"
 
 
-def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
-    response = asyncio.run(
-        sessions_controller.list_chat_sessions(
-            _request(_Service()), collection_id="col-1", limit=12, offset=0
-        )
+def test_chat_sessions_api_lists_owned_collection_sessions(monkeypatch) -> None:
+    response = sessions_controller.ChatSessionListResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.list_chat_sessions(
+                        user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
+                        collection_id="col-1",
+                        limit=12,
+                        offset=0,
+                    )
+                )
+            ).body
+        )["data"]
     )
 
     assert isinstance(response, ChatSessionListResponse)
@@ -264,37 +329,65 @@ def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
     ],
 )
 def test_chat_history_title_is_a_bounded_first_question(
-    question: str | None, title: str | None,
+    monkeypatch,
+    question: str | None,
+    title: str | None,
 ) -> None:
     service = _Service()
-    service.messages = () if question is None else (
-        ChatMessage.user(
-            message_id="question", session_id=service.session.session_id,
-            content=question, created_at="2026-08-19T00:00:01+00:00",
-        ),
+    service.messages = (
+        ()
+        if question is None
+        else (
+            ChatMessage.user(
+                message_id="question",
+                session_id=service.session.session_id,
+                content=question,
+                created_at="2026-08-19T00:00:01+00:00",
+            ),
+        )
     )
-    response = asyncio.run(sessions_controller.list_chat_sessions(
-        _request(service), collection_id="col-1", limit=12, offset=0,
-    ))
+    response = sessions_controller.ChatSessionListResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.list_chat_sessions(
+                        user_id=_request(monkeypatch, service).state.current_user["user_id"],
+                        collection_id="col-1",
+                        limit=12,
+                        offset=0,
+                    )
+                )
+            ).body
+        )["data"]
+    )
     assert response.items[0].title == title
 
 
-def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
+def test_chat_sessions_api_forwards_explicit_permission_mode(monkeypatch) -> None:
     service = _Service()
 
-    asyncio.run(
-        sessions_controller.post_chat_message(
-            "chat-1",
-            ChatTurnRequest(message="你好", permission_mode="none"),
-            _request(service),
-        )
+    sessions_controller.ChatTurnResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.send_chat_message(
+                        session_id="chat-1",
+                        payload=SendChatMessageRequest(
+                            message="你好", permission_mode="none"
+                        ),
+                        request=_request(monkeypatch, service),
+                        user_id=_request(monkeypatch, service).state.current_user["user_id"],
+                    )
+                )
+            ).body
+        )["data"]
     )
 
     assert service.permission_mode is ToolPermissionMode.NONE
 
 
 @pytest.mark.parametrize("count", [1, 3, 12])
-def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None:
+def test_chat_sessions_api_accepts_traceable_source_contexts(monkeypatch, count: int) -> None:
     service = _Service()
     source_context = {
         "resource_ref": {
@@ -315,22 +408,41 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
         "heading_path": "Results",
     }
 
-    turn = asyncio.run(
-        sessions_controller.post_chat_message(
-            "chat-1",
-            ChatTurnRequest(message="你好", source_contexts=[source_context] + [
-                {**source_context, "source_ref": f"methods-{index}", "resource_ref": {
-                    **source_context["resource_ref"], "resource_id": f"doc-1:methods-{index}"
-                }} for index in range(1, count)
-            ]),
-            _request(service),
-        )
+    turn = sessions_controller.ChatTurnResponse.model_validate(
+        json.loads(
+            (
+                asyncio.run(
+                    sessions_controller.send_chat_message(
+                        session_id="chat-1",
+                        payload=SendChatMessageRequest(
+                            message="你好",
+                            source_contexts=[source_context]
+                            + [
+                                {
+                                    **source_context,
+                                    "source_ref": f"methods-{index}",
+                                    "resource_ref": {
+                                        **source_context["resource_ref"],
+                                        "resource_id": f"doc-1:methods-{index}",
+                                    },
+                                }
+                                for index in range(1, count)
+                            ],
+                        ),
+                        request=_request(monkeypatch, service),
+                        user_id=_request(monkeypatch, service).state.current_user["user_id"],
+                    )
+                )
+            ).body
+        )["data"]
     )
 
     assert len(turn.messages[0].source_contexts) == count
     if count == 12:
         with pytest.raises(ValueError):
-            ChatTurnRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
+            SendChatMessageRequest(
+                message="Explain these blocks", source_contexts=[source_context] * 13
+            )
     assert turn.messages[0].source_contexts[0].document_id == "doc-1"
     assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
         {
@@ -344,69 +456,96 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
     )
 
 
-def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
-    with pytest.raises(HTTPException) as invalid:
-        asyncio.run(
-            sessions_controller.post_chat_message(
-                "chat-1",
-                ChatTurnRequest(message="forged source"),
-                _request(_Service()),
-            )
+def test_chat_sessions_api_maps_a_forged_source_context_to_422(monkeypatch) -> None:
+    with pytest.raises(ProjectException) as invalid:
+        sessions_controller.ChatTurnResponse.model_validate(
+            json.loads(
+                (
+                    asyncio.run(
+                        sessions_controller.send_chat_message(
+                            session_id="chat-1",
+                            payload=SendChatMessageRequest(message="forged source"),
+                            request=_request(monkeypatch, _Service()),
+                            user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
+                        )
+                    )
+                ).body
+            )["data"]
         )
 
-    assert invalid.value.status_code == 422
-    assert invalid.value.detail == {
+    assert invalid.value.code == 200100
+    assert (
+        invalid.value.message
+        == "selected Source quote is not contained in the canonical Source"
+    )
+    assert invalid.value.data == {
         "code": "chat_source_context_invalid",
-        "message": (
-            "selected Source quote is not contained in the canonical Source"
-        ),
     }
 
 
-def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
+def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict(monkeypatch) -> None:
     service = _Service()
-    with pytest.raises(HTTPException) as missing:
-        asyncio.run(
-            sessions_controller.get_chat_session(
-                "chat-1",
-                _request(service, "user-2"),
-            )
+    with pytest.raises(ProjectException) as missing:
+        sessions_controller.ChatSessionResponse.model_validate(
+            json.loads(
+                (
+                    asyncio.run(
+                        sessions_controller.get_chat_session(
+                            session_id="chat-1",
+                            user_id=_request(monkeypatch, service, "user-2").state.current_user[
+                                "user_id"
+                            ],
+                        )
+                    )
+                ).body
+            )["data"]
         )
-    assert missing.value.status_code == 404
-    assert missing.value.detail["code"] == "chat_session_not_found"
+    assert missing.value.code == 200201
+    assert missing.value.data["code"] == "chat_session_not_found"
 
-    with pytest.raises(HTTPException) as conflict:
-        asyncio.run(
-            sessions_controller.decide_chat_tool_call(
-                "chat-1",
-                "call-1",
-                ChatToolDecisionRequest(
-                    decision="approved",
-                    arguments_digest="0" * 64,
-                ),
-                _request(service),
-            )
+    with pytest.raises(ProjectException) as conflict:
+        sessions_controller.ChatTurnResponse.model_validate(
+            json.loads(
+                (
+                    asyncio.run(
+                        sessions_controller.decide_chat_tool_call(
+                            session_id="chat-1",
+                            tool_call_id="call-1",
+                            payload=ChatToolDecisionRequest(
+                                decision="approved", arguments_digest="0" * 64
+                            ),
+                            user_id=_request(monkeypatch, service).state.current_user["user_id"],
+                        )
+                    )
+                ).body
+            )["data"]
         )
-    assert conflict.value.status_code == 409
-    assert conflict.value.detail["code"] == "chat_tool_decision_conflict"
+    assert conflict.value.code == 200204
+    assert conflict.value.data["code"] == "chat_tool_decision_conflict"
 
 
-def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending() -> None:
+def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending(monkeypatch) -> None:
     service = _Service()
 
-    with pytest.raises(HTTPException) as conflict:
-        asyncio.run(
-            sessions_controller.post_chat_message(
-                "chat-1",
-                ChatTurnRequest(message="blocked"),
-                _request(service),
-            )
+    with pytest.raises(ProjectException) as conflict:
+        sessions_controller.ChatTurnResponse.model_validate(
+            json.loads(
+                (
+                    asyncio.run(
+                        sessions_controller.send_chat_message(
+                            session_id="chat-1",
+                            payload=SendChatMessageRequest(message="blocked"),
+                            request=_request(monkeypatch, service),
+                            user_id=_request(monkeypatch, service).state.current_user["user_id"],
+                        )
+                    )
+                ).body
+            )["data"]
         )
 
-    assert conflict.value.status_code == 409
-    assert conflict.value.detail == {
+    assert conflict.value.code == 200204
+    assert conflict.value.data == {
         "code": "chat_tool_approval_pending",
-        "message": "resolve the pending research action before sending another message",
         "tool_call_id": "call-1",
     }
 
@@ -424,28 +563,26 @@ class _AuthService:
 
 
 def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
-    collection_service,
+    monkeypatch, collection_service, *, postgres_session_factory
 ) -> None:
     service = _Service()
-    inert_pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
-    app = create_app(
-        auth_session_service=_AuthService(),
-        collection_service=collection_service,
-        pipeline_run_service=inert_pipeline_run_service,
-        source_artifact_repository=object(),
-        document_profile_repository=object(),
-        paper_map_repository=object(),
-        objective_repository=MemoryObjectiveRepository(),
-        finding_review_repository=object(),
-        experiment_plan_repository=object(),
-        chat_session_service=service,
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    monkeypatch.setattr(
+        "application.auth.session_service.resolve_session",
+        _AuthService().resolve_session,
     )
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "main.build_database_engine",
+        lambda _settings: postgres_session_factory.kw["bind"],
+    )
+    app = create_app()
 
     with TestClient(app) as client:
-        assert client.post(
-            "/api/v1/chat-sessions",
-            json={"collection_id": "col-1"},
-        ).status_code == 401
+        monkeypatch.setattr(shared_chat_service, "ChatService", service)
+        response = client.post("/api/v1/chat-sessions", json={"collection_id": "col-1"})
+        assert response.status_code == 200
+        assert response.json()["code"] == 200301
 
         client.cookies.set("lens_session", "browser-session")
         created = client.post(
@@ -457,30 +594,30 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
             json={"message": "你好"},
         )
 
-    assert created.status_code == 201
-    assert created.json()["session_id"] == "chat-1"
+    assert created.status_code == 200
+    assert created.json()["data"]["session_id"] == "chat-1"
     assert turn.status_code == 200
-    assert turn.json()["status"] == "completed"
+    assert turn.json()["data"]["status"] == "completed"
 
 
 def test_chat_message_route_streams_text_then_the_persisted_turn(
-    collection_service,
+    monkeypatch, collection_service, *, postgres_session_factory
 ) -> None:
     service = _Service()
-    app = create_app(
-        auth_session_service=_AuthService(),
-        collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
-        source_artifact_repository=object(),
-        document_profile_repository=object(),
-        paper_map_repository=object(),
-        objective_repository=MemoryObjectiveRepository(),
-        finding_review_repository=object(),
-        experiment_plan_repository=object(),
-        chat_session_service=service,
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    monkeypatch.setattr(
+        "application.auth.session_service.resolve_session",
+        _AuthService().resolve_session,
     )
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "main.build_database_engine",
+        lambda _settings: postgres_session_factory.kw["bind"],
+    )
+    app = create_app()
 
     with TestClient(app) as client:
+        monkeypatch.setattr(shared_chat_service, "ChatService", service)
         client.cookies.set("lens_session", "browser-session")
         response = client.post(
             "/api/v1/chat-sessions/chat-1/messages",
@@ -490,6 +627,102 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: text_delta\ndata: {\"content\":\"你好\"}" in response.text
+    assert 'event: text_delta\ndata: {"content":"你好"}' in response.text
     assert "event: turn\n" in response.text
     assert '"status":"completed"' in response.text
+
+
+def test_title_route_validates_input_and_hides_unowned_sessions(
+    monkeypatch, collection_service, *, postgres_session_factory
+) -> None:
+    import asyncio
+
+    from application.chat import ModelTurn
+    from tests.support.postgres import seed_collection
+    from tests.unit.application.test_chat_session_service import (
+        _Model,
+        _service,
+    )
+
+    asyncio.run(
+        seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+    )
+    repository = ChatRepository()
+    service = _service(_Model(ModelTurn(content="Answer")), repository)
+    session = asyncio.run(
+        service.create_session(collection_id="col-1", user_id="user-1")
+    )
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    monkeypatch.setattr(
+        "application.auth.session_service.resolve_session",
+        _AuthService().resolve_session,
+    )
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "main.build_database_engine",
+        lambda _settings: postgres_session_factory.kw["bind"],
+    )
+    app = create_app()
+    path = f"/api/v1/chat-sessions/{session.session_id}/title"
+    with TestClient(app) as client:
+        response = client.put(path, json={"title": "New title"})
+        assert response.status_code == 200
+        assert response.json()["code"] == 200301
+        client.cookies.set("lens_session", "browser-session")
+        for title in (
+            "",
+            "   ",
+            "x" * 161,
+            "line\nbreak",
+            "\nTitle",
+            "Title\r",
+            "nul\x00title",
+        ):
+            response = client.put(path, json={"title": title})
+            assert response.status_code == 200
+            assert response.json()["code"] == 200100
+        bounded = client.put(path, json={"title": " " + "x" * 160 + " "})
+        assert bounded.status_code == 200
+        assert bounded.json()["data"]["title"] == "x" * 160
+        renamed = client.put(path, json={"title": "  IN718 comparison  "})
+        assert renamed.status_code == 200
+        assert renamed.json()["data"]["title"] == "IN718 comparison"
+        assert (
+            client.get(path.removesuffix("/title")).json()["data"]["title"]
+            == "IN718 comparison"
+        )
+        response = client.put(
+            "/api/v1/chat-sessions/missing/title", json={"title": "Other"}
+        )
+        assert response.status_code == 200
+        assert response.json()["code"] == 200201
+
+
+@pytest.mark.parametrize("known", [True, False])
+def test_started_chat_stream_reports_safe_error_events(known):
+    async def events():
+        yield {"type": "text_delta", "content": "Evidence already read."}
+        if known:
+            raise ResourceConflictException("The response changed.", data={"code": "chat_response_changed"})
+        raise RuntimeError("private provider diagnostic")
+
+    async def collect():
+        return [item async for item in sessions_controller._chat_event_stream(events())]
+
+    output = asyncio.run(collect())
+    assert '"content":"Evidence already read."' in output[0]
+    assert output[1].startswith("event: error\n")
+    assert ("chat_response_changed" if known else "chat_stream_failed") in output[1]
+    assert "private provider diagnostic" not in output[1]
+
+
+def test_started_chat_stream_preserves_cancellation():
+    async def events():
+        yield {"type": "text_delta", "content": "Evidence already read."}
+        raise asyncio.CancelledError()
+
+    async def collect():
+        return [item async for item in sessions_controller._chat_event_stream(events())]
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(collect())

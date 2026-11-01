@@ -37,10 +37,9 @@ vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
 
-function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
-	return new Response(JSON.stringify(body), {
-		status,
-		statusText,
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
+		status: 200,
 		headers: { 'Content-Type': 'application/json' }
 	});
 }
@@ -322,7 +321,7 @@ describe('collections/[id]/graph/+page.svelte', () => {
 				}
 				return jsonResponse(map);
 			}
-			return jsonResponse({ detail: `unexpected request: ${url.pathname}` }, 404, 'Not Found');
+			return jsonResponse({}, 200201, `unexpected request: ${url.pathname}`);
 		});
 	});
 

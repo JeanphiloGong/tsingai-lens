@@ -1,4 +1,5 @@
 """Acceptance probes against the actual Lens checkout after v2 edits."""
+from application.chat.capabilities import published_findings
 
 import pytest
 from types import SimpleNamespace
@@ -41,10 +42,10 @@ async def test_real_finding_handler_checks_collection_before_loading_records():
 
     collection = SimpleNamespace(get_collection_for_user=AsyncMock(side_effect=PermissionError()))
     analysis = SimpleNamespace(get_finding=AsyncMock())
-    handler = InspectPublishedFindingCapability(
-        collection_service=collection, objective_analysis_service=analysis,
-        finding_feedback_service=SimpleNamespace(),
-    )
+    published_findings.collection_service = collection
+    published_findings.objective_analysis_service = analysis
+    published_findings.finding_feedback_service = SimpleNamespace()
+    handler = InspectPublishedFindingCapability()
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall("inspect_published_finding", {
             "objective_id": "objective-1", "finding_id": "finding-2",

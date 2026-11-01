@@ -4,13 +4,16 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
-	import { authState } from '../../../_shared/auth';
+	import { errorMessage, getApiErrorReason, isApiErrorCode } from '../../../_shared/api';
+	import { authState } from '../../../_shared/authState';
+
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
+		fetchModelConnections,
 		deleteChatSession,
 		setChatSessionPin,
+		setChatSessionTitle,
 		listChatSessions,
 		branchChatMessage,
 		clearPendingChatSourceContexts,
@@ -30,7 +33,6 @@
 		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatProgress,
-		type ChatExecutionPlan,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
 		type ChatSession,
@@ -38,7 +40,8 @@
 		type ChatToolCall,
 		type ChatTurn,
 		type ChatTree,
-		type ChatTreeNode
+		type ChatTreeNode,
+		type ModelConnectionChoice
 	} from '../../../_shared/chatSessions';
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
@@ -50,7 +53,6 @@
 	import {
 		getChatSessionActivity,
 		getModelServiceErrorKey,
-		getTurnRecoveryState,
 		type ChatSessionActivity
 	} from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
@@ -67,7 +69,8 @@
 		ArrowRight,
 		Pin,
 		PinOff,
-		ChevronDown
+		ChevronDown,
+		Check
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -77,7 +80,7 @@
 	export let onSourcesChanged: () => void = () => {};
 	export let onBusyChange: (busy: boolean) => void = () => {};
 	$: onBusyChange(
-		loading || sending || deciding || revising || running || Boolean(recoveringCallId)
+		loading || sending || deciding || revising || running || Boolean(recoveringCallId || recoveryError)
 	);
 	let showHistory = false;
 	let showTree = false;
@@ -116,6 +119,7 @@
 	let revisionRequest: { key: string; id: string } | null = null;
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
+	let retryableDecision: ChatToolCall | null = null;
 	let permissionsPanel: { openPanel: () => void } | null = null;
 	let history: StoredChatSession[] = [];
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
@@ -129,23 +133,39 @@
 	let historyPageError = false;
 	let historyNeedsRefresh = false;
 	let pinningSessionId = '';
+	let renamingSessionId = '';
+	let renameDraft = '';
+	let renameSaving = false;
+	let renameError = '';
+	let renameDialog: HTMLDialogElement;
+	$: renameInvalid = !renameDraft.trim() || Array.from(renameDraft.trim()).length > 160 || /[\r\n\x00]/.test(renameDraft);
 	let loading = false;
 	let sending = false;
 	let submitting = false;
 	let deletingSessionId = '';
 	$: sessionNavigationDisabled =
-		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId);
+		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId) || renameSaving;
 	let progress: ChatProgress | null = null;
-	let settledExecutionPlan: ChatExecutionPlan | null = null;
+	let settledTurn: ChatTurn | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
+	let modelConnections: ModelConnectionChoice[] = [];
+	let selectedModelConnectionId = '';
+	let modelPicker: HTMLDetailsElement | null = null;
+	$: selectedModelConnectionName = modelConnections.find(
+		(item) => item.connection_id === selectedModelConnectionId
+	)?.display_name ?? '';
+	let modelConnectionsOwner = '';
+	let modelConnectionsLoading = false;
+	let modelConnectionsError = '';
+	let modelConnectionsController: AbortController | null = null;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
 	let error = '';
 	let notice = '';
-	let turnRecovery: ReturnType<typeof getTurnRecoveryState> = null;
+	let turnRequestError = '';
 	let input = '';
 	let appliedReviewKey = '';
 	let pendingSourceContexts: ChatSourceContext[] = [];
@@ -157,6 +177,7 @@
 	let recoveryLoading = false;
 	let recoveryError = '';
 	let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+	let titleTimer: ReturnType<typeof setTimeout> | undefined;
 
 	let sessionGeneration = 0;
 	let sessionController: AbortController | null = null;
@@ -165,8 +186,10 @@
 
 	onDestroy(() => {
 		destroyed = true;
+		modelConnectionsController?.abort();
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
+		clearTimeout(titleTimer);
 		sessionController?.abort();
 		updatesController?.abort();
 		treeController?.abort();
@@ -185,17 +208,24 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
+	$: if (browser && userId !== modelConnectionsOwner) {
+		modelConnectionsOwner = userId;
+		modelConnectionsController?.abort();
+		modelConnections = [];
+		selectedModelConnectionId = '';
+		modelConnectionsLoading = false;
+		modelConnectionsError = '';
+		if (userId) void loadModelConnections();
+	}
 	$: if (sourceContextVersion && userId && collectionId) {
 		refreshPendingSources();
 	}
 	$: collectionName = userId
-		? ($collections.find((item) => item.id === collectionId)?.name?.trim() ?? '')
+		? ($collections.find((item) => item.collection_id === collectionId)?.name?.trim() ?? '')
 		: '';
 	$: conversationTitle =
-		messages
-			.find((message) => message.role === 'user')
-			?.content.trim()
-			.split('\n')[0] ?? '';
+		session?.title?.trim() ??
+			messages.find((message) => message.role === 'user')?.content.trim().split('\n')[0] ?? '';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: queryReviewFindingId = $page.url.searchParams.get('review_finding_id') ?? '';
@@ -323,7 +353,7 @@
 	function titleFromText(text: string) {
 		const firstLine = text.trim().split('\n')[0]?.trim() ?? '';
 		if (!firstLine) return $t('researchAgent.untitledSession');
-		return firstLine.length > 38 ? `${firstLine.slice(0, 38)}...` : firstLine;
+		return firstLine.length > 160 ? `${firstLine.slice(0, 160)}...` : firstLine;
 	}
 
 	function titleFromMessages(nextMessages: ChatMessage[]) {
@@ -340,7 +370,7 @@
 			{
 				session_id: nextSession.session_id,
 				title:
-					title ||
+					nextSession.title || title ||
 					(messages.some((message) => message.role === 'user')
 						? titleFromMessages(messages)
 						: previous?.title || $t('researchAgent.untitledSession')),
@@ -351,6 +381,28 @@
 			},
 			...existing
 		]);
+	}
+
+	async function refreshSessionTitle(attempt = 0) {
+		clearTimeout(titleTimer);
+		if (!session || session.title) return;
+		const sessionId = session.session_id;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		const historyRequest = historyGeneration;
+		try {
+			const saved = await fetchChatSession(sessionId, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId) || session?.session_id !== sessionId ||
+				historyRequest !== historyGeneration || session.title) return;
+			if (!saved.title) {
+				if (attempt < 24) titleTimer = setTimeout(() => void refreshSessionTitle(attempt + 1), 2000);
+				return;
+			}
+			session = { ...session, title: saved.title };
+			upsertHistory(session);
+		} catch {
+			// Optional title metadata must not hide an answer or prevent the next turn.
+		}
 	}
 
 	async function fetchServerHistory(
@@ -396,12 +448,8 @@
 			const previous = stored.find((entry) => entry.session_id === item.session_id);
 			const status: ChatSessionActivity =
 				item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
-			const title =
-				item.session_id === session?.session_id && messages.length
-					? titleFromMessages(messages)
-					: item.title?.trim()
-						? titleFromText(item.title)
-						: previous?.title || $t('researchAgent.untitledSession');
+			const title = item.title?.trim() || (item.session_id === session?.session_id && messages.length
+				? titleFromMessages(messages) : previous?.title || $t('researchAgent.untitledSession'));
 			return {
 				session_id: item.session_id,
 				title,
@@ -532,12 +580,42 @@
 		}
 	}
 
+	function selectModelConnection(connectionId: string) {
+		selectedModelConnectionId = connectionId;
+		if (modelPicker) {
+			modelPicker.open = false;
+			modelPicker.querySelector('summary')?.focus();
+		}
+	}
+
+	async function loadModelConnections() {
+		modelConnectionsController?.abort();
+		const controller = new AbortController();
+		modelConnectionsController = controller;
+		const owner = userId;
+		modelConnectionsLoading = true;
+		modelConnectionsError = '';
+		try {
+			const result = await fetchModelConnections(controller.signal);
+			if (destroyed || owner !== userId || controller.signal.aborted) return;
+			modelConnections = result.items;
+			selectedModelConnectionId = result.items[0]?.connection_id ?? '';
+		} catch (err) {
+			if (!controller.signal.aborted && owner === userId && !destroyed) {
+				modelConnectionsError = errorMessage(err);
+			}
+		} finally {
+			if (modelConnectionsController === controller) modelConnectionsLoading = false;
+		}
+	}
+
 	async function loadSession(requestedSessionId = '') {
 		closeTree();
 		tree = null;
 		checkpointId = '';
 		const activeCollectionId = collectionId;
 		const generation = ++sessionGeneration;
+		clearTimeout(titleTimer);
 		clearTimeout(recoveryTimer);
 		clearTimeout(historyTimer);
 		historyLoading = false;
@@ -575,10 +653,11 @@
 		loading = false;
 		error = '';
 		notice = '';
-		turnRecovery = null;
+		turnRequestError = '';
 		pendingApproval = null;
+		retryableDecision = null;
 		progress = null;
-		settledExecutionPlan = null;
+		settledTurn = null;
 		pendingSourceContexts = [];
 		history = [];
 		if (!userId || !activeCollectionId) return;
@@ -603,7 +682,7 @@
 					if (nextSession.collection_id !== activeCollectionId) nextSession = null;
 				} catch (err) {
 					if (!isCurrentSession(generation, activeCollectionId)) return;
-					if (!isHttpStatusError(err, 404)) throw err;
+					if (!isApiErrorCode(err, 200201)) throw err;
 					nextSession = null;
 					clearStoredSessionId();
 					writeHistory(readHistory().filter((item) => item.session_id !== storedSessionId));
@@ -615,7 +694,6 @@
 				nextSession = await createChatSession(activeCollectionId, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				createdSession = true;
-				messages = [];
 			} else {
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
@@ -652,6 +730,7 @@
 			session = null;
 			messages = [];
 			pendingApproval = null;
+			retryableDecision = null;
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) {
 				loading = false;
@@ -662,13 +741,18 @@
 
 	function scheduleRecovery() {
 		clearTimeout(recoveryTimer);
+		if ((responseSnapshot && responseSnapshot.status !== 'running') || settledTurn) {
+			recoveringCallId = null;
+			return;
+		}
 		const completed = new Set(messages.map((message) => message.tool_result?.tool_call_id));
 		recoveringCallId =
 			messages
 				.flatMap((message) => message.tool_calls)
 				.find(
 					(call) =>
-						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
+						call.tool_call_id !== pendingApproval?.tool_call_id &&
+						call.tool_call_id !== retryableDecision?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
 		if (
 			running &&
@@ -694,25 +778,12 @@
 		)
 			return;
 		responseSnapshot = snapshot;
-		settledExecutionPlan = snapshot.status === 'running' ? null : (snapshot.progress.execution_plan ?? null);
+		settledTurn = null;
+		running = snapshot.status === 'running';
+		recoveryError = '';
 		streamingText = snapshot.content;
 		progress = snapshot.progress;
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
-		turnRecovery = getTurnRecoveryState(snapshot);
-		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
-		else if (snapshot.status === 'failed')
-			error = turnErrorMessage(snapshot.error_code);
-		else if (turnRecovery && !['technicalFailure', 'permissionDenied'].includes(turnRecovery))
-			notice = recoveryDescription(turnRecovery);
-	}
-
-	function recoveryDescription(state: typeof turnRecovery) {
-		return state ? $t(`researchAgent.${state}Description`) : '';
-	}
-
-	function turnErrorMessage(errorCode: string | null | undefined) {
-		const key = getModelServiceErrorKey(errorCode);
-		return key ? $t(key) : $t('researchAgent.turnFailed');
 	}
 
 	function acceptTrajectory(trajectory: ChatTrajectory) {
@@ -724,12 +795,18 @@
 		running = Boolean(trajectory.running || trajectory.response?.status === 'running');
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
-		if (trajectory.response) acceptSnapshot(trajectory.response);
+		recoveryError = '';
+		turnRequestError = '';
+		retryableDecision = trajectory.retryable_decision ?? null;
+		if (trajectory.response) {
+			acceptSnapshot(trajectory.response);
+			running = responseSnapshot?.status === 'running';
+		}
 		else {
 			responseSnapshot = null;
-			settledExecutionPlan = null;
-			turnRecovery = null;
+			settledTurn = null;
 		}
+		if (!running) void refreshSessionTitle();
 	}
 
 	async function resumeResponse() {
@@ -765,7 +842,7 @@
 				recoveryError = $t('researchAgent.responseDisconnected');
 			}
 		} catch (err) {
-			if (current()) recoveryError = errorMessage(err);
+			if (current() && running) recoveryError = errorMessage(err);
 		} finally {
 			if (current()) {
 				updatesController = null;
@@ -775,7 +852,7 @@
 	}
 
 	async function refreshRecovery() {
-		if (!session || (!recoveringCallId && !running) || recoveryLoading) return;
+		if (!session || (!recoveringCallId && !running && !recoveryError) || recoveryLoading) return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		const activeSession = session;
@@ -863,6 +940,7 @@
 		session = null;
 		messages = [];
 		pendingApproval = null;
+		retryableDecision = null;
 		input = '';
 		await loadSession();
 	}
@@ -874,6 +952,7 @@
 		session = null;
 		messages = [];
 		pendingApproval = null;
+		retryableDecision = null;
 		await loadSession(sessionId);
 		if (preserveDraft && userId === owner && activeSessionId === sessionId) input = draft;
 	}
@@ -905,6 +984,47 @@
 		}
 	}
 
+	function beginRename(item: StoredChatSession) {
+		if (sessionNavigationDisabled) return;
+		renamingSessionId = item.session_id;
+		renameDraft = item.title;
+		renameError = '';
+		renameDialog.showModal();
+	}
+
+	function cancelRename() {
+		if (renameSaving) return;
+		renameDialog?.close();
+		renamingSessionId = '';
+		renameDraft = '';
+	}
+
+	async function saveRename() {
+		if (renameInvalid || renameSaving || !renamingSessionId) return;
+		const title = renameDraft.trim();
+		const targetId = renamingSessionId;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		renameSaving = true;
+		renameError = '';
+		historyGeneration += 1;
+		historyPageLoading = false;
+		try {
+			const saved = await setChatSessionTitle(targetId, title, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			historyGeneration += 1;
+			writeHistory(history.map((entry) => entry.session_id === targetId
+				? { ...entry, title: saved.title || title } : entry));
+			if (session?.session_id === targetId) session = { ...session, title: saved.title };
+			renameSaving = false;
+			cancelRename();
+		} catch (err) {
+			if (isCurrentSession(generation, ownerCollectionId)) renameError = errorMessage(err);
+		} finally {
+			renameSaving = false;
+		}
+	}
+
 	async function removeSession(sessionId: string) {
 		if (sessionNavigationDisabled || !browser) return;
 		const item = history.find((entry) => entry.session_id === sessionId);
@@ -929,6 +1049,7 @@
 			session = null;
 			messages = [];
 			pendingApproval = null;
+			retryableDecision = null;
 			await loadSession(remaining[0]?.session_id ?? '');
 		} catch (err) {
 			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
@@ -1009,7 +1130,8 @@
 			revising ||
 			running ||
 			pendingApproval ||
-			recoveringCallId
+			retryableDecision ||
+			(recoveringCallId || recoveryError)
 		)
 			return false;
 		const ownerCollectionId = collectionId;
@@ -1081,7 +1203,8 @@
 			deciding ||
 			running ||
 			pendingApproval ||
-			recoveringCallId
+			retryableDecision ||
+			(recoveringCallId || recoveryError)
 		)
 			return;
 		const isRevision = revisionSources !== undefined;
@@ -1098,6 +1221,8 @@
 			error = $t('researchAgent.paperScope.tooLong');
 			return;
 		}
+		const modelConnectionId = selectedModelConnectionId;
+		if (!modelConnectionId) return;
 		const activeSession = session;
 		const activeCollectionId = collectionId;
 		const generation = sessionGeneration;
@@ -1146,7 +1271,7 @@
 		};
 		messages = [...messages, optimisticMessage, streamingMessage];
 		responseSnapshot = null;
-		settledExecutionPlan = null;
+		settledTurn = null;
 		streamingText = '';
 		if (!isRevision) input = '';
 		sending = true;
@@ -1156,7 +1281,8 @@
 
 		error = '';
 		notice = '';
-		turnRecovery = null;
+		turnRequestError = '';
+		recoveryError = '';
 		const acknowledgeSubmission = () => {
 			if (!submitting) return;
 			submitting = false;
@@ -1200,7 +1326,8 @@
 					pendingText = '';
 					acceptTrajectory(trajectory);
 					acknowledgeSubmission();
-				}
+				},
+				modelConnectionId
 			);
 			if (!isCurrentSession(generation, activeCollectionId)) return;
 			cancelTextFrame();
@@ -1220,10 +1347,12 @@
 			if (receivedResponse?.status === 'running') {
 				responseSnapshot = { ...receivedResponse, content: streamingText };
 			}
+			let reconciled = false;
 			try {
 				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				acceptTrajectory(trajectory);
+				reconciled = true;
 				const persistedMessage = messages
 					.slice(previousMessageCount)
 					.find((message) => message.role === 'user' && message.content === text);
@@ -1238,13 +1367,16 @@
 				scheduleRecovery();
 			} catch {
 				if (!isCurrentSession(generation, activeCollectionId)) return;
-				messages = messages.filter(
-					(message) => ![optimisticId, streamingId].includes(message.message_id)
-				);
+				messages = messages.filter((message) => message.message_id !== streamingId);
+				if (!responseSnapshot && streamingText.trim())
+					messages = [...messages, { ...streamingMessage, content: streamingText }];
 				if (!isRevision) input = draft;
 			}
-			if (running) recoveryError = errorMessage(err);
-			else if (!error) error = errorMessage(err);
+			const key = getModelServiceErrorKey(getApiErrorReason(err));
+			if (key) turnRequestError = $t(key);
+			if ((!reconciled || running) && (!responseSnapshot || responseSnapshot.status === 'running'))
+				recoveryError = errorMessage(err);
+			else if (!responseSnapshot && !pendingApproval && !key) turnRequestError = errorMessage(err);
 		} finally {
 			cancelTextFrame();
 			signal?.removeEventListener('abort', cancelTextFrame);
@@ -1340,40 +1472,34 @@
 	) {
 		running = false;
 		responseSnapshot = null;
+		settledTurn = turn;
+		recoveryError = '';
 		const prior = localMessageIds.length
 			? messages.filter((message) => !localMessageIds.includes(message.message_id))
 			: messages;
 		const knownIds = new Set(prior.map((message) => message.message_id));
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
-		settledExecutionPlan = turn.execution_plan ?? null;
-		turnRecovery = getTurnRecoveryState(turn);
+		retryableDecision = null;
 		if (turn.status === 'rejected') {
 			notice = $t(rejectionNoticeKey(decidedToolName));
-		}
-		if (turn.status === 'failed') {
-			error = turnErrorMessage(turn.error_code);
-		}
-		if (
-			turn.status === 'completed' &&
-			turnRecovery &&
-			!['technicalFailure', 'permissionDenied'].includes(turnRecovery)
-		) {
-			notice = recoveryDescription(turnRecovery);
 		}
 		if (session) {
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
 			session = { ...session, updated_at: updatedAt };
 			upsertHistory(session, titleFromMessages(messages));
+			void refreshSessionTitle();
 		}
 	}
 
-	async function decide(decision: 'approved' | 'rejected') {
-		if (!session || !pendingApproval || deciding) return;
+	async function decide(
+		decision: 'approved' | 'rejected',
+		call: ChatToolCall | null = pendingApproval
+	) {
+		if (!session || !call || deciding) return;
 		const activeSession = session;
 		const generation = sessionGeneration;
 		const activeCollectionId = collectionId;
-		const call = pendingApproval;
 		deciding = true;
 		failedSessionId = null;
 		error = '';
@@ -1406,7 +1532,7 @@
 					!messages.some((message) => message.tool_result?.tool_call_id === call.tool_call_id)
 				) {
 					error = errorMessage(decisionError);
-					failedSessionId = activeSession.session_id;
+					failedSessionId = retryableDecision ? null : activeSession.session_id;
 				}
 			} else {
 				applyTurn(turn, [], call.name);
@@ -1418,6 +1544,12 @@
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) deciding = false;
 		}
+	}
+
+	async function retryDecision() {
+		const call = retryableDecision;
+		if (!call || (call.status !== 'approved' && call.status !== 'rejected')) return;
+		await decide(call.status, call);
 	}
 
 	function rejectionNoticeKey(toolName: string | null) {
@@ -1440,6 +1572,16 @@
 </script>
 
 <svelte:window
+	on:keydown={(event) => {
+		if (event.key === 'Escape' && modelPicker?.open && modelPicker.contains(event.target as Node)) {
+			event.preventDefault();
+			modelPicker.open = false;
+			modelPicker.querySelector('summary')?.focus();
+		}
+	}}
+	on:pointerdown={(event) => {
+		if (modelPicker?.open && !modelPicker.contains(event.target as Node)) modelPicker.open = false;
+	}}
 	on:focus={() => void refreshHistoryActivities()}
 	on:storage={(event) => {
 		if (event.key === historyStorageKey()) void refreshHistoryActivities();
@@ -1464,6 +1606,7 @@
 			onSwitchSession={switchSession}
 			onDeleteSession={removeSession}
 			onTogglePin={toggleSessionPin}
+			onRenameSession={(id) => { const item = history.find((entry) => entry.session_id === id); if (item) beginRename(item); }}
 			{pinningSessionId}
 			{historyHasMore}
 			{historyPageLoading}
@@ -1507,6 +1650,7 @@
 					{#each history as item (item.session_id)}
 						{@const activity = sessionActivities[item.session_id]}
 						<div class="embedded-history-item">
+
 							<button
 								class="embedded-history-select"
 								type="button"
@@ -1528,6 +1672,7 @@
 									</span>
 								{/if}
 							</button>
+							<button class="embedded-rename" type="button" disabled={sessionNavigationDisabled} aria-label={$t('researchAgent.renameSession')} title={$t('researchAgent.renameSession')} on:click={() => beginRename(item)}>{$t('researchAgent.renameSession')}</button>
 							<button
 								class="embedded-pin"
 								class:pinned={item.is_pinned}
@@ -1575,11 +1720,17 @@
 					sessionId={session.session_id}
 				/>{/key}
 		{/if}
-		{#if error || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
+		{#if retryableDecision && !checkpointId}
+			<div class="status status-notice decision-recovery" role="status" data-testid="decision-recovery">
+				<span>{$t(retryableDecision.status === 'approved' ? 'researchAgent.savedApprovalWaiting' : 'researchAgent.savedRejectionWaiting')}</span>
+				<button type="button" disabled={deciding || loading || running} on:click={retryDecision}>
+					{$t(retryableDecision.status === 'approved' ? 'researchAgent.retryApprovedDecision' : 'researchAgent.retryRejectedDecision')}
+				</button>
+			</div>
+		{/if}
+		{#if (error && session && !pendingApproval) || modelConnectionsError}
 			<div class="status status-error" role="alert">
-				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
-				{#if turnRecovery === 'permissionDenied'}<strong>{$t('researchAgent.permissionDenied')}</strong>{/if}
-				<span>{turnRecovery ? recoveryDescription(turnRecovery) : error}</span>
+				<span>{error || modelConnectionsError}</span>
 				{#if failedSessionId !== null}
 					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
 						{$t('researchAgent.retrySession')}
@@ -1589,16 +1740,8 @@
 		{/if}
 		{#if notice}
 			<div class="status status-notice" role="status">
-				{#if turnRecovery}<strong>{$t(`researchAgent.${turnRecovery}`)}</strong>{/if}
 				<span>{notice}</span>
 			</div>
-		{/if}
-		{#if turnRecovery && turnRecovery !== 'permissionDenied' && session && !checkpointId && !branchDraft && !running && !pendingApproval}
-			<button class="continue-research" type="button"
-				disabled={loading || sending || deciding || revising || Boolean(recoveringCallId)}
-				on:click={() => sendMessage($t('researchAgent.continueRequest'))}>
-				<ArrowRight size={16} aria-hidden="true" />{$t('researchAgent.continueResearch')}
-			</button>
 		{/if}
 		<MessageTimeline
 			{collectionId}
@@ -1607,7 +1750,7 @@
 			{branches}
 			running={!checkpointId && running}
 			revisionDisabled={revising ||
-				Boolean(checkpointId && (running || sending || pendingApproval || recoveringCallId))}
+				Boolean(checkpointId && (running || sending || pendingApproval || retryableDecision || recoveringCallId))}
 			onRevise={reviseMessage}
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
@@ -1617,7 +1760,13 @@
 			pendingApproval={checkpointId ? null : pendingApproval}
 			progress={checkpointId ? null : progress}
 			progressHistory={checkpointId ? [] : progressHistory}
-			executionPlan={checkpointId ? null : settledExecutionPlan}
+			settledTurn={checkpointId ? null : settledTurn}
+			requestError={checkpointId ? '' : turnRequestError}
+			approvalError={checkpointId ? '' : error}
+			loadError={!session && failedSessionId !== null ? error : ''}
+			onRetrySession={() => loadSession(failedSessionId ?? '')}
+			onContinue={session && !checkpointId && !branchDraft && !running && !pendingApproval && !retryableDecision
+				? () => sendMessage($t('researchAgent.continueRequest')) : undefined}
 			recoveringCallId={checkpointId ? null : recoveringCallId}
 			recoveryLoading={!checkpointId && recoveryLoading}
 			recoveryError={checkpointId ? '' : recoveryError}
@@ -1653,6 +1802,7 @@
 						running ||
 						deciding ||
 						Boolean(pendingApproval) ||
+						Boolean(retryableDecision) ||
 						Boolean(recoveringCallId)}
 					on:click={() =>
 						branchDraft && sendMessage(branchDraft.content, branchDraft.source_contexts)}
@@ -1667,6 +1817,8 @@
 				{input}
 				{sending}
 				disabled={!session ||
+					!selectedModelConnectionId ||
+					modelConnectionsLoading ||
 					loading ||
 					revising ||
 					running ||
@@ -1674,7 +1826,8 @@
 					sending ||
 					deciding ||
 					Boolean(pendingApproval) ||
-					Boolean(recoveringCallId)}
+					Boolean(retryableDecision) ||
+					Boolean(recoveringCallId || recoveryError)}
 				pendingSourceContexts={checkpointId ? [] : pendingSourceContexts}
 				hasExtraContext={!checkpointId && selectedPapers.length > 0}
 				onInput={handleComposerInput}
@@ -1684,6 +1837,32 @@
 				onRemovePendingSourceContexts={removePendingSourceContexts}
 				onClearPendingSourceContexts={clearPendingSources}
 			>
+				<details
+					slot="model-picker"
+					class="model-picker"
+					bind:this={modelPicker}
+					data-testid="model-connection-picker"
+					on:focusout={(event) => {
+						if (modelPicker && event.relatedTarget instanceof Node && !modelPicker.contains(event.relatedTarget)) modelPicker.open = false;
+					}}
+				>
+					<summary title={$t('researchAgent.modelConnectionLabel')}>
+						<span class="sr-only">{$t('researchAgent.modelConnectionLabel')}: </span>
+						<span class="model-picker-name">{selectedModelConnectionName || $t('researchAgent.modelConnectionLabel')}</span>
+						<ChevronDown size={14} aria-hidden="true" />
+					</summary>
+					<div class="model-picker-menu" role="group" aria-label={$t('researchAgent.modelConnectionLabel')}>
+						{#if !modelConnectionsLoading && !modelConnections.length}<p>{$t('researchAgent.modelConnectionEmpty')}</p>{/if}
+						<div class="model-picker-options">
+							{#each modelConnections as item (item.connection_id)}
+								<button type="button" disabled={modelConnectionsLoading} aria-pressed={item.connection_id === selectedModelConnectionId} on:click={() => selectModelConnection(item.connection_id)}>
+									<span>{item.display_name}</span>
+									{#if item.connection_id === selectedModelConnectionId}<Check size={15} aria-hidden="true" />{/if}
+								</button>
+							{/each}
+						</div>
+					</div>
+				</details>
 				{#if !checkpointId && pendingSourceContexts.length}
 					<label class="related-sources"
 						><input
@@ -1736,7 +1915,25 @@
 	/>
 {/if}
 
+<dialog bind:this={renameDialog} aria-labelledby="rename-title" on:cancel={(event) => { event.preventDefault(); cancelRename(); }}>
+	<form on:submit|preventDefault={saveRename}>
+		<h2 id="rename-title">{$t('researchAgent.renameSession')}</h2>
+		<label for="rename-input">{$t('researchAgent.renameInput')}</label>
+		<input id="rename-input" bind:value={renameDraft} disabled={renameSaving} aria-describedby="rename-help" aria-invalid={renameInvalid} />
+		<p id="rename-help">{$t('researchAgent.renameHelp')}</p>
+		{#if renameError}<p role="alert">{renameError}</p>{/if}
+		<button type="button" disabled={renameSaving} on:click={cancelRename}>{$t('researchAgent.cancelRename')}</button>
+		<button type="submit" disabled={renameInvalid || renameSaving}>{$t(renameSaving ? 'researchAgent.savingRename' : 'researchAgent.saveRename')}</button>
+	</form>
+</dialog>
+
 <style>
+	dialog { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; border: 1px solid var(--border-default); border-radius: 12px; padding: 24px; color: var(--text-primary); background: var(--surface-card); }
+	dialog::backdrop { background: rgb(0 0 0 / 35%); }
+	dialog input { display: block; width: 100%; box-sizing: border-box; padding: 10px; margin-top: 8px; }
+	dialog p { font-size: 13px; }
+	dialog button { padding: 8px 16px; margin-right: 8px; }
+
 	.checkpoint-bar {
 		display: flex;
 		align-items: center;
@@ -1854,7 +2051,6 @@
 
 	:global(.app-shell:has(.research-agent.standalone) .site-header),
 	:global(.app-shell:has(.research-agent.standalone) .site-footer),
-	:global(.app-shell:has(.research-agent.standalone) .bg-grid),
 	:global(
 		.collection-header:has(+ .collection-tabs + .collection-panel .research-agent.standalone)
 	),
@@ -1895,6 +2091,23 @@
 		background: var(--bg-page);
 	}
 
+	.model-picker { min-width: 0; max-width: 100%; }
+	.model-picker summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 8px; border-radius: 8px; color: var(--text-secondary); cursor: pointer; list-style: none; font-size: 13px; }
+	.model-picker summary::-webkit-details-marker { display: none; }
+	.model-picker summary:hover, .model-picker[open] summary { background: var(--bg-subtle); color: var(--text-primary); }
+	.model-picker-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.model-picker summary :global(svg) { flex: 0 0 auto; }
+	.model-picker .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+	.model-picker-menu { position: absolute; z-index: 30; right: 10px; bottom: calc(100% + 8px); width: min(280px, calc(100% - 20px)); box-sizing: border-box; padding: 8px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-card); color: var(--text-primary); }
+	.model-picker-options { display: grid; gap: 2px; max-height: 224px; overflow-y: auto; }
+	.model-picker-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+	.model-picker-menu button span { min-width: 0; overflow-wrap: anywhere; }
+	.model-picker-menu button :global(svg) { flex: 0 0 auto; }
+	.model-picker-menu button:hover { background: var(--bg-subtle); }
+	.model-picker-menu button[aria-pressed='true'] { background: var(--brand-soft); color: var(--brand-primary); }
+	.model-picker-menu p { margin: 4px 8px 10px; font-size: 13px; line-height: 1.5; }
+	.model-picker summary:focus-visible, .model-picker-menu button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
+	.model-picker-menu button:disabled { cursor: not-allowed; opacity: 0.55; }
 	.status {
 		width: min(calc(100% - 64px), 900px);
 		margin: 12px auto 0;
@@ -1903,22 +2116,6 @@
 		font-size: 13px;
 		overflow-wrap: anywhere;
 	}
-	.status strong { display: block; margin-bottom: 4px; }
-	.continue-research {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		align-self: center;
-		margin-top: 8px;
-		padding: 7px 12px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: var(--surface-card);
-		color: var(--text-primary);
-		cursor: pointer;
-	}
-	.continue-research:disabled { opacity: 0.5; cursor: default; }
-
 	.status-error {
 		display: flex;
 		flex-wrap: wrap;
@@ -1945,6 +2142,26 @@
 		background: var(--warning-bg);
 		color: var(--warning-text);
 	}
+	.decision-recovery {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.decision-recovery span { flex: 1 1 16rem; }
+	.decision-recovery button {
+		flex: 0 0 auto;
+		padding: 6px 10px;
+		border: 1px solid currentColor;
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+	}
+	.decision-recovery button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
+	.decision-recovery button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 	@media (prefers-reduced-motion: reduce) {
 		:global(.research-agent *),

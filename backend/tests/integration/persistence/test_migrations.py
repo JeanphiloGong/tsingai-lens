@@ -4,34 +4,170 @@ import ast
 from datetime import datetime, timezone
 from pathlib import Path
 
+import infra.persistence.postgres.models  # noqa: F401
+import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-import pytest
+from infra.persistence.postgres.base import Base
 from sqlalchemy import (
+    JSON,
     Column,
     DateTime,
     Integer,
-    JSON,
     MetaData,
     String,
     Table,
+    UniqueConstraint,
     create_engine,
     inspect,
     select,
-    UniqueConstraint,
 )
-from sqlalchemy.engine import URL
 from sqlalchemy.dialects import postgresql
-
-from infra.persistence.postgres.base import Base
-import infra.persistence.postgres.models  # noqa: F401
-
+from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260930_0085"
+HEAD_REVISION = "20261101_0092"
 POSTGRES_IDENTIFIER_LIMIT = 63
+
+
+def test_model_connection_migration_creates_schema_and_protects_records(
+    postgres_sync_engine,
+) -> None:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        # The bootstrap migration imports current ORM metadata. Remove the new,
+        # empty table to exercise upgrading an actual pre-registry database.
+        command.downgrade(config, "20261020_0088")
+        assert not inspect(connection).has_table("model_connections")
+        command.upgrade(config, "head")
+
+        inspector = inspect(connection)
+        assert inspector.get_pk_constraint("model_connections")[
+            "constrained_columns"
+        ] == ["connection_id"]
+        assert "revision" not in {
+            item["name"] for item in inspector.get_columns("model_connections")
+        }
+        assert inspector.get_check_constraints("model_connections") == []
+        indexes = {
+            item["name"]: item for item in inspector.get_indexes("model_connections")
+        }
+        assert set(indexes) == {"ix_model_connections_enabled"}
+
+        connections = Base.metadata.tables["model_connections"]
+        now = datetime.now(timezone.utc)
+        connection.execute(
+            connections.insert().values(
+                connection_id="lab-a",
+                display_name="Lab A",
+                base_url="https://model.example.invalid/v1",
+                model="lab-chat-a",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        with pytest.raises(RuntimeError, match="history must be exported"):
+            with connection.begin_nested():
+                command.downgrade(config, "20261020_0088")
+
+        row = connection.execute(select(connections)).mappings().one()
+        assert row["connection_id"] == "lab-a"
+        assert row["enabled"] is False
+        assert row["api_key_ref"] is None
+        assert row["context_window_tokens"] is None
+        assert row["max_output_tokens"] is None
+        assert row["request_timeout_seconds"] is None
+        assert (
+            MigrationContext.configure(connection).get_current_revision()
+            == HEAD_REVISION
+        )
+
+
+def test_model_connection_revision_removal_preserves_configuration(
+    postgres_sync_engine,
+) -> None:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261031_0090")
+        old_connections = Table("model_connections", MetaData(), autoload_with=connection)
+        now = datetime.now(timezone.utc)
+        record = {
+            "connection_id": "lab-a",
+            "revision": 3,
+            "display_name": "Lab A",
+            "base_url": "https://model.example.invalid/v1",
+            "model": "lab-chat-a",
+            "api_key_ref": "env:LENS_MODEL_KEY_LAB_A",
+            "enabled": True,
+            "context_window_tokens": 65536,
+            "max_output_tokens": 8192,
+            "request_timeout_seconds": 180.0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        connection.execute(old_connections.insert().values(record))
+
+        command.upgrade(config, "head")
+        connections = Table("model_connections", MetaData(), autoload_with=connection)
+        expected = {key: value for key, value in record.items() if key != "revision"}
+        assert dict(connection.execute(select(connections)).mappings().one()) == expected
+
+        # Downgrade restores the old shape, not the discarded revision number.
+        command.downgrade(config, "20261031_0090")
+        restored = connection.execute(select(old_connections)).mappings().one()
+        assert dict(restored) == {**expected, "revision": 1}
+        command.upgrade(config, "head")
+        assert dict(connection.execute(select(connections)).mappings().one()) == expected
+
+
+def test_model_connection_revision_removal_refuses_duplicate_ids_without_data_loss(
+    postgres_sync_engine,
+) -> None:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261020_0088")
+        command.upgrade(config, "20261031_0090")
+        connections = Table("model_connections", MetaData(), autoload_with=connection)
+        now = datetime.now(timezone.utc)
+        connection.execute(
+            connections.insert(),
+            [
+                {
+                    "connection_id": "lab-a",
+                    "revision": revision,
+                    "display_name": "Lab A",
+                    "base_url": "https://model.example.invalid/v1",
+                    "model": f"lab-chat-{revision}",
+                    "enabled": revision == 2,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for revision in (1, 2)
+            ],
+        )
+        before = connection.execute(
+            select(connections).order_by(connections.c.revision)
+        ).mappings().all()
+
+        with pytest.raises(RuntimeError, match="Assign distinct connection IDs"):
+            with connection.begin_nested():
+                command.upgrade(config, "head")
+
+        assert connection.execute(
+            select(connections).order_by(connections.c.revision)
+        ).mappings().all() == before
+        assert inspect(connection).get_pk_constraint("model_connections")[
+            "constrained_columns"
+        ] == ["connection_id", "revision"]
+        assert (
+            MigrationContext.configure(connection).get_current_revision()
+            == "20261031_0090"
+        )
 
 
 def test_migration_and_orm_names_fit_postgres_identifier_limit() -> None:
@@ -70,8 +206,11 @@ def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
     # Model-call audits are reintroduced by the P1 feedback-analysis slice;
     # only the retired correction workflow should remain absent at head.
     retired = {
-        "chat_correction_cases", "chat_correction_samples",
-        "chat_correction_reviews", "chat_correction_datasets", "chat_correction_candidates",
+        "chat_correction_cases",
+        "chat_correction_samples",
+        "chat_correction_reviews",
+        "chat_correction_datasets",
+        "chat_correction_candidates",
     }
     with engine.begin() as connection:
         config.attributes["connection"] = connection
@@ -98,39 +237,89 @@ def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
     engine.dispose()
 
 
-def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
+def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(
+    tmp_path,
+) -> None:
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'chat-history.sqlite'}")
     metadata = MetaData()
-    messages = Table("chat_messages", metadata,
-        Column("message_id", String, primary_key=True), Column("session_id", String),
-        Column("role", String), Column("content", String), Column("tool_call_id", String),
-        Column("tool_name", String), Column("tool_arguments", JSON))
-    calls = Table("chat_tool_calls", metadata,
-        Column("tool_call_id", String, primary_key=True), Column("session_id", String),
-        Column("assistant_message_id", String), Column("name", String), Column("arguments", JSON),
-        UniqueConstraint("assistant_message_id", name="uq_chat_tool_calls_assistant_message"))
+    messages = Table(
+        "chat_messages",
+        metadata,
+        Column("message_id", String, primary_key=True),
+        Column("session_id", String),
+        Column("role", String),
+        Column("content", String),
+        Column("tool_call_id", String),
+        Column("tool_name", String),
+        Column("tool_arguments", JSON),
+    )
+    calls = Table(
+        "chat_tool_calls",
+        metadata,
+        Column("tool_call_id", String, primary_key=True),
+        Column("session_id", String),
+        Column("assistant_message_id", String),
+        Column("name", String),
+        Column("arguments", JSON),
+        UniqueConstraint(
+            "assistant_message_id", name="uq_chat_tool_calls_assistant_message"
+        ),
+    )
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         metadata.create_all(connection)
         command.stamp(config, "20260908_0046")
-        connection.execute(messages.insert().values(message_id="m1", session_id="s1", role="assistant", content="", tool_call_id="c1", tool_name="read_source", tool_arguments={"document_id": "p1"}))
-        connection.execute(calls.insert().values(tool_call_id="c1", session_id="s1", assistant_message_id="m1", name="read_source", arguments={"document_id": "p1"}))
+        connection.execute(
+            messages.insert().values(
+                message_id="m1",
+                session_id="s1",
+                role="assistant",
+                content="",
+                tool_call_id="c1",
+                tool_name="read_source",
+                tool_arguments={"document_id": "p1"},
+            )
+        )
+        connection.execute(
+            calls.insert().values(
+                tool_call_id="c1",
+                session_id="s1",
+                assistant_message_id="m1",
+                name="read_source",
+                arguments={"document_id": "p1"},
+            )
+        )
         command.upgrade(config, "7f4a0a872e9d")
         target_calls = Table("chat_tool_calls", MetaData(), autoload_with=connection)
         assert connection.execute(select(target_calls.c.position)).scalar_one() == 0
-        assert "tool_arguments" not in {c["name"] for c in inspect(connection).get_columns("chat_messages")}
-        connection.execute(target_calls.insert().values(tool_call_id="c2", session_id="s1", assistant_message_id="m1", position=1, name="read_source", arguments={"document_id": "p2"}))
+        assert "tool_arguments" not in {
+            c["name"] for c in inspect(connection).get_columns("chat_messages")
+        }
+        connection.execute(
+            target_calls.insert().values(
+                tool_call_id="c2",
+                session_id="s1",
+                assistant_message_id="m1",
+                position=1,
+                name="read_source",
+                arguments={"document_id": "p2"},
+            )
+        )
         with pytest.raises(RuntimeError, match="multiple calls would be lost"):
             command.downgrade(config, "20260908_0046")
         target_calls = Table("chat_tool_calls", MetaData(), autoload_with=connection)
         assert len(connection.execute(select(target_calls)).all()) == 2
-        connection.execute(target_calls.delete().where(target_calls.c.tool_call_id == "c2"))
+        connection.execute(
+            target_calls.delete().where(target_calls.c.tool_call_id == "c2")
+        )
         command.downgrade(config, "20260908_0046")
         old_message = connection.execute(select(messages)).mappings().one()
         assert old_message["tool_call_id"] == "c1"
         assert old_message["tool_arguments"] == {"document_id": "p1"}
-        connection.execute(messages.update().values(tool_arguments={"document_id": "wrong"}))
+        connection.execute(
+            messages.update().values(tool_arguments={"document_id": "wrong"})
+        )
         with pytest.raises(RuntimeError, match="does not match durable calls"):
             command.upgrade(config, "7f4a0a872e9d")
     engine.dispose()
@@ -165,10 +354,7 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
             "sha256",
             "status",
         }.issubset(
-            {
-                column["name"]
-                for column in inspect(connection).get_columns("documents")
-            }
+            {column["name"] for column in inspect(connection).get_columns("documents")}
         )
         document_columns = {
             column["name"] for column in inspect(connection).get_columns("documents")
@@ -201,26 +387,34 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         assert {
             "items",
         }.issubset(
-            {column["name"] for column in inspect(connection).get_columns("evaluation_gold_sets")}
+            {
+                column["name"]
+                for column in inspect(connection).get_columns("evaluation_gold_sets")
+            }
         )
         assert {
             "items",
         }.issubset(
-            {column["name"] for column in inspect(connection).get_columns("evaluation_prediction_snapshots")}
+            {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "evaluation_prediction_snapshots"
+                )
+            }
         )
         assert {"scores", "failures"}.issubset(
-            {column["name"] for column in inspect(connection).get_columns("evaluation_runs")}
+            {
+                column["name"]
+                for column in inspect(connection).get_columns("evaluation_runs")
+            }
         )
         assert "document_sources" not in expected
         assert "document_profiles" not in expected
         collection_columns = {
-            column["name"]
-            for column in inspect(connection).get_columns("collections")
+            column["name"] for column in inspect(connection).get_columns("collections")
         }
         assert "paper_count" not in collection_columns
-        assert {"document_id", "created_at", "updated_at"}.issubset(
-            preparation_columns
-        )
+        assert {"document_id", "created_at", "updated_at"}.issubset(preparation_columns)
         pipeline_run_columns = {
             column["name"]
             for column in inspect(connection).get_columns("pipeline_runs")
@@ -420,7 +614,9 @@ def test_existing_paper_experiment_database_adds_binding_metadata(tmp_path) -> N
     engine.dispose()
 
 
-def test_feedback_signal_migration_replays_without_changing_p1_result_identity(tmp_path) -> None:
+def test_feedback_signal_migration_replays_without_changing_p1_result_identity(
+    tmp_path,
+) -> None:
     """0076 adds the message-signal path while preserving the P1 table contract."""
 
     engine = create_engine(
@@ -457,15 +653,15 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(t
         assert MigrationContext.configure(connection).get_current_revision() == (
             "20260924_0075"
         )
-        assert "feedback_signal_analysis_results" not in after_downgrade.get_table_names()
+        assert (
+            "feedback_signal_analysis_results" not in after_downgrade.get_table_names()
+        )
         assert "signal_analysis_result_ids" not in {
-            column["name"]
-            for column in after_downgrade.get_columns("feedback_cases")
+            column["name"] for column in after_downgrade.get_columns("feedback_cases")
         }
         assert "tool_failure_analysis_results" not in after_downgrade.get_table_names()
         assert "tool_failure_analysis_result_ids" not in {
-            column["name"]
-            for column in after_downgrade.get_columns("feedback_cases")
+            column["name"] for column in after_downgrade.get_columns("feedback_cases")
         }
         downgraded_result_columns = {
             column["name"]: column["nullable"]
@@ -474,7 +670,10 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(t
         assert downgraded_result_columns == old_result_columns
 
         command.upgrade(config, "head")
-        assert MigrationContext.configure(connection).get_current_revision() == HEAD_REVISION
+        assert (
+            MigrationContext.configure(connection).get_current_revision()
+            == HEAD_REVISION
+        )
         replayed = inspect(connection)
         assert "feedback_signal_analysis_results" in replayed.get_table_names()
         assert "signal_analysis_result_ids" in {
@@ -507,9 +706,7 @@ def test_legacy_objective_checkpoints_are_classified_with_sqlite_autoincrement(
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, "20260924_0074")
-        analyses = Table(
-            "objective_analyses", MetaData(), autoload_with=connection
-        )
+        analyses = Table("objective_analyses", MetaData(), autoload_with=connection)
         now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
         connection.execute(
             analyses.insert().values(
@@ -557,7 +754,9 @@ def test_legacy_objective_checkpoints_are_classified_with_sqlite_autoincrement(
     engine.dispose()
 
 
-def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(tmp_path) -> None:
+def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(
+    tmp_path,
+) -> None:
     engine = create_engine(
         URL.create(
             "sqlite+pysqlite",
@@ -623,22 +822,38 @@ def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(tmp_pa
         )
 
         command.upgrade(config, "head")
-        empty = connection.execute(
-            select(analyses).where(analyses.c.objective_id == "empty-checkpoint")
-        ).mappings().one()
-        malformed = connection.execute(
-            select(analyses).where(analyses.c.objective_id == "malformed-payload")
-        ).mappings().one()
-        already_experiment_backed = connection.execute(
-            select(analyses).where(
-                analyses.c.objective_id == "already-experiment-backed"
+        empty = (
+            connection.execute(
+                select(analyses).where(analyses.c.objective_id == "empty-checkpoint")
             )
-        ).mappings().one()
-        authored = connection.execute(
-            select(analyses).where(
-                analyses.c.objective_id == "authored-with-legacy-marker"
+            .mappings()
+            .one()
+        )
+        malformed = (
+            connection.execute(
+                select(analyses).where(analyses.c.objective_id == "malformed-payload")
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
+        already_experiment_backed = (
+            connection.execute(
+                select(analyses).where(
+                    analyses.c.objective_id == "already-experiment-backed"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        authored = (
+            connection.execute(
+                select(analyses).where(
+                    analyses.c.objective_id == "authored-with-legacy-marker"
+                )
+            )
+            .mappings()
+            .one()
+        )
 
         assert empty["payload"] == {
             "origin": "system_generated",
@@ -660,7 +875,9 @@ def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(tmp_pa
     engine.dispose()
 
 
-def test_redundant_source_and_collection_fields_are_removed_without_data_loss(tmp_path) -> None:
+def test_redundant_source_and_collection_fields_are_removed_without_data_loss(
+    tmp_path,
+) -> None:
     engine = create_engine(
         URL.create("sqlite+pysqlite", database=str(tmp_path / "compact-source.sqlite"))
     )
@@ -756,15 +973,16 @@ def test_redundant_source_and_collection_fields_are_removed_without_data_loss(tm
         assert "paper_map_payload" in preparations.c
         assert "document_sources" not in inspect(connection).get_table_names()
         assert "paper_count" not in {
-            column["name"]
-            for column in inspect(connection).get_columns("collections")
+            column["name"] for column in inspect(connection).get_columns("collections")
         }
     engine.dispose()
 
 
 def test_evaluation_children_are_embedded_before_tables_are_removed(tmp_path) -> None:
     engine = create_engine(
-        URL.create("sqlite+pysqlite", database=str(tmp_path / "evaluation-merge.sqlite"))
+        URL.create(
+            "sqlite+pysqlite", database=str(tmp_path / "evaluation-merge.sqlite")
+        )
     )
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
 
@@ -918,22 +1136,38 @@ def test_evaluation_children_are_embedded_before_tables_are_removed(tmp_path) ->
         )
 
         command.upgrade(config, "head")
-        merged_gold = Table("evaluation_gold_sets", MetaData(), autoload_with=connection)
+        merged_gold = Table(
+            "evaluation_gold_sets", MetaData(), autoload_with=connection
+        )
         merged_snapshot = Table(
             "evaluation_prediction_snapshots", MetaData(), autoload_with=connection
         )
         merged_run = Table("evaluation_runs", MetaData(), autoload_with=connection)
-        assert connection.execute(
-            select(merged_gold.c["items"]).where(merged_gold.c.gold_id == "gold-migrate")
-        ).scalar_one()[0]["gold_item_id"] == "gold-item-migrate"
-        assert connection.execute(
-            select(merged_snapshot.c["items"]).where(
-                merged_snapshot.c.snapshot_id == "snapshot-migrate"
+        assert (
+            connection.execute(
+                select(merged_gold.c["items"]).where(
+                    merged_gold.c.gold_id == "gold-migrate"
+                )
+            ).scalar_one()[0]["gold_item_id"]
+            == "gold-item-migrate"
+        )
+        assert (
+            connection.execute(
+                select(merged_snapshot.c["items"]).where(
+                    merged_snapshot.c.snapshot_id == "snapshot-migrate"
+                )
+            ).scalar_one()[0]["item_id"]
+            == "prediction-migrate"
+        )
+        run_row = (
+            connection.execute(
+                select(merged_run).where(
+                    merged_run.c.evaluation_run_id == "run-migrate"
+                )
             )
-        ).scalar_one()[0]["item_id"] == "prediction-migrate"
-        run_row = connection.execute(
-            select(merged_run).where(merged_run.c.evaluation_run_id == "run-migrate")
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         assert run_row["scores"][0]["score_id"] == "score-migrate"
         assert run_row["failures"][0]["failure_id"] == "failure-migrate"
         assert not {
@@ -1188,14 +1422,14 @@ def test_existing_0044_task_history_is_backfilled_as_one_pipeline_run(tmp_path) 
 
         command.upgrade(config, "head")
 
-        pipeline_runs = Table(
-            "pipeline_runs", MetaData(), autoload_with=connection
-        )
-        row = connection.execute(
-            select(pipeline_runs).where(
-                pipeline_runs.c.run_id == "task-migration"
+        pipeline_runs = Table("pipeline_runs", MetaData(), autoload_with=connection)
+        row = (
+            connection.execute(
+                select(pipeline_runs).where(pipeline_runs.c.run_id == "task-migration")
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
         assert row["pipeline_name"] == "document_preparation"
         assert row["scope_type"] == "document"
         assert row["scope_id"] == "migration-document"
@@ -1283,9 +1517,7 @@ def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> 
         auth_users = Table("auth_users", metadata, autoload_with=connection)
         collections = Table("collections", metadata, autoload_with=connection)
         objectives = Table("research_objectives", metadata, autoload_with=connection)
-        plans = Table(
-            "objective_experiment_plans", metadata, autoload_with=connection
-        )
+        plans = Table("objective_experiment_plans", metadata, autoload_with=connection)
         connection.execute(
             auth_users.insert().values(
                 user_id="legacy-user",
@@ -1340,9 +1572,13 @@ def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> 
         upgraded_plans = Table(
             "objective_experiment_plans", MetaData(), autoload_with=connection
         )
-        row = connection.execute(
-            select(upgraded_plans).where(upgraded_plans.c.plan_id == "legacy-plan")
-        ).mappings().one()
+        row = (
+            connection.execute(
+                select(upgraded_plans).where(upgraded_plans.c.plan_id == "legacy-plan")
+            )
+            .mappings()
+            .one()
+        )
         assert row["plan_version"] == 1
         assert row["parent_plan_id"] is None
         assert row["structured_plan"] is None

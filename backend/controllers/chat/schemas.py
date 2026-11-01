@@ -23,6 +23,12 @@ class ChatSessionPinRequest(BaseModel):
     is_pinned: bool = Field(strict=True)
 
 
+class ChatSessionTitleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+
+
 class ChatPermissionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["read_only", "confirm", "auto"]
@@ -100,7 +106,7 @@ class ChatSourceContextPayload(BaseModel):
     quote: str = Field(min_length=1, max_length=6000)
     heading_path: str | None = Field(default=None, max_length=1000)
     quote_truncated: bool = False
-    source_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    source_digest: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
 
 
 class ChatToolResultResponse(BaseModel):
@@ -139,6 +145,7 @@ class ChatModelCallSummaryResponse(BaseModel):
     response_message_id: str | None
     purpose: Literal["decision", "compaction", "finalization"]
     model: str
+    model_connection_id: str | None = None
     request_digest: str
     status: Literal[
         "recorded",
@@ -188,10 +195,11 @@ class ChatToolCallResponse(BaseModel):
     authorization_revision: int | None = None
 
 
-class ChatTurnRequest(BaseModel):
+class SendChatMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=12000)
+    model_connection_id: str | None = Field(default=None, min_length=1, max_length=64)
     branch_revision: bool = False
     source_contexts: list[ChatSourceContextPayload] = Field(
         default_factory=list,
@@ -239,7 +247,7 @@ class ChatMessageFeedbackRequest(BaseModel):
 
     rating: Literal["helpful", "not_helpful"] | None
     reason: Literal["incorrect", "incomplete", "unclear", "other"] | None = None
-    comment: str | None = Field(default=None, max_length=2000)
+    comment: str | None = Field(default=None, max_length=2000, pattern=r"^[^\x00]*$")
 
     @model_validator(mode="after")
     def validate_details(self) -> ChatMessageFeedbackRequest:
@@ -247,8 +255,8 @@ class ChatMessageFeedbackRequest(BaseModel):
             self.reason is not None or self.comment is not None
         ):
             raise ValueError("withdrawn feedback cannot have a reason or comment")
-        if self.reason is not None and self.rating != "not_helpful":
-            raise ValueError("only negative feedback may have a reason")
+        if self.comment is not None:
+            self.comment = self.comment.strip() or None
         return self
 
 
@@ -268,6 +276,8 @@ class ChatMessageFeedbackResponse(BaseModel):
 
 
 class ChatResponseSnapshotResponse(BaseModel):
+    model_connection_id: str | None = None
+    model_connection_name: str | None = None
     response_id: str
     sequence: int
     started_at: str
@@ -288,6 +298,7 @@ class ChatResponseSnapshotResponse(BaseModel):
 class ChatMessageListResponse(BaseModel):
     items: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
+    retryable_decision: ChatToolCallResponse | None = None
     feedback: list[ChatMessageFeedbackResponse] = Field(default_factory=list)
     branches: list[ChatBranchOptions] = Field(default_factory=list)
     branch_draft: ChatMessageResponse | None = None

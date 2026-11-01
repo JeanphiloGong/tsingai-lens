@@ -1,14 +1,20 @@
 from __future__ import annotations
+from application.feedback import conversation_context
+
+from tests.support.feedback_workers import FeedbackAnalyzerFixture, FeedbackWorkerFixture
+
+from application.feedback import analysis_worker, worker_lease
+
+from application.feedback import analysis_handler
 
 from dataclasses import replace
 
 import pytest
 
-from application.feedback.analysis_handler import FeedbackAnalysisHandler
-from application.feedback.analysis_worker import FeedbackAnalysisWorker
-from application.repositories.analysis_job_repository import AnalysisJob
+from application.feedback.conversation_context import conversation_before_answer
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
+from repositories.analysis_job_repository import AnalysisJob
 
 pytestmark = pytest.mark.anyio
 
@@ -58,10 +64,21 @@ class _Jobs:
         self.job = job
         self.finished: tuple[str, str | None] | None = None
 
+    async def recover_expired_jobs(self, *, now):
+        return 0
+
+    async def read_job(self, job_id):
+        return self.job if self.job.job_id == job_id else None
+
+    async def renew_lease(self, **kwargs):
+        assert kwargs["worker_id"] == self.job.worker_id
+        assert kwargs["lease_version"] == self.job.lease_version
+        return self.job
+
     async def claim_next_feedback_analysis_job(self, now: str):
         if self.job.status != "pending":
             return None
-        self.job = replace(self.job, status="running", started_at=now, updated_at=now)
+        self.job = replace(self.job, status="running", started_at=now, updated_at=now, worker_id="worker-1", lease_version=1)
         return self.job
 
     async def mark_succeeded(self, job_id: str, result_id: str, finished_at: str, **_lease):
@@ -92,12 +109,14 @@ class _Cases:
         self.results.append(result)
         return result
 
-    async def upsert_case_from_analysis(self, result, *, context_snapshot, source_signal_ids, now):
+    async def upsert_case_from_analysis(self, result, *, job, context_snapshot, source_signal_ids, now):
         if self.fail_on_save:
             raise RuntimeError("database unavailable")
         self.results.append(result)
         self.cases.append({"result": result, "context_snapshot": context_snapshot, "source_signal_ids": source_signal_ids})
+        await analysis_worker.AnalysisJobRepo.mark_succeeded(job_id=job.job_id, result_id=result.result_id, finished_at=now)
         return self.cases[-1]
+
 
 
 def _job(feedback_id: str, *, idempotency_key: str | None = None) -> AnalysisJob:
@@ -129,11 +148,11 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases()
     before = (chat.question, chat.answer)
-    result = await FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chat),
-    ).run_once()
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    result = await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     assert result.status == "succeeded"
     assert jobs.finished and jobs.finished[0] == "succeeded"
     assert len(cases.results) == 1
@@ -143,14 +162,27 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
     assert (chat.question, chat.answer) == before
 
 
+def test_conversation_capture_excludes_target_and_later_corrections() -> None:
+    chat = _Chat(feedback=None)
+    followup = replace(chat.question, message_id="followup", content="Summarize that decision.")
+    target = replace(chat.answer, message_id="target", content="Target answer")
+    correction = replace(chat.question, message_id="correction", content="Later correction")
+    history = conversation_before_answer((chat.question, chat.answer, followup, target, correction), target)
+    assert history == [
+        {"role": "user", "content": chat.question.content},
+        {"role": "assistant", "content": chat.answer.content},
+        {"role": "user", "content": followup.content},
+    ]
+
+
 async def test_worker_cancels_withdrawn_feedback_without_case() -> None:
     jobs = _Jobs(_job("feedback-withdrawn"))
     cases = _Cases()
-    worker = FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=_Chat(feedback=None)),
-    )
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = _Chat(feedback=None)
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    worker = FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture())
     result = await worker.run_once()
     assert result.status == "cancelled"
     assert jobs.finished == ("cancelled", "feedback_withdrawn")
@@ -173,11 +205,11 @@ async def test_worker_cancels_a_superseded_feedback_version() -> None:
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key="older-version"))
     cases = _Cases()
 
-    result = await FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chat),
-    ).run_once()
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    result = await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
 
     assert result.status == "cancelled"
     assert jobs.finished == ("cancelled", "feedback_version_superseded")
@@ -199,11 +231,11 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
     jobs = _Jobs(_job(feedback.feedback_id, idempotency_key=feedback.analysis_version_key))
     cases = _Cases(fail_on_save=True)
 
-    result = await FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=chat),
-    ).run_once()
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    result = await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
 
     assert result.status == "failed"
     assert jobs.finished == ("failed", "feedback_analysis_persistence_failed")
@@ -212,12 +244,29 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
 async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:
     jobs = _Jobs(replace(_job("feedback-1"), payload_version=2))
     cases = _Cases()
-    worker = FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(chat_repository=_Chat(feedback=None)),
-    )
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = _Chat(feedback=None)
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    worker = FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture())
     result = await worker.run_once()
     assert result.status == "failed"
     assert jobs.finished == ("failed", "unsupported_feedback_analysis_job")
     assert not cases.results
+
+
+async def test_feedback_digest_is_stable_when_the_same_version_is_reanalysed():
+    chat = _Chat(feedback=None)
+    chat.feedback = ChatMessageFeedback.for_answer(
+        message=chat.answer, feedback_id="feedback-1", user_id="user-1",
+        rating="not_helpful", reason="incorrect", comment="Check the caption.",
+        now="2026-09-24T00:00:03+00:00",
+    )
+    job = _job(chat.feedback.feedback_id, idempotency_key=chat.feedback.analysis_version_key)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = chat
+    handler = FeedbackAnalyzerFixture()
+    first, snapshot, _ = await handler.handle(job)
+    second, repeated_snapshot, _ = await handler.handle(job)
+    assert second.input_digest == first.input_digest
+    assert repeated_snapshot == snapshot
+    assert first.input_digest == "07566d4a74c484c6acf31619676b04f6b6ba01313e7222a55d654f92c3253c58"

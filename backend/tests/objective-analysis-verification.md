@@ -13,12 +13,14 @@ Run from backend:
     .venv/bin/python -m pytest -q tests/unit/application/test_experiment_analysis_writer.py
     .venv/bin/python -m pytest -q tests/unit/application/test_objective_analysis_service.py
     .venv/bin/python -m pytest -q tests/integration/test_four_paper_research_flow.py
-    .venv/bin/python -m pytest -q tests/integration/test_deep_path_research_flow.py
+    .venv/bin/python -m pytest -q tests/integration/test_research_agent_flow.py
 
-The two integration scenarios require their documented fixture and database
-prerequisites. If they cannot run in the current environment, report that
-explicitly; a passing focused unit test is not evidence that the complete
-research chain works.
+The four-paper scenario follows fixed revisions through comparison. The Agent
+scenario checks approved tool execution and durable trajectory. Both use
+deterministic model responses and require a dedicated PostgreSQL test database;
+neither is live-provider acceptance. If they cannot run in the current
+environment, report that explicitly; a passing focused unit test is not
+evidence that the complete research chain works.
 
 ## What the tests must cover
 

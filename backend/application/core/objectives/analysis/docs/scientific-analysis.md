@@ -102,8 +102,8 @@ service checks, not accepted status.
 The model must not generate formal experiment/result IDs, database IDs,
 collection or Objective ownership, revision numbers, formal SourceReference
 objects, binding/relation status, or final direction/basis/causal decisions.
-PaperExperimentModelOutput.from_model_mapping rejects those fields, and the
-service attaches request context and the Source catalog.
+`parse_paper_experiment_response` rejects those fields at the model-response
+boundary, and the service attaches request context and the Source catalog.
 
 ### Why broad facts are allowed
 
@@ -280,7 +280,7 @@ stronger than the exact measurements and comparisons in its selected revision
 set. If no defensible result set exists, the analysis publishes a visible
 scientific abstention with the reasons; a provider failure remains retryable.
 
-ExperimentCompatibilityProjection is read-only. It derives existing Objective,
+The experiment_projection module is read-only. It derives existing Objective,
 Evidence, and Finding response shapes from the fixed graph without creating a
 duplicate scientific-fact store.
 
@@ -300,7 +300,7 @@ The nearest focused tests are:
 - tests/unit/application/test_paper_experiment_extraction.py
 - tests/unit/application/test_paper_experiment_authoring_contract.py
 - tests/unit/application/test_experiment_analysis_writer.py
-- tests/unit/application/test_experiment_compatibility_projection.py
+- tests/unit/application/test_experiment_projection.py
 - tests/unit/application/test_objective_analysis_service.py
 
 The complete acceptance scenario must demonstrate: Source recall, source-local

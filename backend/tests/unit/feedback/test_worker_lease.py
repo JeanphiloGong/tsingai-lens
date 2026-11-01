@@ -5,9 +5,9 @@ from dataclasses import replace
 
 import pytest
 
+from application.feedback import worker_lease
 from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
-from application.repositories.analysis_job_repository import AnalysisJob
-
+from repositories.analysis_job_repository import AnalysisJob
 
 pytestmark = pytest.mark.anyio
 
@@ -43,8 +43,8 @@ async def test_long_operation_renews_its_lease() -> None:
             calls.append((job_id, worker_id, lease_version))
             return replace(_job(), heartbeat_at=now)
 
+    worker_lease.AnalysisJobRepo = Jobs()
     result = await run_with_lease_heartbeat(
-        Jobs(),
         _job(),
         lambda: asyncio.sleep(0.035, result="done"),
         interval_seconds=0.005,
@@ -60,10 +60,30 @@ async def test_operation_cannot_publish_after_lease_is_lost() -> None:
         async def renew_lease(self, **_kwargs):
             return None
 
+    worker_lease.AnalysisJobRepo = Jobs()
     with pytest.raises(LeaseLostError):
         await run_with_lease_heartbeat(
-            Jobs(),
             _job(),
             lambda: asyncio.sleep(0.03, result="must-not-publish"),
             interval_seconds=0.005,
         )
+
+
+async def test_outer_cancellation_waits_for_operation_cleanup():
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def operation():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            finished.set()
+
+    task = asyncio.create_task(run_with_lease_heartbeat(_job(), operation))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert finished.is_set()

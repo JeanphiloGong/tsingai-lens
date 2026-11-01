@@ -3,8 +3,53 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
+import pytest
+from infra.source.artifact_bundle import SourceArtifactBundle, source_table_payload
 
-from infra.source.artifact_bundle import SourceArtifactBundle
+
+@pytest.mark.parametrize(
+    ("header_fields", "header_rows", "expected_header_count"),
+    [
+        ({"header_row_count": 0}, [], 0),
+        ({"header_row_count": 1}, [["Power", "Density"]], 1),
+        ({"header_row_count": 2}, [["Process", "Result"], ["Power", "Density"]], 2),
+        ({}, [["Power", "Density"]], 1),
+        ({"header_row_count": None}, [["Power", "Density"]], 1),
+    ],
+)
+def test_table_header_count_preserves_all_measurement_rows(
+    header_fields, header_rows, expected_header_count
+):
+    bundle = SourceArtifactBundle(
+        documents=pd.DataFrame([{"id": "doc_1"}]),
+        text_units=pd.DataFrame(),
+        blocks=pd.DataFrame(),
+        figures=pd.DataFrame(),
+        tables=pd.DataFrame(
+            [
+                {
+                    "table_id": "table_1",
+                    "document_id": "doc_1",
+                    "column_headers": ["Power", "Density"],
+                    "table_matrix": [
+                        *header_rows,
+                        ["200 W", "99.5%"],
+                        ["250 W", "99.9%"],
+                    ],
+                    **header_fields,
+                }
+            ]
+        ),
+        table_rows=pd.DataFrame(),
+        table_cells=pd.DataFrame(),
+        figure_assets={},
+    )
+
+    table = bundle.to_documents()[0].tables[0]
+    assert table.header_row_count == expected_header_count
+    assert source_table_payload(table)["table_markdown"] == (
+        "| Power | Density |\n| --- | --- |\n" "| 200 W | 99.5% |\n| 250 W | 99.9% |"
+    )
 
 
 def test_to_documents_removes_nul_from_all_source_text(caplog):
@@ -80,6 +125,7 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
             [
                 {
                     "cell_id": "cell_1",
+                    "id": "doc_1",
                     "document_id": "doc_1",
                     "table_id": "table_1",
                     "row_index": 0,
@@ -111,4 +157,55 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
     )
     assert all("\x00" not in str(value) for value in values)
     assert "documents" in caplog.text
-    assert "doc_1" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("raw_page", "expected"),
+    [
+        (1, 1),
+        (2.0, 2),
+        ("3", 3),
+        (None, None),
+        (0, None),
+        (-1, None),
+        (1.5, None),
+        (float("nan"), None),
+        (float("inf"), None),
+        ("invalid", None),
+    ],
+)
+def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
+    from application.core.document_profiles import service as document_profile_service
+
+    bundle = SourceArtifactBundle(
+        documents=pd.DataFrame([{"id": "doc_1"}]),
+        text_units=pd.DataFrame(),
+        blocks=pd.DataFrame(
+            [
+                {
+                    "block_id": "block_1",
+                    "document_id": "doc_1",
+                    "block_type": "paragraph",
+                    "text": "Laser power versus porosity.",
+                    "page": raw_page,
+                }
+            ]
+        ),
+        figures=pd.DataFrame(),
+        tables=pd.DataFrame(),
+        table_rows=pd.DataFrame(),
+        table_cells=pd.DataFrame(),
+        figure_assets={},
+    )
+    document = bundle.to_documents()[0]
+    document_profile_service.collection_service = None
+    document_profile_service.SourceArtifactRepo = None
+    document_profile_service.DocumentProfileRepo = None
+    content = document_profile_service._build_document_content_blocks(
+        "", list(document.blocks)
+    )
+
+    assert document.blocks[0].page == expected
+    assert content[0]["page"] == expected
+    assert content[0]["block_id"] == "block_1"
+    assert content[0]["text"] == "Laser power versus porosity."

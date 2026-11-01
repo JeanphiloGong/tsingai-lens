@@ -14,6 +14,7 @@ describe('collection document API', () => {
 
 	it('preserves the current preparation versions and fingerprint', async () => {
 		request.mockResolvedValue({
+			count: 9,
 			items: [
 				{
 					document_id: 'doc_1',
@@ -38,6 +39,7 @@ describe('collection document API', () => {
 		const result = await listCollectionDocuments('col_1');
 
 		expect(request).toHaveBeenCalledWith('/collections/col_1/documents', { method: 'GET' });
+		expect(result.count).toBe(9);
 		expect(result.items[0]).toMatchObject({
 			document_id: 'doc_1',
 			status: 'ready',
@@ -86,11 +88,10 @@ describe('collection document API', () => {
 		expect(result.failures).toEqual([{ file: damaged, message: 'Upload failed.' }]);
 	});
 
-	it('rejects a malformed list response instead of treating it as an empty collection', async () => {
-		request.mockResolvedValue({ status: 'temporarily_unavailable' });
+	it('returns the declared list response without client-side shape repair', async () => {
+		const payload = { count: 0, items: [] };
+		request.mockResolvedValue(payload);
 
-		await expect(listCollectionDocuments('col_1')).rejects.toThrow(
-			'Collection documents response is missing items.'
-		);
+		await expect(listCollectionDocuments('col_1')).resolves.toBe(payload);
 	});
 });

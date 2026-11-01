@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-import json
-from typing import Any, Annotated, Mapping
+from application.source import collection_service
+from application.core.objectives import analysis_service as objective_analysis_service
+from application.evaluation import finding_feedback_service
+from repositories.objective_repository import ObjectiveRepo
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+import json
+from dataclasses import replace
+from typing import Annotated, Any, Mapping
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from application.chat.context_builder import ChatContextBuilder
-
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
 _OBJECTIVE_LIMIT = 12
@@ -65,27 +68,16 @@ class QueryPublishedFindingsCapability:
         input_model=QueryPublishedFindingsToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_repository: Any,
-        objective_analysis_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
-        self.objective_analysis_service = objective_analysis_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: QueryPublishedFindingsToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objectives = await self.objective_repository.list_objectives(
+        objectives = await ObjectiveRepo.list_objectives(
             context.collection_id
         )
         objectives_by_id = {item.objective_id: item for item in objectives}
@@ -94,9 +86,7 @@ class QueryPublishedFindingsCapability:
         ]
         missing_ids = [item for item in requested_ids if item not in objectives_by_id]
         selected = [
-            objectives_by_id[item]
-            for item in requested_ids
-            if item in objectives_by_id
+            objectives_by_id[item] for item in requested_ids if item in objectives_by_id
         ]
 
         records: list[dict[str, Any]] = []
@@ -109,29 +99,25 @@ class QueryPublishedFindingsCapability:
             if version is None:
                 unpublished_count += 1
                 continue
-            findings = await self.objective_analysis_service.list_findings(
+            findings = await objective_analysis_service.list_findings(
                 context.collection_id,
                 objective.objective_id,
                 analysis_version=version,
                 offset=0,
                 limit=arguments.finding_limit_per_objective,
+                user_id=context.user_id,
             )
-            evidence = await self.objective_analysis_service.list_evidence(
+            evidence = await objective_analysis_service.list_evidence(
                 context.collection_id,
                 objective.objective_id,
                 analysis_version=version,
                 offset=0,
                 limit=arguments.evidence_limit_per_objective,
+                user_id=context.user_id,
             )
-            finding_items = [
-                self._finding_summary(item)
-                for item in findings.get("items", ())
-                if isinstance(item, Mapping)
-            ]
+            finding_items = [self._finding_summary(item) for item in findings["items"]]
             evidence_items = [
-                self._evidence_summary(item)
-                for item in evidence.get("items", ())
-                if isinstance(item, Mapping)
+                self._evidence_summary(item) for item in evidence["items"]
             ]
             finding_count += len(finding_items)
             evidence_count += len(evidence_items)
@@ -140,14 +126,16 @@ class QueryPublishedFindingsCapability:
                     "objective_id": objective.objective_id,
                     "question": objective.question[:500],
                     "analysis_version": version,
-                    "finding_total": int(findings.get("total") or 0),
-                    "evidence_total": int(evidence.get("total") or 0),
+                    "finding_total": findings["total"],
+                    "evidence_total": evidence["total"],
                     "findings": finding_items,
                     "evidence_reviews": findings.get("evidence_reviews", {}),
                     "evidence": evidence_items,
                 }
             )
-            refs.append(self._objective_ref(context.collection_id, objective.objective_id))
+            refs.append(
+                self._objective_ref(context.collection_id, objective.objective_id)
+            )
             refs.extend(
                 self._finding_ref(
                     context.collection_id,
@@ -181,7 +169,7 @@ class QueryPublishedFindingsCapability:
         scientific_absence = finding_count == 0 and evidence_count == 0
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "selected_objective_count": len(selected),
                 "published_objective_count": len(records),
@@ -196,44 +184,38 @@ class QueryPublishedFindingsCapability:
 
     @staticmethod
     def _finding_summary(item: Mapping[str, Any]) -> dict[str, Any]:
-        contributions = item.get("paper_contributions") or ()
         return {
-            "finding_id": str(item.get("finding_id") or ""),
-            "parent_finding_id": item.get("parent_finding_id"),
-            "statement": str(item.get("statement") or "")[:1_000],
-            "factors": [str(value)[:160] for value in item.get("factors") or ()][:6],
-            "outcome": str(item.get("outcome") or "")[:160],
-            "direction": str(item.get("direction") or "unknown")[:80],
-            "assertion_strength": str(
-                item.get("assertion_strength") or "uncertain"
-            )[:80],
-            "synthesis_status": str(item.get("synthesis_status") or "unknown")[:80],
-            "certainty": item.get("certainty"),
+            "finding_id": item["finding_id"],
+            "parent_finding_id": item["parent_finding_id"],
+            "statement": item["statement"][:1_000],
+            "factors": [value[:160] for value in item["factors"][:6]],
+            "outcome": item["outcome"][:160],
+            "direction": item["direction"][:80],
+            "assertion_strength": item["assertion_strength"][:80],
+            "synthesis_status": item["synthesis_status"][:80],
+            "certainty": item["certainty"],
             "document_ids": [
-                str(value.get("document_id"))
-                for value in contributions
-                if isinstance(value, Mapping) and value.get("document_id")
-            ][:12],
+                value["document_id"] for value in item["paper_contributions"][:12]
+            ],
         }
 
     @staticmethod
     def _evidence_summary(item: Mapping[str, Any]) -> dict[str, Any]:
-        result = item.get("reported_result")
         return {
-            "evidence_id": str(item.get("evidence_id") or ""),
-            "document_id": str(item.get("document_id") or ""),
-            "source_kind": str(item.get("source_kind") or ""),
-            "source_ref": str(item.get("source_ref") or "")[:500],
-            "source_excerpt": str(item.get("source_excerpt") or "")[:800],
-            "evidence_role": item.get("evidence_role"),
-            "reported_result": dict(result) if isinstance(result, Mapping) else None,
-            "attribution_scope": item.get("attribution_scope"),
-            "resolution_status": item.get("resolution_status"),
-            "confidence": item.get("confidence"),
-            "supports_finding": item.get("supports_finding") is True,
-            "eligible_for_finding_authoring": item.get("eligible_for_finding_authoring") is True,
-            "supersedes_evidence_id": item.get("supersedes_evidence_id"),
-            "superseded_by_evidence_id": item.get("superseded_by_evidence_id"),
+            "evidence_id": item["evidence_id"],
+            "document_id": item["document_id"],
+            "source_kind": item["source_kind"],
+            "source_ref": item["source_ref"][:500],
+            "source_excerpt": item["source_excerpt"][:800],
+            "evidence_role": item["evidence_role"],
+            "reported_result": item["reported_result"],
+            "attribution_scope": item["attribution_scope"],
+            "resolution_status": item["resolution_status"],
+            "confidence": item["confidence"],
+            "supports_finding": item["supports_finding"],
+            "eligible_for_finding_authoring": item["eligible_for_finding_authoring"],
+            "supersedes_evidence_id": item["supersedes_evidence_id"],
+            "superseded_by_evidence_id": item["superseded_by_evidence_id"],
         }
 
     @staticmethod
@@ -296,63 +278,68 @@ class InspectPublishedFindingCapability:
         input_model=InspectPublishedFindingToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, objective_analysis_service: Any,
-                 finding_feedback_service: Any) -> None:
-        self.collection_service = collection_service
-        self.objective_analysis_service = objective_analysis_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectPublishedFindingToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        detail = await self.objective_analysis_service.get_finding(
+        detail = await objective_analysis_service.get_finding(
             context.collection_id,
             arguments.objective_id,
             arguments.finding_id,
             analysis_version=arguments.analysis_version,
+            user_id=context.user_id,
         )
-        version = int(detail["analysis_version"])
-        review_key = dict(collection_id=context.collection_id, objective_id=arguments.objective_id,
-                          analysis_version=version, finding_id=arguments.finding_id)
-        feedback = await self.finding_feedback_service.list_feedback(**review_key)
-        curations = await self.finding_feedback_service.list_curations(**review_key)
-        evidence = await self.objective_analysis_service.list_evidence(
+        version = detail["analysis_version"]
+        review_key = dict(
+            collection_id=context.collection_id,
+            objective_id=arguments.objective_id,
+            analysis_version=version,
+            finding_id=arguments.finding_id,
+        )
+        feedback = await finding_feedback_service.list_feedback(
+            **review_key, user_id=context.user_id
+        )
+        curations = await finding_feedback_service.list_curations(
+            **review_key, user_id=context.user_id
+        )
+        evidence = await objective_analysis_service.list_evidence(
             context.collection_id,
             arguments.objective_id,
             analysis_version=version,
             finding_id=arguments.finding_id,
             offset=arguments.evidence_offset,
             limit=arguments.evidence_limit,
+            user_id=context.user_id,
         )
-        evidence_items = [
-            dict(item)
-            for item in evidence.get("items", ())
-            if isinstance(item, Mapping)
-        ]
-        evidence_total = int(evidence.get("total") or 0)
+        evidence_items = evidence["items"]
+        evidence_total = evidence["total"]
         review = detail.get("evidence_review", {})
         replacements = review.get("evidence_replacements", {})
         pending_ids = {
-            replacements[item["evidence_id"]] for item in evidence_items
+            replacements[item["evidence_id"]]
+            for item in evidence_items
             if replacements.get(item["evidence_id"])
         }
         replacement_evidence = []
         offset = 0
         while pending_ids:
-            candidates = await self.objective_analysis_service.list_evidence(
-                context.collection_id, arguments.objective_id,
-                analysis_version=version, offset=offset, limit=100,
+            candidates = await objective_analysis_service.list_evidence(
+                context.collection_id,
+                arguments.objective_id,
+                analysis_version=version,
+                offset=offset,
+                limit=100,
+                user_id=context.user_id,
             )
             items = candidates.get("items", ())
             for item in items:
                 if item["evidence_id"] in pending_ids:
-                    replacement_evidence.append(dict(item))
+                    replacement_evidence.append(item)
                     pending_ids.remove(item["evidence_id"])
             offset += len(items)
             if not items or offset >= candidates["total"]:
@@ -374,13 +361,211 @@ class InspectPublishedFindingCapability:
         )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": arguments.objective_id,
                 "analysis_version": version,
-                "finding": dict(detail["finding"]),
-                "feedback_records": [item.to_record() for item in feedback],
-                "curation_records": [item.to_record() for item in curations],
+                "finding": detail["finding"],
+                "feedback_records": [
+                    {
+                        "feedback_id": item.feedback_id,
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "finding_id": item.finding_id,
+                        "review_status": item.review_status,
+                        "issue_type": item.issue_type,
+                        "note": item.note,
+                        "reviewer": item.reviewer,
+                        "created_at": item.created_at,
+                    }
+                    for item in feedback
+                ],
+                "curation_records": [
+                    {
+                        "curation_id": item.curation_id,
+                        "collection_id": item.collection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "finding_id": item.finding_id,
+                        "curated_status": item.curated_status,
+                        "curated_finding": {
+                            "collection_id": item.curated_finding.collection_id,
+                            "objective_id": item.curated_finding.objective_id,
+                            "analysis_version": item.curated_finding.analysis_version,
+                            "finding_id": item.curated_finding.finding_id,
+                            "statement": item.curated_finding.statement,
+                            "factors": list(item.curated_finding.factors),
+                            "outcome": item.curated_finding.outcome,
+                            "direction": item.curated_finding.direction,
+                            "assertion_strength": item.curated_finding.assertion_strength,
+                            "attribution_scope": item.curated_finding.attribution_scope,
+                            "synthesis_status": item.curated_finding.synthesis_status,
+                            "certainty": item.curated_finding.certainty,
+                            "display_rank": item.curated_finding.display_rank,
+                            "mechanisms": [
+                                {
+                                    "source_term": mechanism.source_term,
+                                    "relation_type": mechanism.relation_type,
+                                    "target_term": mechanism.target_term,
+                                    "direction": mechanism.direction,
+                                    "assertion_strength": mechanism.assertion_strength,
+                                    "supporting_evidence_ids": list(
+                                        mechanism.supporting_evidence_ids
+                                    ),
+                                }
+                                for mechanism in item.curated_finding.mechanisms
+                            ],
+                            "scientific_context": {
+                                "material": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.material
+                                ],
+                                "sample": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.sample
+                                ],
+                                "process": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.process
+                                ],
+                                "test": [
+                                    {
+                                        "name": attribute.name,
+                                        "value": attribute.value,
+                                        "unit": attribute.unit,
+                                        **(
+                                            {"context_scope": attribute.context_scope}
+                                            if attribute.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    attribute.applies_to_outcomes
+                                                )
+                                            }
+                                            if attribute.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.test
+                                ],
+                            },
+                            "limitations": list(item.curated_finding.limitations),
+                            "paper_contributions": [
+                                {
+                                    "document_id": contribution.document_id,
+                                    "analysis_status": contribution.analysis_status,
+                                    "supporting_evidence_ids": list(
+                                        contribution.supporting_evidence_ids
+                                    ),
+                                    "contradicting_evidence_ids": list(
+                                        contribution.contradicting_evidence_ids
+                                    ),
+                                    "context_evidence_ids": list(
+                                        contribution.context_evidence_ids
+                                    ),
+                                    "condition_boundary_evidence_ids": list(
+                                        contribution.condition_boundary_evidence_ids
+                                    ),
+                                }
+                                for contribution in item.curated_finding.paper_contributions
+                            ],
+                            "origin": item.curated_finding.origin,
+                            "source_analysis_version": item.curated_finding.source_analysis_version,
+                            "parent_finding_id": item.curated_finding.parent_finding_id,
+                            "created_by_user_id": item.curated_finding.created_by_user_id,
+                            "created_by_tool_call_id": item.curated_finding.created_by_tool_call_id,
+                            "created_at": (
+                                item.curated_finding.created_at.isoformat()
+                                if item.curated_finding.created_at
+                                else None
+                            ),
+                            **(
+                                {
+                                    "selection_ids": list(
+                                        item.curated_finding.selection_ids
+                                    )
+                                }
+                                if item.curated_finding.selection_ids
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "comparison_group_ids": list(
+                                        item.curated_finding.comparison_group_ids
+                                    )
+                                }
+                                if item.curated_finding.comparison_group_ids
+                                else {}
+                            ),
+                            **(
+                                {"warnings": list(item.curated_finding.warnings)}
+                                if item.curated_finding.warnings
+                                else {}
+                            ),
+                        },
+                        "note": item.note,
+                        "reviewer": item.reviewer,
+                        "updated_at": item.updated_at,
+                    }
+                    for item in curations
+                ],
                 "review_scope": {**review_key, "includes_ancestor_reviews": False},
                 "evidence_review": review,
                 "replacement_evidence": replacement_evidence,
@@ -407,14 +592,39 @@ class InspectPublishedFindingCapability:
         )
         # Measure the actual escaped tool message, rather than raw excerpt text.
         budget = max(0, min(context.max_result_tokens, 12_000) - 256)
-        while ChatContextBuilder.estimate_tokens({
-            "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
-        }) > budget:
+        while (
+            ChatContextBuilder.estimate_tokens(
+                {
+                    "role": "tool",
+                    "tool_call_id": result.tool_call_id,
+                    "content": json.dumps(
+                        {
+                            "tool_call_id": result.tool_call_id,
+                            "status": result.status.value,
+                            "data": result.data,
+                            "resource_refs": [
+                                {
+                                    "resource_type": item.resource_type,
+                                    "resource_id": item.resource_id,
+                                    "href": item.href,
+                                }
+                                for item in result.resource_refs
+                            ],
+                            "warnings": list(result.warnings),
+                            "error_code": result.error_code,
+                            "error_message": result.error_message,
+                        },
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ),
+                }
+            )
+            > budget
+        ):
             if not evidence_items:
                 return ChatToolResult(
                     tool_call_id=context.tool_call_id,
-                    status="failed",
+                    status=ToolResultStatus.FAILED,
                     error_code="finding_read_exceeds_budget",
                     error_message=(
                         "The complete Finding or one Evidence record exceeds the read budget. "
@@ -425,21 +635,38 @@ class InspectPublishedFindingCapability:
                 )
             evidence_items.pop()
             pending = {replacements.get(item["evidence_id"]) for item in evidence_items}
-            replacement_evidence = [item for item in replacement_evidence if item["evidence_id"] in pending]
+            replacement_evidence = [
+                item for item in replacement_evidence if item["evidence_id"] in pending
+            ]
             next_offset = arguments.evidence_offset + len(evidence_items)
             if not evidence_items and next_offset < evidence_total:
                 # A zero-length page must never ask the Agent to repeat its offset.
                 continue
-            visible_ids = {item["evidence_id"] for item in (*evidence_items, *replacement_evidence)}
+            visible_ids = {
+                item["evidence_id"] for item in (*evidence_items, *replacement_evidence)
+            }
             result = replace(
                 result,
-                data={**result.data, "evidence": list(evidence_items),
-                      "replacement_evidence": replacement_evidence,
-                      "next_evidence_offset": next_offset if next_offset < evidence_total else None},
-                resource_refs=(finding_ref, *(ref for ref in result.resource_refs[1:]
-                    if ref.resource_id.rsplit(":", 1)[-1] in visible_ids)),
-                warnings=("Additional Finding Evidence was omitted to fit the read budget; "
-                          "continue with next_evidence_offset before a complete review.",),
+                data={
+                    **result.data,
+                    "evidence": list(evidence_items),
+                    "replacement_evidence": replacement_evidence,
+                    "next_evidence_offset": (
+                        next_offset if next_offset < evidence_total else None
+                    ),
+                },
+                resource_refs=(
+                    finding_ref,
+                    *(
+                        ref
+                        for ref in result.resource_refs[1:]
+                        if ref.resource_id.rsplit(":", 1)[-1] in visible_ids
+                    ),
+                ),
+                warnings=(
+                    "Additional Finding Evidence was omitted to fit the read budget; "
+                    "continue with next_evidence_offset before a complete review.",
+                ),
             )
         return result
 

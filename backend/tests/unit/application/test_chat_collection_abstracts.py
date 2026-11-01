@@ -1,3 +1,9 @@
+from application.chat.capabilities import document_sources
+from application.chat.capabilities import collection_context
+from infra.persistence import database
+from copy import deepcopy
+from tests.support.source_artifacts import build_source_documents
+from tests.support.postgres import seed_collection
 import asyncio
 import json
 from pathlib import Path
@@ -10,17 +16,34 @@ from application.chat.capabilities.collection_context import (
     BrowseCollectionPapersCapability,
     BrowseCollectionPapersToolRequest,
 )
+from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
 )
-from application.chat.capabilities.contracts import CapabilityExecutionContext
 from domain.source.artifacts import SourceBlock, SourceDocument
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+
+
+from domain.source import Collection, Document
+from repositories.collection_repository import StoredCollection, StoredDocument
+
+
+def stored_collection(records):
+    return StoredCollection(
+        collection=Collection("collection-1", "user-1", "Papers", None, "idle"),
+        created_at="2026-11-01", updated_at="2026-11-01",
+        documents=tuple(
+            StoredDocument(
+                document=Document(item["document_id"], item.get("original_filename", item["document_id"]), "digest", None, item["status"], 0),
+                stored_filename=item.get("original_filename", item["document_id"]),
+                storage_key="input/" + item["document_id"], created_at="2026-11-01",
+            )
+            for item in records
+        ),
+    )
 
 
 def document(text, heading="Paper title"):
@@ -80,18 +103,15 @@ def test_unprepared_source_remains_unprepared():
     ("No explicitly labelled abstract is available.", "not_found"),
 ])
 def test_browse_prepared_paper_reports_only_real_screening_limitations(text, expected_status):
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
-            "documents": [{"document_id": "paper-1", "original_filename": "Preheating.pdf", "status": "ready"}],
-        })),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection([{"document_id": "paper-1", "original_filename": "Preheating.pdf", "status": "ready"}])))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", title="Preheating", doc_type="experimental", confidence=0.9),
-        ])),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[
+        ]))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", map_status="sufficient", studies=(), map_limitations=()),
-        ])),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document(text))),
-    )
+        ]))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(text)))
+    capability = BrowseCollectionPapersCapability()
     result = asyncio.run(capability.execute(
         CapabilityExecutionContext(session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="call-1"),
         BrowseCollectionPapersToolRequest(),
@@ -103,7 +123,7 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
     assert bool(paper["screening_limitations"]) == (expected_status == "not_found")
     assert paper["support_is_evidence"] is False
     assert any(ref.resource_id == "paper-1" for ref in result.resource_refs)
-    capability.source_artifact_repository.read_document.assert_awaited_once_with("collection-1", "paper-1")
+    collection_context.SourceArtifactRepo.read_document.assert_awaited_once_with("collection-1", "paper-1")
 
 
 @pytest.mark.parametrize("missing,document_status", [
@@ -120,20 +140,17 @@ def test_optional_screening_information_does_not_require_researcher_intervention
     if missing == "insufficient_map":
         paper_map.map_status = "insufficient_map"
         paper_map.map_limitations = ("Process scope is not mapped.",)
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
-            "documents": [{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}],
-        })),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection([{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}])))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(
             return_value=[] if missing == "profile" else [profile]
-        )),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(
+        ))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(
             return_value=[] if missing == "map" else [paper_map]
-        )),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document(
+        ))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(
             "Preheating temperature was varied." if missing == "abstract" else "Abstract: LPBF preheating study."
-        ))),
-    )
+        )))
+    capability = BrowseCollectionPapersCapability()
     result = asyncio.run(capability.execute(
         CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t"),
         BrowseCollectionPapersToolRequest(),
@@ -160,12 +177,11 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
             raise OSError("private-storage-detail")
         return document("Abstract: LPBF study.") if document_id == "paper-1" else None
 
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={"documents": records})),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(side_effect=read_source)),
-    )
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection(records)))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
+    capability = BrowseCollectionPapersCapability()
     context = CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t")
     result = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(limit=6)))
     assert [paper["source_status"] for paper in result.data["papers"]] == [
@@ -175,7 +191,22 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     assert result.data["paper_total"] == 7
     assert len(result.warnings) == 1
     assert "3" in result.warnings[0]
-    assert "private-storage-detail" not in str(result.to_record())
+    assert "private-storage-detail" not in str({
+        "tool_call_id": result.tool_call_id,
+        "status": result.status.value,
+        "data": deepcopy(dict(result.data)),
+        "resource_refs": [
+            {
+                "resource_type": item.resource_type,
+                "resource_id": item.resource_id,
+                "href": item.href,
+            }
+            for item in result.resource_refs
+        ],
+        "warnings": list(result.warnings),
+        "error_code": result.error_code,
+        "error_message": result.error_message,
+    })
     assert "paper-6" in caplog.text
 
     miss = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(query="not-a-filename")))
@@ -184,14 +215,11 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
 
 
 def test_normal_pagination_is_not_a_warning():
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
-            "documents": [{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)],
-        })),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text."))),
-    )
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value=stored_collection([{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)])))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
+    capability = BrowseCollectionPapersCapability()
     result = asyncio.run(capability.execute(
         CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t"),
         BrowseCollectionPapersToolRequest(limit=8),
@@ -201,33 +229,50 @@ def test_normal_pagination_is_not_a_warning():
     assert result.data["returned_paper_count"] == 8
 
 
-def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
+def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*, postgres_session_factory):
     fixture = Path(__file__).resolve().parents[2] / "fixtures" / "agent_p002" / "source_document.json"
-    source_document = SourceDocument.from_record(json.loads(fixture.read_text(encoding="utf-8")))
+    record = json.loads(fixture.read_text(encoding="utf-8"))
+    record["id"] = record["document_id"]
+    source_document = build_source_documents(
+        documents=[record],
+        text_units=record.get("text_units", ()),
+        blocks=record.get("blocks", ()),
+        tables=record.get("tables", ()),
+        table_rows=record.get("table_rows", ()),
+        table_cells=record.get("table_cells", ()),
+        figures=record.get("figures", ()),
+    )[0]
     records = [
-        {"document_id": source_document.document_id, "original_filename": "P002-preheating.pdf", "status": "ready"},
-        {"document_id": "paper-2", "original_filename": "Missing.pdf", "status": "ready"},
+        {
+            "document_id": source_document.document_id,
+            "original_filename": "P002-preheating.pdf",
+            "status": "ready",
+        },
+        {
+            "document_id": "paper-2",
+            "original_filename": "Missing.pdf",
+            "status": "ready",
+        },
     ]
     collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock(return_value={"documents": records}),
+        get_collection_for_user=AsyncMock(return_value=stored_collection(records)),
         get_document=AsyncMock(return_value=records[1]),
     )
-    sources = MemorySourceArtifactRepository()
-    browse = BrowseCollectionPapersCapability(
-        collection_service=collection_service,
-        document_profile_repository=MemoryDocumentProfileRepository(),
-        paper_map_repository=MemoryPaperMapRepository(),
-        source_artifact_repository=sources,
-    )
-    inspect = InspectDocumentSourcesCapability(
-        collection_service=collection_service,
-        source_artifact_repository=sources,
-    )
+    sources = SourceArtifactRepository()
+    collection_context.collection_service = collection_service
+    collection_context.DocumentProfileRepo = DocumentProfileRepository()
+    collection_context.PaperMapRepo = PaperMapRepository()
+    collection_context.SourceArtifactRepo = sources
+    browse = BrowseCollectionPapersCapability()
+    document_sources.collection_service = collection_service
+    document_sources.SourceArtifactRepo = sources
+    inspect = InspectDocumentSourcesCapability()
     context = CapabilityExecutionContext(
         session_id="s", user_id="u", collection_id="c", tool_call_id="browse"
     )
 
     async def scenario():
+        await seed_collection(database.AsyncSessionLocal, 'c', document_ids=(source_document.document_id,))
         await sources.replace_document("c", source_document)
         survey = await browse.execute(context, BrowseCollectionPapersToolRequest())
         assert [paper["source_status"] for paper in survey.data["papers"]] == ["available", "unavailable"]

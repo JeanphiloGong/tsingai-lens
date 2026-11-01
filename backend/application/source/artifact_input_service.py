@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import ast
-import math
-from typing import Any, Iterable, Mapping
+from typing import Any
 
-from application.repositories.source_artifact_repository import SourceArtifactRepository
-from domain.source import SourceDocument, SourceDocumentTree
-
+from domain.source import SourceDocument
+from infra.source.artifact_bundle import (
+    source_block_payload,
+    source_document_payload,
+    source_figure_payload,
+    source_table_cell_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_text_unit_payload,
+)
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 SourceRecord = dict[str, Any]
 
@@ -18,9 +24,11 @@ async def load_collection_inputs(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    documents = _records(document.to_record() for document in source_documents)
-    text_units = _records(
-        text_unit.to_record()
+    documents = tuple(
+        source_document_payload(document) for document in source_documents
+    )
+    text_units = tuple(
+        source_text_unit_payload(text_unit)
         for document in source_documents
         for text_unit in document.text_units
     )
@@ -34,8 +42,8 @@ async def load_blocks_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
-        block.to_record()
+    return tuple(
+        source_block_payload(block)
         for document in source_documents
         for block in document.blocks
     )
@@ -48,8 +56,8 @@ async def load_table_rows_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
-        row.to_record()
+    return tuple(
+        source_table_row_payload(row)
         for document in source_documents
         for row in document.table_rows
     )
@@ -62,8 +70,8 @@ async def load_table_cells_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
-        cell.to_record()
+    return tuple(
+        source_table_cell_payload(cell)
         for document in source_documents
         for cell in document.table_cells
     )
@@ -73,8 +81,8 @@ async def load_figures_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
-    return _records(
-        figure.to_record()
+    return tuple(
+        source_figure_payload(figure)
         for figure in await source_artifact_repository.list_figures(collection_id)
     )
 
@@ -86,21 +94,10 @@ async def load_tables_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
-        table.to_record()
+    return tuple(
+        source_table_payload(table)
         for document in source_documents
         for table in document.tables
-    )
-
-
-async def load_document_tree(
-    collection_id: str,
-    document_id: str,
-    source_artifact_repository: SourceArtifactRepository,
-) -> SourceDocumentTree:
-    return await source_artifact_repository.read_document_tree(
-        collection_id,
-        document_id,
     )
 
 
@@ -114,107 +111,3 @@ async def _load_source_documents(
     if not documents:
         raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
     return documents
-
-
-def _records(records: Iterable[Mapping[str, Any]]) -> tuple[SourceRecord, ...]:
-    return tuple(dict(record) for record in records)
-
-
-def build_document_records(
-    documents: Iterable[Mapping[str, Any]],
-    text_units: Iterable[Mapping[str, Any]] | None = None,
-) -> tuple[SourceRecord, ...]:
-    document_rows = [dict(row) for row in documents]
-    if not document_rows:
-        return ()
-    if not any("id" in row for row in document_rows):
-        raise ValueError("documents missing required 'id' field")
-    if not any("text" in row for row in document_rows) and text_units is None:
-        raise ValueError("documents missing 'text' and no text_units fallback provided")
-
-    text_unit_rows = [dict(row) for row in text_units or ()]
-    text_unit_ids_by_doc: dict[str, list[str]] = {}
-    if text_unit_rows and all({"id", "text"}.issubset(row) for row in text_unit_rows):
-        for row in text_unit_rows:
-            text_unit_id = str(row.get("id"))
-            for doc_id in _listify(row.get("document_ids")):
-                text_unit_ids_by_doc.setdefault(str(doc_id), []).append(text_unit_id)
-
-    passthrough_columns = [
-        column
-        for column in (
-            "creation_date",
-            "metadata",
-            "source_filename",
-            "original_filename",
-            "stored_filename",
-        )
-        if any(column in row for row in document_rows)
-    ]
-
-    rows: list[SourceRecord] = []
-    for row in document_rows:
-        paper_id = str(row.get("id"))
-        text = str(row.get("text") or "").strip()
-        if not text and text_unit_rows:
-            text = _join_text_units_for_document(text_unit_rows, paper_id)
-        payload: SourceRecord = {
-            "paper_id": paper_id,
-            "title": _coerce_optional_text(row.get("title")) or paper_id,
-            "text": text,
-            "text_unit_ids": text_unit_ids_by_doc.get(paper_id, []),
-        }
-        for column in passthrough_columns:
-            payload[column] = row.get(column)
-        rows.append(payload)
-
-    return tuple(rows)
-
-
-def _join_text_units_for_document(
-    text_units: Iterable[Mapping[str, Any]],
-    paper_id: str,
-) -> str:
-    matched: list[str] = []
-    for row in text_units:
-        if paper_id not in {str(item) for item in _listify(row.get("document_ids"))}:
-            continue
-        text = str(row.get("text") or "").strip()
-        if text:
-            matched.append(text)
-    return "\n".join(matched)
-
-
-def _coerce_optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    return text
-
-
-def _listify(value: Any) -> list[Any]:
-    if value is None:
-        return []
-    if isinstance(value, float) and math.isnan(value):
-        return []
-    if isinstance(value, list):
-        return value
-    if isinstance(value, (tuple, set)):
-        return list(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return []
-        if text.startswith("[") and text.endswith("]"):
-            try:
-                parsed = ast.literal_eval(text)
-            except (ValueError, SyntaxError):
-                return [text]
-            if isinstance(parsed, list):
-                return parsed
-        return [text]
-    return [value]

@@ -22,20 +22,20 @@ Use the following entry points when modifying the Core workflow:
 
 | Task | Entry point | Result |
 |---|---|---|
-| Resolve selected ready papers | `ObjectiveInputService.resolve_prepared_document_inputs()` | frozen input set; no parsing |
-| Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
-| Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
-| Create/confirm a candidate | `ObjectiveAuthoringService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
-| Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
-| Reconstruct experiments | `ObjectiveExperimentAnalysisService.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
-| Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
+| Resolve selected ready papers | `objective_input_service.resolve_prepared_document_inputs()` | frozen input set; no parsing |
+| Discover candidates | `objective_discovery_service.start_objective_discovery()` | queued discovery run |
+| Form candidates | `objective_candidate_service.discover_candidate_facts()` | candidate Objectives |
+| Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
+| Queue analysis | `analysis_service.start_objective_analysis()` | queued versioned analysis |
+| Reconstruct experiments | `objective_analysis_service.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
+| Publish/read analysis | `analysis_service.execute_objective_analysis_job()` / module read functions | immutable published snapshot |
 
 Paper Map construction is intentionally split by responsibility:
 
 - `paper_research_map_service.py` coordinates the document-level sequence;
-- `paper_map_sources.py` owns Source selection and window payloads;
-- `paper_map_extraction.py` owns model extraction, structured-output recovery,
-  and window-result normalization;
+- `paper_map_sources.py` owns Source selection and traversal;
+- `paper_map_extraction.py` assembles and fits selected windows, then owns model
+  extraction, structured-output recovery, and window-result normalization;
 - `paper_map_aggregation.py` owns window consolidation, study identity merging,
   unresolved-scope retention, and final status assessment.
 
@@ -43,17 +43,35 @@ The coordinator must remain the only place that orders these steps. Moving a
 helper does not authorize changing Source order, recovery budgets, or map
 status semantics.
 
-`ObjectiveInputService.load_or_build_paper_maps()` may call the model and store
-a refreshed map. Its other input reads do not create Objectives or experiments.
+`objective_input_service.load_or_build_paper_maps()` may call the model and store
+a refreshed map using the actual extractor passed by the runtime owner. Its
+other input reads do not create Objectives or experiments.
 Discovery stores candidate Objectives; authoring stores only the explicitly
 requested creation or confirmation. Scientific analysis returns experiment
-records; `ExperimentAnalysisWriter` stores revisions, selections, optional
-groups, and Findings. `ObjectiveAnalysisService` controls the complete
+records; `experiment_analysis_writer` stores revisions, selections, optional
+groups, and Findings. `analysis_service` controls the complete
 version's publication. Both HTTP and Agent callers use these owners.
+Agent paper authoring calls `prepare_paper_experiment_draft()` and
+`write_prepared_paper_experiments()` directly. Preparation checks the current
+Sources; the approved write persists immutable paper revisions without publishing
+an Objective analysis or Finding.
+`scripts/run_objective_analysis.py` claims a fixed analysis version from
+`ObjectiveRepo`, creates the actual structured-response client and extraction
+components, and passes them explicitly to `execute_objective_analysis_job()`.
+The lease is checked for progress, diagnostics, failure and result publication;
+the experiment graph and published-version pointer commit together. The entry
+point owns its operation and heartbeat and closes the model client on exit.
+Read operations remain module functions. The optional synchronous Finding summary
+uses a separate request client with a 60-second budget and zero provider retries.
 
-The analysis runtime receives `ObjectiveInputService` and
-`DocumentProfileService` directly at construction. It does not reach through
-the scientific engine to discover those dependencies.
+`run_objective_discovery.py` similarly owns discovery's model client. Selected
+preparation fingerprints are frozen when queued. Paper Maps, candidates and
+completion writes use short transactions guarded by the claimed run lease.
+
+The analysis module imports `objective_input_service` and
+`document_profiles.service` directly. It does not reach through the scientific
+engine to discover those dependencies. Public reads and commands accept the
+actor's user ID and authorize the Collection before accessing scientific data.
 
 ## Changing This Package
 
@@ -68,7 +86,13 @@ the scientific engine to discover those dependencies.
 | Map merging or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
 | One paper's scientific experiment flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
-| Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.py` | `test_finding_summary.py` |
+| Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.summarize_objective_finding()` | `test_finding_summary.py` |
+
+`analysis_service.summarize_objective_finding()` owns its request client.
+This client has a 60-second timeout and no provider retries, stays separate
+from the worker's analysis client, and closes after the request, including
+failure or cancellation. Authorization and fixed-version reads precede client creation. The
+summary helper receives the actual client and never constructs or closes one.
 
 For a scientific stage, continue to [`analysis/README.md`](analysis/README.md).
 For cross-module verification, use the commands in
@@ -90,7 +114,7 @@ Finding.
 
 ## Document-Level Paper Map
 
-`PaperResearchMapService.build_document_paper_map()` receives one prepared
+`paper_research_map_service.build_document_paper_map()` receives one prepared
 `SourceDocument`, its `DocumentProfile`, and its document tree. It:
 
 1. selects bounded overview, abstract, conclusion, table, and figure Sources;
@@ -132,7 +156,7 @@ POST objective-discovery {document_ids}
 `preparation_fingerprint`. Empty, duplicate, unknown, non-ready, or stale inputs
 are rejected. Discovery never falls back to all Collection papers.
 
-`ObjectiveInputService` owns this input boundary for both Discovery and
+`objective_input_service` owns this input boundary for both Discovery and
 Analysis. It also loads the matching Source documents, Profiles, document trees,
 and reusable Paper Maps; it does not form scientific claims or persist
 Objectives/Evidence.
@@ -153,6 +177,11 @@ Candidate formation identifies shared scientific themes while preserving each
 paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,
 states, methods, or broad outcome families into a directly comparable question.
+
+Discovery is durable work claimed by a concrete worker, rather than a task owned
+by an HTTP process. A new worker may take over an expired lease; the superseded
+worker cannot publish late progress, cached maps or candidates. Restarting Web
+does not mark these jobs failed.
 
 The discovered Objective list is a bounded human review set, not the complete
 Paper Map. The map remains the discovery ledger: every emitted relationship,

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from repositories.objective_repository import ObjectiveRepo
+from repositories.paper_map_repository import PaperMapRepo
+
+from domain.chat import ToolResultStatus
+
 from hashlib import sha256
 import json
 from typing import Any, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -16,20 +22,9 @@ from application.core.objectives import property_matching
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-ShortText = Annotated[str, Field(min_length=1, max_length=240)]
-
-
-def normalize_terms(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = value.strip()
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(text)
-    return result
+ShortText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)
+]
 
 
 class ObjectiveDraftInput(BaseModel):
@@ -62,7 +57,14 @@ class ObjectiveDraftInput(BaseModel):
     )
     @classmethod
     def _normalize_lists(cls, values: list[str]) -> list[str]:
-        return normalize_terms(values)
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = value.casefold()
+            if key not in seen:
+                seen.add(key)
+                result.append(value)
+        return result
 
     @field_validator("question")
     @classmethod
@@ -94,30 +96,19 @@ class ProposeObjectiveDraftsCapability:
         input_model=ProposeObjectiveDraftsToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_repository: Any,
-        paper_map_repository: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
-        self.paper_map_repository = paper_map_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ProposeObjectiveDraftsToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        paper_maps = await PaperMapRepo.list_collection(
             context.collection_id
         )
-        existing = await self.objective_repository.list_objectives(
+        existing = await ObjectiveRepo.list_objectives(
             context.collection_id
         )
         records: list[dict[str, Any]] = []
@@ -158,7 +149,7 @@ class ProposeObjectiveDraftsCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft_count": len(records),
                 "drafts": records,
@@ -259,5 +250,4 @@ __all__ = [
     "ObjectiveDraftInput",
     "ProposeObjectiveDraftsToolRequest",
     "ProposeObjectiveDraftsCapability",
-    "normalize_terms",
 ]

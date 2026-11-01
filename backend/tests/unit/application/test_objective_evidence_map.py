@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Mapping
 
 import pytest
-
 from application.core.objectives.evidence_map import build_objective_evidence_map
-from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core import (
     DocumentProfile,
     Finding,
@@ -14,23 +13,51 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.research_objective import (
+    EVIDENCE_ROLE_VALUES,
+    ObjectiveEvidence,
+    PaperContribution,
+    ResearchObjective,
+)
+
+
+from domain.core.research_objective import _scoped_id as objective_scoped_id
+from domain.core.scientific_fact import (
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+
+from repositories.objective_repository import ObjectiveAnalysis
 
 
 def _objective(*, published_version: int | None = 1) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "How does heat treatment affect tensile strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["heat treatment temperature"],
-            "outcomes": ["ultimate tensile strength"],
-            "seed_document_ids": ["paper-1", "paper-2", "paper-3"],
-            "confidence": 0.9,
-            "confirmation_status": "confirmed",
-            "active_analysis_version": published_version,
-            "published_analysis_version": published_version,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="How does heat treatment affect tensile strength?",
+        material_scope=("Alloy A",),
+        variables=("heat treatment temperature",),
+        outcomes=("ultimate tensile strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1", "paper-2", "paper-3"),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        confirmation_status="confirmed",
+        active_analysis_version=published_version,
+        published_analysis_version=published_version,
     )
 
 
@@ -63,50 +90,75 @@ def _evidence(
     direction: str,
     source_ref: str,
 ) -> ObjectiveEvidence:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "evidence_id": evidence_id,
-            "document_id": document_id,
-            "source_kind": "table",
-            "source_ref": source_ref,
-            "source_excerpt": "Heat-treatment results from Table 7.",
-            "page_numbers": [20],
-            "evidence_role": (
-                "direct_result" if direction == "decrease" else "contradictory_result"
+    return ObjectiveEvidence(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        evidence_id=evidence_id
+        or objective_scoped_id(
+            "oev",
+            "collection-1",
+            "objective-1",
+            1,
+            document_id or "",
+            "table",
+            source_ref or "",
+            'direct_result' if direction == 'decrease' else 'contradictory_result',
+            (
+                ScientificResult(
+                    outcome="ultimate tensile strength",
+                    value=None,
+                    unit=None,
+                    direction=direction,
+                    result_text="Ultimate tensile strength changed after treatment.",
+                ).outcome
+                if ScientificResult(
+                    outcome="ultimate tensile strength",
+                    value=None,
+                    unit=None,
+                    direction=direction,
+                    result_text="Ultimate tensile strength changed after treatment.",
+                )
+                is not None
+                else None
             ),
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "heat treatment temperature",
-                    "baseline_value": "as-built",
-                    "target_value": "800 C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "as-built",
-                "target_label": "800 C",
-                "axis_names": ["heat treatment temperature"],
-                "comparable": True,
-                "incomparability_reasons": [],
-            },
-            "reported_result": {
-                "outcome": "ultimate tensile strength",
-                "direction": direction,
-                "result_text": "Ultimate tensile strength changed after treatment.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+        ),
+        document_id=document_id or "",
+        source_kind="table",
+        source_ref=source_ref or "",
+        source_excerpt="Heat-treatment results from Table 7.",
+        page_numbers=(20,),
+        related_source_refs=(),
+        evidence_role='direct_result' if direction == 'decrease' else 'contradictory_result',
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="heat treatment temperature",
+                baseline_value="as-built",
+                target_value="800 C",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="800 C",
+            axis_names=("heat treatment temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="ultimate tensile strength",
+            value=None,
+            unit=None,
+            direction=direction,
+            result_text="Ultimate tensile strength changed after treatment.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
 
 
@@ -117,24 +169,28 @@ def _contribution(
     disposition: str = "comparable_evidence",
 ) -> PaperContribution:
     failed = status == "failed"
-    return PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": document_id,
-            "analysis_status": status,
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "exclusion_reason": "provider timeout" if failed else None,
-            "confidence": 0.8,
-            "evidence_disposition": disposition,
-            "routed_source_count": 1,
-            "extracted_source_count": 0 if failed else 1,
-            "comparable_evidence_count": 0 if failed else 1,
-            "failed_source_count": 1 if failed else 0,
-            "evidence_disposition_reason": "provider timeout" if failed else None,
-        }
+    return PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id=document_id or "",
+        analysis_status=status,
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason='provider timeout' if failed else None,
+        warnings=(),
+        confidence=0.8,
+        evidence_disposition=disposition,
+        routed_source_count=1,
+        extracted_source_count=0 if failed else 1,
+        comparable_evidence_count=0 if failed else 1,
+        failed_source_count=1 if failed else 0,
+        evidence_disposition_reason='provider timeout' if failed else None,
     )
 
 
@@ -144,31 +200,39 @@ def _needs_context_evidence(
     *,
     source_ref: str,
 ) -> ObjectiveEvidence:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "evidence_id": evidence_id,
-            "document_id": document_id,
-            "source_kind": "text_block",
-            "source_ref": source_ref,
-            "source_excerpt": (
-                "Porosity was measured after the heat-treatment experiments."
-            ),
-            "page_numbers": [8],
-            "evidence_role": "direct_result",
-            "selection_status": "candidate",
-            "changed_variables": [],
-            "comparison": None,
-            "reported_result": None,
-            "attribution_scope": "not_attributable",
-            "resolution_status": "unresolved",
-            "selection_reason": (
-                "Target outcome mentioned but needs same-paper context."
-            ),
-            "confidence": 0.5,
-        }
+    return ObjectiveEvidence(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        evidence_id=evidence_id
+        or objective_scoped_id(
+            "oev",
+            "collection-1",
+            "objective-1",
+            1,
+            document_id or "",
+            "text_window",
+            source_ref or "",
+            "direct_result",
+            None,
+        ),
+        document_id=document_id or "",
+        source_kind="text_window",
+        source_ref=source_ref or "",
+        source_excerpt="Porosity was measured after the heat-treatment experiments.",
+        page_numbers=(8,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="candidate",
+        selection_reason="Target outcome mentioned but needs same-paper context.",
+        changed_variables=(),
+        comparison=None,
+        reported_result=None,
+        attribution_scope="not_attributable",
+        scientific_context=ScientificContext(),
+        resolution_status="unresolved",
+        failure_reason=None,
+        confidence=0.5,
     )
 
 
@@ -189,30 +253,48 @@ def _finding(evidence: tuple[ObjectiveEvidence, ...]) -> Finding:
             "analysis_status": "failed",
         },
     )
-    return Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1",
-            "statement": "Heat treatment generally decreased tensile strength.",
-            "factors": ["heat treatment temperature"],
-            "outcome": "ultimate tensile strength",
-            "direction": "decrease",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "conflict",
-            "certainty": Finding.certainty_for("conflict", evidence),
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "limitations": ["One paper reported the opposite direction."],
-            "paper_contributions": contributions,
-        }
+    return Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement="Heat treatment generally decreased tensile strength.",
+        factors=("heat treatment temperature",),
+        outcome="ultimate tensile strength",
+        direction="decrease",
+        assertion_strength="associative",
+        attribution_scope='isolated_effect',
+        synthesis_status="conflict",
+        certainty=Finding.certainty_for('conflict', evidence),
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        limitations=("One paper reported the opposite direction.",),
+        paper_contributions=tuple(
+            (
+                FindingPaperContribution(
+                    document_id=item.get('document_id') or "",
+                    analysis_status=item.get('analysis_status'),
+                    supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
+                    contradicting_evidence_ids=tuple(item.get('contradicting_evidence_ids') or ()),
+                    context_evidence_ids=tuple(item.get('context_evidence_ids') or ()),
+                    condition_boundary_evidence_ids=tuple(item.get('condition_boundary_evidence_ids') or ()),
+                )
+                for item in tuple(
+                    (
+                        dict(item)
+                        for item in (
+                            contributions
+                            if isinstance(contributions, (list, tuple))
+                            else ()
+                        )
+                        if isinstance(item, Mapping)
+                    )
+                )
+            )
+        ),
     )
 
 
@@ -237,21 +319,19 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
         findings=(_finding(evidence),),
         evidence_records=evidence,
         profiles=(
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "title": "Heat treatment study A",
-                    "doc_type": "experimental",
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                document_id="paper-1",
+                title="Heat treatment study A",
+                doc_type="experimental",
+                confidence=0.9,
+                profile_warnings=(),
             ),
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": "paper-2",
-                    "title": "Heat treatment study B",
-                    "doc_type": "experimental",
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                document_id="paper-2",
+                title="Heat treatment study B",
+                doc_type="experimental",
+                confidence=0.9,
+                profile_warnings=(),
             ),
         ),
     )
@@ -303,25 +383,28 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
 
 
 def test_evidence_map_is_complete_for_scientific_abstention() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "confidence": 0.8,
-            "evidence_disposition": "no_routable_evidence",
-            "evidence_disposition_reason": (
-                "No source in this paper was selected for Objective extraction."
-            ),
-            "routed_source_count": 0,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.8,
+        evidence_disposition="no_routable_evidence",
+        routed_source_count=0,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=0,
+        evidence_disposition_reason="No source in this paper was selected for Objective extraction.",
     )
     payload = build_objective_evidence_map(
         objective=_objective(),
@@ -343,26 +426,29 @@ def test_evidence_map_keeps_unlinked_needs_context_evidence_with_source_lineage(
         "paper-1",
         source_ref="block-results-4",
     )
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "confidence": 0.8,
-            "evidence_disposition": "no_comparable_evidence",
-            "evidence_disposition_reason": (
-                "Selected sources need same-paper context before comparison."
-            ),
-            "routed_source_count": 1,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-            "evidence_status_counts": {"needs_context": 1},
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.8,
+        evidence_disposition="no_comparable_evidence",
+        routed_source_count=1,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=0,
+        evidence_disposition_reason="Selected sources need same-paper context before comparison.",
+        evidence_status_counts=(("needs_context", 1),),
     )
 
     payload = build_objective_evidence_map(

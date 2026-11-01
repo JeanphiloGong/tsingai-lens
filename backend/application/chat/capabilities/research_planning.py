@@ -2,24 +2,32 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from application.evaluation import finding_dataset_service
+from application.goal import experiment_plan_service
+
+import json
 from collections.abc import Mapping
 from hashlib import sha256
-import json
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlencode
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
 from application.goal.research_plan_contract import (
     ResearchPlanStructure,
     ResearchPlanVariable,
 )
-from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ProposeResearchPlanToolRequest(ResearchPlanStructure):
@@ -27,12 +35,14 @@ class ProposeResearchPlanToolRequest(ResearchPlanStructure):
 
     objective_id: str = Field(min_length=1, max_length=240)
     title: str = Field(min_length=1, max_length=400)
-    finding_ids: list[str] = Field(
-        min_length=1, max_length=8,
+    finding_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1,
+        max_length=8,
         description="Exact published Findings whose inspected evidence supports this plan.",
     )
-    evidence_ids: list[str] = Field(
-        min_length=1, max_length=32,
+    evidence_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1,
+        max_length=32,
         description=(
             "Use only Evidence returned by inspecting one of the selected finding_ids. "
             "Evidence from the collection overview may belong to other Findings and "
@@ -46,26 +56,10 @@ class ProposeResearchPlanToolRequest(ResearchPlanStructure):
     )
     @classmethod
     def _normalize_source_ids(cls, values: list[str]) -> list[str]:
-        return _unique_text(values)
+        return list(dict.fromkeys(values))
 
     @model_validator(mode="after")
     def _validate_variable_evidence_scope(self) -> "ProposeResearchPlanToolRequest":
-        required_lists = {
-            "controls": self.controls,
-            "fixed_conditions": self.fixed_conditions,
-            "measurements": self.measurements,
-            "acceptance_criteria": self.acceptance_criteria,
-            "feasibility_checks": self.feasibility_checks,
-            "safety_considerations": self.safety_considerations,
-            "limitations": self.limitations,
-            "finding_ids": self.finding_ids,
-            "evidence_ids": self.evidence_ids,
-        }
-        empty_fields = [name for name, values in required_lists.items() if not values]
-        if empty_fields:
-            raise ValueError(
-                "research plan requires non-empty " + ", ".join(empty_fields)
-            )
         selected = set(self.evidence_ids)
         outside_scope = sorted(
             {
@@ -90,24 +84,25 @@ class ResearchPlanSourceSnapshot(BaseModel):
     analysis_version: int = Field(ge=1)
     finding_fingerprint: str = Field(min_length=1, max_length=240)
     evidence_fingerprint: str = Field(min_length=1, max_length=240)
-    evidence_ids: list[str] = Field(min_length=1, max_length=100)
+    evidence_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        min_length=1, max_length=100
+    )
 
     @field_validator("evidence_ids")
     @classmethod
     def _normalize_evidence_ids(cls, values: list[str]) -> list[str]:
-        normalized = _unique_text(values)
-        if not normalized:
-            raise ValueError("source snapshot requires at least one Evidence ID")
-        return normalized
+        return list(dict.fromkeys(values))
 
 
 class CreateResearchPlanToolRequest(ProposeResearchPlanToolRequest):
     source_snapshots: list[ResearchPlanSourceSnapshot] = Field(
         min_length=1,
         max_length=8,
-        description=("Copy source_snapshots exactly from the reviewed propose_research_plan result. "
-                     "Fingerprints are canonical opaque values, not fields to invent or summarize. "
-                     "If unavailable, inspect the sources and prepare a fresh draft before requesting approval."),
+        description=(
+            "Copy source_snapshots exactly from the reviewed propose_research_plan result. "
+            "Fingerprints are canonical opaque values, not fields to invent or summarize. "
+            "If unavailable, inspect the sources and prepare a fresh draft before requesting approval."
+        ),
     )
 
 
@@ -134,28 +129,45 @@ class InspectResearchPlansCapability:
         input_model=InspectResearchPlansToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, experiment_plan_service: Any) -> None:
-        self.collection_service = collection_service
-        self.experiment_plan_service = experiment_plan_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectResearchPlansToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
         if arguments.plan_id is None:
-            plans = await self.experiment_plan_service.list_plans(
+            plans = await experiment_plan_service.list_plans(
                 context.collection_id,
                 arguments.objective_id,
+                user_id=context.user_id,
             )
-            records = [item.to_record() for item in plans]
+            records = [
+                {
+                    "plan_id": item.plan_id,
+                    "collection_id": item.collection_id,
+                    "objective_id": item.objective_id,
+                    "title": item.title,
+                    "content": item.content,
+                    "status": item.status,
+                    "source_message_id": item.source_message_id,
+                    "source_links": [dict(link) for link in item.source_links],
+                    "metadata": dict(item.metadata),
+                    "created_by": item.created_by,
+                    "created_at": item.created_at,
+                    "updated_at": item.updated_at,
+                    "plan_version": item.plan_version,
+                    "parent_plan_id": item.parent_plan_id,
+                    "structured_plan": item.structured_plan,
+                    "updated_by": item.updated_by,
+                }
+                for item in plans
+            ]
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="succeeded",
+                status=ToolResultStatus.SUCCEEDED,
                 data={
                     "objective_id": arguments.objective_id,
                     "plans": records,
@@ -168,15 +180,16 @@ class InspectResearchPlansCapability:
                 ),
             )
         try:
-            plan = await self.experiment_plan_service.read_plan(
+            plan = await experiment_plan_service.read_plan(
                 context.collection_id,
                 arguments.objective_id,
                 arguments.plan_id,
+                user_id=context.user_id,
             )
         except ExperimentPlanNotFoundError:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     "objective_id": arguments.objective_id,
                     "plan_id": arguments.plan_id,
@@ -184,10 +197,27 @@ class InspectResearchPlansCapability:
                 error_code="research_plan_not_found",
                 error_message="The requested research-plan revision was not found.",
             )
-        record = plan.to_record()
+        record = {
+            "plan_id": plan.plan_id,
+            "collection_id": plan.collection_id,
+            "objective_id": plan.objective_id,
+            "title": plan.title,
+            "content": plan.content,
+            "status": plan.status,
+            "source_message_id": plan.source_message_id,
+            "source_links": [dict(link) for link in plan.source_links],
+            "metadata": dict(plan.metadata),
+            "created_by": plan.created_by,
+            "created_at": plan.created_at,
+            "updated_at": plan.updated_at,
+            "plan_version": plan.plan_version,
+            "parent_plan_id": plan.parent_plan_id,
+            "structured_plan": plan.structured_plan,
+            "updated_by": plan.updated_by,
+        }
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": arguments.objective_id,
                 "plan": record,
@@ -222,45 +252,38 @@ class ProposeResearchPlanCapability:
         input_model=ProposeResearchPlanToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        finding_feedback_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ProposeResearchPlanToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        dataset = await self.finding_feedback_service.export_dataset(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-        )
-        items = [
-            dict(item)
-            for item in dataset.get("items") or ()
-            if isinstance(item, Mapping)
-        ]
-        findings = {
-            finding_id: item
-            for item in items
-            if (finding_id := _text(item.get("finding_id")))
-        }
+        try:
+            dataset = await finding_dataset_service.export_dataset(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                user_id=context.user_id,
+            )
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="finding_dataset_unavailable",
+                error_message="The review dataset is unavailable. Check that the Objective has a published analysis.",
+            )
+        findings = {item["finding_id"]: item for item in dataset["items"]}
         missing_finding_ids = [
             item for item in arguments.finding_ids if item not in findings
         ]
         selected_findings = [
-            findings[item]
-            for item in arguments.finding_ids
-            if item in findings
+            findings[item] for item in arguments.finding_ids if item in findings
         ]
         evidence = _evidence_index(selected_findings)
         missing_evidence_ids = [
@@ -270,20 +293,15 @@ class ProposeResearchPlanCapability:
             finding_id
             for finding_id in arguments.finding_ids
             if finding_id in findings
-            and _text(findings[finding_id].get("label_status")) == "rejected"
+            and findings[finding_id]["label_status"] == "rejected"
         ]
         failed_evidence_ids = [
             evidence_id
             for evidence_id in arguments.evidence_ids
             if evidence_id in evidence
-            and _text(evidence[evidence_id].get("evidence_status"))
-            == "extraction_failed"
+            and evidence[evidence_id]["evidence_status"] == "extraction_failed"
         ]
-        analysis_versions = {
-            int(item["analysis_version"])
-            for item in selected_findings
-            if item.get("analysis_version") is not None
-        }
+        analysis_versions = {item["analysis_version"] for item in selected_findings}
         invalid_versions = len(analysis_versions) != 1
         if (
             missing_finding_ids
@@ -294,14 +312,18 @@ class ProposeResearchPlanCapability:
         ):
             warnings = []
             if missing_finding_ids:
-                warnings.append("Some selected Findings are not in the current dataset.")
+                warnings.append(
+                    "Some selected Findings are not in the current dataset."
+                )
             if missing_evidence_ids:
                 warnings.append(
                     "Some selected Evidence is not linked to the selected current Findings. "
                     "Correct the selection using available_evidence_ids before proposing again."
                 )
             if rejected_finding_ids:
-                warnings.append("Rejected Findings cannot support a research plan draft.")
+                warnings.append(
+                    "Rejected Findings cannot support a research plan draft."
+                )
             if failed_evidence_ids:
                 warnings.append(
                     "Technical extraction failures cannot support a research plan draft."
@@ -312,16 +334,20 @@ class ProposeResearchPlanCapability:
                 )
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="succeeded",
+                status=ToolResultStatus.SUCCEEDED,
                 data={
                     "objective_id": arguments.objective_id,
                     "draft_status": "abstained",
                     "abstention_reason": "source_basis_not_current",
                     "missing_finding_ids": missing_finding_ids,
                     "missing_evidence_ids": missing_evidence_ids,
-                    "available_finding_ids": [item for item in arguments.finding_ids if item in findings],
+                    "available_finding_ids": [
+                        item for item in arguments.finding_ids if item in findings
+                    ],
                     "available_evidence_ids": sorted(evidence),
-                    "source_analysis_version": next(iter(analysis_versions)) if not invalid_versions else None,
+                    "source_analysis_version": (
+                        next(iter(analysis_versions)) if not invalid_versions else None
+                    ),
                     "rejected_finding_ids": rejected_finding_ids,
                     "failed_evidence_ids": failed_evidence_ids,
                     "persistence": "transient_chat_result",
@@ -351,16 +377,14 @@ class ProposeResearchPlanCapability:
         unreviewed_finding_ids = [
             finding_id
             for finding_id in arguments.finding_ids
-            if _text(findings[finding_id].get("label_status")) != "gold"
+            if findings[finding_id]["label_status"] != "gold"
         ]
         draft_status = (
             "needs_finding_review"
             if unreviewed_finding_ids
             else "ready_for_researcher_review"
         )
-        source_snapshots = [
-            _source_snapshot(item) for item in selected_findings
-        ]
+        source_snapshots = [_source_snapshot(item) for item in selected_findings]
         source_links = [
             {
                 "kind": "evidence",
@@ -400,15 +424,14 @@ class ProposeResearchPlanCapability:
                     href=_evidence_href(context.collection_id, item),
                 )
             )
-            document_id = _text(item.get("document_id"))
-            source_ref = _text(item.get("source_ref"))
+            document_id = item["document_id"]
+            source_ref = item["source_ref"]
             if document_id and source_ref:
                 refs.append(
                     ChatResourceRef(
                         resource_type="source",
                         resource_id=(
-                            f"{document_id}:{_text(item.get('source_kind'))}:"
-                            f"{source_ref}"
+                            f"{document_id}:{item['source_kind']}:" f"{source_ref}"
                         ),
                         href=(
                             f"/collections/{context.collection_id}/documents/"
@@ -421,13 +444,17 @@ class ProposeResearchPlanCapability:
                 )
         warnings = (
             (
-                "The plan cites one or more Findings that still require researcher "
-                "review; treat the draft as provisional."
-            ),
-        ) if unreviewed_finding_ids else ()
+                (
+                    "The plan cites one or more Findings that still require researcher "
+                    "review; treat the draft as provisional."
+                ),
+            )
+            if unreviewed_finding_ids
+            else ()
+        )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft_id": draft_id,
                 "objective_id": arguments.objective_id,
@@ -464,26 +491,12 @@ class CreateResearchPlanCapability:
         input_model=CreateResearchPlanToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        finding_feedback_service: Any,
-        experiment_plan_service: Any,
-    ) -> None:
-        self.experiment_plan_service = experiment_plan_service
-        self._draft_capability = ProposeResearchPlanCapability(
-            collection_service=collection_service,
-            finding_feedback_service=finding_feedback_service,
-        )
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateResearchPlanToolRequest,
     ) -> ChatToolResult:
         current, current_snapshots, error = await _approved_plan_draft(
-            self._draft_capability,
             context,
             arguments,
         )
@@ -491,21 +504,21 @@ class CreateResearchPlanCapability:
             return error
 
         try:
-            plan = await self.experiment_plan_service.create_agent_plan(
+            plan = await experiment_plan_service.create_agent_plan(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 title=arguments.title,
-                content=str(current.data["content"]),
+                content=current.data["content"],
                 source_links=list(current.data["source_links"]),
                 source_findings=current_snapshots,
                 structured_plan=dict(current.data["structured_plan"]),
                 created_by=context.user_id,
                 created_by_tool_call_id=context.tool_call_id,
             )
-        except ValueError as exc:
-            message = str(exc).strip()
-            if not message.startswith("research plan sources are stale"):
+        except ResourceConflictException as exc:
+            if exc.data["code"] != "research_plan_sources_stale":
                 raise
+            message = exc.message
             return _stale_plan_write(
                 context,
                 arguments.objective_id,
@@ -534,38 +547,24 @@ class ReviseResearchPlanCapability:
         input_model=ReviseResearchPlanToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        finding_feedback_service: Any,
-        experiment_plan_service: Any,
-    ) -> None:
-        self.experiment_plan_service = experiment_plan_service
-        self._draft_capability = ProposeResearchPlanCapability(
-            collection_service=collection_service,
-            finding_feedback_service=finding_feedback_service,
-        )
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ReviseResearchPlanToolRequest,
     ) -> ChatToolResult:
         current, current_snapshots, error = await _approved_plan_draft(
-            self._draft_capability,
             context,
             arguments,
         )
         if error is not None:
             return error
         try:
-            plan = await self.experiment_plan_service.update_plan(
+            plan = await experiment_plan_service.update_plan(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 plan_id=arguments.parent_plan_id,
                 title=arguments.title,
-                content=str(current.data["content"]),
+                content=current.data["content"],
                 status="draft",
                 structured_plan=dict(current.data["structured_plan"]),
                 updated_by=context.user_id,
@@ -576,7 +575,7 @@ class ReviseResearchPlanCapability:
         except ExperimentPlanNotFoundError:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     "objective_id": arguments.objective_id,
                     "plan_id": arguments.parent_plan_id,
@@ -584,10 +583,10 @@ class ReviseResearchPlanCapability:
                 error_code="research_plan_not_found",
                 error_message="The parent research-plan revision was not found.",
             )
-        except ValueError as exc:
-            message = str(exc).strip()
-            if not message.startswith("research plan sources are stale"):
+        except ResourceConflictException as exc:
+            if exc.data["code"] != "research_plan_sources_stale":
                 raise
+            message = exc.message
             return _stale_plan_write(
                 context,
                 arguments.objective_id,
@@ -604,45 +603,52 @@ class ReviseResearchPlanCapability:
 
 
 async def _approved_plan_draft(
-    draft_capability: ProposeResearchPlanCapability,
     context: CapabilityExecutionContext,
     arguments: CreateResearchPlanToolRequest | ReviseResearchPlanToolRequest,
 ) -> tuple[ChatToolResult, list[dict[str, Any]], ChatToolResult | None]:
     # Create/Revise arguments inherit the complete proposal contract. Pass the
     # already validated subtype through directly instead of serializing and
     # validating the same fields a second time.
-    current = await draft_capability.execute(context, arguments)
+    current = await ProposeResearchPlanCapability().execute(context, arguments)
     current_snapshots = list(current.data.get("source_snapshots") or ())
     if current.data.get("draft_status") == "abstained":
-        return current, current_snapshots, ChatToolResult(
-            tool_call_id=context.tool_call_id,
-            status="failed",
-            data=dict(current.data),
-            resource_refs=current.resource_refs,
-            warnings=current.warnings,
-            error_code="research_plan_source_stale",
-            error_message=(
-                "The selected Finding or Evidence is no longer current; inspect "
-                "the published analysis and prepare a new plan draft."
+        return (
+            current,
+            current_snapshots,
+            ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                data=dict(current.data),
+                resource_refs=current.resource_refs,
+                warnings=current.warnings,
+                error_code="research_plan_source_stale",
+                error_message=(
+                    "The selected Finding or Evidence is no longer current; inspect "
+                    "the published analysis and prepare a new plan draft."
+                ),
             ),
         )
     approved_snapshots = [item.model_dump() for item in arguments.source_snapshots]
     if approved_snapshots != current_snapshots:
-        return current, current_snapshots, ChatToolResult(
-            tool_call_id=context.tool_call_id,
-            status="failed",
-            data={
-                "objective_id": arguments.objective_id,
-                "approved_source_snapshots": approved_snapshots,
-                "current_source_snapshots": current_snapshots,
-            },
-            resource_refs=current.resource_refs,
-            error_code="research_plan_source_stale",
-            error_message=(
-                "The supplied source snapshots do not match the current canonical snapshots. "
-                "This can mean stale sources or incorrectly copied fingerprints. Inspect the "
-                "current sources, reuse source_snapshots exactly from the resulting draft, "
-                "and request approval for the corrected save arguments. Do not invent fingerprints."
+        return (
+            current,
+            current_snapshots,
+            ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                data={
+                    "objective_id": arguments.objective_id,
+                    "approved_source_snapshots": approved_snapshots,
+                    "current_source_snapshots": current_snapshots,
+                },
+                resource_refs=current.resource_refs,
+                error_code="research_plan_source_stale",
+                error_message=(
+                    "The supplied source snapshots do not match the current canonical snapshots. "
+                    "This can mean stale sources or incorrectly copied fingerprints. Inspect the "
+                    "current sources, reuse source_snapshots exactly from the resulting draft, "
+                    "and request approval for the corrected save arguments. Do not invent fingerprints."
+                ),
             ),
         )
     return current, current_snapshots, None
@@ -657,7 +663,7 @@ def _stale_plan_write(
 ) -> ChatToolResult:
     return ChatToolResult(
         tool_call_id=context.tool_call_id,
-        status="failed",
+        status=ToolResultStatus.FAILED,
         data={
             "objective_id": objective_id,
             "source_snapshots_current": False,
@@ -665,13 +671,14 @@ def _stale_plan_write(
             "persistence": "transient_chat_result",
         },
         resource_refs=tuple(
-            ref for ref in current.resource_refs if ref.resource_type != "research_plan_draft"
+            ref
+            for ref in current.resource_refs
+            if ref.resource_type != "research_plan_draft"
         ),
         error_code="research_plan_source_stale",
         error_message=(
             "The Finding or Evidence changed before saving the plan; review the current "
-            "sources before saving it."
-            + (f" ({detail})" if detail else "")
+            "sources before saving it." + (f" ({detail})" if detail else "")
         ),
     )
 
@@ -682,14 +689,33 @@ def _saved_plan_result(
     current: ChatToolResult,
     plan: Any,
 ) -> ChatToolResult:
-    record = plan.to_record()
+    record = {
+        "plan_id": plan.plan_id,
+        "collection_id": plan.collection_id,
+        "objective_id": plan.objective_id,
+        "title": plan.title,
+        "content": plan.content,
+        "status": plan.status,
+        "source_message_id": plan.source_message_id,
+        "source_links": [dict(link) for link in plan.source_links],
+        "metadata": dict(plan.metadata),
+        "created_by": plan.created_by,
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
+        "plan_version": plan.plan_version,
+        "parent_plan_id": plan.parent_plan_id,
+        "structured_plan": plan.structured_plan,
+        "updated_by": plan.updated_by,
+    }
     refs = [_plan_ref(context.collection_id, objective_id, record)]
     refs.extend(
-        ref for ref in current.resource_refs if ref.resource_type != "research_plan_draft"
+        ref
+        for ref in current.resource_refs
+        if ref.resource_type != "research_plan_draft"
     )
     return ChatToolResult(
         tool_call_id=context.tool_call_id,
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "plan": record,
             "source_snapshots_current": True,
@@ -703,27 +729,18 @@ def _saved_plan_result(
 def _evidence_index(findings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for finding in findings:
-        for item in finding.get("evidence") or ():
-            if not isinstance(item, Mapping):
-                continue
-            evidence_id = _text(item.get("evidence_id"))
-            if evidence_id:
-                result.setdefault(evidence_id, dict(item))
+        for item in finding["evidence"]:
+            result.setdefault(item["evidence_id"], item)
     return result
 
 
 def _source_snapshot(finding: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "finding_id": _text(finding.get("finding_id")),
-        "analysis_version": int(finding.get("analysis_version") or 0),
-        "finding_fingerprint": _text(finding.get("finding_fingerprint")),
-        "evidence_fingerprint": _text(finding.get("evidence_fingerprint")),
-        "evidence_ids": [
-            evidence_id
-            for item in finding.get("evidence") or ()
-            if isinstance(item, Mapping)
-            and (evidence_id := _text(item.get("evidence_id")))
-        ],
+        "finding_id": finding["finding_id"],
+        "analysis_version": finding["analysis_version"],
+        "finding_fingerprint": finding["finding_fingerprint"],
+        "evidence_fingerprint": finding["evidence_fingerprint"],
+        "evidence_ids": [item["evidence_id"] for item in finding["evidence"]],
     }
 
 
@@ -746,10 +763,12 @@ def _render_plan(
         "| --- | --- | --- | --- | --- |",
     ]
     for variable in arguments.variables:
-        citations = ", ".join(
-            f"[{evidence_labels[item]}]"
-            for item in variable.basis_evidence_ids
-        ) or "Expert decision"
+        citations = (
+            ", ".join(
+                f"[{evidence_labels[item]}]" for item in variable.basis_evidence_ids
+            )
+            or "Expert decision"
+        )
         lines.append(
             "| "
             + " | ".join(
@@ -783,18 +802,17 @@ def _render_plan(
         lines.extend(_section("Limitations and open decisions", arguments.limitations))
     lines.extend(["", "## Source basis"])
     for finding in selected_findings:
-        finding_id = _text(finding.get("finding_id"))
-        target = finding.get("training_target")
-        target = dict(target) if isinstance(target, Mapping) else {}
+        finding_id = finding["finding_id"]
+        target = finding["training_target"]
         lines.append(
             f"- [{finding_labels[finding_id]}] "
-            + (_text(target.get("statement")) or "Published research conclusion.")
+            + (target["statement"] or "Published research conclusion.")
         )
     for item in selected_evidence:
-        evidence_id = _text(item.get("evidence_id"))
+        evidence_id = item["evidence_id"]
         lines.append(
             f"- [{evidence_labels[evidence_id]}] "
-            f"{_text(item.get('source_excerpt')) or 'Source-linked Evidence.'}"
+            f"{item['source_excerpt'] or 'Source-linked Evidence.'}"
         )
     return "\n".join(lines).strip()
 
@@ -804,13 +822,13 @@ def _section(title: str, items: list[str]) -> list[str]:
 
 
 def _cell(value: str) -> str:
-    return " ".join(str(value).replace("|", "\\|").split())
+    return " ".join(value.replace("|", "\\|").split())
 
 
 def _evidence_href(collection_id: str, evidence: Mapping[str, Any]) -> str:
     return (
-        f"/collections/{collection_id}/documents/{_text(evidence.get('document_id'))}"
-        f"?evidence_id={_text(evidence.get('evidence_id'))}"
+        f"/collections/{collection_id}/documents/{evidence['document_id']}"
+        f"?evidence_id={evidence['evidence_id']}"
     )
 
 
@@ -819,7 +837,7 @@ def _plan_ref(
     objective_id: str,
     plan: Mapping[str, Any],
 ) -> ChatResourceRef:
-    plan_id = _text(plan.get("plan_id"))
+    plan_id = plan["plan_id"]
     return ChatResourceRef(
         resource_type="research_plan",
         resource_id=plan_id,
@@ -844,25 +862,6 @@ def _draft_id(
         separators=(",", ":"),
     )
     return f"plan_draft_{sha256(identity.encode('utf-8')).hexdigest()[:20]}"
-
-
-def _unique_text(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = str(value or "").strip()
-        if not text:
-            continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(text)
-    return result
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...]:

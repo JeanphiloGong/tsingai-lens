@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
+from dataclasses import asdict
+
+import json
+
 import pytest
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import StoredCollection
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -16,10 +20,11 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.source import Collection
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.chat_repository import ChatRepository
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
 )
 
 pytestmark = pytest.mark.anyio
@@ -35,7 +40,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "password_hash": "synthetic-password-hash",
         "created_at": "2026-08-19T00:00:00+00:00",
     }
-    await PostgresAuthRepository(postgres_session_factory).add_user(AuthUserRecord(**user))
+    await AuthRepository().add_user(AuthUserRecord(**user))
     collection = StoredCollection(
         collection=Collection(
             collection_id="col-chat",
@@ -47,10 +52,10 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         created_at="2026-08-19T00:00:00+00:00",
         updated_at="2026-08-19T00:00:00+00:00",
     )
-    await PostgresCollectionRepository(postgres_session_factory).add_collection(
+    await CollectionRepository().add_collection(
         collection
     )
-    repository = PostgresChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=user["user_id"],
@@ -69,7 +74,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     user_message = ChatMessage.user(
         message_id="msg-1",
         session_id=chat.session_id,
-        content="读取 collection",
+        content="  读取 collection\n保持实验状态独立。",
         created_at="2026-08-19T00:00:01+00:00",
         source_contexts=(
             ChatSourceContext(
@@ -113,16 +118,34 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     ).start("2026-08-19T00:00:03+00:00").succeed(
         "2026-08-19T00:00:04+00:00"
     )
+    result_payload = {
+        "document_count": 10,
+        "measurement_keys": ["strength-A", "strength-a", "001"],
+        "certainty": 0.735123,
+    }
     read_result = ChatToolResult(
         tool_call_id=read_call.tool_call_id,
-        status="succeeded",
-        data={"document_count": 10},
+        status=ToolResultStatus.SUCCEEDED,
+        data=result_payload,
+        resource_refs=(ChatResourceRef(
+            resource_type="document",
+            resource_id="doc-source",
+            href="/collections/col-chat/documents/doc-source",
+        ),),
+        warnings=("Some papers still require researcher review.",),
     )
-    tool_message = ChatMessage.from_tool_result(
+    tool_message = ChatMessage(
         message_id="msg-3",
         session_id=chat.session_id,
-        result=read_result,
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(read_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-08-19T00:00:05+00:00",
+        tool_call_id=read_result.tool_call_id,
+        tool_result=read_result,
     )
     final_message = ChatMessage.assistant(
         message_id="msg-4",
@@ -131,7 +154,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         created_at="2026-08-19T00:00:06+00:00",
     )
     await repository.save_trajectory(
-        session=chat.update(
+        chat_session=chat.update(
             user_id=chat.user_id,
             collection_id=chat.collection_id,
             updated_at="2026-08-19T00:00:06+00:00",
@@ -141,6 +164,14 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         tool_results=(read_result,),
     )
 
+    result_payload["measurement_keys"].append("outside-change")
+    stored_tool_message = await repository.read_message(tool_message.message_id)
+    assert stored_tool_message.tool_result.data["measurement_keys"] == [
+        "strength-A", "strength-a", "001",
+    ]
+    assert stored_tool_message.tool_result.data["certainty"] == 0.735123
+    result_payload["measurement_keys"].pop()
+
     stored_chat = await repository.read_session(chat.session_id)
     assert stored_chat is not None
     assert stored_chat.collection_id == chat.collection_id
@@ -148,7 +179,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         user_id=chat.user_id, collection_id=chat.collection_id,
     )
     assert [(item.session.session_id, item.title) for item in history] == [
-        (chat.session_id, user_message.content),
+        (chat.session_id, "读取 collection"),
         (empty_chat.session_id, None),
     ]
     assert (await repository.list_sessions(
@@ -161,6 +192,17 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         final_message,
     )
     assert await repository.read_tool_call(read_call.tool_call_id) == read_call
+    # A stale generation checkpoint must not undo a researcher's custom name.
+    await repository.set_session_title(session_id=chat.session_id, user_id=chat.user_id, title="IN718 comparison")
+    with pytest.raises(FileNotFoundError):
+        await repository.set_session_title(session_id=chat.session_id, user_id="other-user", title="Forbidden")
+    await repository.save_trajectory(
+        chat_session=chat.update(user_id=chat.user_id, collection_id=chat.collection_id, updated_at="2026-08-19T00:00:06+00:00"),
+        messages=(user_message, assistant_call, tool_message, final_message),
+        tool_calls=(read_call,), tool_results=(read_result,),
+    )
+    assert (await repository.read_session(chat.session_id)).title == "IN718 comparison"
+    assert (await repository.list_sessions(user_id=chat.user_id, collection_id=chat.collection_id))[0].title == "IN718 comparison"
 
     write_message = ChatMessage.assistant_tool_calls(
         message_id="msg-5",
@@ -180,7 +222,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         risk=ToolRisk.WRITE,
     ).require_approval()
     await repository.save_trajectory(
-        session=chat.update(
+        chat_session=chat.update(
             user_id=chat.user_id,
             collection_id=chat.collection_id,
             updated_at="2026-08-19T00:01:00+00:00",
@@ -242,21 +284,87 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         is None
     )
 
-    write_result = ChatToolResult(tool_call_id=claimed.tool_call_id, status="succeeded")
+    write_result = ChatToolResult(tool_call_id=claimed.tool_call_id, status=ToolResultStatus.SUCCEEDED)
     finished = claimed.succeed("2026-08-19T00:01:04+00:00")
     batch = tuple(ChatToolCall.requested(
         tool_call_id=f"call-batch-{position}", session_id=chat.session_id,
         assistant_message_id="msg-batch", name="read_source", position=position,
         arguments={"document_id": f"paper-{position}"}, risk=ToolRisk.READ,
     ).start("2026-08-19T00:02:00+00:00").succeed("2026-08-19T00:02:01+00:00") for position in range(2))
-    observations = tuple(ChatToolResult(tool_call_id=call.tool_call_id, status="succeeded", data={"document_id": call.arguments["document_id"]}) for call in batch)
+    batch = (batch[0], ChatToolCall.requested(
+        tool_call_id=batch[1].tool_call_id, session_id=chat.session_id,
+        assistant_message_id="msg-batch", name="read_source", position=1,
+        arguments=batch[1].arguments, risk=ToolRisk.READ,
+    ).start("2026-08-19T00:02:00+00:00").fail(
+        "source_unavailable", "2026-08-19T00:02:01+00:00",
+    ))
+    observations = (
+        ChatToolResult(
+            tool_call_id=batch[0].tool_call_id, status=ToolResultStatus.SUCCEEDED,
+            data={"document_id": batch[0].arguments["document_id"]},
+        ),
+        ChatToolResult(
+            tool_call_id=batch[1].tool_call_id, status=ToolResultStatus.FAILED,
+            error_code="source_unavailable",
+            error_message="The selected source could not be read.",
+        ),
+    )
     trajectory = (
         *(await repository.read_messages(chat.session_id)),
-        ChatMessage.from_tool_result(message_id="msg-write-result", session_id=chat.session_id, result=write_result, created_at="2026-08-19T00:01:04+00:00"),
-        ChatMessage.assistant_tool_calls(message_id="msg-batch", session_id=chat.session_id, content="", created_at="2026-08-19T00:02:00+00:00", tool_calls=tuple(call.to_request() for call in batch)),
-        *(ChatMessage.from_tool_result(message_id=f"msg-result-{index}", session_id=chat.session_id, result=result, created_at="2026-08-19T00:02:01+00:00") for index, result in enumerate(observations)),
+        ChatMessage(
+            message_id="msg-write-result",
+            session_id=chat.session_id,
+            role=ChatMessageRole.TOOL,
+            content=json.dumps(
+                asdict(write_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-08-19T00:01:04+00:00",
+            tool_call_id=write_result.tool_call_id,
+            tool_result=write_result,
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-batch",
+            session_id=chat.session_id,
+            content="",
+            created_at="2026-08-19T00:02:00+00:00",
+            tool_calls=tuple(
+                ChatToolRequest(
+                    tool_call_id=call.tool_call_id,
+                    name=call.name,
+                    arguments=call.arguments,
+                    position=call.position,
+                    decision_user_id=call.decision_user_id,
+                    decision_arguments_digest=call.decision_arguments_digest,
+                    decided_at=call.decided_at,
+                    decision_basis=call.decision_basis,
+                    authorization_revision=call.authorization_revision,
+                )
+                for call in batch
+            ),
+        ),
+        *(
+            ChatMessage(
+                message_id=f"msg-result-{index}",
+                session_id=chat.session_id,
+                role=ChatMessageRole.TOOL,
+                content=json.dumps(
+                    asdict(result),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+                created_at="2026-08-19T00:02:01+00:00",
+                tool_call_id=result.tool_call_id,
+                tool_result=result,
+            )
+            for index, result in enumerate(observations)
+        ),
     )
-    await repository.save_trajectory(session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
-    reloaded = await PostgresChatRepository(postgres_session_factory).read_messages(chat.session_id)
+    await repository.save_trajectory(chat_session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
+    reloaded = await ChatRepository().read_messages(chat.session_id)
     assert reloaded == trajectory
+    assert await repository.read_message(user_message.message_id) == user_message
+    assert await repository.read_message(tool_message.message_id) == tool_message
+    assert await repository.read_tool_call(batch[1].tool_call_id) == batch[1]
     assert [request.position for request in reloaded[-3].tool_calls] == [0, 1]

@@ -32,18 +32,8 @@ class ChatMessageFeedback:
         return ":".join((self.feedback_id, self.updated_at, self.response_digest))
 
     def __post_init__(self) -> None:
-        if self.rating not in {"helpful", "not_helpful"}:
-            raise ValueError("invalid feedback rating")
-        if self.reason not in {None, "incorrect", "incomplete", "unclear", "other"}:
-            raise ValueError("invalid feedback reason")
         if self.reason is not None and self.rating != "not_helpful":
             raise ValueError("only negative feedback may have a reason")
-        if self.comment is not None:
-            if "\x00" in self.comment:
-                raise ValueError("feedback comment cannot contain a null character")
-            if len(self.comment) > 2000:
-                raise ValueError("feedback comment cannot exceed 2000 characters")
-            object.__setattr__(self, "comment", self.comment.strip() or None)
 
     @classmethod
     def for_answer(

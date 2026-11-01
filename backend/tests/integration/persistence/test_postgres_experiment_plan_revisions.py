@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from application.repositories.auth_repository import AuthUserRecord
+from infra.persistence import database
+
+from domain.core.research_objective import (
+    ResearchObjective,
+    build_research_objective_id,
+)
 
 import asyncio
 
@@ -9,15 +14,14 @@ import pytest
 from domain.core import ResearchObjective
 from domain.goal import (
     ExperimentPlanRecord,
-    ExperimentPlanRevisionConflictError,
 )
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.experiment_plan_repository import (
-    PostgresExperimentPlanRepository,
+from exceptions import ResourceConflictException
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.experiment_plan_repository import (
+    ExperimentPlanRepository,
 )
-from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -27,29 +31,42 @@ OBJECTIVE_ID = "objective-plan-revisions"
 
 @pytest.fixture
 async def experiment_plan_repository(source_repository):
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": OBJECTIVE_ID,
-            "question": "How does laser power affect porosity?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["porosity"],
-            "seed_document_ids": ["doc_a"],
-            "confidence": 0,
-            "origin": "chat_assisted",
-            "created_by_user_id": "user_source",
-            "created_by_tool_call_id": "call-plan-objective",
-        }
+    objective = ResearchObjective(
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID
+        or build_research_objective_id(
+            question="How does laser power affect porosity?",
+            material_scope=("Ti-6Al-4V",),
+            variables=("laser power",),
+            outcomes=("porosity",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does laser power affect porosity?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("porosity",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc_a",),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        origin="chat_assisted",
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-plan-objective",
     )
-    await PostgresObjectiveRepository(
-        source_repository.session_factory
-    ).create_authored_candidate(
+    await ObjectiveRepository(
+        ).create_authored_candidate(
         objective,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-plan-objective",
     )
-    await PostgresAuthRepository(source_repository.session_factory).add_user(
+    await AuthRepository().add_user(
         AuthUserRecord(
             user_id="user_reviewer",
             email="reviewer@example.com",
@@ -58,7 +75,7 @@ async def experiment_plan_repository(source_repository):
             created_at="2026-09-07T00:30:00+00:00",
         )
     )
-    return PostgresExperimentPlanRepository(source_repository.session_factory)
+    return ExperimentPlanRepository()
 
 
 def _plan(**overrides) -> ExperimentPlanRecord:
@@ -70,7 +87,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "content": "Initial approved plan.",
         "status": "draft",
         "source_message_id": None,
-        "source_links": [],
+        "source_links": (),
         "metadata": {"source": "manual"},
         "created_by": "user_source",
         "created_at": "2026-09-07T00:00:00+00:00",
@@ -82,7 +99,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         },
     }
     payload.update(overrides)
-    return ExperimentPlanRecord.from_mapping(payload)
+    return ExperimentPlanRecord(**payload)
 
 
 async def test_postgres_round_trips_structured_plan_and_revision_lineage(
@@ -149,8 +166,12 @@ async def test_postgres_allows_only_one_concurrent_successor(
 
     assert sum(isinstance(item, ExperimentPlanRecord) for item in outcomes) == 1
     assert sum(
-        isinstance(item, ExperimentPlanRevisionConflictError) for item in outcomes
+        isinstance(item, ResourceConflictException) for item in outcomes
     ) == 1
+    conflict = next(item for item in outcomes if isinstance(item, ResourceConflictException))
+    assert conflict.code == 200204
+    assert conflict.data["code"] == "experiment_plan_revision_superseded"
+    assert conflict.data["parent_plan_id"] == parent.plan_id
     leaves = await experiment_plan_repository.list_plans(COLLECTION_ID, OBJECTIVE_ID)
     assert len(leaves) == 1
     assert leaves[0].parent_plan_id == parent.plan_id

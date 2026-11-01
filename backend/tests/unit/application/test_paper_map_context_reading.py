@@ -13,14 +13,13 @@ from application.core.objectives.discovery.paper_understanding.paper_map_results
 )
 from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
-    _normalize_experimental_paper_map_payload,
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.objectives import paper_map_extraction
 from application.core.objectives.paper_map_extraction import (
     PaperMapExtractionBudget,
-    PaperMapExtractionService,
 )
-from application.core.objectives.paper_map_sources import PaperMapSourceSelector
+from application.core.objectives import paper_map_extraction
 from infra.llm.usage import capture_llm_usage
 from tests.unit.application.test_paper_research_map_service import (
     _artifacts,
@@ -51,9 +50,7 @@ class _ContextReader:
 def _selected_payloads(blocks, *, reader=None):
     documents, tree = _artifacts(blocks=blocks)
     document = documents[0]
-    return PaperMapSourceSelector(
-        PaperMapExtractionService().fit_payload_to_prompt_limit
-    ).build_payloads(
+    return paper_map_extraction.build_payloads(
         collection_id="context-reading",
         document=document,
         profile=None,
@@ -245,7 +242,7 @@ def test_oversized_input_splits_losslessly_with_distinct_fragment_lineage():
 def test_actual_provider_attempts_share_budget_and_do_not_count_unsent_calls(mode, allowed_recovery):
     class BudgetClient(_FakeOpenAIClient):
         def __init__(self):
-            super().__init__("not JSON", parse_error=RuntimeError("invalid provider response"))
+            super().__init__("not JSON", parse_error=json.JSONDecodeError("invalid provider response", "not JSON", 0))
             self.options = []
 
         def with_options(self, **kwargs):
@@ -260,7 +257,7 @@ def test_actual_provider_attempts_share_budget_and_do_not_count_unsent_calls(mod
     budget = PaperMapExtractionBudget(deadline=monotonic() + 30, max_calls=1 + allowed_recovery, max_recovery_calls=allowed_recovery)
 
     with capture_llm_usage() as usage:
-        results = PaperMapExtractionService().extract_window_payloads(
+        results = paper_map_extraction.extract_window_payloads(
             collection_id="test", document_id="paper-1", payloads=payloads,
             paper_map_extractor=reader, extraction_budget=budget,
         )
@@ -278,7 +275,7 @@ def test_expired_document_budget_sends_no_model_request():
     payloads = _selected_payloads([_paragraph("abstract", "Current study.", 1, "Abstract")])
     budget = PaperMapExtractionBudget(deadline=monotonic() - 1, max_calls=2, max_recovery_calls=1)
 
-    results = PaperMapExtractionService().extract_window_payloads(
+    results = paper_map_extraction.extract_window_payloads(
         collection_id="test", document_id="paper-1", payloads=payloads,
         paper_map_extractor=reader, extraction_budget=budget,
     )
@@ -315,7 +312,7 @@ def test_factor_overflow_never_turns_a_joint_design_into_a_smaller_factor_set():
         "outcome": "relative density", "source_labels": ["S1"],
     }]}]}
 
-    result = ExperimentalPaperMapModelOutput.model_validate(_normalize_experimental_paper_map_payload(payload))
+    result = ExperimentalPaperMapModelOutput.model_validate(payload)
 
     assert result.output_saturated
     assert result.studies == []
@@ -353,7 +350,7 @@ def test_other_window_budget_failure_does_not_mask_this_window_parse_failure():
         failure_kind="recovery_budget_exhausted",
     )
 
-    results = PaperMapExtractionService().extract_window_payloads(
+    results = paper_map_extraction.extract_window_payloads(
         collection_id="test", document_id="paper-1", payloads=payloads,
         paper_map_extractor=_ContextReader(respond), extraction_budget=budget,
     )
@@ -361,3 +358,146 @@ def test_other_window_budget_failure_does_not_mask_this_window_parse_failure():
     coverage = results[0][0][0].source_unit_coverage[0]
     assert "malformed_json" in coverage.reason
     assert "recovery_budget_exhausted" not in coverage.reason
+
+@pytest.mark.parametrize("field,value", [("studies", None), ("studies", {}), ("unresolved_signals", None), ("warnings", None), ("output_saturated", "false")])
+def test_paper_map_extractor_rejects_explicit_wrong_shapes(field, value):
+    from pydantic import ValidationError
+
+    client = _FakeOpenAIClient(json.dumps({field: value}))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+
+    with pytest.raises(ValidationError):
+        reader.extract({"document_id": "paper-1", "source_units": []})
+    assert len(client.chat.completions.calls) == 2
+
+
+@pytest.mark.parametrize("relationship", [
+    {"factor_assertions": None, "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [17], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [{"label": 17, "role": "varied", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [{"label": "power", "role": "INVALID", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [{"label": "power", "role": [], "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [], "outcome": "microstructure", "source_labels": ["S1", "S1"]},
+    {"factor_assertions": [{"label": "power", "role": "varied", "source_labels": ["S1"]}, {"label": "Power", "role": "varied", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [], "outcome": {"invalid": "object"}, "source_labels": ["S1"]},
+    {"factor_assertions": [], "outcome": "microstructure", "source_labels": [17]},
+])
+def test_scientific_downgrade_does_not_hide_malformed_relationship(relationship):
+    from pydantic import ValidationError
+
+    client = _FakeOpenAIClient(json.dumps({"studies": [{"relationships": [relationship]}]}))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+    with pytest.raises(ValidationError):
+        reader.extract({"document_id": "paper-1", "source_units": [{"source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1", "content": "Power and microstructure."}]})
+    assert len(client.chat.completions.calls) == 2
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+@pytest.mark.parametrize("extra_fields", [
+    {"signal_type": "outcome"},
+    {"label": "fatigue life"},
+    {"variable_role": "not_applicable"},
+    {"source_labels": ["S1"]},
+])
+def test_paper_map_downgrade_preserves_unknown_study_field_rejections(
+    extraction_mode, extra_fields,
+):
+    from pydantic import ValidationError
+
+    response = {"studies": [{
+        "material_scope": ["Ti-6Al-4V"],
+        "relationships": [{
+            "factor_assertions": [], "outcome": "porosity", "source_labels": ["S1"],
+        }],
+        **extra_fields,
+    }]}
+    client = _FakeOpenAIClient(json.dumps(response), parsed=response)
+    reader = PaperResearchMapExtractor(StructuredResponseClient(
+        client=client, model="fake-model", extraction_mode=extraction_mode,
+    ))
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        reader.extract({"document_id": "paper-ti", "source_units": [{
+            "source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1",
+            "content": "Ti-6Al-4V porosity was measured; its varied factor is unresolved.",
+        }]})
+
+    assert len(client.chat.completions.calls) == 2
+    assert len(client.beta.chat.completions.calls) == (extraction_mode == "provider_parse")
+
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+def test_each_paper_map_response_is_processed_once_before_source_binding(monkeypatch, extraction_mode):
+    from application.core.objectives.discovery.paper_understanding import paper_map_outputs
+
+    original = paper_map_outputs._downgrade_unresolved_relationships
+    calls = []
+
+    def record_call(value):
+        calls.append(value)
+        return original(value)
+
+    monkeypatch.setattr(paper_map_outputs, "_downgrade_unresolved_relationships", record_call)
+    response = {"studies": [{"material_scope": ["Ti-6Al-4V"], "relationships": [{"factor_assertions": [], "outcome": "porosity", "source_labels": ["S1"]}]}]}
+    client = _FakeOpenAIClient(json.dumps(response), parsed=response)
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode=extraction_mode))
+    result = reader.extract({"document_id": "paper-1", "source_units": [{"source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1", "content": "Porosity was measured; its varied factor is unresolved."}]})
+
+    assert len(calls) == 1
+    assert result.studies == []
+    assert result.unresolved_signals[0].source_unit_ids == ["unit-1"]
+    assert result.unresolved_signals[0].material_scope == ["Ti-6Al-4V"]
+    assert len(client.chat.completions.calls) + len(client.beta.chat.completions.calls) == 1
+
+
+def test_paper_map_binding_preserves_scope_identity_and_confidence():
+    response = {
+        "doc_role": "experimental",
+        "studies": [{
+            "design_type": "experimental", "claim_scope": "current_work",
+            "experiment_label": "LPBF power study",
+            "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"],
+            "process_context": [" LPBF ", "lpbf"],
+            "relationships": [{
+                "factor_assertions": [{"label": " laser power ", "role": "varied", "source_labels": ["S1"]}],
+                "outcome": " porosity ", "source_labels": ["S1"], "confidence": 0.876543,
+            }],
+            "confidence": 0.876543,
+        }],
+        "unresolved_signals": [{
+            "signal_type": "outcome", "label": " fatigue life ", "variable_role": "not_applicable",
+            "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"], "source_labels": ["S1"], "confidence": 0.876543,
+        }],
+        "confidence": 0.876543, "warnings": [" supported ", "SUPPORTED"],
+    }
+    payload = {"document_id": "paper-ti", "window_id": "window-1", "source_units": [{
+        "source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1",
+        "content": "Laser power and porosity were reported.",
+    }]}
+    client = _FakeOpenAIClient(json.dumps(response))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+
+    parsed = reader.extract(payload)
+    paper_map, signals = paper_map_extraction._resolve_window_result(document_id="paper-ti", payload=payload, parsed=parsed)
+
+    study = paper_map.studies[0]
+    assert study.study_id == "study_1f65d7cf7de93d0f9a8f6936"
+    assert study.relationships[0].relationship_id == "relationship_9ef0ac8f82103bf5a838b480"
+    assert signals[0].signal_id == "signal_c1d7b290a5c88427d24e7fdc"
+    assert study.material_scope == ("Ti-6Al-4V",)
+    assert study.process_context == ("LPBF",)
+    assert study.relationships[0].varied_factors == ("laser power",)
+    assert paper_map.warnings == ("supported",)
+    assert paper_map.confidence == study.confidence == study.relationships[0].confidence == signals[0].confidence == 0.8765
+    assert study.relationships[0].source_refs[0].source_ref == "block-1"
+
+
+@pytest.mark.parametrize("field,value", [("warnings", None), ("warnings", [17]), ("output_saturated", "false")])
+def test_budget_diagnostics_do_not_replace_invalid_fields(field, value):
+    from pydantic import ValidationError
+
+    response = {"unresolved_signals": [{"signal_type": "outcome", "label": f"outcome-{index}", "variable_role": "not_applicable", "source_labels": ["S1"]} for index in range(13)], field: value}
+    client = _FakeOpenAIClient(json.dumps(response))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+    with pytest.raises(ValidationError):
+        reader.extract({"document_id": "paper-1", "source_units": [{"source_unit_id": "unit-1", "source_ref": "block-1", "content": "Measured outcomes."}]})
+    assert len(client.chat.completions.calls) == 2

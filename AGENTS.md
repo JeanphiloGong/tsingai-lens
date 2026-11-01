@@ -36,6 +36,9 @@ comparison, not generic paper chat.
   nodes, persistence shapes, or abstractions.
 - Prefer direct changes to the owning implementation and direct caller updates.
 - Avoid adding layers unless the human explicitly approves them.
+- Keep calls and temporary operation data direct; use the
+  [backend ownership rules](backend/AGENTS.md#direct-calls-and-temporary-operation-data)
+  for service, model, and callback placement.
 - Keep one authoritative doc path for each contract surface.
 
 ## Domain Philosophies (Master-Level)

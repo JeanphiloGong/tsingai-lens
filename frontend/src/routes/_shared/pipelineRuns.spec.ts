@@ -75,7 +75,7 @@ describe('document preparation API', () => {
 		});
 	});
 
-	it('normalizes collection history as compact run summaries', async () => {
+	it('preserves collection history as compact run summaries', async () => {
 		request.mockResolvedValue({
 			collection_id: 'col_1',
 			count: 1,
@@ -114,12 +114,7 @@ describe('document preparation API', () => {
 			progress_percent: 45,
 			progress_detail: {
 				phase: 'document_profile',
-				current: null,
-				total: null,
-				unit: null,
 				message: 'Classifying the paper.',
-				active_document_id: null,
-				active_objective_id: null
 			},
 			errors: [],
 			warnings: [],

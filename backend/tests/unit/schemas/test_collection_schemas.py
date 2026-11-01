@@ -1,7 +1,6 @@
 import pytest
+from controllers.source.collection_routes import CollectionCreateRequest
 from pydantic import ValidationError
-
-from controllers.source.collections import CollectionCreateRequest
 
 
 def test_collection_create_request_normalizes_user_text() -> None:

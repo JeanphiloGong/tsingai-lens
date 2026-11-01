@@ -46,6 +46,7 @@ class ToolSpec:
     risk: ToolRisk
     input_model: type[BaseModel]
     parallel_safe: bool = False
+    initially_available: bool = False
 
     def __post_init__(self) -> None:
         if self.parallel_safe and self.risk is not ToolRisk.READ:

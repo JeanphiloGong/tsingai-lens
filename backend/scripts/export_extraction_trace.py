@@ -3,36 +3,47 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime
 import json
-from pathlib import Path
 import sys
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
+from infra.source.artifact_bundle import (
+    source_block_payload,
+    source_document_payload,
+    source_figure_payload,
+    source_table_cell_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_text_unit_payload,
+)
+
 from infra.persistence.database import (  # noqa: E402
     DatabaseSettings,
     build_database_engine,
-    build_session_factory,
+    AsyncSessionLocal,
 )
-from infra.persistence.postgres.document_profile_repository import (  # noqa: E402
-    PostgresDocumentProfileRepository,
+from repositories.document_profile_repository import (  # noqa: E402
+    DocumentProfileRepository,
 )
-from infra.persistence.postgres.objective_repository import (  # noqa: E402
-    PostgresObjectiveRepository,
+from repositories.objective_repository import (  # noqa: E402
+    ObjectiveRepository,
 )
-from infra.persistence.postgres.paper_map_repository import (  # noqa: E402
-    PostgresPaperMapRepository,
+
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import (  # noqa: E402
+    SourceArtifactRepository,
 )
-from infra.persistence.postgres.source_artifact_repository import (  # noqa: E402
-    PostgresSourceArtifactRepository,
-)
+from application.core.objectives.analysis.analysis_record_source import is_experiment_backed_analysis
+from application.core.objectives.analysis import experiment_projection
+from application.core.objectives.analysis_records import list_all_evidence, list_all_findings
 
 
 ARTIFACT_NAMES = (
@@ -139,65 +150,529 @@ async def export_trace(
 
 async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
     engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=engine)
     try:
-        sessions = build_session_factory(engine)
-        documents = await PostgresSourceArtifactRepository(
-            sessions
-        ).read_collection_documents(collection_id)
-        profiles = await PostgresDocumentProfileRepository(sessions).list_collection(
+        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
+        profiles = await DocumentProfileRepository().list_collection(
             collection_id
         )
-        paper_maps = await PostgresPaperMapRepository(sessions).list_collection(
+        paper_maps = await PaperMapRepository().list_collection(
             collection_id
         )
-        objective_repository = PostgresObjectiveRepository(sessions)
+        objective_repository = ObjectiveRepository()
         evidence: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
         for objective in await objective_repository.list_objectives(collection_id):
             version = objective.published_analysis_version
             if version is None:
                 continue
-            objective_evidence, _ = await objective_repository.list_evidence(
-                collection_id,
-                objective.objective_id,
-                version,
-                offset=0,
-                limit=10_000,
+            analysis = await objective_repository.read_analysis(
+                collection_id, objective.objective_id, version
             )
-            objective_findings, _ = await objective_repository.list_findings(
-                collection_id,
-                objective.objective_id,
-                version,
-                offset=0,
-                limit=10_000,
+            if is_experiment_backed_analysis(analysis):
+                objective_findings, objective_evidence, _ = (
+                    await experiment_projection.read_analysis_records(
+                        collection_id, objective.objective_id, version
+                    )
+                )
+            else:
+                objective_evidence = await list_all_evidence(
+                    objective_repository,
+                    collection_id,
+                    objective.objective_id,
+                    version,
+                )
+                objective_findings = await list_all_findings(
+                    objective_repository,
+                    collection_id,
+                    objective.objective_id,
+                    version,
+                )
+            evidence.extend(
+                {
+                    "collection_id": item.collection_id,
+                    "objective_id": item.objective_id,
+                    "analysis_version": item.analysis_version,
+                    "evidence_id": item.evidence_id,
+                    "document_id": item.document_id,
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "source_excerpt": item.source_excerpt,
+                    "page_numbers": list(item.page_numbers),
+                    "evidence_role": item.evidence_role,
+                    "selection_status": item.selection_status,
+                    "selection_reason": item.selection_reason,
+                    "evidence_status": item.evidence_status,
+                    "evidence_status_reason": item.evidence_status_reason,
+                    "changed_variables": [
+                        {
+                            "name": variable.name,
+                            "baseline_value": variable.baseline_value,
+                            "target_value": variable.target_value,
+                            "unit": variable.unit,
+                        }
+                        for variable in item.changed_variables
+                    ],
+                    "comparison": (
+                        {
+                            "baseline_label": item.comparison.baseline_label,
+                            "target_label": item.comparison.target_label,
+                            "axis_names": list(item.comparison.axis_names),
+                            "comparable": item.comparison.comparable,
+                            "incomparability_reasons": list(
+                                item.comparison.incomparability_reasons
+                            ),
+                        }
+                        if item.comparison
+                        else None
+                    ),
+                    "reported_result": (
+                        {
+                            "outcome": item.reported_result.outcome,
+                            "value": item.reported_result.value,
+                            "baseline_value": item.reported_result.baseline_value,
+                            "target_value": item.reported_result.target_value,
+                            "unit": item.reported_result.unit,
+                            "direction": item.reported_result.direction,
+                            "result_text": item.reported_result.result_text,
+                            "result_kind": item.reported_result.result_kind,
+                        }
+                        if item.reported_result
+                        else None
+                    ),
+                    "attribution_scope": item.attribution_scope,
+                    "scientific_context": {
+                        "material": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.material
+                        ],
+                        "sample": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.sample
+                        ],
+                        "process": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.process
+                        ],
+                        "test": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.test
+                        ],
+                    },
+                    "resolution_status": item.resolution_status,
+                    "failure_reason": item.failure_reason,
+                    "confidence": item.confidence,
+                    "origin": item.origin,
+                    "source_analysis_version": item.source_analysis_version,
+                    "supersedes_evidence_id": item.supersedes_evidence_id,
+                    "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                    "created_by_user_id": item.created_by_user_id,
+                    "created_by_tool_call_id": item.created_by_tool_call_id,
+                    "created_at": (
+                        item.created_at.isoformat()
+                        if item.created_at is not None
+                        else None
+                    ),
+                    "authoring_note": item.authoring_note,
+                    **({"warnings": list(item.warnings)} if item.warnings else {}),
+                    **(
+                        {
+                            "related_source_refs": [
+                                dict(item) for item in item.related_source_refs
+                            ]
+                        }
+                        if item.related_source_refs or item.related_source_refs_explicit
+                        else {}
+                    ),
+                }
+                for item in objective_evidence
             )
-            evidence.extend(item.to_record() for item in objective_evidence)
-            findings.extend(item.to_record() for item in objective_findings)
+            findings.extend(
+                {
+                    "collection_id": item.collection_id,
+                    "objective_id": item.objective_id,
+                    "analysis_version": item.analysis_version,
+                    "finding_id": item.finding_id,
+                    "statement": item.statement,
+                    "factors": list(item.factors),
+                    "outcome": item.outcome,
+                    "direction": item.direction,
+                    "assertion_strength": item.assertion_strength,
+                    "attribution_scope": item.attribution_scope,
+                    "synthesis_status": item.synthesis_status,
+                    "certainty": item.certainty,
+                    "display_rank": item.display_rank,
+                    "mechanisms": [
+                        {
+                            "source_term": mechanism.source_term,
+                            "relation_type": mechanism.relation_type,
+                            "target_term": mechanism.target_term,
+                            "direction": mechanism.direction,
+                            "assertion_strength": mechanism.assertion_strength,
+                            "supporting_evidence_ids": list(
+                                mechanism.supporting_evidence_ids
+                            ),
+                        }
+                        for mechanism in item.mechanisms
+                    ],
+                    "scientific_context": {
+                        "material": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.material
+                        ],
+                        "sample": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.sample
+                        ],
+                        "process": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.process
+                        ],
+                        "test": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in item.scientific_context.test
+                        ],
+                    },
+                    "limitations": list(item.limitations),
+                    "paper_contributions": [
+                        {
+                            "document_id": contribution.document_id,
+                            "analysis_status": contribution.analysis_status,
+                            "supporting_evidence_ids": list(
+                                contribution.supporting_evidence_ids
+                            ),
+                            "contradicting_evidence_ids": list(
+                                contribution.contradicting_evidence_ids
+                            ),
+                            "context_evidence_ids": list(
+                                contribution.context_evidence_ids
+                            ),
+                            "condition_boundary_evidence_ids": list(
+                                contribution.condition_boundary_evidence_ids
+                            ),
+                        }
+                        for contribution in item.paper_contributions
+                    ],
+                    "origin": item.origin,
+                    "source_analysis_version": item.source_analysis_version,
+                    "parent_finding_id": item.parent_finding_id,
+                    "created_by_user_id": item.created_by_user_id,
+                    "created_by_tool_call_id": item.created_by_tool_call_id,
+                    "created_at": (
+                        item.created_at.isoformat() if item.created_at else None
+                    ),
+                    **(
+                        {"selection_ids": list(item.selection_ids)}
+                        if item.selection_ids
+                        else {}
+                    ),
+                    **(
+                        {"comparison_group_ids": list(item.comparison_group_ids)}
+                        if item.comparison_group_ids
+                        else {}
+                    ),
+                    **({"warnings": list(item.warnings)} if item.warnings else {}),
+                }
+                for item in objective_findings
+            )
     finally:
         await engine.dispose()
 
     records: dict[str, list[dict[str, Any]]] = {
-        "documents": [item.to_record() for item in documents],
+        "documents": [source_document_payload(item) for item in documents],
         "text_units": [
-            item.to_record() for document in documents for item in document.text_units
+            source_text_unit_payload(item)
+            for document in documents
+            for item in document.text_units
         ],
         "blocks": [
-            item.to_record() for document in documents for item in document.blocks
+            source_block_payload(item)
+            for document in documents
+            for item in document.blocks
         ],
         "figures": [
-            item.to_record() for document in documents for item in document.figures
+            source_figure_payload(item)
+            for document in documents
+            for item in document.figures
         ],
         "tables": [
-            item.to_record() for document in documents for item in document.tables
+            source_table_payload(item)
+            for document in documents
+            for item in document.tables
         ],
         "table_rows": [
-            item.to_record() for document in documents for item in document.table_rows
+            source_table_row_payload(item)
+            for document in documents
+            for item in document.table_rows
         ],
         "table_cells": [
-            item.to_record() for document in documents for item in document.table_cells
+            source_table_cell_payload(item)
+            for document in documents
+            for item in document.table_cells
         ],
-        "document_profiles": [item.to_record() for item in profiles],
-        "paper_maps": [item.to_record() for item in paper_maps],
+        "document_profiles": [
+            {
+                "document_id": item.document_id,
+                "title": item.title,
+                "doc_type": item.doc_type,
+                "profile_warnings": list(item.profile_warnings),
+                "confidence": round(float(item.confidence), 2),
+                "profile_status": item.profile_status,
+                "source_fingerprint": item.source_fingerprint,
+                "profile_version": item.profile_version,
+                "profile_fingerprint": item.profile_fingerprint,
+                "generated_at": item.generated_at,
+            }
+            for item in profiles
+        ],
+        "paper_maps": [
+            {
+                "document_id": item.document_id,
+                "doc_role": item.doc_role,
+                "studies": [
+                    {
+                        "study_id": study.study_id,
+                        "document_id": study.document_id,
+                        "design_type": study.design_type,
+                        "claim_scope": study.claim_scope,
+                        "experiment_label": study.experiment_label,
+                        "material_scope": list(study.material_scope),
+                        "process_context": list(study.process_context),
+                        "relationships": [
+                            {
+                                "relationship_id": item.relationship_id,
+                                "varied_factors": list(item.varied_factors),
+                                "outcome": item.outcome,
+                                "source_refs": [
+                                    {
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                    }
+                                    for item in item.source_refs
+                                ],
+                                "confidence": item.confidence,
+                            }
+                            for item in study.relationships
+                        ],
+                        "confidence": study.confidence,
+                    }
+                    for study in item.studies
+                ],
+                "evidence_density": item.evidence_density,
+                "confidence": item.confidence,
+                "warnings": list(item.warnings),
+                "unresolved_signals": [
+                    {
+                        "signal_id": signal.signal_id,
+                        "signal_type": signal.signal_type,
+                        "label": signal.label,
+                        "variable_role": signal.variable_role,
+                        "design_type": signal.design_type,
+                        "claim_scope": signal.claim_scope,
+                        "experiment_label": signal.experiment_label,
+                        "material_scope": list(signal.material_scope),
+                        "process_context": list(signal.process_context),
+                        "source_refs": [
+                            {
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                            }
+                            for item in signal.source_refs
+                        ],
+                        "confidence": signal.confidence,
+                        "reason": signal.reason,
+                    }
+                    for signal in item.unresolved_signals
+                ],
+                "source_unit_coverage": [
+                    {
+                        "source_unit_id": item.source_unit_id,
+                        "window_id": item.window_id,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "status": item.status.value,
+                        "reason": item.reason,
+                    }
+                    for item in item.source_unit_coverage
+                ],
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "review_synthesis": {
+                    field_name: [
+                        {
+                            "content": item.content,
+                            "material_scope": list(item.material_scope),
+                            "variables": list(item.variables),
+                            "outcomes": list(item.outcomes),
+                            "conditions": list(item.conditions),
+                            "source_refs": [
+                                {
+                                    "source_kind": item.source_kind,
+                                    "source_ref": item.source_ref,
+                                }
+                                for item in item.source_refs
+                            ],
+                            "confidence": item.confidence,
+                        }
+                        for item in getattr(item.review_synthesis, field_name)
+                    ]
+                    for field_name in (
+                        "synthesis_claims",
+                        "disputes",
+                        "evidence_gaps",
+                        "citation_leads",
+                    )
+                },
+                "input_fingerprint": item.input_fingerprint,
+                "map_version": item.map_version,
+                "generated_at": item.generated_at,
+            }
+            for item in paper_maps
+        ],
         "objective_evidence": evidence,
         "objective_findings": findings,
     }

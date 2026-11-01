@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { authState } from '../../../../_shared/auth';
+	import { authState } from '../../../../_shared/authState';
+
 	import { browser } from '$app/environment';
 	import {
 		buildDocumentWorkbenchModel,

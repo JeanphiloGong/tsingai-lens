@@ -1,20 +1,21 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
-from application.repositories.auth_repository import AuthSessionRecord, AuthUserRecord
-
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-import os
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.models.auth import AuthSession
-
+from infra.persistence.postgres.models.auth import AuthSessionORM
+from repositories.auth_repository import (
+    AuthRepository,
+    AuthSessionRecord,
+    AuthUserRecord,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -22,7 +23,7 @@ pytestmark = pytest.mark.anyio
 async def test_auth_repository_round_trips_users_and_sessions(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAuthRepository(postgres_session_factory)
+    repository = AuthRepository()
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     token_hash = sha256(b"browser-session-token").hexdigest()
     user = AuthUserRecord(
@@ -52,7 +53,7 @@ async def test_auth_repository_round_trips_users_and_sessions(
 async def test_auth_repository_rejects_duplicate_email_and_token_hash(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAuthRepository(postgres_session_factory)
+    repository = AuthRepository()
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     first_user = AuthUserRecord(
         user_id="user_first", email="reader@example.com", display_name=None,
@@ -80,7 +81,7 @@ async def test_postgresql_enforces_auth_contract(
     monkeypatch,
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAuthRepository(postgres_session_factory)
+    repository = AuthRepository()
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     user = AuthUserRecord(
         user_id="user_constraints", email="constraints@example.com", display_name=None,
@@ -134,16 +135,17 @@ async def test_postgresql_enforces_auth_contract(
 
         me = client.get("/api/v1/auth/me")
         assert me.status_code == 200
-        assert me.json()["user"]["email"] == "admin@example.com"
+        assert me.json()["data"]["user"]["email"] == "admin@example.com"
 
         logout = client.post("/api/v1/auth/logout")
         assert logout.status_code == 200
-        assert client.get("/api/v1/auth/me").status_code == 401
+        assert client.get('/api/v1/auth/me').status_code == 200
+        assert client.get('/api/v1/auth/me').json()["code"] == 200301
 
-    async with repository.session_factory() as database_session:
+    async with postgres_session_factory() as database_session:
         stored = await database_session.scalar(
-            select(AuthSession).where(
-                AuthSession.token_hash
+            select(AuthSessionORM).where(
+                AuthSessionORM.token_hash
                 == sha256(bearer_token.encode("utf-8")).hexdigest()
             )
         )

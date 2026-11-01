@@ -64,7 +64,8 @@
 	{#if missingSelections.length}<p class="warning" role="alert">{$t('objectiveWorkspace.incomplete')}</p>{/if}
 	{#if !rows.length}<p class="empty">{$t(findingId ? 'objectiveWorkspace.noFindingData' : 'objectiveWorkspace.noComparisons')}</p>
 	{:else if mode === 'table'}
-			<div class="table-scroll" tabindex="-1" role="region" aria-label={$t('objectiveWorkspace.comparison')}>
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the named comparison region.) -->
+			<div class="table-scroll" tabindex="0" role="region" aria-label={$t('objectiveWorkspace.comparison')}>
 			<table><thead><tr>
 				{#each ['paper', 'factors', 'firstGroup', 'secondGroup', 'difference', 'conditions', 'sources'] as key}<th scope="col">{$t(`objectiveWorkspace.${key}`)}</th>{/each}
 			</tr></thead><tbody>
@@ -118,18 +119,18 @@
 	.experiment-results { display: grid; gap: 16px; min-width: 0; }
 	header, header > div, .toolbar, .modes, nav { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 	header { justify-content: space-between; } h2 { margin: 0; font-size: 18px; } header span, small, .muted, figcaption span { color: var(--text-secondary); }
-	button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 12px; border: 1px solid var(--border-default); background: var(--surface-panel); border-radius: 4px; cursor: pointer; color: var(--text-primary); font-size: 13px; }
-	.modes { gap: 0; } .modes button[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); } button:disabled { opacity: .5; cursor: default; }
-	.outcome { display: flex; align-items: center; gap: 12px; font-size: 13px; } select { max-width: min(400px, 70%); padding: 7px; background: var(--surface-panel); border: 1px solid var(--border-default); border-radius: 4px; }
+	button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 12px; border: 1px solid var(--border-default); background: var(--surface-card); border-radius: 4px; cursor: pointer; color: var(--text-primary); font-size: 13px; }
+	.modes { gap: 0; } .modes button[aria-pressed='true'] { background: var(--brand-soft); color: var(--brand-primary); } button:disabled { opacity: .5; cursor: default; }
+	.outcome { display: flex; align-items: center; gap: 12px; font-size: 13px; } select { max-width: min(400px, 70%); padding: 7px; background: var(--surface-card); border: 1px solid var(--border-default); border-radius: 4px; }
 	.table-scroll { overflow: auto; max-height: 600px; border-block: 1px solid var(--border-default); }
 	table { width: 100%; min-width: 1080px; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
-	th { position: sticky; top: 0; background: var(--surface-muted); text-align: left; font-size: 12px; z-index: 1; }
+	th { position: sticky; top: 0; background: var(--bg-subtle); text-align: left; font-size: 12px; z-index: 1; }
 	th, td { padding: 14px 12px; vertical-align: top; border-bottom: 1px solid var(--border-default); overflow-wrap: anywhere; } th:first-child { width: 19%; } th:last-child { width: 12%; }
 	strong { font-weight: 600; } small { display: block; font-size: 12px; line-height: 1.5; margin-top: 5px; } .value { display: block; margin-top: 8px; font-variant-numeric: tabular-nums; } .variable + .variable { margin-top: 8px; }
-	a { color: var(--primary); } .source { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; } summary { cursor: pointer; margin-block: 8px; color: var(--text-secondary); }
-	p { margin: 8px 0; } .warning { color: var(--warning); } .empty { padding: 24px 0; color: var(--text-secondary); }
+	a { color: var(--brand-primary); } .source { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; } summary { cursor: pointer; margin-block: 8px; color: var(--text-secondary); }
+	p { margin: 8px 0; } .warning { color: var(--warning-text); } .empty { padding: 24px 0; color: var(--text-secondary); }
 	.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; } figure { margin: 0; padding-block: 12px; border-bottom: 1px solid var(--border-default); } figcaption { display: grid; gap: 6px; font-size: 13px; overflow-wrap: anywhere; }
-	svg { display: block; width: 100%; height: auto; margin-block: 12px; } svg text { font-size: 13px; fill: var(--text-primary); } .axis { stroke: var(--border-default); } .pair { stroke: var(--success); stroke-width: 2; } .before { stroke: var(--success); fill: var(--surface-panel); stroke-width: 2; } .after { fill: var(--success); } figure p { font-size: 12px; color: var(--text-secondary); } figure a { display: inline-flex; gap: 5px; margin-right: 12px; font-size: 12px; }
+	svg { display: block; width: 100%; height: auto; margin-block: 12px; } svg text { font-size: 13px; fill: var(--text-primary); } .axis { stroke: var(--border-default); } .pair { stroke: var(--success-text); stroke-width: 2; } .before { stroke: var(--success-text); fill: var(--surface-card); stroke-width: 2; } .after { fill: var(--success-text); } figure p { font-size: 12px; color: var(--text-secondary); } figure a { display: inline-flex; gap: 5px; margin-right: 12px; font-size: 12px; }
 	nav { justify-content: flex-end; } .comparability { border-top: 1px solid var(--border-default); font-size: 13px; }
 	@media (max-width: 700px) { .charts { grid-template-columns: 1fr; } .toolbar { width: 100%; justify-content: space-between; } }
 </style>

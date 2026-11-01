@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from infra.persistence import database
+from tests.support.postgres import seed_collection
+
+from tests.support.source_artifacts import build_source_documents
+
 import importlib.util
 import json
 from pathlib import Path
@@ -9,11 +14,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from domain.core import DocumentProfile
-from domain.source import source_documents_from_records
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemorySourceArtifactRepository,
-)
+from domain.core.finding import Finding, FindingPaperContribution
+from domain.core.research_objective import ObjectiveEvidence
+from domain.core.scientific_fact import ScientificContext
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 @pytest.fixture
@@ -36,17 +41,14 @@ def _load_exporter_module():
     return module
 
 
-class _Record:
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-
-    def to_record(self) -> dict:
-        return dict(self.payload)
-
-
 class _PublishedObjectiveRepository:
     def __init__(self, *, published: bool = True) -> None:
         self.published = published
+
+    async def read_analysis(self, *args):
+        return SimpleNamespace(
+            status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot"
+        )
 
     async def list_objectives(self, collection_id: str):
         if not self.published:
@@ -62,18 +64,28 @@ class _PublishedObjectiveRepository:
         if not self.published:
             return (), 0
         records = (
-            _Record(
-                {
-                    "collection_id": "col-test",
-                    "objective_id": "obj-1",
-                    "analysis_version": 2,
-                    "evidence_id": "ev-1",
-                    "document_id": "paper-1",
-                    "source_kind": "text_window",
-                    "source_ref": "block-1",
-                    "source_excerpt": "Preheating increased ductility by 14%.",
-                    "evidence_role": "direct_result",
-                }
+            ObjectiveEvidence(
+                collection_id="col-test",
+                objective_id="obj-1",
+                analysis_version=2,
+                evidence_id="ev-1",
+                document_id="paper-1",
+                source_kind="text_window",
+                source_ref="block-1",
+                source_excerpt="Preheating increased ductility by 14%.",
+                page_numbers=(),
+                related_source_refs=(),
+                evidence_role="direct_result",
+                selection_status="candidate",
+                selection_reason=None,
+                changed_variables=(),
+                comparison=None,
+                reported_result=None,
+                attribution_scope="descriptive_only",
+                scientific_context=ScientificContext(),
+                resolution_status="unknown",
+                failure_reason=None,
+                confidence=0.0,
             ),
         )
         return records, len(records)
@@ -82,33 +94,40 @@ class _PublishedObjectiveRepository:
         if not self.published:
             return (), 0
         records = (
-            _Record(
-                {
-                    "collection_id": "col-test",
-                    "objective_id": "obj-1",
-                    "analysis_version": 2,
-                    "finding_id": "finding-1",
-                    "statement": "Preheating was associated with higher ductility.",
-                    "factors": ["preheating"],
-                    "outcome": "ductility",
-                    "synthesis_status": "insufficient_confirmation",
-                    "attribution_scope": "isolated_effect",
-                    "certainty": 0.8,
-                    "limitations": ["single paper"],
-                }
+            Finding(
+                collection_id="col-test",
+                objective_id="obj-1",
+                analysis_version=2,
+                finding_id="finding-1",
+                statement="Preheating was associated with higher ductility.",
+                factors=("preheating",),
+                outcome="ductility",
+                direction="unknown",
+                assertion_strength="descriptive",
+                attribution_scope="isolated_effect",
+                synthesis_status="insufficient_confirmation",
+                certainty=0.8,
+                display_rank=0,
+                mechanisms=(),
+                scientific_context=ScientificContext(),
+                limitations=("single paper",),
+                paper_contributions=(
+                    FindingPaperContribution(
+                        document_id="paper-1",
+                        analysis_status="analyzed",
+                        supporting_evidence_ids=("ev-1",),
+                    ),
+                ),
             ),
         )
         return records, len(records)
 
 
 @pytest.mark.anyio
-async def test_export_prediction_bundle_uses_current_published_results(
-    tmp_path,
-    monkeypatch,
-):
+async def test_export_prediction_bundle_uses_current_published_results(tmp_path, monkeypatch, *, postgres_session_factory):
     exporter = _load_exporter_module()
-    source_repository = MemorySourceArtifactRepository()
-    source_document = source_documents_from_records(
+    source_repository = SourceArtifactRepository()
+    source_document = build_source_documents(
         documents=[
             {
                 "id": "paper-1",
@@ -121,18 +140,17 @@ async def test_export_prediction_bundle_uses_current_published_results(
             }
         ]
     )[0]
+    await seed_collection(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
-    profile_repository = MemoryDocumentProfileRepository()
+    profile_repository = DocumentProfileRepository()
     await profile_repository.replace(
         "col-test",
-        DocumentProfile.from_mapping(
-            {
-                "document_id": "paper-1",
-                "title": "Prediction Paper",
-                "doc_type": "experimental",
-                "profile_warnings": [],
-                "confidence": 0.9,
-            }
+        DocumentProfile(
+            document_id="paper-1",
+            title="Prediction Paper",
+            doc_type="experimental",
+            profile_warnings=(),
+            confidence=0.9,
         )
     )
     monkeypatch.setattr(
@@ -140,21 +158,21 @@ async def test_export_prediction_bundle_uses_current_published_results(
         "build_database_engine",
         lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
-    monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(exporter.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         exporter,
-        "PostgresSourceArtifactRepository",
-        lambda _sessions: source_repository,
+        "SourceArtifactRepository",
+        lambda: source_repository,
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresDocumentProfileRepository",
-        lambda _sessions: profile_repository,
+        "DocumentProfileRepository",
+        lambda: profile_repository,
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresObjectiveRepository",
-        lambda _sessions: _PublishedObjectiveRepository(),
+        "ObjectiveRepository",
+        lambda: _PublishedObjectiveRepository(),
     )
     output = tmp_path / "prediction.json"
 
@@ -179,6 +197,8 @@ def test_prediction_bundle_preserves_exact_evidence_and_uncertainty(tmp_path):
     records["objective_evidence"] = [
         {
             "evidence_id": "ev-1",
+            "document_id": "paper-1",
+            "source_ref": "block-1",
             "source_excerpt": "Preheating increased ductility by 14%.",
         }
     ]
@@ -316,31 +336,28 @@ def test_prediction_bundle_preserves_scalar_measurement_when_target_value_is_nul
 
 
 @pytest.mark.anyio
-async def test_export_prediction_bundle_allows_missing_current_artifacts(
-    tmp_path,
-    monkeypatch,
-):
+async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_path, monkeypatch, *, postgres_session_factory):
     exporter = _load_exporter_module()
     monkeypatch.setattr(
         exporter,
         "build_database_engine",
         lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
-    monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(exporter.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         exporter,
-        "PostgresSourceArtifactRepository",
-        lambda _sessions: MemorySourceArtifactRepository(),
+        "SourceArtifactRepository",
+        lambda: SourceArtifactRepository(),
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresDocumentProfileRepository",
-        lambda _sessions: MemoryDocumentProfileRepository(),
+        "DocumentProfileRepository",
+        lambda: DocumentProfileRepository(),
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresObjectiveRepository",
-        lambda _sessions: _PublishedObjectiveRepository(published=False),
+        "ObjectiveRepository",
+        lambda: _PublishedObjectiveRepository(published=False),
     )
     output = tmp_path / "empty.json"
 
@@ -356,3 +373,14 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(
     assert set(bundle["metadata"]["missing_artifacts"]) == set(
         exporter.ARTIFACT_NAMES
     )
+
+
+def test_prediction_bundle_rejects_missing_evidence_identity(tmp_path):
+    exporter = _load_exporter_module()
+    records = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records["objective_evidence"] = [{"evidence_id": "ev-1"}]
+    with pytest.raises(KeyError, match="document_id"):
+        exporter.build_prediction_bundle(
+            collection_id="col-test", source_output_dir=tmp_path,
+            records_by_artifact=records, missing_artifacts=[],
+        )

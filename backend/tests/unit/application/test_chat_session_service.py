@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from application.chat.capabilities import document_sources
+
 import asyncio
-from contextlib import asynccontextmanager
 from dataclasses import replace
 from hashlib import sha256
+from types import ModuleType
 from typing import Any
 
 import pytest
-from pydantic import BaseModel, ConfigDict
-
 from application.chat import (
     AgentContext,
     AgentRunLimits,
@@ -20,31 +20,42 @@ from application.chat import (
     ResearchAgentRunner,
     ToolSpec,
 )
+from application.chat import session_service as chat_session_service
+from application.chat.capabilities.document_sources import ReadSourceCapability
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatFeedbackAnalysisEnqueueError,
     ChatSessionNotFoundError,
-    ChatSessionService,
     ChatSourceContextError,
+    resolve_canonical_objective_source,
 )
-from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
-from application.chat.capabilities.document_sources import ReadSourceCapability
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
-    ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ChatToolRequest,
     ChatToolResult,
     ToolCallStatus,
     ToolResultStatus,
     ToolRisk,
 )
-from domain.source import SourceBlock, SourceDocument
+from domain.source import SourceBlock, SourceDocument, SourceTable
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
+from infra.persistence import database
+from pydantic import BaseModel, ConfigDict
+from repositories.chat_repository import ChatRepository, ChatResponseSnapshot
+from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.postgres import read_tool_calls, read_tool_results, seed_collection
 from tests.unit.application.test_research_agent_runner import _Model
-from tests.support.chat_repository import MemoryChatRepository
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.fixture
@@ -77,7 +88,7 @@ class _WriteCapability:
         self.executed.append(arguments.model_dump())
         return ChatToolResult(
             tool_call_id="rebound-by-runner",
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={"objective_id": "obj-1"},
         )
 
@@ -86,12 +97,10 @@ class _CollectionService:
     def __init__(self) -> None:
         self.full_reads = 0
 
-    async def collection_belongs_to_user(
-        self,
-        collection_id: str,
-        user_id: str,
-    ) -> bool:
-        return collection_id == "col-1" and user_id == "user-1"
+    async def get_agent_default_permission_for_user(self, collection_id, user_id):
+        if collection_id != "col-1" or user_id != "user-1":
+            raise FileNotFoundError("collection not found")
+        return {"mode": "confirm"}
 
     async def get_collection_for_user(
         self,
@@ -105,13 +114,18 @@ class _CollectionService:
 
     async def get_document(self, collection_id: str, document_id: str) -> dict:
         if collection_id != "col-1" or document_id != "doc-1":
-            raise FileNotFoundError("document not found")
+            raise ResourceNotFoundException("document not found")
         return {"collection_id": collection_id, "document_id": document_id}
 
 
-class _SourceArtifactRepository:
-    def __init__(self) -> None:
-        self.document = SourceDocument(
+@pytest.fixture(autouse=True)
+async def research_sources(postgres_session_factory):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+    await SourceArtifactRepository().replace_document(
+        "col-1",
+        SourceDocument(
             document_id="doc-1",
             document_order=0,
             title="Canonical Paper A",
@@ -127,168 +141,32 @@ class _SourceArtifactRepository:
                     heading_path="Results > Conductivity",
                 ),
             ),
-        )
-
-    async def read_document(
-        self,
-        collection_id: str,
-        document_id: str,
-    ) -> SourceDocument | None:
-        if collection_id == "col-1" and document_id == self.document.document_id:
-            return self.document
-        return None
-
-
-class _Repository(MemoryChatRepository):
-    def __init__(self) -> None:
-        super().__init__()
-        self.sessions: dict[str, ChatSession] = {}
-        self.active_sessions: set[str] = set()
-        self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
-        self.messages: dict[str, tuple[ChatMessage, ...]] = {}
-        self.calls: dict[str, ChatToolCall] = {}
-        self.results: dict[str, ChatToolResult] = {}
-        self.trajectory_snapshots: list[
-            tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]
-        ] = []
-
-    async def add_session(self, record: ChatSession) -> None:
-        self.sessions[record.session_id] = record
-        self.messages[record.session_id] = ()
-
-    @asynccontextmanager
-    async def session_execution(self, session_id: str):
-        if session_id in self.active_sessions:
-            raise ChatSessionBusyError()
-        self.active_sessions.add(session_id)
-        try:
-            yield
-        finally:
-            self.active_sessions.remove(session_id)
-
-    async def is_session_running(self, session_id: str) -> bool:
-        return session_id in self.active_sessions
-
-    async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None:
-        return self.response_snapshots.get(session_id)
-
-    async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None:
-        self.response_snapshots[session_id] = snapshot
-
-    async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
-        return (session,)
-
-    async def read_feedback(self, session_id: str, user_id: str) -> tuple:
-        return ()
-
-    async def read_session(self, session_id: str) -> ChatSession | None:
-        return self.sessions.get(session_id)
-
-    async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
-        return self.messages.get(session_id, ())
-
-    async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
-        return self.calls.get(tool_call_id)
-
-    async def save_trajectory(
-        self,
-        *,
-        session: ChatSession,
-        messages: tuple[ChatMessage, ...],
-        tool_calls: tuple[ChatToolCall, ...],
-        tool_results: tuple[ChatToolResult, ...],
-    ) -> None:
-        self.sessions[session.session_id] = session
-        self.messages[session.session_id] = messages
-        for call in tool_calls:
-            self.proposed_revisions.setdefault(call.tool_call_id, 0)
-        self.calls.update((item.tool_call_id, item) for item in tool_calls)
-        self.results.update((item.tool_call_id, item) for item in tool_results)
-        self.trajectory_snapshots.append(
-            (
-                tuple(item.role.value for item in messages),
-                tuple(item.status.value for item in tool_calls),
-                tuple(item.status.value for item in tool_results),
-            )
-        )
-
-    async def decide_tool_call(
-        self,
-        *,
-        session_id: str,
-        tool_call_id: str,
-        user_id: str,
-        arguments_digest: str,
-        decision: str,
-        decided_at: str,
-    ) -> ChatToolCall:
-        session = self.sessions.get(session_id)
-        if session is None or session.user_id != user_id:
-            raise FileNotFoundError("chat session not found")
-        call = self.calls[tool_call_id]
-        decided = (
-            call.approve(
-                user_id=user_id,
-                arguments_digest=arguments_digest,
-                decided_at=decided_at,
-            )
-            if decision == "approved"
-            else call.reject(
-                user_id=user_id,
-                arguments_digest=arguments_digest,
-                decided_at=decided_at,
-            )
-        )
-        self.calls[tool_call_id] = decided
-        return decided
-
-    async def claim_approved_tool_call(
-        self,
-        *,
-        session_id: str,
-        tool_call_id: str,
-        user_id: str,
-        started_at: str,
-    ) -> ChatToolCall | None:
-        session = self.sessions.get(session_id)
-        if session is None or session.user_id != user_id:
-            raise FileNotFoundError("chat session not found")
-        call = self.calls[tool_call_id]
-        if call.status is ToolCallStatus.APPROVED:
-            call = call.start(started_at)
-            self.calls[tool_call_id] = call
-            return call
-        if call.status in {
-            ToolCallStatus.RUNNING,
-            ToolCallStatus.SUCCEEDED,
-            ToolCallStatus.FAILED,
-        }:
-            return None
-        raise ValueError(f"cannot claim tool call in status {call.status.value}")
-
-
-def _service(
-    model: _Model,
-    repository: _Repository,
-    *capabilities,
-) -> ChatSessionService:
-    return ChatSessionService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        repository=repository,
-        runner=ResearchAgentRunner(
-            model=model,
-            capabilities=CapabilityRegistry(tuple(capabilities)),
         ),
     )
 
 
-async def test_chat_session_service_persists_ordinary_conversation() -> None:
-    repository = _Repository()
+def _service(
+    model: _Model,
+    repository: ChatRepository,
+    *capabilities,
+) -> chat_session_service.ChatSessionService:
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    chat_session_service.ChatRepo = repository
+    runner = ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry(tuple(capabilities))
+    )
+    return chat_session_service.ChatSessionService(runner=runner)
+
+
+async def test_chat_session_service_persists_ordinary_conversation(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="你好，我可以帮助你。")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    result = await service.post_message_for_user(
+    result = await service.send_message(
         session.session_id,
         "user-1",
         message="你好",
@@ -301,15 +179,17 @@ async def test_chat_session_service_persists_ordinary_conversation() -> None:
         await service.get_session_for_user(session.session_id, "user-2")
 
 
-async def test_chat_session_access_uses_collection_owner_probe() -> None:
-    repository = _Repository()
+async def test_chat_session_access_uses_collection_owner_probe(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="answer")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
     await service.get_session_for_user(session.session_id, "user-1")
     await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
 
-    assert service.collection_service.full_reads == 0
+    assert chat_session_service.collection_service.full_reads == 0
 
 
 class _FailingAnalysisJobs:
@@ -317,21 +197,21 @@ class _FailingAnalysisJobs:
         raise RuntimeError("database unavailable")
 
 
-async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable() -> None:
-    repository = _Repository()
-    service = ChatSessionService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        repository=repository,
-        runner=ResearchAgentRunner(
-            model=_Model(ModelTurn(content="answer")),
-            capabilities=CapabilityRegistry(()),
-        ),
-        analysis_job_repository=_FailingAnalysisJobs(),
+async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    chat_session_service.ChatRepo = repository
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="answer")), capabilities=CapabilityRegistry(())
     )
+    chat_session_service.AnalysisJobRepo = _FailingAnalysisJobs()
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.save_trajectory(
-        session=session,
+        chat_session=session,
         messages=(
             ChatMessage.user(
                 message_id="question-1",
@@ -359,12 +239,16 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable() -
             reason="incorrect",
         )
 
-    assert len(repository.feedback) == 1
+    assert len(await repository.read_feedback(session.session_id, "user-1")) == 1
 
 
-async def test_chat_session_service_persists_selected_source_with_user_message() -> None:
-    repository = _Repository()
-    service = _service(_Model(ModelTurn(content="这段原文报告了一个测量结果。")), repository)
+async def test_chat_session_service_persists_selected_source_with_user_message(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
+    service = _service(
+        _Model(ModelTurn(content="这段原文报告了一个测量结果。")), repository
+    )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
         resource_ref=ChatResourceRef(
@@ -385,7 +269,7 @@ async def test_chat_session_service_persists_selected_source_with_user_message()
         heading_path="Client supplied heading",
     )
 
-    await service.post_message_for_user(
+    await service.send_message(
         session.session_id,
         "user-1",
         message="解释这段结果。",
@@ -398,9 +282,10 @@ async def test_chat_session_service_persists_selected_source_with_user_message()
     assert canonical_context.source_kind == "text_window"
     assert canonical_context.page == 3
     assert canonical_context.heading_path == "Results > Conductivity"
-    assert canonical_context.source_digest == sha256(
-        b"Conductivity improved to 12 mS/cm under EIS."
-    ).hexdigest()
+    assert (
+        canonical_context.source_digest
+        == sha256(b"Conductivity improved to 12 mS/cm under EIS.").hexdigest()
+    )
     assert canonical_context.resource_ref.href == (
         "/collections/col-1/documents/doc-1"
         "?view=parsed-paper&source_ref=results&page=3"
@@ -410,45 +295,86 @@ async def test_chat_session_service_persists_selected_source_with_user_message()
 
 @pytest.mark.parametrize("forged_second_block", [False, True])
 async def test_selected_blocks_are_canonicalized_together_before_a_turn(
-    forged_second_block: bool,
+    forged_second_block: bool, *, postgres_session_factory
 ) -> None:
-    repository = _Repository()
-    sources = _SourceArtifactRepository()
+    repository = ChatRepository()
+    sources = SourceArtifactRepository()
     methods = SourceBlock(
-        block_id="methods", document_id="doc-1", block_type="paragraph",
-        text="Conductivity was measured using EIS at 25 C.", block_order=1,
-        page=2, heading_path="Methods > EIS",
+        block_id="methods",
+        document_id="doc-1",
+        block_type="paragraph",
+        text="Conductivity was measured using EIS at 25 C.",
+        block_order=1,
+        page=2,
+        heading_path="Methods > EIS",
     )
-    sources.document = replace(sources.document, blocks=(*sources.document.blocks, methods))
-    service = ChatSessionService(
-        collection_service=_CollectionService(), source_artifact_repository=sources,
-        repository=repository,
-        runner=ResearchAgentRunner(model=_Model(ModelTurn(content="Check the measurement conditions.")), capabilities=CapabilityRegistry(())),
+    document = await sources.read_document("col-1", "doc-1")
+    document = replace(document, blocks=(*document.blocks, methods))
+    await seed_collection(
+        database.AsyncSessionLocal, "col-1", document_ids=(document.document_id,)
     )
+    await sources.replace_document("col-1", document)
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = sources
+    chat_session_service.ChatRepo = repository
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="Check the measurement conditions.")),
+        capabilities=CapabilityRegistry(()),
+    )
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     contexts = tuple(
         ChatSourceContext(
-            resource_ref=ChatResourceRef(resource_type="source", resource_id=f"doc-1:{block.block_id}", href=None),
-            collection_id="col-1", document_id="doc-1", document_title="Untrusted client label",
-            source_kind="text_window", source_ref=block.block_id, page=1,
-            quote="Invented room-temperature superconductivity." if forged_second_block and block.block_id == "methods" else block.text,
-        ) for block in sources.document.blocks
+            resource_ref=ChatResourceRef(
+                resource_type="source", resource_id=f"doc-1:{block.block_id}", href=None
+            ),
+            collection_id="col-1",
+            document_id="doc-1",
+            document_title="Untrusted client label",
+            source_kind="text_window",
+            source_ref=block.block_id,
+            page=1,
+            quote=(
+                "Invented room-temperature superconductivity."
+                if forged_second_block and block.block_id == "methods"
+                else block.text
+            ),
+        )
+        for block in document.blocks
     )
     if forged_second_block:
         with pytest.raises(ChatSourceContextError):
-            await service.post_message_for_user(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
+            await service.send_message(
+                session.session_id,
+                "user-1",
+                message="Compare these blocks",
+                source_contexts=contexts,
+            )
         assert not await repository.read_messages(session.session_id)
         return
-    await service.post_message_for_user(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
+    await service.send_message(
+        session.session_id,
+        "user-1",
+        message="Compare these blocks",
+        source_contexts=contexts,
+    )
     stored = await repository.read_messages(session.session_id)
-    assert [item.source_ref for item in stored[0].source_contexts] == ["results", "methods"]
+    assert [item.source_ref for item in stored[0].source_contexts] == [
+        "results",
+        "methods",
+    ]
     assert [item.page for item in stored[0].source_contexts] == [3, 2]
-    assert all(item.document_title == "Canonical Paper A" and item.source_digest for item in stored[0].source_contexts)
+    assert all(
+        item.document_title == "Canonical Paper A" and item.source_digest
+        for item in stored[0].source_contexts
+    )
     assert stored[-1].role.value == "assistant"
 
 
-async def test_chat_session_service_rejects_source_from_another_collection() -> None:
-    repository = _Repository()
+async def test_chat_session_service_rejects_source_from_another_collection(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     foreign_source = ChatSourceContext(
@@ -468,7 +394,7 @@ async def test_chat_session_service_rejects_source_from_another_collection() -> 
     )
 
     with pytest.raises(ChatSourceContextError, match="does not belong"):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -478,8 +404,10 @@ async def test_chat_session_service_rejects_source_from_another_collection() -> 
     assert await repository.read_messages(session.session_id) == ()
 
 
-async def test_chat_session_service_rejects_unknown_document_source() -> None:
-    repository = _Repository()
+async def test_chat_session_service_rejects_unknown_document_source(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     unknown_source = ChatSourceContext(
@@ -502,7 +430,7 @@ async def test_chat_session_service_rejects_unknown_document_source() -> None:
     )
 
     with pytest.raises(ChatSourceContextError, match="document does not belong"):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -540,8 +468,10 @@ async def test_chat_session_service_rejects_forged_source_context(
     source_ref: str,
     quote: str,
     error: str,
+    *,
+    postgres_session_factory,
 ) -> None:
-    repository = _Repository()
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
@@ -564,7 +494,7 @@ async def test_chat_session_service_rejects_forged_source_context(
     )
 
     with pytest.raises(ChatSourceContextError, match=error):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -574,8 +504,10 @@ async def test_chat_session_service_rejects_forged_source_context(
     assert await repository.read_messages(session.session_id) == ()
 
 
-async def test_chat_session_service_accepts_a_bounded_canonical_quote() -> None:
-    repository = _Repository()
+async def test_chat_session_service_accepts_a_bounded_canonical_quote(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(
         _Model(ModelTurn(content="This is a partial Source quote.")), repository
     )
@@ -594,23 +526,23 @@ async def test_chat_session_service_accepts_a_bounded_canonical_quote() -> None:
         quote="Conductivity improved to 12 mS/cm",
     )
 
-    await service.post_message_for_user(
+    await service.send_message(
         session.session_id,
         "user-1",
         message="Explain this excerpt.",
         source_contexts=(source_context,),
     )
 
-    stored = (await repository.read_messages(session.session_id))[0].source_contexts[
-        0
-    ]
+    stored = (await repository.read_messages(session.session_id))[0].source_contexts[0]
     assert stored.quote == "Conductivity improved to 12 mS/cm"
     assert stored.quote_truncated is True
     assert stored.source_digest is not None
 
 
-async def test_chat_session_service_rejects_a_stale_source_digest() -> None:
-    repository = _Repository()
+async def test_chat_session_service_rejects_a_stale_source_digest(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
@@ -629,7 +561,7 @@ async def test_chat_session_service_rejects_a_stale_source_digest() -> None:
     )
 
     with pytest.raises(ChatSourceContextError, match="digest does not match"):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -639,12 +571,14 @@ async def test_chat_session_service_rejects_a_stale_source_digest() -> None:
     assert await repository.read_messages(session.session_id) == ()
 
 
-async def test_chat_session_service_streams_text_before_the_persisted_turn() -> None:
-    repository = _Repository()
+async def test_chat_session_service_streams_text_before_the_persisted_turn(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="逐段回复")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    stream = await service.stream_message_for_user(
+    stream = await service.send_message_stream(
         session.session_id,
         "user-1",
         message="你好",
@@ -652,7 +586,9 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn() -> 
     events = [event async for event in stream]
 
     assert events[0]["type"] == "trajectory"
-    snapshot = next(event["snapshot"] for event in events if event["type"] == "snapshot")
+    snapshot = next(
+        event["snapshot"] for event in events if event["type"] == "snapshot"
+    )
     assert snapshot.message_id == events[-1]["turn"]["messages"][-1].message_id
     assert [event for event in events if event["type"] == "text_delta"] == [
         {"type": "text_delta", "content": "逐段"},
@@ -664,7 +600,9 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn() -> 
         for event in events
     )
     assert events[-1]["turn"]["messages"][-1].content == "逐段回复"
-    assert (await repository.read_messages(session.session_id))[-1].content == "逐段回复"
+    assert (await repository.read_messages(session.session_id))[
+        -1
+    ].content == "逐段回复"
 
 
 class _PausedResponseModel:
@@ -687,14 +625,65 @@ class _PausedResponseModel:
         return ModelTurn(content=self.first + self.second)
 
 
-async def test_disconnected_response_restores_text_and_continues_with_the_same_message() -> None:
-    repository = _Repository()
+async def test_chat_shutdown_keeps_another_apps_stream_running(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
+    first_model = _PausedResponseModel()
+    second_model = _PausedResponseModel()
+    first = _service(first_model, repository)
+    second = _service(second_model, repository)
+    first_session = await first.create_session(collection_id="col-1", user_id="user-1")
+    second_session = await second.create_session(collection_id="col-1", user_id="user-1")
+    first_stream = await first.send_message_stream(
+        first_session.session_id, "user-1", message="Explain matched tensile conditions."
+    )
+    second_stream = await second.send_message_stream(
+        second_session.session_id, "user-1", message="Explain the comparison context."
+    )
+    try:
+        async with asyncio.timeout(5):
+            for stream in (first_stream, second_stream):
+                async for event in stream:
+                    if event["type"] == "text_delta":
+                        break
+            assert first.runner is not second.runner
+            first_task, = first._active_stream_tasks
+            second_task, = second._active_stream_tasks
+            await first.close()
+            assert first_task.cancelled()
+            assert not second_task.done()
+            interrupted = await first.get_trajectory_for_user(
+                first_session.session_id, "user-1"
+            )
+            assert interrupted["response"].status == "interrupted"
+            second_model.continue_response.set()
+            second_model.finish_response.set()
+            await second_task
+            completed = await second.get_trajectory_for_user(
+                second_session.session_id, "user-1"
+            )
+            assert completed["response"].status == "completed"
+            assert completed["messages"][-1].content == second_model.first + second_model.second
+    finally:
+        await first.close()
+        await second.close()
+        await first_stream.aclose()
+        await second_stream.aclose()
+
+
+async def test_disconnected_response_restores_text_and_continues_with_the_same_message(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     model = _PausedResponseModel()
     service = _service(model, repository)
     reader = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    original = await service.stream_message_for_user(
-        session.session_id, "user-1", message="Explain matched LPBF tensile conditions without tools.",
+    original = await service.send_message_stream(
+        session.session_id,
+        "user-1",
+        message="Explain matched LPBF tensile conditions without tools.",
     )
     try:
         async with asyncio.timeout(5):
@@ -703,7 +692,9 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
                     break
             await original.aclose()
             while True:
-                saved = await reader.get_trajectory_for_user(session.session_id, "user-1")
+                saved = await reader.get_trajectory_for_user(
+                    session.session_id, "user-1"
+                )
                 if saved["response"].content == model.first:
                     break
                 await asyncio.sleep(0.01)
@@ -713,7 +704,9 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
             assert snapshot.content.endswith(" ")
             assert len(saved["messages"]) == 1
             updates = await reader.stream_updates_for_user(
-                session.session_id, "user-1", response_id=snapshot.response_id,
+                session.session_id,
+                "user-1",
+                response_id=snapshot.response_id,
             )
             initial = await anext(updates)
             assert initial["trajectory"]["response"].content == model.first
@@ -737,12 +730,18 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
         await asyncio.gather(*service._active_stream_tasks, return_exceptions=True)
 
 
-async def test_interrupted_response_keeps_partial_text_without_claiming_it_completed() -> None:
-    repository = _Repository()
+async def test_interrupted_response_keeps_partial_text_without_claiming_it_completed(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     model = _PausedResponseModel()
     service = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    original = await service.stream_message_for_user(session.session_id, "user-1", message="Explain matching conditions without tools.")
+    original = await service.send_message_stream(
+        session.session_id,
+        "user-1",
+        message="Explain matching conditions without tools.",
+    )
     async for event in original:
         if event["type"] == "text_delta":
             break
@@ -757,11 +756,15 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
     assert saved["response"].content == model.first
     assert len(saved["messages"]) == 1
     with pytest.raises(ChatSessionNotFoundError):
-        await service.stream_updates_for_user(session.session_id, "user-2", response_id=saved["response"].response_id)
+        await service.stream_updates_for_user(
+            session.session_id, "user-2", response_id=saved["response"].response_id
+        )
 
 
-async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume() -> None:
-    repository = _Repository()
+async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     started = asyncio.Event()
     release = asyncio.Event()
 
@@ -776,7 +779,9 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume() -> 
             input_model=_EmptyArguments,
         )
 
-        async def execute(self, context: AgentContext, arguments: BaseModel) -> ChatToolResult:
+        async def execute(
+            self, context: AgentContext, arguments: BaseModel
+        ) -> ChatToolResult:
             started.set()
             await release.wait()
             return ChatToolResult(
@@ -787,14 +792,18 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume() -> 
 
     capability = _BlockingReadCapability()
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(
-            name=capability.spec.name,
-            arguments={},
-        ),)),
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name=capability.spec.name,
+                    arguments={},
+                ),
+            )
+        ),
     )
     service = _service(model, repository, capability)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    stream = await service.stream_message_for_user(
+    stream = await service.send_message_stream(
         session.session_id,
         "user-1",
         message="Inspect the prepared paper sources.",
@@ -817,29 +826,44 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume() -> 
         await asyncio.gather(consumer, return_exceptions=True)
 
     call = next(
-        item for item in repository.calls.values()
+        item
+        for item in (await read_tool_calls(repository, session.session_id))
         if item.name == capability.spec.name
     )
     assert call.status is ToolCallStatus.FAILED
     assert call.error_code == "chat_response_interrupted"
-    assert repository.results[call.tool_call_id].error_code == "chat_response_interrupted"
+    assert (
+        next(
+            result
+            for result in await read_tool_results(repository, session.session_id)
+            if result.tool_call_id == call.tool_call_id
+        ).error_code
+        == "chat_response_interrupted"
+    )
     saved = await service.get_trajectory_for_user(session.session_id, "user-1")
     assert saved["running"] is False
     assert saved["response"].status == "interrupted"
 
     model.turns.clear()
-    model.turns.append(ModelTurn(content="The interrupted source inspection can be resumed."))
-    resumed = await service.post_message_for_user(
+    model.turns.append(
+        ModelTurn(content="The interrupted source inspection can be resumed.")
+    )
+    resumed = await service.send_message(
         session.session_id,
         "user-1",
         message="Continue from the interrupted inspection.",
     )
     assert resumed["status"] == "completed"
-    assert resumed["messages"][-1].content == "The interrupted source inspection can be resumed."
+    assert (
+        resumed["messages"][-1].content
+        == "The interrupted source inspection can be resumed."
+    )
 
 
-async def test_new_request_recovers_a_running_call_left_by_a_dead_worker() -> None:
-    repository = _Repository()
+async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     model = _Model(ModelTurn(content="The previous interruption was recovered."))
     service = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
@@ -853,14 +877,82 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker() -> No
         message_id="assistant-1",
         session_id=session.session_id,
         content="",
-        tool_calls=(ChatToolCall.requested(
-            tool_call_id="call-orphaned",
-            session_id=session.session_id,
-            assistant_message_id="assistant-1",
-            name="inspect_document_sources",
-            arguments={},
-            risk=ToolRisk.READ,
-        ).to_request(),),
+        tool_calls=(
+            ChatToolRequest(
+                tool_call_id=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).tool_call_id,
+                name=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).name,
+                arguments=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).arguments,
+                position=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).position,
+                decision_user_id=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).decision_user_id,
+                decision_arguments_digest=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).decision_arguments_digest,
+                decided_at=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).decided_at,
+                decision_basis=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).decision_basis,
+                authorization_revision=ChatToolCall.requested(
+                    tool_call_id="call-orphaned",
+                    session_id=session.session_id,
+                    assistant_message_id="assistant-1",
+                    name="inspect_document_sources",
+                    arguments={},
+                    risk=ToolRisk.READ,
+                ).authorization_revision,
+            ),
+        ),
         created_at="2026-10-10T00:00:01Z",
     )
     running = ChatToolCall.requested(
@@ -872,7 +964,7 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker() -> No
         risk=ToolRisk.READ,
     ).start("2026-10-10T00:00:02Z")
     await repository.save_trajectory(
-        session=session,
+        chat_session=session,
         messages=(user_message, assistant_message),
         tool_calls=(running,),
         tool_results=(),
@@ -888,7 +980,7 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker() -> No
         ),
     )
 
-    result = await service.post_message_for_user(
+    result = await service.send_message(
         session.session_id,
         "user-1",
         message="Continue after the interruption.",
@@ -896,21 +988,36 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker() -> No
 
     assert result["status"] == "completed"
     assert result["messages"][-1].content == "The previous interruption was recovered."
-    assert repository.calls["call-orphaned"].status is ToolCallStatus.FAILED
-    assert repository.results["call-orphaned"].error_code == "chat_response_interrupted"
+    assert (
+        await repository.read_tool_call("call-orphaned")
+    ).status is ToolCallStatus.FAILED
+    assert (
+        next(
+            result
+            for result in await read_tool_results(repository, session.session_id)
+            if result.tool_call_id == "call-orphaned"
+        ).error_code
+        == "chat_response_interrupted"
+    )
     snapshot = await repository.read_response_snapshot(session.session_id)
     assert snapshot is not None
     assert snapshot.status == "completed"
 
 
 @pytest.mark.parametrize("transition", ["starts", "completes", "stops"])
-async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(transition, monkeypatch) -> None:
-    repository = _Repository()
+async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(
+    transition, monkeypatch, *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="unused")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     snapshot = ChatResponseSnapshot(
-        response_id="response-1", sequence=1, started_at=session.created_at,
-        updated_at=session.created_at, message_id="answer-1", content="Match test conditions",
+        response_id="response-1",
+        sequence=1,
+        started_at=session.created_at,
+        updated_at=session.created_at,
+        message_id="answer-1",
+        content="Match test conditions",
     )
     if transition != "starts":
         await repository.save_response_snapshot(session.session_id, snapshot)
@@ -919,32 +1026,64 @@ async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(tra
         if transition == "starts":
             await repository.save_response_snapshot(session.session_id, snapshot)
         elif transition == "completes":
-            await repository.save_response_snapshot(session.session_id, replace(snapshot, sequence=2, status="completed"))
+            await repository.save_response_snapshot(
+                session.session_id, replace(snapshot, sequence=2, status="completed")
+            )
         return False
 
     monkeypatch.setattr(repository, "is_session_running", sample_execution)
     saved = await service.get_trajectory_for_user(session.session_id, "user-1")
     assert saved["running"] is (transition == "starts")
-    assert saved["response"].status == {"starts": "running", "completes": "completed", "stops": "interrupted"}[transition]
+    assert (
+        saved["response"].status
+        == {"starts": "running", "completes": "completed", "stops": "interrupted"}[
+            transition
+        ]
+    )
     assert saved["response"].content == snapshot.content
 
 
-async def test_approved_continuation_captures_text_without_repeating_the_write() -> None:
-    repository = _Repository()
+async def test_approved_continuation_captures_text_without_repeating_the_write(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     capability = _WriteCapability()
-    service = _service(_Model(ModelTurn(tool_calls=(ModelToolCall(
-        name="create_objective_candidate", arguments={"question": "Compare matched LPBF tensile conditions"},
-    ),))), repository, capability)
+    service = _service(
+        _Model(
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name="create_objective_candidate",
+                        arguments={
+                            "question": "Compare matched LPBF tensile conditions"
+                        },
+                    ),
+                )
+            )
+        ),
+        repository,
+        capability,
+    )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    initial = await service.post_message_for_user(session.session_id, "user-1", message="Create an objective candidate for these test conditions.")
+    initial = await service.send_message(
+        session.session_id,
+        "user-1",
+        message="Create an objective candidate for these test conditions.",
+    )
     call = initial["pending_approval"]
     assert call is not None
     original_snapshot = await repository.read_response_snapshot(session.session_id)
     model = _PausedResponseModel()
     service.runner.model = model
-    decision = asyncio.create_task(service.decide_tool_call_for_user(
-        session.session_id, call.tool_call_id, "user-1", arguments_digest=call.arguments_digest, decision="approved",
-    ))
+    decision = asyncio.create_task(
+        service.decide_tool_call_for_user(
+            session.session_id,
+            call.tool_call_id,
+            "user-1",
+            arguments_digest=call.arguments_digest,
+            decision="approved",
+        )
+    )
     try:
         async with asyncio.timeout(5):
             while True:
@@ -954,8 +1093,12 @@ async def test_approved_continuation_captures_text_without_repeating_the_write()
                 await asyncio.sleep(0.01)
             assert snapshot.response_id != original_snapshot.response_id
             assert len(capability.executed) == 1
-            updates = await service.stream_updates_for_user(session.session_id, "user-1", response_id=snapshot.response_id)
-            assert (await anext(updates))["trajectory"]["response"].content == model.first
+            updates = await service.stream_updates_for_user(
+                session.session_id, "user-1", response_id=snapshot.response_id
+            )
+            assert (await anext(updates))["trajectory"][
+                "response"
+            ].content == model.first
             await updates.aclose()
             model.continue_response.set()
             model.finish_response.set()
@@ -969,30 +1112,42 @@ async def test_approved_continuation_captures_text_without_repeating_the_write()
         await decision
 
 
-async def test_approved_write_response_failure_preserves_saved_result_but_fails_turn() -> None:
-    repository = _Repository()
+async def test_approved_write_response_failure_preserves_saved_result_but_fails_turn(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(
-        _Model(ModelTurn(tool_calls=(ModelToolCall(
-            name=capability.spec.name,
-            arguments={"question": "Record the reconstructed tensile experiment."},
-        ),))),
+        _Model(
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name=capability.spec.name,
+                        arguments={
+                            "question": "Record the reconstructed tensile experiment."
+                        },
+                    ),
+                )
+            )
+        ),
         repository,
         capability,
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    proposed = await service.post_message_for_user(
+    proposed = await service.send_message(
         session.session_id,
         "user-1",
         message="保存已重建的拉伸实验。",
     )
     pending = proposed["pending_approval"]
     assert pending is not None
-    service.runner.model = _Model(ModelResponseError(
-        "Model request exceeds its context window.",
-        reason="context_window_exceeded",
-        retryable=False,
-    ))
+    service.runner.model = _Model(
+        ModelResponseError(
+            "Model request exceeds its context window.",
+            reason="context_window_exceeded",
+            retryable=False,
+        )
+    )
 
     failed = await service.decide_tool_call_for_user(
         session.session_id,
@@ -1010,7 +1165,9 @@ async def test_approved_write_response_failure_preserves_saved_result_but_fails_
         "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
     )
     assert len(capability.executed) == 1
-    assert repository.calls[pending.tool_call_id].status is ToolCallStatus.SUCCEEDED
+    assert (
+        await repository.read_tool_call(pending.tool_call_id)
+    ).status is ToolCallStatus.SUCCEEDED
     snapshot = await repository.read_response_snapshot(session.session_id)
     assert snapshot is not None
     assert snapshot.status == "failed"
@@ -1018,8 +1175,14 @@ async def test_approved_write_response_failure_preserves_saved_result_but_fails_
     assert snapshot.warnings == failed["warnings"]
 
 
-async def test_chat_session_service_checkpoints_every_agent_step() -> None:
-    repository = _Repository()
+async def test_chat_session_service_checkpoints_every_agent_step(
+    *, postgres_session_factory, monkeypatch
+) -> None:
+    repository = ChatRepository()
+    from unittest.mock import AsyncMock
+
+    save_trajectory = AsyncMock(wraps=repository.save_trajectory)
+    monkeypatch.setattr(repository, "save_trajectory", save_trajectory)
     capability = _WriteCapability()
     capability.spec = ToolSpec(
         name="get_collection_context",
@@ -1030,10 +1193,12 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
     service = _service(
         _Model(
             ModelTurn(
-                tool_calls=(ModelToolCall(
-                    name="get_collection_context",
-                    arguments={"question": "What is in this collection?"},
-                ),)
+                tool_calls=(
+                    ModelToolCall(
+                        name="get_collection_context",
+                        arguments={"question": "What is in this collection?"},
+                    ),
+                )
             ),
             ModelTurn(content="The collection contains relevant papers."),
         ),
@@ -1042,31 +1207,62 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    result = await service.post_message_for_user(
+    result = await service.send_message(
         session.session_id,
         "user-1",
         message="What is in this collection?",
     )
 
     assert result["status"] == "completed"
-    assert repository.trajectory_snapshots == [
+    assert [
+        (
+            tuple(item.role.value for item in call.kwargs["messages"]),
+            tuple(item.status.value for item in call.kwargs["tool_calls"]),
+            tuple(item.status.value for item in call.kwargs["tool_results"]),
+        )
+        for call in save_trajectory.call_args_list
+    ] == [
         (("user",), (), ()),
         (("user", "assistant"), ("requested",), ()),
         (("user", "assistant"), ("running",), ()),
         (("user", "assistant", "tool"), ("succeeded",), ("succeeded",)),
-        (("user", "assistant", "tool", "assistant"), ("succeeded", "requested"), ("succeeded",)),
-        (("user", "assistant", "tool", "assistant"), ("succeeded", "running"), ("succeeded",)),
-        (("user", "assistant", "tool", "assistant", "tool"), ("succeeded", "succeeded"), ("succeeded", "succeeded")),
-        (("user", "assistant", "tool", "assistant", "tool", "assistant"), ("succeeded", "succeeded"), ("succeeded", "succeeded")),
+        (
+            ("user", "assistant", "tool", "assistant"),
+            ("succeeded", "requested"),
+            ("succeeded",),
+        ),
+        (
+            ("user", "assistant", "tool", "assistant"),
+            ("succeeded", "running"),
+            ("succeeded",),
+        ),
+        (
+            ("user", "assistant", "tool", "assistant", "tool"),
+            ("succeeded", "succeeded"),
+            ("succeeded", "succeeded"),
+        ),
+        (
+            ("user", "assistant", "tool", "assistant", "tool", "assistant"),
+            ("succeeded", "succeeded"),
+            ("succeeded", "succeeded"),
+        ),
     ]
 
 
 @pytest.mark.parametrize("ending", ["timeout", "budget"])
-async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending: str) -> None:
-    repository = _Repository()
-    sources = _SourceArtifactRepository()
+async def test_source_comparison_preserves_inspected_paper_and_can_resume(
+    ending: str, monkeypatch, *, postgres_session_factory
+) -> None:
+    from application.chat import agent_runner as agent_runner_module
+
+    now = [0.0]
+    monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
+    repository = ChatRepository()
+    sources = SourceArtifactRepository()
     collection = _CollectionService()
-    read = ReadSourceCapability(collection_service=collection, source_artifact_repository=sources)
+    document_sources.collection_service = collection
+    document_sources.SourceArtifactRepo = sources
+    read = ReadSourceCapability()
     cancelled = asyncio.Event()
 
     class Model(_Model):
@@ -1074,31 +1270,47 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
 
         async def respond(self, **kwargs):
             self.calls += 1
-            if ending == "timeout" and self.calls == 3:
+            if ending == "timeout" and self.calls == 2:
                 try:
                     await asyncio.Event().wait()
                 finally:
+                    now[0] = 0.5
                     cancelled.set()
             return await super().respond(**kwargs)
 
     model = Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={
-            "document_id": "doc-1", "source_kind": "text_window", "source_ref": "results",
-        }),)),
-        ModelTurn(content="Paper A reports 12 mS/cm under EIS. Paper B remains unread; comparison is unresolved.",
-                  usage=ModelUsage(80, 20, 100)),
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name="read_source",
+                    arguments={
+                        "document_id": "doc-1",
+                        "source_kind": "text_window",
+                        "source_ref": "results",
+                    },
+                ),
+            )
+        ),
+        ModelTurn(
+            content="Paper A reports 12 mS/cm under EIS. Paper B remains unread; comparison is unresolved.",
+            usage=ModelUsage(80, 20, 100),
+        ),
     )
     runner = ResearchAgentRunner(
-        model=model, capabilities=CapabilityRegistry((read,)),
-        # Leave enough setup time to reach the deliberately hanging third call;
-        # the whole-turn budget still cancels it promptly.
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+        # Charge the controlled deadline to the hanging model call, independently
+        # of database checkpoint latency during setup.
         limits=AgentRunLimits(max_elapsed_seconds=0.5, max_model_tokens=100),
     )
-    service = ChatSessionService(repository=repository, collection_service=collection,
-                                 source_artifact_repository=sources, runner=runner)
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = collection
+    chat_session_service.SourceArtifactRepo = sources
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    stream = await service.stream_message_for_user(
-        session.session_id, "user-1",
+    stream = await service.send_message_stream(
+        session.session_id,
+        "user-1",
         message="Read the exact Source in paper A, then paper B, to compare their EIS conductivity measurements.",
     )
     events = [event async for event in stream]
@@ -1115,36 +1327,54 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
         assert result["completion_reason"] == "resource_budget"
         assert result["warnings"]
         assert "Paper B remains unread" in result["messages"][-1].content
-    assert model.calls == 3  # Discovery, exact Source read, then answer or timeout.
+    assert model.calls == 2  # The initially available Source read, then answer or timeout.
     persisted = await service.list_messages_for_user(session.session_id, "user-1")
-    source_results = [message.tool_result for message in persisted
-                      if message.tool_result and message.tool_result.resource_refs]
+    source_results = [
+        message.tool_result
+        for message in persisted
+        if message.tool_result and message.tool_result.resource_refs
+    ]
     assert len(source_results) == 1
     assert source_results[0].data["complete_source"] is True
-    assert source_results[0].data["content"] == sources.document.text
+    assert (
+        source_results[0].data["content"]
+        == (await sources.read_document("col-1", "doc-1")).text
+    )
     assert source_results[0].resource_refs[0].resource_type == "source"
 
     model.turns.clear()
-    model.turns.append(ModelTurn(content="Paper B has not yet been inspected. Its Source must be read next."))
-    resumed = await service.post_message_for_user(
-        session.session_id, "user-1", message="Without tools, summarize what is still unread.",
+    model.turns.append(
+        ModelTurn(
+            content="Paper B has not yet been inspected. Its Source must be read next."
+        )
+    )
+    resumed = await service.send_message(
+        session.session_id,
+        "user-1",
+        message="Without tools, summarize what is still unread.",
     )
     assert resumed["status"] == "completed"
     assert "Paper B" in resumed["messages"][-1].content
-    assert len(repository.results) == 2
+    assert len(await read_tool_results(repository, session.session_id)) == 1
 
 
-async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
-    repository = _Repository()
+async def test_chat_session_service_approves_exact_write_and_resumes(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(
         _Model(
             ModelTurn(
                 content="我准备保存候选目标。",
-                tool_calls=(ModelToolCall(
-                    name="create_objective_candidate",
-                    arguments={"question": "How does energy input affect ductility?"},
-                ),),
+                tool_calls=(
+                    ModelToolCall(
+                        name="create_objective_candidate",
+                        arguments={
+                            "question": "How does energy input affect ductility?"
+                        },
+                    ),
+                ),
             ),
             ModelTurn(content="候选目标已创建，尚未启动分析。"),
         ),
@@ -1152,7 +1382,7 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
         capability,
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    pending_turn = await service.post_message_for_user(
+    pending_turn = await service.send_message(
         session.session_id,
         "user-1",
         message="保存这个目标",
@@ -1166,13 +1396,13 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
     )
     assert capability.executed == []
     with pytest.raises(ChatApprovalPendingError) as blocked:
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="start another branch",
         )
     assert blocked.value.tool_call_id == pending.tool_call_id
-    with pytest.raises(ValueError, match="arguments digest"):
+    with pytest.raises(ResourceConflictException, match="arguments digest"):
         await service.decide_tool_call_for_user(
             session.session_id,
             pending.tool_call_id,
@@ -1193,7 +1423,9 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
     assert capability.executed == [
         {"question": "How does energy input affect ductility?"}
     ]
-    assert repository.calls[pending.tool_call_id].status is ToolCallStatus.SUCCEEDED
+    assert (
+        await repository.read_tool_call(pending.tool_call_id)
+    ).status is ToolCallStatus.SUCCEEDED
     assert (
         await service.get_pending_approval_for_user(session.session_id, "user-1")
         is None
@@ -1213,16 +1445,22 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
     ]
 
 
-async def test_chat_session_service_rejection_never_executes_write() -> None:
-    repository = _Repository()
+async def test_chat_session_service_rejection_never_executes_write(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(
         _Model(
             ModelTurn(
-                tool_calls=(ModelToolCall(
-                    name="create_objective_candidate",
-                    arguments={"question": "How does energy input affect ductility?"},
-                ),)
+                tool_calls=(
+                    ModelToolCall(
+                        name="create_objective_candidate",
+                        arguments={
+                            "question": "How does energy input affect ductility?"
+                        },
+                    ),
+                )
             ),
             ModelTurn(content="已记录你的拒绝，未创建目标。"),
         ),
@@ -1230,11 +1468,13 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
         capability,
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    pending = (await service.post_message_for_user(
-        session.session_id,
-        "user-1",
-        message="保存这个目标",
-    ))["pending_approval"]
+    pending = (
+        await service.send_message(
+            session.session_id,
+            "user-1",
+            message="保存这个目标",
+        )
+    )["pending_approval"]
 
     result = await service.decide_tool_call_for_user(
         session.session_id,
@@ -1247,7 +1487,14 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
     assert result["status"] == "completed"
     assert result["messages"][-1].content == "已记录你的拒绝，未创建目标。"
     assert capability.executed == []
-    assert repository.results[pending.tool_call_id].error_code == "user_rejected"
+    assert (
+        next(
+            result
+            for result in await read_tool_results(repository, session.session_id)
+            if result.tool_call_id == pending.tool_call_id
+        ).error_code
+        == "user_rejected"
+    )
     snapshot = await repository.read_response_snapshot(session.session_id)
     assert snapshot is not None
     assert snapshot.status == "completed"
@@ -1256,3 +1503,181 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
         message.role == "tool" and message.tool_call_id == pending.tool_call_id
         for message in messages
     )
+
+
+async def test_rename_survives_continuation_and_rejects_non_owner(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
+    service = _service(_Model(ModelTurn(content="Evidence retained.")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    saved = await service.set_session_title_for_user(
+        session.session_id, "user-1", title="  IN718 comparison  "
+    )
+    assert saved.title == "IN718 comparison"
+    assert saved.updated_at == session.updated_at
+    with pytest.raises(ChatSessionNotFoundError):
+        await service.set_session_title_for_user(
+            session.session_id, "user-2", title="Other title"
+        )
+    for invalid in (" ", "x" * 161, "line\nbreak", "nul\x00title"):
+        with pytest.raises(RequestInvalidException):
+            await service.set_session_title_for_user(
+                session.session_id, "user-1", title=invalid
+            )
+    await service.send_message(
+        session.session_id, "user-1", message="Compare the evidence"
+    )
+    assert (
+        await service.get_session_for_user(session.session_id, "user-1")
+    ).title == "IN718 comparison"
+    assert (
+        await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
+    )[0].title == "IN718 comparison"
+    assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
+
+
+@pytest.mark.parametrize("decision", ["approved", "rejected"])
+async def test_approval_continuation_recovers_context_without_repeating_write(
+    decision, *, postgres_session_factory
+):
+    from dataclasses import replace
+
+    from application.chat import ChatContextBuilder
+    from tests.unit.application.test_chat_context_builder import _tool_pair
+
+    class RecoveringModel(_Model):
+        def __init__(self):
+            super().__init__(
+                ModelTurn(
+                    tool_calls=(
+                        ModelToolCall(
+                            name="create_objective_candidate",
+                            arguments={
+                                "question": "Compare matched elongation conditions."
+                            },
+                        ),
+                    )
+                )
+            )
+            self.continuing = False
+            self.requests = []
+
+        async def respond(self, *, context, **kwargs):
+            if context.compacting:
+                return ModelTurn(
+                    content='{"scope":"Match material state and test orientation.","checks":[],"next_actions":[]}'
+                )
+            if not self.continuing:
+                return await super().respond(context=context, **kwargs)
+            self.requests.append(context)
+            if len(self.requests) == 1:
+                raise ModelResponseError(
+                    "context rejected",
+                    reason="context_window_exceeded",
+                    retryable=False,
+                )
+            return ModelTurn(
+                content="The reviewed decision is recorded; comparable measurements remain uncertain."
+            )
+
+    repository = ChatRepository()
+    capability = _WriteCapability()
+    model = RecoveringModel()
+    service = _service(model, repository, capability)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    # Persist the preceding investigation before the approval request.
+    history = tuple(
+        replace(message, session_id=session.session_id)
+        for i in range(10)
+        for message in _tool_pair(
+            call_id=f"prior-{i}",
+            payload={
+                "source_ref": f"results-{i}",
+                "content": "Reported measurements need matched specimen orientation. "
+                * 900,
+            },
+        )
+    )
+    calls = tuple(
+        ChatToolCall.requested(
+            tool_call_id=request.tool_call_id,
+            session_id=session.session_id,
+            assistant_message_id=message.message_id,
+            name=request.name,
+            arguments=request.arguments,
+            risk=ToolRisk.READ,
+            position=request.position,
+        )
+        .start(message.created_at)
+        .succeed(message.created_at)
+        for message in history
+        for request in message.tool_calls
+    )
+    await repository.save_trajectory(
+        chat_session=session,
+        messages=history,
+        tool_calls=calls,
+        tool_results=tuple(
+            message.tool_result for message in history if message.tool_result
+        ),
+    )
+    proposed = await service.send_message(
+        session.session_id, "user-1", message="Save the reviewed objective."
+    )
+    pending = proposed["pending_approval"]
+    model.continuing = True
+    response = await service.decide_tool_call_for_user(
+        session.session_id,
+        pending.tool_call_id,
+        "user-1",
+        arguments_digest=pending.arguments_digest,
+        decision=decision,
+    )
+    assert response["status"] == "completed"
+    assert len(capability.executed) == (1 if decision == "approved" else 0)
+    assert len(model.requests) == 2
+    sizes = [
+        ChatContextBuilder.estimate_tokens(context.provider_messages("system"))
+        for context in model.requests
+    ]
+    assert sizes[1] < sizes[0]
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot.progress["context_recovery_attempts"] == 1
+    assert snapshot.progress["retry_count"] == 1
+    saved = await repository.read_messages(session.session_id)
+    assert all(message in saved for message in history)
+
+
+async def test_canonical_objective_table_keeps_rendered_content_and_grounding() -> None:
+    table = SourceTable(
+        table_id="table-1",
+        document_id="paper-1",
+        table_order=1,
+        caption_text="Tensile results",
+        caption_block_id=None,
+        page=5,
+        heading_path="Results",
+        column_headers=("Sample", "Strength (MPa)"),
+        table_matrix=(("Sample", "Strength (MPa)"), ("A", "560")),
+    )
+    document = SourceDocument(
+        document_id="paper-1",
+        document_order=1,
+        title="Tensile study",
+        text="Results",
+        tables=(table,),
+    )
+
+    canonical = resolve_canonical_objective_source(
+        document, source_kind="table", source_ref="table-1"
+    )
+
+    assert "| A | 560 |" in canonical.content
+    assert canonical.page == 5
+    assert canonical.heading_path == "Results"
+    assert canonical.grounding_source["source_kind"] == "table"
+    assert canonical.grounding_source["table_matrix"] == [
+        ["Sample", "Strength (MPa)"],
+        ["A", "560"],
+    ]

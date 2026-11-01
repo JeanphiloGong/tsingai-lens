@@ -1,38 +1,91 @@
 from __future__ import annotations
 
+from tests.support.research_jobs import claim_analysis_fixture
+
 from datetime import datetime, timezone
 from hashlib import sha256
+from types import ModuleType
 from typing import Any
 
-from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.objective_analysis_service import (
-    ObjectiveExperimentAnalysisService,
+from application.core.document_profiles import service as document_profile_module
+from application.core.objectives import (
+    objective_analysis_service as experiment_analysis_service,
 )
-from application.core.objectives.objective_input_service import ObjectiveInputService
-from application.core.objectives.paper_research_map_service import (
-    PaperResearchMapService,
+from application.core.objectives import (
+    objective_input_service as objective_input_module,
 )
-from application.repositories.collection_repository import StoredDocument
-from application.repositories.objective_repository import ObjectiveAnalysis
+from application.core.objectives import paper_research_map_service
 from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
-from domain.source import Document
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    ResearchObjective,
+    build_research_objective_id,
+    normalize_objective_terms,
 )
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from domain.source import Document
+from repositories.collection_repository import StoredDocument
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-test",
-            "question": "How does process condition affect the target outcome?",
-            "variables": ["process condition"],
-            "outcomes": ["target outcome"],
-            **payload,
-        }
+    return ResearchObjective(
+        collection_id=payload.get("collection_id", "collection-test") or "",
+        objective_id=payload.get("objective_id", None)
+        or build_research_objective_id(
+            question=payload.get(
+                "question", "How does process condition affect the target outcome?"
+            )
+            or "",
+            material_scope=normalize_objective_terms(payload.get("material_scope", ())),
+            variables=normalize_objective_terms(
+                payload.get("variables", ["process condition"])
+            ),
+            outcomes=normalize_objective_terms(
+                payload.get("outcomes", ["target outcome"])
+            ),
+            mechanisms=normalize_objective_terms(payload.get("mechanisms", ())),
+            constraints=normalize_objective_terms(payload.get("constraints", ())),
+            requested_comparator=payload.get("requested_comparator", None),
+            parent_objective_id=payload.get("parent_objective_id", None),
+            parent_analysis_version=payload.get("parent_analysis_version", None),
+        ),
+        question=payload.get(
+            "question", "How does process condition affect the target outcome?"
+        )
+        or "",
+        material_scope=normalize_objective_terms(payload.get("material_scope", ())),
+        variables=normalize_objective_terms(
+            payload.get("variables", ["process condition"])
+        ),
+        outcomes=normalize_objective_terms(payload.get("outcomes", ["target outcome"])),
+        mechanisms=normalize_objective_terms(payload.get("mechanisms", ())),
+        constraints=normalize_objective_terms(payload.get("constraints", ())),
+        requested_comparator=payload.get("requested_comparator", None),
+        seed_document_ids=normalize_objective_terms(
+            payload.get("seed_document_ids", ())
+        ),
+        excluded_document_ids=normalize_objective_terms(
+            payload.get("excluded_document_ids", ())
+        ),
+        confidence=payload.get("confidence", 0.0),
+        reason=payload.get("reason", None),
+        source_relationship_ids=normalize_objective_terms(
+            payload.get("source_relationship_ids", ())
+        ),
+        parent_objective_id=payload.get("parent_objective_id", None),
+        parent_analysis_version=payload.get("parent_analysis_version", None),
+        derivation_basis=tuple(payload.get("derivation_basis", None) or ()),
+        rank=payload.get("rank", None),
+        confirmation_status=payload.get("confirmation_status", None),
+        active_analysis_version=payload.get("active_analysis_version", None),
+        published_analysis_version=payload.get("published_analysis_version", None),
+        origin=payload.get("origin", None),
+        created_by_user_id=payload.get("created_by_user_id", None),
+        created_by_tool_call_id=payload.get("created_by_tool_call_id", None),
     )
 
 
@@ -40,65 +93,64 @@ def build_research_objective_service(
     *,
     collection_service,
     **kwargs,
-) -> ObjectiveExperimentAnalysisService:
-    objective_judgments = kwargs.pop("response_client", None)
-    if objective_judgments is not None:
-        kwargs.setdefault("objective_source_screener", objective_judgments)
+) -> ModuleType:
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
-        source_repository = getattr(
-            kwargs.get("document_profile_service"),
-            "source_artifact_repository",
-            None,
-        ) or MemorySourceArtifactRepository()
+        source_repository = (
+            getattr(
+                kwargs.get("document_profile_service"),
+                "source_artifact_repository",
+                None,
+            )
+            or SourceArtifactRepository()
+        )
     document_profile_repository = kwargs.pop(
         "document_profile_repository",
-        MemoryDocumentProfileRepository(),
+        DocumentProfileRepository(),
     )
     paper_map_repository = kwargs.pop(
         "paper_map_repository",
-        MemoryPaperMapRepository(),
+        PaperMapRepository(),
     )
     objective_repository = kwargs.pop(
         "objective_repository",
-        MemoryObjectiveRepository(),
+        ObjectiveRepository(),
     )
-    document_profile_service = kwargs.pop("document_profile_service", None)
-    if document_profile_service is None:
-        document_profile_service = DocumentProfileService(
-            collection_service=collection_service,
-            source_artifact_repository=source_repository,
-            document_profile_repository=document_profile_repository,
-        )
+    document_profile_service = kwargs.pop(
+        "document_profile_service", document_profile_module
+    )
+    document_profile_service.collection_service = collection_service
+    document_profile_service.SourceArtifactRepo = source_repository
+    document_profile_service.DocumentProfileRepo = document_profile_repository
     objective_input_service = kwargs.pop(
         "objective_input_service",
-        ObjectiveInputService(
-            collection_service=collection_service,
-            source_artifact_repository=source_repository,
-            paper_map_repository=paper_map_repository,
-            document_profile_service=document_profile_service,
-            paper_map_service=kwargs.pop("paper_map_service", PaperResearchMapService()),
-            response_client=objective_judgments,
-        ),
+        objective_input_module,
     )
-    return ObjectiveExperimentAnalysisService(
-        collection_service=collection_service,
-        paper_map_repository=paper_map_repository,
-        objective_repository=objective_repository,
-        objective_input_service=objective_input_service,
-        **kwargs,
+    objective_input_service.collection_service = collection_service
+    objective_input_service.SourceArtifactRepo = source_repository
+    objective_input_service.PaperMapRepo = paper_map_repository
+    objective_input_service.document_profile_service = document_profile_service
+    objective_input_service.paper_research_map_service = kwargs.pop(
+        "paper_map_service", paper_research_map_service
     )
+    experiment_analysis_service.collection_service = collection_service
+    experiment_analysis_service.PaperMapRepo = paper_map_repository
+    experiment_analysis_service.ObjectiveRepo = objective_repository
+    experiment_analysis_service.objective_input_service = objective_input_service
+    if kwargs:
+        raise TypeError(f"Unexpected test service options: {', '.join(kwargs)}")
+    return experiment_analysis_service
 
 
 async def seed_document_profiles(
-    service: ObjectiveExperimentAnalysisService,
+    service: ModuleType,
     collection_id: str,
 ) -> None:
-    documents = await service.objective_input_service.source_artifact_repository.read_collection_documents(
+    documents = await service.objective_input_service.SourceArtifactRepo.read_collection_documents(
         collection_id
     )
-    current_collection = await service.collection_service.repository.read_collection(
-        collection_id
+    current_collection = (
+        await service.collection_service.CollectionRepo.read_collection(collection_id)
     )
     assert current_collection is not None
     existing_document_ids = {
@@ -133,7 +185,7 @@ async def seed_document_profiles(
         if document.document_id not in existing_document_ids
     )
     if new_documents:
-        await service.collection_service.repository.add_documents(
+        await service.collection_service.CollectionRepo.add_documents(
             collection_id,
             new_documents,
             updated_at=now,
@@ -142,25 +194,22 @@ async def seed_document_profiles(
     for document in documents:
         title = document.title
         profiles.append(
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": document.document_id,
-                    "title": title,
-                    "doc_type": "review" if "Review" in title else "experimental",
-                    "profile_warnings": [],
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                document_id=document.document_id,
+                title=title,
+                doc_type="review" if "Review" in title else "experimental",
+                profile_warnings=(),
+                confidence=0.9,
             )
         )
     for profile in profiles:
-        await service.objective_input_service.document_profile_service.document_profile_repository.replace(
-            collection_id,
-            profile
+        await service.objective_input_service.document_profile_service.DocumentProfileRepo.replace(
+            collection_id, profile
         )
 
 
 async def queue_running_analysis(
-    service: ObjectiveExperimentAnalysisService,
+    service: ModuleType,
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:
@@ -172,9 +221,11 @@ async def queue_running_analysis(
             objective_id,
         )
         assert objective is not None
-        document_inputs = await service.objective_input_service.resolve_prepared_document_inputs(
-            collection_id,
-            tuple(objective.seed_document_ids),
+        document_inputs = (
+            await service.objective_input_service.resolve_prepared_document_inputs(
+                collection_id,
+                tuple(objective.seed_document_ids),
+            )
         )
     _, queued = await service.objective_repository.queue_analysis(
         collection_id,
@@ -190,7 +241,8 @@ async def queue_running_analysis(
         model_name="test-model",
         prompt_versions={},
     )
-    claimed = await service.objective_repository.claim_analysis(
+    claimed = await claim_analysis_fixture(
+        service.objective_repository,
         collection_id,
         objective_id,
         queued.analysis_version,

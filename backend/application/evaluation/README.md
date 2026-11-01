@@ -12,11 +12,17 @@ prepare Source documents, discover Objectives, or run Objective analyses.
 - `core_evaluation_service.py`
   Scores predictions against gold and records metrics and failures.
 - `finding_feedback_service.py`
-  Records feedback and curation for one published Finding version and exports
-  Objective or collection Finding datasets.
+  Records feedback and curation for one published Finding version.
+- `finding_snapshot_service.py`
+  Reads published Finding, Evidence and review facts, computes the canonical
+  `finding.v2` / `evidence.v2` fingerprints, and checks only the Findings
+  referenced by an experiment plan. This does not construct training messages.
+- `finding_dataset_service.py`
+  Exports Objective or collection datasets, training messages and gold drafts
+  from those same snapshots.
 - `finding_review_import_service.py`
-  Validates human accept, reject, correct, or skip decisions and writes them
-  through `FindingFeedbackService`.
+  Parses external corrected Finding JSON, validates human accept, reject,
+  correct or skip decisions, and writes through `finding_feedback_service`.
 
 ## Identity Contract
 

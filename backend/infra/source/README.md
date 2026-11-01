@@ -25,7 +25,7 @@ A parser failure is technical failure for that Document. It does not claim that
 the paper lacks scientific evidence, and it does not block preparation or
 research over other ready Documents.
 
-`DocumentPreparationService` owns user-visible preparation progress through
+`document_preparation_service.execute_document_preparation_job()` owns user-visible preparation progress through
 `PipelineRunService`. The Source parser returns the bundle directly and raises
 parsing errors to that service. It has no workflow registry, factory, or generic
 pipeline runner. Its scratch output includes the seven artifact tables and
@@ -34,7 +34,7 @@ parse, and `stats.json` records document count and elapsed time. These files do
 not control preparation state or retries.
 
 Preparation reuses persisted Source and Profile artifacts through their
-fingerprints in `DocumentPreparationService`. Parsing has no cache.
+fingerprints in `document_preparation_service.execute_document_preparation_job()`. Parsing has no cache.
 
 ## Source Artifacts
 
@@ -47,6 +47,8 @@ fingerprints in `DocumentPreparationService`. Parsing has no cache.
 - `table_cells`: cell coordinates, header paths, units, spans, and stable IDs.
 
 Complete normalized Markdown is preferred for model and reader context. An
+explicit `header_row_count: 0` preserves every matrix row as data under the
+parser's column headers; only a missing count defaults to one header row. An
 oversized table may be divided only into continuous row slices with its caption
 and complete flattened header repeated. This analysis-local repair never
 overwrites the current Source table.

@@ -1,15 +1,9 @@
-"""Authentication application services."""
+"""Password authentication and server-side session operations."""
 
 from application.auth.session_service import (
     AuthError,
-    AuthSessionService,
     InvalidCredentialsError,
     SessionNotFoundError,
 )
 
-__all__ = [
-    "AuthError",
-    "AuthSessionService",
-    "InvalidCredentialsError",
-    "SessionNotFoundError",
-]
+__all__ = ["AuthError", "InvalidCredentialsError", "SessionNotFoundError"]

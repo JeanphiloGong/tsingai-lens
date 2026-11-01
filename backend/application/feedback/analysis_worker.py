@@ -4,95 +4,86 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import Any
 
-from application.feedback.analysis_handler import AnalysisInputError, FeedbackAnalysisHandler
-from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
+from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo, LeaseLostError
+from repositories.feedback_case_repository import FeedbackCaseRepo, FeedbackCaseWriteConflict
+
+from application.feedback.errors import AnalysisInputError
+from application.feedback.analysis_handler import FeedbackAnalysisEngine, analyze_feedback_job
 
 
 logger = logging.getLogger(__name__)
 
 
-class FeedbackAnalysisWorker:
-    def __init__(
-        self,
-        *,
-        job_repository: Any,
-        case_repository: Any,
-        handler: FeedbackAnalysisHandler,
-    ) -> None:
-        self.job_repository = job_repository
-        self.case_repository = case_repository
-        self.handler = handler
-
-    async def run_once(self) -> Any | None:
-        now = datetime.now(timezone.utc).isoformat()
-        recover = getattr(self.job_repository, "recover_expired_jobs", None)
-        if callable(recover):
-            await recover(now=now)
-        job = await self.job_repository.claim_next_feedback_analysis_job(now=now)
-        if job is None:
-            return None
-        try:
-            result, context_snapshot, source_signal_ids = await run_with_lease_heartbeat(
-                self.job_repository,
-                job,
-                lambda: self.handler.handle(job),
-            )
-        except LeaseLostError:
-            read_job = getattr(self.job_repository, "read_job", None)
-            return await read_job(job.job_id) if callable(read_job) else job
-        except AnalysisInputError as exc:
-            if str(exc) in {"feedback_withdrawn", "feedback_version_superseded"}:
-                return await self.job_repository.mark_cancelled(
-                    job_id=job.job_id,
-                    error_code=str(exc),
-                    finished_at=datetime.now(timezone.utc).isoformat(),
-                    worker_id=job.worker_id,
-                    lease_version=job.lease_version,
-                )
-            logger.warning("feedback analysis input rejected job_id=%s code=%s", job.job_id, exc)
-            return await self.job_repository.mark_failed(
+async def execute_feedback_analysis_job(
+    job: AnalysisJob, *, engine: FeedbackAnalysisEngine, model_name: str
+) -> AnalysisJob:
+    try:
+        result, context_snapshot, source_signal_ids = await analyze_feedback_job(
+            job,
+            engine=engine,
+            model_name=model_name,
+        )
+    except AnalysisInputError as exc:
+        if str(exc) in {"feedback_withdrawn", "feedback_version_superseded"}:
+            return await AnalysisJobRepo.mark_cancelled(
                 job_id=job.job_id,
                 error_code=str(exc),
                 finished_at=datetime.now(timezone.utc).isoformat(),
                 worker_id=job.worker_id,
                 lease_version=job.lease_version,
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("feedback analysis worker failed job_id=%s", job.job_id)
-            return await self.job_repository.mark_failed(
-                job_id=job.job_id,
-                error_code="feedback_analysis_failed",
-                finished_at=datetime.now(timezone.utc).isoformat(),
-                worker_id=job.worker_id,
-                lease_version=job.lease_version,
-            )
-
-        try:
-            # The repository commits the result, case, and three sample queues together.
-            await self.case_repository.upsert_case_from_analysis(
-                result,
-                context_snapshot=context_snapshot,
-                source_signal_ids=source_signal_ids,
-                now=datetime.now(timezone.utc).isoformat(),
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("feedback analysis persistence failed job_id=%s", job.job_id)
-            return await self.job_repository.mark_failed(
-                job_id=job.job_id,
-                error_code="feedback_analysis_persistence_failed",
-                finished_at=datetime.now(timezone.utc).isoformat(),
-                worker_id=job.worker_id,
-                lease_version=job.lease_version,
-            )
-        return await self.job_repository.mark_succeeded(
+        logger.warning(
+            "feedback analysis input rejected job_id=%s code=%s", job.job_id, exc
+        )
+        return await AnalysisJobRepo.mark_failed(
             job_id=job.job_id,
-            result_id=result.result_id,
+            error_code=str(exc),
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
+        )
+    except LeaseLostError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception("feedback analysis worker failed job_id=%s", job.job_id)
+        return await AnalysisJobRepo.mark_failed(
+            job_id=job.job_id,
+            error_code="feedback_analysis_failed",
             finished_at=datetime.now(timezone.utc).isoformat(),
             worker_id=job.worker_id,
             lease_version=job.lease_version,
         )
 
+    try:
+        # The repository commits the result, case, and three sample queues together.
+        await FeedbackCaseRepo.upsert_case_from_analysis(
+            result,
+            job=job,
+            context_snapshot=context_snapshot,
+            source_signal_ids=source_signal_ids,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+    except FeedbackCaseWriteConflict as exc:
+        return await AnalysisJobRepo.mark_cancelled(
+            job_id=job.job_id,
+            error_code=exc.reason,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
+        )
+    except LeaseLostError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.exception("feedback analysis persistence failed job_id=%s", job.job_id)
+        return await AnalysisJobRepo.mark_failed(
+            job_id=job.job_id,
+            error_code="feedback_analysis_persistence_failed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
+        )
+    return await AnalysisJobRepo.read_job(job.job_id)
 
-__all__ = ["FeedbackAnalysisWorker"]
+
+__all__ = ["execute_feedback_analysis_job"]

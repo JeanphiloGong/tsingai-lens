@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchMap,
+    PaperResearchSignal,
+    PaperResearchSourceRef,
+    PaperSourceUnitCoverage,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
+    build_paper_research_scope,
+    build_paper_research_relationship,
+    build_paper_research_signal,
+)
+
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
 import pytest
-
-from application.repositories.objective_repository import (
-    OBJECTIVE_ANALYSIS_STATUSES,
-    ObjectiveAnalysis,
-)
 from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
@@ -26,14 +33,36 @@ from domain.core import (
     ReviewSynthesisMap,
     build_research_objective_id,
     is_question_shaped_objective,
-    normalize_objective_confidence,
+    normalize_objective_terms,
+)
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    InspectedObjectiveSourceRef,
+    ObjectiveEvidence,
+    PaperContribution,
+    PreparedDocumentInput,
+    ResearchObjective,
+)
+
+
+from domain.core.research_objective import _scoped_id as objective_scoped_id
+from domain.core.research_objective import (
+    build_research_objective_id,
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
+    ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
+)
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
+from repositories.objective_repository import (
+    OBJECTIVE_ANALYSIS_STATUSES,
+    ObjectiveAnalysis,
+    ObjectiveRepository,
 )
 
 
@@ -41,40 +70,45 @@ from domain.core.scientific_fact import (
     "variable_role",
     ["varied", "compared", "modeled", "fixed", "context", "uncertain"],
 )
-def test_paper_research_variable_signal_round_trips_scientific_role(
+def test_paper_research_variable_signal_retains_scientific_role(
     variable_role: str,
 ) -> None:
-    signal = PaperResearchSignal.from_mapping(
-        {
-            "document_id": "paper-1",
-            "signal_type": "variable",
-            "label": "processing speed",
-            "variable_role": variable_role,
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "source_refs": [
-                {"source_kind": "block", "source_ref": "methods-1"}
-            ],
-        }
+    signal = build_paper_research_signal(
+        document_id="paper-1",
+        signal_type="variable",
+        label="processing speed",
+        variable_role=variable_role,
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        source_refs=(
+            PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+        ),
+        confidence=0.0,
+        reason=None,
     )
 
     assert signal.variable_role == variable_role
-    assert PaperResearchSignal.from_mapping(signal.to_record()) == signal
 
 
 def test_paper_research_outcome_signal_has_no_factor_role() -> None:
-    signal = PaperResearchSignal.from_mapping(
-        {
-            "document_id": "paper-1",
-            "signal_type": "outcome",
-            "label": "relative density",
-            "variable_role": "not_applicable",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "source_refs": [
-                {"source_kind": "block", "source_ref": "results-1"}
-            ],
-        }
+    signal = build_paper_research_signal(
+        document_id="paper-1",
+        signal_type="outcome",
+        label="relative density",
+        variable_role="not_applicable",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        source_refs=(
+            PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+        ),
+        confidence=0.0,
+        reason=None,
     )
 
     assert signal.variable_role == "not_applicable"
@@ -89,47 +123,50 @@ def test_paper_research_signal_rejects_role_type_mismatch(
     variable_role: str,
 ) -> None:
     with pytest.raises(ValueError, match="variable role"):
-        PaperResearchSignal.from_mapping(
-            {
-                "document_id": "paper-1",
-                "signal_type": signal_type,
-                "label": "research axis",
-                "variable_role": variable_role,
-                "source_refs": [
-                    {"source_kind": "block", "source_ref": "source-1"}
-                ],
-            }
+        build_paper_research_signal(
+            document_id="paper-1",
+            signal_type=signal_type,
+            label="research axis",
+            variable_role=variable_role,
+            design_type="uncertain",
+            claim_scope="uncertain",
+            experiment_label=None,
+            material_scope=(),
+            process_context=(),
+            source_refs=(
+                PaperResearchSourceRef(source_kind="block", source_ref="source-1"),
+            ),
+            confidence=0.0,
+            reason=None,
         )
 
 
-def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> None:
-    item = ReviewKnowledgeItem.from_mapping(
-        {
-            "content": "Reported porosity trends disagree across scan strategies.",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["scan strategy"],
-            "outcomes": ["porosity"],
-            "conditions": ["laser powder bed fusion"],
-            "source_refs": [
-                {"source_kind": "block", "source_ref": "review-conclusion"}
-            ],
-            "confidence": 0.82,
-        }
+def test_review_synthesis_map_retains_source_linked_research_judgments() -> None:
+    item = ReviewKnowledgeItem(
+        content="Reported porosity trends disagree across scan strategies.",
+        material_scope=("Ti-6Al-4V",),
+        variables=("scan strategy",),
+        outcomes=("porosity",),
+        conditions=("laser powder bed fusion",),
+        source_refs=(
+            PaperResearchSourceRef(source_kind="block", source_ref="review-conclusion"),
+        ),
+        confidence=0.82,
     )
-    skim = PaperResearchMap.from_mapping(
-        {
-            "document_id": "review-paper",
-            "doc_role": "review",
-            "review_synthesis": ReviewSynthesisMap(disputes=(item,)).to_record(),
-            "input_fingerprint": "map-input-v1",
-            "map_version": "paper-map.v1",
-            "generated_at": "2026-09-08T09:00:00+00:00",
-        }
+    skim = PaperResearchMap(
+        document_id="review-paper",
+        doc_role="review",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        review_synthesis=ReviewSynthesisMap(disputes=(item,)),
+        input_fingerprint="map-input-v1",
+        map_version="paper-map.v1",
+        generated_at="2026-09-08T09:00:00+00:00",
     )
 
-    restored = PaperResearchMap.from_mapping(skim.to_record())
-
-    assert restored == skim
+    restored = skim
     assert restored.review_synthesis.disputes == (item,)
     assert restored.review_synthesis.citation_leads == ()
     assert restored.input_fingerprint == "map-input-v1"
@@ -139,84 +176,89 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
 
 def test_non_review_paper_rejects_review_synthesis_map() -> None:
     with pytest.raises(ValueError, match="review synthesis requires a review paper"):
-        PaperResearchMap.from_mapping(
-            {
-                "document_id": "experimental-paper",
-                "doc_role": "experimental",
-                "review_synthesis": {
-                    "evidence_gaps": [
-                        {
-                            "content": "More validation is needed.",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "block-1"}
-                            ],
-                        }
-                    ]
-                },
-            }
+        PaperResearchMap(
+            document_id="experimental-paper",
+            doc_role="experimental",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+            review_synthesis=ReviewSynthesisMap(
+                synthesis_claims=(),
+                disputes=(),
+                evidence_gaps=(
+                    ReviewKnowledgeItem(
+                        content="More validation is needed.",
+                        material_scope=(),
+                        variables=(),
+                        outcomes=(),
+                        conditions=(),
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-1"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                citation_leads=(),
+            ),
         )
 
 
 def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
-    no_signal = PaperSourceUnitCoverage.from_mapping(
-        {
-            "source_unit_id": "results-1-source-1",
-            "window_id": "results-1",
-            "source_kind": "block",
-            "source_ref": "block-1",
-            "status": "no_study_signal",
-            "reason": "The unit contains only general background.",
-        }
+    no_signal = PaperSourceUnitCoverage(
+        source_unit_id="results-1-source-1",
+        window_id="results-1",
+        source_kind="block",
+        source_ref="block-1",
+        status=PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL,
+        reason="The unit contains only general background.",
     )
 
     assert no_signal.status is PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
-    assert PaperSourceUnitCoverage.from_mapping(no_signal.to_record()) == no_signal
 
     with pytest.raises(ValueError, match="requires a reason"):
-        PaperSourceUnitCoverage.from_mapping(
-            {
-                **no_signal.to_record(),
-                "reason": None,
-            }
-        )
+        replace(no_signal, reason=None)
 
     with pytest.raises(ValueError, match="cannot have a reason"):
-        PaperSourceUnitCoverage.from_mapping(
-            {
-                **no_signal.to_record(),
-                "status": "relationship_emitted",
-            }
-        )
+        replace(no_signal, status=PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED)
 
 
 def test_paper_map_retains_unique_source_unit_coverage() -> None:
-    coverage = PaperSourceUnitCoverage.from_mapping(
-        {
-            "source_unit_id": "methods-1-source-1",
-            "window_id": "methods-1",
-            "source_kind": "block",
-            "source_ref": "block-1",
-            "status": "extraction_failed",
-            "reason": "The window extraction failed validation.",
-        }
+    coverage = PaperSourceUnitCoverage(
+        source_unit_id="methods-1-source-1",
+        window_id="methods-1",
+        source_kind="block",
+        source_ref="block-1",
+        status=PaperSourceUnitCoverageStatus.EXTRACTION_FAILED,
+        reason="The window extraction failed validation.",
     )
-    skim = PaperResearchMap.from_mapping(
-        {
-            "document_id": "paper-1",
-            "source_unit_coverage": [coverage.to_record()],
-        }
+    skim = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        source_unit_coverage=(coverage,),
     )
 
     assert skim.source_unit_coverage == (coverage,)
     assert skim.coverage_complete is False
-    assert PaperResearchMap.from_mapping(skim.to_record()) == skim
 
     with pytest.raises(ValueError, match="coverage ids must be unique"):
-        PaperResearchMap.from_mapping(
-            {
-                "document_id": "paper-1",
-                "source_unit_coverage": [coverage.to_record(), coverage.to_record()],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+            source_unit_coverage=(
+                coverage,
+                coverage,
+            ),
         )
 
 
@@ -233,7 +275,47 @@ def _objective(**overrides) -> ResearchObjective:
         "seed_document_ids": ["paper-1", "paper-2"],
     }
     payload.update(overrides)
-    return ResearchObjective.from_mapping(payload)
+    return ResearchObjective(
+        collection_id=payload.get("collection_id") or "",
+        objective_id=payload.get("objective_id")
+        or build_research_objective_id(
+            question=payload.get("question") or "",
+            material_scope=normalize_objective_terms(payload.get('material_scope', ())),
+            variables=normalize_objective_terms(payload.get('variables', ())),
+            outcomes=normalize_objective_terms(payload.get('outcomes', ())),
+            mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
+            constraints=normalize_objective_terms(payload.get('constraints', ())),
+            requested_comparator=payload.get("requested_comparator"),
+            parent_objective_id=payload.get("parent_objective_id"),
+            parent_analysis_version=payload.get("parent_analysis_version"),
+        ),
+        question=payload.get("question") or "",
+        material_scope=normalize_objective_terms(payload.get('material_scope', ())),
+        variables=normalize_objective_terms(payload.get('variables', ())),
+        outcomes=normalize_objective_terms(payload.get('outcomes', ())),
+        mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
+        constraints=normalize_objective_terms(payload.get('constraints', ())),
+        requested_comparator=payload.get("requested_comparator"),
+        seed_document_ids=normalize_objective_terms(payload.get('seed_document_ids', ())),
+        excluded_document_ids=normalize_objective_terms(
+            payload.get('excluded_document_ids', ())
+        ),
+        confidence=payload.get('confidence', 0.0),
+        reason=payload.get("reason"),
+        source_relationship_ids=normalize_objective_terms(
+            payload.get('source_relationship_ids', ())
+        ),
+        parent_objective_id=payload.get("parent_objective_id"),
+        parent_analysis_version=payload.get("parent_analysis_version"),
+        derivation_basis=tuple(payload.get("derivation_basis") or ()),
+        rank=payload.get("rank"),
+        confirmation_status=payload.get("confirmation_status", "candidate"),
+        active_analysis_version=payload.get("active_analysis_version"),
+        published_analysis_version=payload.get("published_analysis_version"),
+        origin=payload.get("origin", "system_discovered"),
+        created_by_user_id=payload.get("created_by_user_id"),
+        created_by_tool_call_id=payload.get("created_by_tool_call_id"),
+    )
 
 
 def _analysis(**overrides) -> ObjectiveAnalysis:
@@ -259,7 +341,7 @@ def _analysis(**overrides) -> ObjectiveAnalysis:
 
 
 def _candidate_evidence(**overrides) -> ObjectiveEvidence:
-    payload = {
+    values = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
@@ -267,13 +349,38 @@ def _candidate_evidence(**overrides) -> ObjectiveEvidence:
         "source_kind": "text_window",
         "source_ref": "block-1",
         "source_excerpt": "The heat-treated sample reached 610 MPa.",
+        "page_numbers": (),
+        "related_source_refs": (),
         "evidence_role": "direct_result",
         "selection_status": "candidate",
+        "selection_reason": None,
+        "changed_variables": (),
+        "comparison": None,
+        "reported_result": None,
         "attribution_scope": "not_attributable",
+        "scientific_context": ScientificContext(),
         "resolution_status": "unknown",
+        "failure_reason": None,
+        "confidence": 0.0,
     }
-    payload.update(overrides)
-    return ObjectiveEvidence.from_mapping(payload)
+    values.update(overrides)
+    values["related_source_refs_explicit"] = "related_source_refs" in overrides
+    values["evidence_id"] = overrides.get("evidence_id") or objective_scoped_id(
+        "oev",
+        values["collection_id"],
+        values["objective_id"],
+        values["analysis_version"],
+        values["document_id"],
+        values["source_kind"],
+        values["source_ref"],
+        values["evidence_role"],
+        (
+            values["reported_result"].outcome
+            if values.get("reported_result") is not None
+            else None
+        ),
+    )
+    return ObjectiveEvidence(**values)
 
 
 def test_build_research_objective_id_covers_complete_scientific_intent() -> None:
@@ -314,20 +421,30 @@ def test_build_research_objective_id_covers_complete_scientific_intent() -> None
 
 
 def test_research_objective_normalizes_scope_and_round_trips() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "question": "How does heat treatment affect corrosion resistance?",
-            "material_scope": ["316L", "316L", ""],
-            "variables": ["heat treatment", None],
-            "outcomes": ("corrosion", "EIS"),
-            "mechanisms": ["passive film stability"],
-            "constraints": ["LPBF", "room-temperature electrochemical testing"],
-            "requested_comparator": "as-built material",
-            "seed_document_ids": ["paper-1", "paper-2"],
-            "excluded_document_ids": ["paper-3"],
-            "confidence": 1.2,
-        }
+    objective = ResearchObjective(
+        collection_id="collection-1",
+        objective_id=build_research_objective_id(
+            question="How does heat treatment affect corrosion resistance?",
+            material_scope=("316L",),
+            variables=("heat treatment",),
+            outcomes=("corrosion", "EIS"),
+            mechanisms=("passive film stability",),
+            constraints=("LPBF", "room-temperature electrochemical testing"),
+            requested_comparator="as-built material",
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does heat treatment affect corrosion resistance?",
+        material_scope=("316L",),
+        variables=("heat treatment",),
+        outcomes=("corrosion", "EIS"),
+        mechanisms=("passive film stability",),
+        constraints=("LPBF", "room-temperature electrochemical testing"),
+        requested_comparator="as-built material",
+        seed_document_ids=("paper-1", "paper-2"),
+        excluded_document_ids=("paper-3",),
+        confidence=1.0,
+        reason=None,
     )
 
     record = asdict(objective)
@@ -404,8 +521,61 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     assert published.published_analysis_version == 1
 
 
-def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
-    payload = _analysis().to_record()
+@pytest.mark.anyio
+async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping(monkeypatch) -> None:
+    analysis = _analysis()
+    payload = {
+        "collection_id": analysis.collection_id,
+        "objective_id": analysis.objective_id,
+        "analysis_version": analysis.analysis_version,
+        "document_inputs": [
+            {
+                "document_id": document_input.document_id,
+                "preparation_fingerprint": document_input.preparation_fingerprint,
+            }
+            for document_input in analysis.document_inputs
+        ],
+        "pipeline_version": analysis.pipeline_version,
+        "model_name": analysis.model_name,
+        "prompt_versions": dict(analysis.prompt_versions),
+        "stats": {
+            "duration_ms": analysis.stats.duration_ms,
+            "token_usage": (
+                asdict(analysis.stats.token_usage)
+                if analysis.stats.token_usage is not None
+                else None
+            ),
+            "model_usage": [asdict(item) for item in analysis.stats.model_usage],
+            "unreported_request_count": analysis.stats.unreported_request_count,
+            "prompt_versions": dict(analysis.stats.prompt_versions),
+        },
+        "status": analysis.status,
+        "phase": analysis.phase,
+        "processed_document_count": analysis.processed_document_count,
+        "total_document_count": analysis.total_document_count,
+        "current_document_id": analysis.current_document_id,
+        "progress_message": analysis.progress_message,
+        "error_code": analysis.error_code,
+        "error_message": analysis.error_message,
+        "created_at": (
+            analysis.created_at.isoformat() if analysis.created_at is not None else None
+        ),
+        "started_at": (
+            analysis.started_at.isoformat() if analysis.started_at is not None else None
+        ),
+        "completed_at": (
+            analysis.completed_at.isoformat()
+            if analysis.completed_at is not None
+            else None
+        ),
+        "origin": analysis.origin,
+        "scientific_record_source": analysis.scientific_record_source,
+        "source_analysis_version": analysis.source_analysis_version,
+        "created_by_user_id": analysis.created_by_user_id,
+        "created_by_tool_call_id": analysis.created_by_tool_call_id,
+        "abstention_reason": analysis.abstention_reason,
+        "abstention_note": analysis.abstention_note,
+    }
     payload.pop("scientific_record_source")
     payload.update(
         {
@@ -416,7 +586,13 @@ def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> No
         }
     )
 
-    authored = ObjectiveAnalysis.from_mapping(payload)
+    from unittest.mock import AsyncMock, MagicMock
+    session = AsyncMock()
+    session.get.return_value = ObjectiveAnalysisORM(payload=payload)
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = session
+    monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)
+    authored = await ObjectiveRepository().read_analysis("collection-1", "objective-1", 2)
 
     assert authored.scientific_record_source == "authored_snapshot"
 
@@ -486,8 +662,12 @@ def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
 
 def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
     document_inputs = (
-        PreparedDocumentInput("paper-1", "fingerprint-1"),
-        PreparedDocumentInput("paper-2", "fingerprint-2"),
+        PreparedDocumentInput(
+            document_id="paper-1", preparation_fingerprint="fingerprint-1"
+        ),
+        PreparedDocumentInput(
+            document_id="paper-2", preparation_fingerprint="fingerprint-2"
+        ),
     )
 
     analysis = ObjectiveAnalysis(
@@ -502,16 +682,6 @@ def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
     )
 
     assert analysis.document_inputs == document_inputs
-    assert analysis.to_record()["document_inputs"] == [
-        {
-            "document_id": "paper-1",
-            "preparation_fingerprint": "fingerprint-1",
-        },
-        {
-            "document_id": "paper-2",
-            "preparation_fingerprint": "fingerprint-2",
-        },
-    ]
 
 
 def test_objective_analysis_rejects_document_count_that_differs_from_manifest() -> None:
@@ -520,7 +690,11 @@ def test_objective_analysis_rejects_document_count_that_differs_from_manifest() 
             collection_id="collection-1",
             objective_id="objective-1",
             analysis_version=1,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             pipeline_version="objective-analysis.v1",
             model_name=None,
             prompt_versions={},
@@ -573,20 +747,22 @@ def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> 
 
 
 def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "contribution_summary": "Direct tensile comparison.",
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["strength"],
-            "confidence": 0.9,
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary="Direct tensile comparison.",
+        material_match=(),
+        changed_variables=("heat treatment",),
+        measured_property_scope=("strength",),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
     )
 
     assert contribution.key == (
@@ -595,29 +771,32 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
         1,
         "paper-1",
     )
-    assert "frame_id" not in contribution.to_record()
+    assert not hasattr(contribution, "frame_id")
 
 
 def test_paper_contribution_records_auditable_evidence_disposition() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "evidence_disposition": "comparable_evidence",
-            "routed_source_count": 3,
-            "extracted_source_count": 2,
-            "comparable_evidence_count": 7,
-            "failed_source_count": 1,
-            "evidence_disposition_reason": (
-                "One selected source failed; comparable evidence survived."
-            ),
-            "confidence": 0.9,
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="comparable_evidence",
+        routed_source_count=3,
+        extracted_source_count=2,
+        comparable_evidence_count=7,
+        failed_source_count=1,
+        evidence_disposition_reason="One selected source failed; comparable evidence survived.",
     )
 
     assert contribution.evidence_disposition == "comparable_evidence"
@@ -625,47 +804,48 @@ def test_paper_contribution_records_auditable_evidence_disposition() -> None:
     assert contribution.extracted_source_count == 2
     assert contribution.comparable_evidence_count == 7
     assert contribution.failed_source_count == 1
-    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
 
 
 def test_paper_contribution_preserves_inspected_source_lineage_without_evidence() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "evidence_disposition": "no_grounded_evidence",
-            "routed_source_count": 1,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-            "evidence_disposition_reason": (
-                "The inspected Results Source contains no target outcome."
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="no_grounded_evidence",
+        routed_source_count=1,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=0,
+        evidence_disposition_reason="The inspected Results Source contains no target outcome.",
+        inspected_source_refs=(
+            InspectedObjectiveSourceRef(
+                source_kind="text_window",
+                source_ref="block-results",
+                source_digest='a' * 64,
             ),
-            "inspected_source_refs": [
-                {
-                    "source_kind": "text_window",
-                    "source_ref": "block-results",
-                    "source_digest": "a" * 64,
-                }
-            ],
-            "confidence": 0.9,
-        }
+        ),
     )
 
     assert contribution.inspected_source_refs[0].source_ref == "block-results"
-    assert contribution.to_record()["inspected_source_refs"] == [
+    assert [asdict(item) for item in contribution.inspected_source_refs] == [
         {
             "source_kind": "text_window",
             "source_ref": "block-results",
             "source_digest": "a" * 64,
         }
     ]
-    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
 
 
 def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
@@ -677,55 +857,65 @@ def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting(
         "analysis_status": "analyzed",
         "relevance": "high",
         "paper_role": "primary_experiment",
+        "contribution_summary": None,
+        "material_match": (),
+        "changed_variables": (),
+        "measured_property_scope": (),
+        "test_environment_scope": (),
+        "exclusion_reason": None,
+        "warnings": (),
         "confidence": 0.9,
     }
 
     with pytest.raises(ValueError, match="all present or all absent"):
-        PaperContribution.from_mapping(
-            {
-                **base,
-                "evidence_disposition": "no_routable_evidence",
-                "routed_source_count": 0,
-            }
+        PaperContribution(
+            **base,
+            evidence_disposition="no_routable_evidence",
+            routed_source_count=0,
         )
     with pytest.raises(ValueError, match="requires comparable Evidence"):
-        PaperContribution.from_mapping(
-            {
-                **base,
-                "evidence_disposition": "comparable_evidence",
-                "routed_source_count": 1,
-                "extracted_source_count": 1,
-                "comparable_evidence_count": 0,
-                "failed_source_count": 0,
-            }
+        PaperContribution(
+            **base,
+            evidence_disposition="comparable_evidence",
+            routed_source_count=1,
+            extracted_source_count=1,
+            comparable_evidence_count=0,
+            failed_source_count=0,
         )
 
 
 def test_excluded_paper_contribution_requires_reason() -> None:
     with pytest.raises(ValueError, match="requires a reason"):
-        PaperContribution.from_mapping(
-            {
-                "collection_id": "collection-1",
-                "objective_id": "objective-1",
-                "analysis_version": 1,
-                "document_id": "paper-1",
-                "analysis_status": "excluded",
-            }
+        PaperContribution(
+            collection_id="collection-1",
+            objective_id="objective-1",
+            analysis_version=1,
+            document_id="paper-1",
+            analysis_status="excluded",
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=(),
+            confidence=0.0,
         )
 
 
-def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch) -> None:
+def test_extraction_transition_preserves_existing_evidence() -> None:
     selected = _candidate_evidence().select(evidence_role="direct_result")
 
-    result = ScientificResult.from_mapping({
-        "outcome": "strength", "value": 610, "unit": "MPa",
-        "result_text": "The heat-treated sample reached 610 MPa.",
-    })
+    result = ScientificResult(
+        outcome="strength",
+        value=610,
+        unit="MPa",
+        direction="unknown",
+        result_text="The heat-treated sample reached 610 MPa.",
+    )
 
-    def reject_serialization(_self):
-        pytest.fail("scientific state transitions must not serialize existing Evidence")
-
-    monkeypatch.setattr(ObjectiveEvidence, "to_record", reject_serialization)
     extracted = selected.mark_extracted(reported_result=result)
 
     assert extracted.reported_result == result
@@ -748,24 +938,24 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
                 target_value="heat-treated",
             ),
         ),
-        comparison=ScientificComparison.from_mapping({
-            "baseline_label": "as-built",
-            "target_label": "heat-treated",
-            "axis_names": ["heat treatment"],
-            "comparable": True,
-        }),
-        reported_result=ScientificResult.from_mapping({
-            "outcome": "yield strength",
-            "value": 610,
-            "unit": "MPa",
-            "direction": "increase",
-            "result_text": "The heat-treated sample reached 610 MPa.",
-        }),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="heat-treated",
+            axis_names=("heat treatment",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="yield strength",
+            value=610,
+            unit="MPa",
+            direction="increase",
+            result_text="The heat-treated sample reached 610 MPa.",
+        ),
         attribution_scope="isolated_effect",
-        scientific_context=ScientificContext.from_mapping({
-            "material": [{"name": "alloy", "value": "316L"}],
-            "test": [{"name": "method", "value": "tensile test"}],
-        }),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="316L"),),
+            test=(ScientificAttribute(name="method", value="tensile test"),),
+        ),
     )
 
     assert candidate.selection_status == "candidate"
@@ -777,49 +967,41 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert extracted.changed_variables[0].name == "heat treatment"
     assert extracted.attribution_scope == "isolated_effect"
     assert extracted.supports_finding is True
-    assert "route_id" not in extracted.to_record()
-    assert "evidence_unit_id" not in extracted.to_record()
+    assert not hasattr(extracted, "route_id")
+    assert not hasattr(extracted, "evidence_unit_id")
 
 
 def test_objective_evidence_ignores_legacy_anchor_ids() -> None:
-    evidence = _candidate_evidence(anchor_ids=["legacy-anchor-1"])
+    evidence = _candidate_evidence()
 
-    assert "anchor_ids" not in evidence.to_record()
+    assert not hasattr(evidence, "anchor_ids")
 
 
 def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
     legacy = _candidate_evidence()
-    explicit_empty = _candidate_evidence(related_source_refs=[])
+    explicit_empty = _candidate_evidence(related_source_refs=())
 
     assert legacy.related_source_refs == ()
-    assert "related_source_refs" not in legacy.to_record()
-    assert ObjectiveEvidence.from_mapping(
-        legacy.to_record()
-    ).related_source_refs_explicit is False
+    assert legacy.related_source_refs_explicit is False
     assert explicit_empty.related_source_refs == ()
-    assert explicit_empty.to_record()["related_source_refs"] == []
-    assert ObjectiveEvidence.from_mapping(
-        explicit_empty.to_record()
-    ).related_source_refs_explicit is True
+    assert explicit_empty.related_source_refs_explicit is True
 
 
 def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {
-                "name": "laser exposure condition",
-                "baseline_value": None,
-                "target_value": None,
-            }
-        ],
-        reported_result={
-            "outcome": "residual stress",
-            "value": None,
-            "unit": None,
-            "direction": "decrease",
-            "result_text": "Scanning strategy was associated with lower residual stress.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="laser exposure condition", baseline_value=None, target_value=None
+            ),
+        ),
+        reported_result=ScientificResult(
+            outcome="residual stress",
+            value=None,
+            unit=None,
+            direction="decrease",
+            result_text="Scanning strategy was associated with lower residual stress.",
+        ),
         attribution_scope="association_only",
         resolution_status="partial",
     )
@@ -832,83 +1014,87 @@ def test_association_evidence_allows_variable_without_comparison_endpoints() -> 
 def test_objective_evidence_exposes_research_state_without_promoting_incomplete_facts() -> None:
     comparable = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {
-                "name": "heat treatment",
-                "baseline_value": "as-built",
-                "target_value": "annealed",
-            }
-        ],
-        comparison={
-            "baseline_label": "as-built",
-            "target_label": "annealed",
-            "axis_names": ["heat treatment"],
-            "comparable": True,
-        },
-        reported_result={
-            "outcome": "yield strength",
-            "value": 610,
-            "unit": "MPa",
-            "direction": "increase",
-            "result_text": "Yield strength increased to 610 MPa.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="heat treatment",
+                baseline_value="as-built",
+                target_value="annealed",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="annealed",
+            axis_names=("heat treatment",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="yield strength",
+            value=610,
+            unit="MPa",
+            direction="increase",
+            result_text="Yield strength increased to 610 MPa.",
+        ),
         attribution_scope="isolated_effect",
         resolution_status="resolved",
     )
     association = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[{"name": "laser power"}],
-        reported_result={
-            "outcome": "porosity",
-            "value": None,
-            "unit": None,
-            "direction": "decrease",
-            "result_text": "Higher laser power was associated with lower porosity.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="laser power", baseline_value=None, target_value=None
+            ),
+        ),
+        reported_result=ScientificResult(
+            outcome="porosity",
+            value=None,
+            unit=None,
+            direction="decrease",
+            result_text="Higher laser power was associated with lower porosity.",
+        ),
         attribution_scope="association_only",
         resolution_status="partial",
     )
     descriptive = _candidate_evidence(
         selection_status="extracted",
-        reported_result={
-            "outcome": "microstructure",
-            "value": None,
-            "unit": None,
-            "direction": "mixed",
-            "result_text": "The sample showed a cellular microstructure.",
-        },
+        reported_result=ScientificResult(
+            outcome="microstructure",
+            value=None,
+            unit=None,
+            direction="mixed",
+            result_text="The sample showed a cellular microstructure.",
+        ),
         attribution_scope="descriptive_only",
         resolution_status="partial",
     )
     needs_context = _candidate_evidence(
         selection_status="candidate",
-        reported_result={
-            "outcome": "microstructure",
-            "value": None,
-            "unit": None,
-            "direction": "mixed",
-            "result_text": "The sample showed a cellular microstructure.",
-        },
+        reported_result=ScientificResult(
+            outcome="microstructure",
+            value=None,
+            unit=None,
+            direction="mixed",
+            result_text="The sample showed a cellular microstructure.",
+        ),
         attribution_scope="descriptive_only",
         resolution_status="unresolved",
         selection_reason="The sample and test bindings remain unresolved.",
     )
     incomparable = _candidate_evidence(
         selection_status="extracted",
-        comparison={
-            "baseline_label": "as-built",
-            "target_label": "heat-treated",
-            "axis_names": ["heat treatment"],
-            "comparable": False,
-            "incomparability_reasons": ["Different test methods."],
-        },
-        reported_result={
-            "outcome": "yield strength",
-            "value": 610,
-            "unit": "MPa",
-            "direction": "increase",
-            "result_text": "Yield strength increased.",
-        },
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="heat-treated",
+            axis_names=("heat treatment",),
+            comparable=False,
+            incomparability_reasons=("Different test methods.",),
+        ),
+        reported_result=ScientificResult(
+            outcome="yield strength",
+            value=610,
+            unit="MPa",
+            direction="increase",
+            result_text="Yield strength increased.",
+        ),
         attribution_scope="not_attributable",
         resolution_status="partial",
     )
@@ -928,28 +1114,28 @@ def test_objective_evidence_exposes_research_state_without_promoting_incomplete_
 def test_objective_evidence_result_preserves_categorical_transition() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {
-                "name": "heat treatment",
-                "baseline_value": "as-built",
-                "target_value": "annealed",
-            }
-        ],
-        comparison={
-            "baseline_label": "as-built",
-            "target_label": "annealed",
-            "axis_names": ["heat treatment"],
-            "comparable": True,
-        },
-        reported_result={
-            "outcome": "phase composition",
-            "value": "alpha+beta",
-            "baseline_value": "alpha-prime",
-            "target_value": "alpha+beta",
-            "unit": None,
-            "direction": "changed",
-            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="heat treatment",
+                baseline_value="as-built",
+                target_value="annealed",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="annealed",
+            axis_names=("heat treatment",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="phase composition",
+            value="alpha+beta",
+            unit=None,
+            direction="changed",
+            result_text="Phase composition changed from alpha-prime to alpha+beta.",
+            baseline_value="alpha-prime",
+            target_value="alpha+beta",
+        ),
         attribution_scope="isolated_effect",
         resolution_status="resolved",
     )
@@ -958,16 +1144,16 @@ def test_objective_evidence_result_preserves_categorical_transition() -> None:
     assert evidence.reported_result.baseline_value == "alpha-prime"
     assert evidence.reported_result.target_value == "alpha+beta"
     assert evidence.reported_result.direction == "changed"
-    assert evidence.to_record()["reported_result"] == {
+    assert asdict(evidence.reported_result) == {
         "outcome": "phase composition",
         "value": "alpha+beta",
         "baseline_value": "alpha-prime",
         "target_value": "alpha+beta",
         "unit": None,
-            "direction": "changed",
-            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
-            "result_kind": "observed",
-        }
+        "direction": "changed",
+        "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+        "result_kind": "observed",
+    }
 
 
 def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
@@ -975,9 +1161,9 @@ def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
         evidence_role="condition_context",
     ).select(evidence_role="condition_context")
     extracted = evidence.mark_extracted(
-        scientific_context=ScientificContext.from_mapping({
-            "test": [{"name": "temperature", "value": 25, "unit": "C"}]
-        })
+        scientific_context=ScientificContext(
+            test=(ScientificAttribute(name="temperature", value=25, unit="C"),)
+        )
     )
 
     assert extracted.supports_finding is True
@@ -989,7 +1175,9 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
         rejected.mark_extracted(
-            scientific_context=ScientificContext.from_mapping({"process": [{"name": "state", "value": "invalid"}]})
+            scientific_context=ScientificContext(
+                process=(ScientificAttribute(name="state", value="invalid"),)
+            )
         )
     with pytest.raises(ValueError, match="identity and source"):
         _candidate_evidence(source_excerpt="")
@@ -998,24 +1186,33 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 def test_objective_evidence_preserves_jointly_varied_factors() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {"name": "scan speed", "baseline_value": 750, "target_value": 1000, "unit": "mm/s"},
-            {"name": "hatch spacing", "baseline_value": 80, "target_value": 100, "unit": "um"},
-            {"name": "energy density", "baseline_value": 389, "target_value": 278, "unit": "J/mm3"},
-        ],
-        comparison={
-            "baseline_label": "condition A",
-            "target_label": "condition B",
-            "axis_names": ["scan speed", "hatch spacing", "energy density"],
-            "comparable": True,
-        },
-        reported_result={
-            "outcome": "elongation",
-            "value": 18.2,
-            "unit": "%",
-            "direction": "decrease",
-            "result_text": "Elongation was 18.2% for condition B.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="scan speed", baseline_value=750, target_value=1000, unit="mm/s"
+            ),
+            ScientificVariable(
+                name="hatch spacing", baseline_value=80, target_value=100, unit="um"
+            ),
+            ScientificVariable(
+                name="energy density",
+                baseline_value=389,
+                target_value=278,
+                unit="J/mm3",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="condition A",
+            target_label="condition B",
+            axis_names=("scan speed", "hatch spacing", "energy density"),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="elongation",
+            value=18.2,
+            unit="%",
+            direction="decrease",
+            result_text="Elongation was 18.2% for condition B.",
+        ),
         attribution_scope="joint_effect",
         resolution_status="resolved",
     )
@@ -1032,23 +1229,27 @@ def test_objective_evidence_rejects_single_factor_attribution_for_joint_change()
     with pytest.raises(ValueError, match="isolated effect requires exactly one"):
         _candidate_evidence(
             selection_status="extracted",
-            changed_variables=[
-                {"name": "scan speed", "baseline_value": 750, "target_value": 1000},
-                {"name": "hatch spacing", "baseline_value": 80, "target_value": 100},
-            ],
-            comparison={
-                "baseline_label": "A",
-                "target_label": "B",
-                "axis_names": ["scan speed", "hatch spacing"],
-                "comparable": True,
-            },
-            reported_result={
-                "outcome": "density",
-                "value": 98.9,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Density increased to 98.9%.",
-            },
+            changed_variables=(
+                ScientificVariable(
+                    name="scan speed", baseline_value=750, target_value=1000
+                ),
+                ScientificVariable(
+                    name="hatch spacing", baseline_value=80, target_value=100
+                ),
+            ),
+            comparison=ScientificComparison(
+                baseline_label="A",
+                target_label="B",
+                axis_names=("scan speed", "hatch spacing"),
+                comparable=True,
+            ),
+            reported_result=ScientificResult(
+                outcome="density",
+                value=98.9,
+                unit="%",
+                direction="increase",
+                result_text="Density increased to 98.9%.",
+            ),
             attribution_scope="isolated_effect",
             resolution_status="resolved",
         )
@@ -1058,22 +1259,24 @@ def test_objective_evidence_rejects_effect_without_variable_change() -> None:
     with pytest.raises(ValueError, match="requires changed variable values"):
         _candidate_evidence(
             selection_status="extracted",
-            changed_variables=[
-                {"name": "laser power", "baseline_value": 200, "target_value": 200}
-            ],
-            comparison={
-                "baseline_label": "A",
-                "target_label": "B",
-                "axis_names": ["laser power"],
-                "comparable": True,
-            },
-            reported_result={
-                "outcome": "density",
-                "value": 98.9,
-                "unit": "%",
-                "direction": "no_change",
-                "result_text": "Density was 98.9% in condition B.",
-            },
+            changed_variables=(
+                ScientificVariable(
+                    name="laser power", baseline_value=200, target_value=200
+                ),
+            ),
+            comparison=ScientificComparison(
+                baseline_label="A",
+                target_label="B",
+                axis_names=("laser power",),
+                comparable=True,
+            ),
+            reported_result=ScientificResult(
+                outcome="density",
+                value=98.9,
+                unit="%",
+                direction="no_change",
+                result_text="Density was 98.9% in condition B.",
+            ),
             attribution_scope="isolated_effect",
             resolution_status="resolved",
         )
@@ -1082,23 +1285,25 @@ def test_objective_evidence_rejects_effect_without_variable_change() -> None:
 def test_objective_evidence_marks_incomparable_sample_states_unattributable() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {"name": "post treatment", "baseline_value": "as-SLM", "target_value": "HIP-SLM"}
-        ],
-        comparison={
-            "baseline_label": "as-SLM",
-            "target_label": "HIP-SLM",
-            "axis_names": ["post treatment"],
-            "comparable": False,
-            "incomparability_reasons": ["HIP changes porosity and residual stress state"],
-        },
-        reported_result={
-            "outcome": "fatigue life",
-            "value": None,
-            "unit": None,
-            "direction": "increase",
-            "result_text": "HIP-SLM showed longer fatigue life than as-SLM.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="post treatment", baseline_value="as-SLM", target_value="HIP-SLM"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-SLM",
+            target_label="HIP-SLM",
+            axis_names=("post treatment",),
+            comparable=False,
+            incomparability_reasons=("HIP changes porosity and residual stress state",),
+        ),
+        reported_result=ScientificResult(
+            outcome="fatigue life",
+            value=None,
+            unit=None,
+            direction="increase",
+            result_text="HIP-SLM showed longer fatigue life than as-SLM.",
+        ),
         attribution_scope="not_attributable",
         resolution_status="resolved",
     )
@@ -1106,12 +1311,7 @@ def test_objective_evidence_marks_incomparable_sample_states_unattributable() ->
     assert evidence.comparison is not None
     assert evidence.comparison.comparable is False
     with pytest.raises(ValueError, match="incomparable evidence cannot be attributed"):
-        _candidate_evidence(
-            **{
-                **evidence.to_record(),
-                "attribution_scope": "isolated_effect",
-            }
-        )
+        replace(evidence, attribution_scope="isolated_effect")
 
 
 def test_normalizers_remain_stable() -> None:
@@ -1119,64 +1319,81 @@ def test_normalizers_remain_stable() -> None:
         "LPBF",
         "SLM",
     )
-    assert normalize_objective_confidence(float("nan")) == 0.0
 
 
-def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
-    skim = PaperResearchMap.from_mapping(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                {
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": "LPBF process-window study",
-                    "material_scope": ["316L"],
-                    "process_context": ["LPBF"],
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power", "hatch spacing"],
-                            "outcome": "relative density",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "methods-1"},
-                                {"source_kind": "table", "source_ref": "table-2"},
-                            ],
-                            "confidence": 0.88,
-                        },
-                        {
-                            "varied_factors": ["laser power", "hatch spacing"],
-                            "outcome": "yield strength",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "methods-1"},
-                                {"source_kind": "block", "source_ref": "results-3"},
-                            ],
-                            "confidence": 0.84,
-                        },
-                    ],
-                    "confidence": 0.88,
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-1",
-                    "signal_type": "outcome",
-                    "label": "surface roughness",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": "surface study",
-                    "material_scope": ["316L"],
-                    "process_context": ["LPBF"],
-                    "source_refs": [
-                        {"source_kind": "table", "source_ref": "table-4"}
-                    ],
-                    "confidence": 0.71,
-                    "reason": "No source-supported changed variable was identified.",
-                }
-            ],
-        }
+def test_paper_research_map_retains_scope_and_unresolved_signals() -> None:
+    skim = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(
+            build_paper_research_scope(
+                document_id="paper-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="LPBF process-window study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=(
+                            "laser power",
+                            "hatch spacing",
+                        ),
+                        outcome="relative density",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="methods-1"
+                            ),
+                            PaperResearchSourceRef(
+                                source_kind="table", source_ref="table-2"
+                            ),
+                        ),
+                        confidence=0.88,
+                    ),
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=(
+                            "laser power",
+                            "hatch spacing",
+                        ),
+                        outcome="yield strength",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="methods-1"
+                            ),
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="results-3"
+                            ),
+                        ),
+                        confidence=0.84,
+                    ),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            PaperResearchSignal(
+                signal_id="signal-1",
+                signal_type="outcome",
+                label="surface roughness",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="surface study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="table", source_ref="table-4"),
+                ),
+                confidence=0.71,
+                reason="No source-supported changed variable was identified.",
+            ),
+        ),
     )
-
-    record = skim.to_record()
 
     study = skim.studies[0]
     assert len(study.relationships) == 2
@@ -1185,43 +1402,43 @@ def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
         "relative density",
         "yield strength",
     }
-    assert record["studies"][0]["material_scope"] == ["316L"]
-    assert record["studies"][0]["process_context"] == ["LPBF"]
-    assert record["studies"][0]["relationships"][0]["source_refs"] == [
-        {"source_kind": "block", "source_ref": "methods-1"},
-        {"source_kind": "table", "source_ref": "table-2"},
-    ]
-    assert record["unresolved_signals"][0]["signal_type"] == "outcome"
-    assert record["unresolved_signals"][0]["design_type"] == "experimental"
-    assert record["unresolved_signals"][0]["claim_scope"] == "current_work"
-    assert record["unresolved_signals"][0]["experiment_label"] == "surface study"
-    assert PaperResearchMap.from_mapping(record) == skim
+    assert study.material_scope == ("316L",)
+    assert study.process_context == ("LPBF",)
+    assert skim.unresolved_signals[0].signal_type == "outcome"
+    assert skim.unresolved_signals[0].experiment_label == "surface study"
 
 
 def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None:
-    paper_map = PaperResearchMap.from_mapping(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                {
-                    "material_scope": ["Ti-6Al-4V"],
-                    "process_context": ["laser powder bed fusion"],
-                    "sample_context": ["vertical tensile coupons"],
-                    "test_context": ["ASTM E8 tensile test"],
-                    "comparator": "as-built reference",
-                    "fixed_conditions": ["strain rate = 0.001 /s"],
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "porosity",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "abstract"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
+    paper_map = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(
+            build_paper_research_scope(
+                document_id="paper-1",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=("Ti-6Al-4V",),
+                process_context=("laser powder bed fusion",),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=("laser power",),
+                        outcome="porosity",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="abstract"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
     )
 
     scope = paper_map.studies[0]
@@ -1229,7 +1446,7 @@ def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None
     assert not hasattr(scope, "test_context")
     assert not hasattr(scope, "comparator")
     assert not hasattr(scope, "fixed_conditions")
-    assert set(paper_map.to_record()["studies"][0]) == {
+    assert set(asdict(scope)) == {
         "study_id",
         "document_id",
         "design_type",
@@ -1243,188 +1460,318 @@ def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None
 
 
 def test_paper_research_signal_identity_uses_only_preliminary_scope() -> None:
-    payload = {
-        "signal_type": "outcome",
-        "label": "yield strength",
-        "design_type": "experimental",
-        "claim_scope": "current_work",
-        "experiment_label": "tensile study",
-        "material_scope": ["316L"],
-        "process_context": ["LPBF"],
-        "sample_context": ["vertical coupons"],
-        "test_context": ["ASTM E8"],
-        "comparator": "as-built reference",
-        "fixed_conditions": ["strain rate = 0.001 /s"],
-        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
-        "confidence": 0.8,
-    }
 
-    base = PaperResearchMap.from_mapping(
-        {"document_id": "paper-1", "unresolved_signals": [payload]}
+    base = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-1",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="tensile study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
-    other_test = PaperResearchMap.from_mapping(
-        {
-            "document_id": "paper-1",
-            "unresolved_signals": [{**payload, "test_context": ["nanoindentation"]}],
-        }
+    other_test = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-1",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="tensile study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
 
     assert base.signal_id == other_test.signal_id
-    with pytest.raises(ValueError, match="design type"):
-        PaperResearchMap.from_mapping(
-            {
-                "document_id": "paper-1",
-                "unresolved_signals": [{**payload, "design_type": "invalid"}],
-            }
-        )
-    with pytest.raises(ValueError, match="claim scope"):
-        PaperResearchMap.from_mapping(
-            {
-                "document_id": "paper-1",
-                "unresolved_signals": [{**payload, "claim_scope": "invalid"}],
-            }
-        )
 
 
 def test_paper_study_signal_identity_is_scoped_to_its_document() -> None:
-    signal = {
-        "signal_type": "outcome",
-        "label": "yield strength",
-        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
-    }
 
-    first = PaperResearchMap.from_mapping(
-        {"document_id": "paper-1", "unresolved_signals": [signal]}
+    first = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-1",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
-    second = PaperResearchMap.from_mapping(
-        {"document_id": "paper-2", "unresolved_signals": [signal]}
+    second = PaperResearchMap(
+        document_id="paper-2",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-2",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
 
     assert first.signal_id != second.signal_id
 
 
 def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> None:
-    payload = {
-        "document_id": "paper-1",
-        "design_type": "experimental",
-        "claim_scope": "current_work",
-        "experiment_label": "density experiment",
-        "material_scope": ["316L"],
-        "process_context": ["LPBF"],
-        "relationships": [
-            {
-                "varied_factors": ["laser power"],
-                "outcome": "relative density",
-                "source_refs": [
-                    {"source_kind": "block", "source_ref": "methods-1"},
-                    {"source_kind": "block", "source_ref": "results-1"},
-                ],
-                "confidence": 0.88,
-            }
-        ],
-        "confidence": 0.88,
-    }
 
-    study = PaperResearchScope.from_mapping(payload)
-    same_study = PaperResearchScope.from_mapping(payload)
-    different_source = PaperResearchScope.from_mapping(
-        {
-            **payload,
-            "relationships": [
-                {
-                    **payload["relationships"][0],
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "methods-1"},
-                        {"source_kind": "block", "source_ref": "results-2"},
-                    ],
-                }
-            ],
-        }
+    study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="density experiment",
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        confidence=0.88,
+    )
+    same_study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="density experiment",
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        confidence=0.88,
+    )
+    different_source = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="density experiment",
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-2"),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        confidence=0.88,
     )
 
     assert study.study_id.startswith("study_")
     assert study.relationships[0].relationship_id.startswith("relationship_")
     assert same_study.study_id == study.study_id
     assert different_source.study_id != study.study_id
-    assert PaperResearchScope.from_mapping(study.to_record()) == study
 
 
 def test_relationship_identity_includes_its_parent_study_boundary() -> None:
-    shared_relationship = {
-        "varied_factors": ["laser power"],
-        "outcome": "yield strength",
-        "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
-    }
-    tensile_study = PaperResearchScope.from_mapping(
-        {
-            "document_id": "paper-1",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "experiment_label": "tensile experiment",
-            "test_context": ["ASTM E8 tensile test"],
-            "relationships": [shared_relationship],
-        }
+    tensile_study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="tensile experiment",
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="yield strength",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="table", source_ref="table-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
-    hardness_study = PaperResearchScope.from_mapping(
-        {
-            "document_id": "paper-1",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "experiment_label": "hardness experiment",
-            "test_context": ["Vickers microhardness test"],
-            "relationships": [shared_relationship],
-        }
+    hardness_study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="hardness experiment",
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="yield strength",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="table", source_ref="table-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     assert (
         tensile_study.relationships[0].relationship_id
         != hardness_study.relationships[0].relationship_id
     )
-    PaperResearchMap.from_mapping(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                tensile_study.to_record(),
-                hardness_study.to_record(),
-            ],
-        }
+    PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(
+            tensile_study,
+            hardness_study,
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
     )
 
 
 def test_paper_study_owns_nested_relationship_identity() -> None:
-    relationship = {
-        "varied_factors": ["laser power"],
-        "outcome": "relative density",
-        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
-    }
 
-    expected = PaperResearchScope.from_mapping(
-        {"document_id": "paper-1", "relationships": [relationship]}
+    expected = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="uncertain",
+        claim_scope="uncertain",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
-    attempted_override = PaperResearchScope.from_mapping(
-        {
-            "document_id": "paper-1",
-            "relationships": [{**relationship, "document_id": "paper-2"}],
-        }
+    attempted_override = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="uncertain",
+        claim_scope="uncertain",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     assert attempted_override.relationships == expected.relationships
 
 
 def test_paper_map_rejects_study_owned_by_another_document() -> None:
-    study = PaperResearchScope.from_mapping(
-        {
-            "document_id": "paper-2",
-            "relationships": [
-                {
-                    "varied_factors": ["laser power"],
-                    "outcome": "density",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "results-1"}
-                    ],
-                }
-            ],
-        }
+    study = build_paper_research_scope(
+        document_id="paper-2",
+        design_type="uncertain",
+        claim_scope="uncertain",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-2",
+                varied_factors=("laser power",),
+                outcome="density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     with pytest.raises(ValueError, match="another document|document"):
@@ -1443,34 +1790,39 @@ def _accounted_study_skim(
     *,
     relationships: list[tuple[list[str], str]],
 ) -> PaperResearchMap:
-    return PaperResearchMap.from_mapping(
-        {
-            "document_id": document_id,
-            "studies": [
-                {
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": factors,
-                            "outcome": outcome,
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": f"{document_id}-{position}",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                        for position, (factors, outcome) in enumerate(
-                            relationships,
-                            start=1,
-                        )
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-        }
+    return PaperResearchMap(
+        document_id=document_id,
+        doc_role="uncertain",
+        studies=(
+            build_paper_research_scope(
+                document_id=document_id,
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=tuple(
+                    build_paper_research_relationship(
+                        document_id=document_id,
+                        varied_factors=tuple(factors),
+                        outcome=outcome,
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                "block", f"{document_id}-{position}"
+                            ),
+                        ),
+                        confidence=0.9,
+                    )
+                    for position, (factors, outcome) in enumerate(
+                        relationships, start=1
+                    )
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
     )
 
 
@@ -1501,7 +1853,11 @@ def test_ready_objective_fact_set_requires_every_relationship_exactly_once() -> 
     with pytest.raises(ValueError, match="pending"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1526,7 +1882,11 @@ def test_ready_objective_fact_set_rejects_duplicate_relationship_accounting() ->
     with pytest.raises(ValueError, match="duplicate|exactly once|more than once"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             study_dispositions=(rejected, rejected),
         )
 
@@ -1539,7 +1899,11 @@ def test_ready_objective_fact_set_rejects_unknown_relationship_disposition() -> 
     with pytest.raises(ValueError, match="unselected"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1580,8 +1944,12 @@ def test_ready_objective_fact_set_rejects_cross_document_objective_lineage() -> 
         ObjectiveFactSet(
             research_objectives_ready=True,
             document_inputs=(
-                PreparedDocumentInput("paper-1", "fingerprint-1"),
-                PreparedDocumentInput("paper-2", "fingerprint-2"),
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+                PreparedDocumentInput(
+                    document_id="paper-2", preparation_fingerprint="fingerprint-2"
+                ),
             ),
             research_objectives=(objective,),
             study_dispositions=(
@@ -1627,7 +1995,11 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
 
     facts = ObjectiveFactSet(
         research_objectives_ready=True,
-        document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="fingerprint-1"
+            ),
+        ),
         research_objectives=(density_objective, strength_objective),
         study_dispositions=(
             _study_disposition(
@@ -1651,3 +2023,8 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
     }
     assert density_objective.source_relationship_ids == (density_id,)
     assert strength_objective.source_relationship_ids == (strength_id,)
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"

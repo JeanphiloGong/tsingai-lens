@@ -50,8 +50,8 @@ class _Registry:
 _REGISTRY_PATH = Path(__file__).with_name("registry.json")
 
 
-def _normalise(value: Any) -> str:
-    text = unicodedata.normalize("NFKC", str(value or ""))
+def _normalise(value: str | None) -> str:
+    text = unicodedata.normalize("NFKC", value if value is not None else "")
     text = re.sub(r"[\u2010-\u2015\u2212]", "-", text).casefold()
     text = "".join(
         character if character.isalnum() or character in "%+./-" else " "

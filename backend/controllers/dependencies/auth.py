@@ -1,33 +1,17 @@
-from __future__ import annotations
-
-from typing import Any
-
-from fastapi import HTTPException, Request
-
-from application.auth.session_service import SESSION_COOKIE_NAME, SessionNotFoundError
+from application.auth import session_service
+from application.auth.session_service import SESSION_COOKIE_NAME
+from fastapi import Request
+from utils.logger import bind_user_id
 
 
-def auth_required_detail() -> dict[str, str]:
-    return {
-        "code": "authentication_required",
-        "message": "Authentication is required.",
-    }
+async def get_current_user_id(request: Request) -> str:
+    user = await session_service.resolve_session(
+        request.cookies.get(SESSION_COOKIE_NAME)
+    )
+    request.state.current_user = user
+    request.state.user_id = user["user_id"]
+    bind_user_id(user["user_id"])
+    return user["user_id"]
 
 
-async def require_current_user(request: Request) -> dict[str, Any]:
-    current_user = getattr(request.state, "current_user", None)
-    if current_user:
-        return dict(current_user)
-    try:
-        return await request.app.state.auth_session_service.resolve_session(
-            request.cookies.get(SESSION_COOKIE_NAME)
-        )
-    except SessionNotFoundError as exc:
-        raise HTTPException(status_code=401, detail=auth_required_detail()) from exc
-
-
-async def current_user_id(request: Request) -> str:
-    return str((await require_current_user(request))["user_id"])
-
-
-__all__ = ["auth_required_detail", "current_user_id", "require_current_user"]
+__all__ = ["get_current_user_id"]

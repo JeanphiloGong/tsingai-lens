@@ -2,6 +2,13 @@
 
 This node owns the Collection route family.
 
+The Collection is the current research workspace boundary. Shared navigation
+keeps Overview, Papers, Objectives, and AI Copilot directly visible; Evidence Map,
+Feedback, and Settings live under More. Active routes expose `aria-current` and
+an underline. Objective list and detail routes use compact collection context.
+Findings remain inside their Objective results, with exact Source return context.
+The visual rules are documented in [DESIGN.md](../../../docs/DESIGN.md).
+
 ## Primary Routes
 
 - `collections/[id]/+page.svelte`
@@ -14,7 +21,12 @@ This node owns the Collection route family.
   collection-scoped Pipeline Run; queued/running progress survives navigation or refresh,
   disables duplicate submission, and refreshes Objectives at completion. A
   failed run exposes its error and restores the retry action. This phase does
-  not claim that Objective Evidence analysis has started.
+  not claim that Objective Evidence analysis has started. Objective query failures
+  remain visible through the page error state: an initial failure means unknown
+  availability, while a failed refresh preserves the previously loaded results.
+  Only a successful empty response establishes that there are no Objectives.
+  Collection changes clear prior results and ignore late responses from the old
+  collection; document preparation remains available during an Objective failure.
   The overview keeps a persistent four-stage research strip and, while paper
   preparation runs are queued or running, adds an aggregate progress bar with
   ready/total papers, active run count, and weighted run completion. It does
@@ -187,8 +199,12 @@ This node owns the Collection route family.
 ## Objective Interaction
 
 The maintained feedback task page opens one fixed task workbench and shows its
-sample queue. SFT and evaluation candidates are generated from the case's
-readable evidence; preference candidates use the original and corrected
+sample queue. SFT and evaluation candidates use the case's conversation and
+available evidence; Helpful answers can seed an unconfirmed SFT candidate.
+Paper excerpts are optional in all three editors and exports. Existing excerpts
+remain editable and traceable; missing excerpts alone never block confirmation.
+Captured conversation history is preserved when saving a first human revision.
+Preference candidates use the original and corrected
 answers when both exist. For SFT, the page keeps the question and readable evidence beside
 an editable candidate answer; saving appends a human revision and confirming
 binds that exact revision. A stale revision returns a conflict without losing
@@ -375,3 +391,12 @@ reader.
 
 Route components use helpers from `../_shared/`; they do not implement a second
 API client or normalize retired payloads.
+
+
+Conversation history supports renaming in both the Assistant sidebar and the
+embedded paper conversation. The shared dialog validates a nonblank, single-line
+name of at most 160 characters, preserves edits on request failure, and saves to
+the owned session API. Custom names take precedence over first-question previews
+on reload and after subsequent messages. Objective list and feedback workbench
+static labels follow the selected language; researcher input and source content
+are not translated.

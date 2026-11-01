@@ -1,48 +1,74 @@
 from __future__ import annotations
 
-from copy import deepcopy
+from application.chat.capabilities import objective_candidate
+
+from application.core.objectives.analysis import analysis_record_source
+
+import asyncio
 import json
+from copy import deepcopy
+from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-
+from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.capabilities.objective_candidate import (
+    CreateObjectiveCandidateCapability,
+    CreateObjectiveCandidateToolRequest,
+)
+from application.core.objectives import (
+    objective_authoring_service,
+    objective_candidate_service,
+)
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,
 )
-from application.core.objectives.objective_candidate_service import (
-    ObjectiveCandidateService,
-)
+from application.core.structured_extraction.json_support import StructuredOutputError
 from domain.core import PaperResearchMap
+from domain.core.research_objective import (
+    PaperResearchSourceRef,
+    build_paper_research_relationship,
+    build_paper_research_scope,
+)
+from pydantic import ValidationError
 
 
 @pytest.fixture
 def reading():
     factors = (("laser power",), ("scan speed",), ("laser power", "scan speed"))
     maps = tuple(
-        PaperResearchMap.from_mapping(
-            {
-                "document_id": name,
-                "doc_role": "experimental",
-                "studies": [
-                    {
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["LPBF"],
-                        "relationships": [
-                            {
-                                "varied_factors": list(varied),
-                                "outcome": "porosity",
-                                "confidence": 0.8,
-                                "source_refs": [
-                                    {"source_kind": "block", "source_ref": "abstract"}
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            }
+        PaperResearchMap(
+            document_id=name,
+            doc_role="experimental",
+            studies=(
+                build_paper_research_scope(
+                    document_id=name,
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=None,
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id=name,
+                            varied_factors=varied,
+                            outcome="porosity",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="abstract"
+                                ),
+                            ),
+                            confidence=0.8,
+                        ),
+                    ),
+                    confidence=0.0,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         )
         for name, varied in zip(("A", "B", "C"), factors)
     )
@@ -116,12 +142,13 @@ def model_client(payload, *, finish_reason="stop"):
         ),
         model="test-model",
     )
+    client.client.with_options = lambda **kwargs: client.client
     return client, requests
 
 
 def form(reading, client, **kwargs):
     maps, texts = reading
-    return ObjectiveCandidateService().propose_candidate_questions(
+    return objective_candidate_service.propose_candidate_questions(
         "collection",
         paper_maps=maps,
         source_texts=texts,
@@ -130,10 +157,74 @@ def form(reading, client, **kwargs):
     )
 
 
+@pytest.mark.parametrize("field", ["variables", "outcomes", "seed_document_ids"])
+def test_candidate_request_rejects_blank_scope_or_document_identity(field):
+    payload = {
+        "question": "How does laser power affect porosity?",
+        "variables": ["laser power"],
+        "outcomes": ["porosity"],
+        field: ["   "],
+    }
+    with pytest.raises(ValidationError):
+        CreateObjectiveCandidateToolRequest.model_validate(payload)
+
+
+def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
+    repository = SimpleNamespace(
+        create_authored_candidate=AsyncMock(
+            side_effect=lambda objective, **kwargs: objective
+        ),
+    )
+    objective_authoring_service.collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock(), get_document=AsyncMock()
+    )
+    objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
+    objective_candidate.objective_authoring_service = objective_authoring_service
+    capability = CreateObjectiveCandidateCapability()
+    request = CreateObjectiveCandidateToolRequest.model_validate(
+        {
+            "question": " How does laser power affect porosity? ",
+            "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"],
+            "variables": ["laser power", "Laser power"],
+            "outcomes": ["porosity"],
+            "constraints": ["LPBF", "lpbf"],
+            "seed_document_ids": ["Paper-A", "paper-a", "Paper-A"],
+            "excluded_document_ids": ["Paper-B", "paper-b", "Paper-B"],
+        }
+    )
+
+    result = asyncio.run(
+        capability.execute(
+            CapabilityExecutionContext(
+                session_id="chat-1",
+                user_id="user-1",
+                collection_id="col-1",
+                tool_call_id="call-1",
+            ),
+            request,
+        )
+    )
+
+    assert result.status.value == "succeeded"
+    objective = repository.create_authored_candidate.call_args.args[0]
+    assert objective.objective_id == "obj_how-does-laser-power-affect-porosity_e63c4889"
+    assert objective.material_scope == ("Ti-6Al-4V",)
+    assert objective.variables == ("laser power",)
+    assert objective.constraints == ("LPBF",)
+    assert objective.seed_document_ids == ("Paper-A", "paper-a")
+    assert objective.excluded_document_ids == ("Paper-B", "paper-b")
+    assert objective.origin == "chat_assisted"
+    assert objective.created_by_user_id == "user-1"
+    assert objective.created_by_tool_call_id == "call-1"
+    assert objective.active_analysis_version is None
+    assert objective.confirmation_status == "candidate"
+
+
 def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     reading, proposal
 ):
-    before = deepcopy([m.to_record() for m in reading[0]])
+    before = deepcopy(reading[0])
     client, requests = model_client(proposal)
     result = form(reading, client)
     assert len(result.candidates) == 1
@@ -143,7 +234,7 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     assert candidate.objective.outcomes == ("porosity",)
     assert candidate.objective.confirmation_status == "candidate"
     assert candidate.objective.active_analysis_version is None
-    assert [m.to_record() for m in reading[0]] == before
+    assert reading[0] == before
     for selection, original in zip(candidate.papers, reading[0]):
         assert selection.paper_map is original
         assert selection.source_texts == (
@@ -154,6 +245,31 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     assert (
         client.consume_last_trace()["prompt_version"]
         == "objective_question_formation.v2"
+    )
+
+
+def test_reading_question_preserves_case_distinct_paper_selections(reading, proposal):
+    maps, texts = reading
+    renamed = replace(
+        maps[1],
+        document_id="a",
+        studies=tuple(replace(study, document_id="a") for study in maps[1].studies),
+    )
+    renamed_texts = {
+        ("a" if document_id == "B" else document_id, source_ref): text
+        for (document_id, source_ref), text in texts.items()
+    }
+    proposal["proposals"][0]["papers"][1]["document_id"] = "a"
+    client, _ = model_client(proposal)
+
+    result = form(((maps[0], renamed, maps[2]), renamed_texts), client)
+
+    candidate = result.candidates[0]
+    assert candidate.objective.seed_document_ids == ("A", "a", "C")
+    assert tuple(paper.paper_map.document_id for paper in candidate.papers) == (
+        "A",
+        "a",
+        "C",
     )
 
 
@@ -169,7 +285,14 @@ def test_background_selection_survives_without_becoming_an_experimental_seed(
 
 def test_excerpts_can_justify_inspection_without_a_complete_map(reading, proposal):
     maps = tuple(
-        PaperResearchMap.from_mapping({"document_id": m.document_id})
+        PaperResearchMap(
+            document_id=m.document_id,
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+        )
         for m in reading[0]
     )
     client, _ = model_client(proposal)
@@ -248,7 +371,7 @@ def test_prompt_scopes_limitations_to_observed_comparisons(reading, proposal):
 @pytest.mark.parametrize(
     "payload,finish,exception",
     [
-        ("not json", "stop", RuntimeError),
+        ("not json", "stop", StructuredOutputError),
         ("{}", "length", StructuredOutputSaturatedError),
         (TimeoutError("provider timeout"), "stop", TimeoutError),
     ],
@@ -300,7 +423,15 @@ def test_invalid_input_never_reaches_the_model(reading, proposal, invalid):
         del texts["A", "abstract"]
     else:
         maps = tuple(
-            PaperResearchMap.from_mapping({"document_id": str(i)}) for i in range(13)
+            PaperResearchMap(
+                document_id=str(i),
+                doc_role="uncertain",
+                studies=(),
+                evidence_density="unknown",
+                confidence=0.0,
+                warnings=(),
+            )
+            for i in range(13)
         )
         texts = {(m.document_id, "abstract"): "Original abstract." for m in maps}
     client, requests = model_client(proposal)

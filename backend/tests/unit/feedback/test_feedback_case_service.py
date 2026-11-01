@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import pytest
+from dataclasses import replace
 
-from application.feedback.feedback_case_service import FeedbackCaseService
+import pytest
+from application.feedback import feedback_case_service
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
 from domain.feedback import (
@@ -12,7 +13,6 @@ from domain.feedback import (
     FeedbackCase,
 )
 
-
 pytestmark = pytest.mark.anyio
 
 
@@ -21,14 +21,16 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+class _CollectionRepository:
+    async def list_collections(self, user_id: str):
+        return (type("CollectionSummary", (), {"collection_id": "collection-1"})(),)
+
+
 class _Collections:
     async def get_collection_for_user(self, collection_id: str, user_id: str):
         if collection_id != "collection-1" or user_id != "user-1":
             raise FileNotFoundError("collection not found")
         return {"collection_id": collection_id}
-
-    async def list_collections(self, user_id: str):
-        return (type("CollectionSummary", (), {"collection_id": "collection-1"})(),)
 
 
 class _Chat:
@@ -68,8 +70,20 @@ class _Cases:
         return (self.result,) if self.result.result_id in result_ids else ()
 
     async def read_correction_signal_analysis_results(self, result_ids):
-        if self.signal_result is not None and self.signal_result.result_id in result_ids:
+        if (
+            self.signal_result is not None
+            and self.signal_result.result_id in result_ids
+        ):
             return (self.signal_result,)
+        return ()
+
+    async def read_tool_failure_analysis_results(self, result_ids):
+        return ()
+
+    async def read_annotation(self, case_id):
+        return None
+
+    async def read_review_decisions(self, case_id):
         return ()
 
 
@@ -115,18 +129,22 @@ def _fixture():
         suggested_target=None,
         evidence_coverage=EvidenceCoverage(
             requested_scope=({"document_id": "paper-a"}, {"document_id": "paper-b"}),
-            inspected_sources=({
-                "document_id": "paper-a",
-                "document_title": "Paper A",
-                "source_ref": "results",
-                "quote": "A result",
-            },),
-            omitted_candidates=({
-                "document_id": "paper-b",
-                "document_title": "Paper B",
-                "source_ref": "figure-3-caption",
-                "reason": "not_read",
-            },),
+            inspected_sources=(
+                {
+                    "document_id": "paper-a",
+                    "document_title": "Paper A",
+                    "source_ref": "results",
+                    "quote": "A result",
+                },
+            ),
+            omitted_candidates=(
+                {
+                    "document_id": "paper-b",
+                    "document_title": "Paper B",
+                    "source_ref": "figure-3-caption",
+                    "reason": "not_read",
+                },
+            ),
             gaps=("paper B caption was not inspected",),
             coverage_status="partial",
         ),
@@ -151,14 +169,14 @@ def _fixture():
 
 async def test_case_service_returns_user_readable_detail_and_summary() -> None:
     case, result, feedback, messages = _fixture()
-    service = FeedbackCaseService(
-        case_repository=_Cases(case, result),
-        chat_repository=_Chat(feedback, messages),
-        collection_service=_Collections(),
-    )
+    feedback_case_service.FeedbackCaseRepo = _Cases(case, result)
+    feedback_case_service.ChatRepo = _Chat(feedback, messages)
+    feedback_case_service.collection_service = _Collections()
+    feedback_case_service.CollectionRepo = _CollectionRepository()
+    service = feedback_case_service
 
-    summaries = await service.list_for_user(user_id="user-1", needs_human_review=True)
-    detail = await service.read_for_user(case.case_id, "user-1")
+    summaries = await service.list_feedback_cases_for_user(user_id="user-1", needs_human_review=True)
+    detail = await service.get_feedback_case_for_user(case.case_id, "user-1")
 
     assert summaries[0].problem_type == "source_missing"
     assert summaries[0].confidence == 0.87
@@ -175,17 +193,19 @@ async def test_case_service_returns_user_readable_detail_and_summary() -> None:
 
 async def test_case_service_hides_a_case_from_another_collection_owner() -> None:
     case, result, feedback, messages = _fixture()
-    service = FeedbackCaseService(
-        case_repository=_Cases(case, result),
-        chat_repository=_Chat(feedback, messages),
-        collection_service=_Collections(),
-    )
+    feedback_case_service.FeedbackCaseRepo = _Cases(case, result)
+    feedback_case_service.ChatRepo = _Chat(feedback, messages)
+    feedback_case_service.collection_service = _Collections()
+    feedback_case_service.CollectionRepo = _CollectionRepository()
+    service = feedback_case_service
 
     with pytest.raises(FileNotFoundError):
-        await service.read_for_user(case.case_id, "other-user")
+        await service.get_feedback_case_for_user(case.case_id, "other-user")
 
 
-async def test_case_service_exposes_message_correction_signal_without_claiming_target() -> None:
+async def test_case_service_exposes_message_correction_signal_without_claiming_target() -> (
+    None
+):
     case, result, feedback, messages = _fixture()
     challenge = ChatMessage.user(
         message_id="challenge-1",
@@ -212,20 +232,18 @@ async def test_case_service_exposes_message_correction_signal_without_claiming_t
         input_digest="b" * 64,
         created_at="2026-09-24T00:00:06+00:00",
     )
-    signal_case = FeedbackCase(
-        **{
-            **case.to_record(),
-            "source_signal_ids": (feedback.feedback_id, signal_result.signal_id),
-            "signal_analysis_result_ids": (signal_result.result_id,),
-        }
+    signal_case = replace(
+        case,
+        source_signal_ids=(feedback.feedback_id, signal_result.signal_id),
+        signal_analysis_result_ids=(signal_result.result_id,),
     )
-    service = FeedbackCaseService(
-        case_repository=_Cases(signal_case, result, signal_result),
-        chat_repository=_Chat(feedback, (*messages, challenge)),
-        collection_service=_Collections(),
-    )
+    feedback_case_service.FeedbackCaseRepo = _Cases(signal_case, result, signal_result)
+    feedback_case_service.ChatRepo = _Chat(feedback, (*messages, challenge))
+    feedback_case_service.collection_service = _Collections()
+    feedback_case_service.CollectionRepo = _CollectionRepository()
+    service = feedback_case_service
 
-    detail = await service.read_for_user(signal_case.case_id, "user-1")
+    detail = await service.get_feedback_case_for_user(signal_case.case_id, "user-1")
 
     correction = next(
         item

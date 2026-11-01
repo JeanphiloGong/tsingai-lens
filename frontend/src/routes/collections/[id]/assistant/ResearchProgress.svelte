@@ -21,14 +21,18 @@
 	$: actionSummary = actionNames.join(' · ');
 	$: actionCounts = getChatProgressActions(progress);
 	$: executionPlan = progress.execution_plan;
-	function progressLabel(value: ChatProgress) {
+	function progressLabel(value: ChatProgress, detailed = false) {
 		if (value.phase === 'model_retry') {
+			if (!detailed) return $t('researchAgent.progress.waiting');
 			return $t('researchAgent.progress.model_retry', {
 				attempt: value.retry_attempt ?? value.retry_count ?? 1,
 				seconds: Math.ceil((value.retry_delay_ms ?? 0) / 1000)
 			});
 		}
-		return $t(`researchAgent.progress.${value.phase}`, { cycle: value.cycle_index ?? 0 });
+		const label = $t(`researchAgent.progress.${value.phase}`);
+		return detailed && value.cycle_index !== undefined
+			? `${label} · ${$t('researchAgent.progress.cycle', { cycle: value.cycle_index })}`
+			: label;
 	}
 </script>
 
@@ -113,7 +117,7 @@
 				{@const current = index === historyEntries.length - 1}
 				<li class:current aria-current={current ? 'step' : undefined}>
 					{#if current}<LoaderCircle size={12} />{:else}<Check size={12} />{/if}
-					<span>{progressLabel(entry)}</span><small>{formatChatElapsed(entry.elapsed_ms)}</small>
+					<span>{progressLabel(entry, true)}</span><small>{formatChatElapsed(entry.elapsed_ms)}</small>
 				</li>
 			{/each}
 		</ol>

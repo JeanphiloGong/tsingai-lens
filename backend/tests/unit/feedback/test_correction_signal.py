@@ -1,31 +1,36 @@
 from __future__ import annotations
+from application.feedback import conversation_context
+
+from tests.support.feedback_workers import CorrectionAnalyzerFixture, CorrectionWorkerFixture
+
+from application.feedback import correction_signal_worker, worker_lease
+
+from application.feedback import analysis_handler, correction_signal_handler
 
 from dataclasses import replace
 from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-
+from application.chat import session_service as chat_session_service
 from application.chat.agent_runner import (
     AgentCompletionReason,
     AgentRunResult,
     AgentRunStatus,
 )
-from application.chat.session_service import ChatSessionService
-from application.feedback.correction_signal_handler import (
-    CorrectionSignalAnalysisDraft,
-    CorrectionSignalAnalysisHandler,
-)
-from application.feedback.correction_signal_worker import CorrectionSignalAnalysisWorker
-from application.repositories.analysis_job_repository import (
+from application.feedback.correction_signal_handler import CorrectionSignalAnalysisDraft
+from application.feedback.sample_builder_support import PreferenceSampleModelOutput
+from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
+from domain.feedback import is_correction_challenge
+from repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     AnalysisJob,
     correction_signal_idempotency_key,
 )
-from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
-from domain.feedback import is_correction_challenge
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.fixture
@@ -55,13 +60,33 @@ class _Jobs:
         self.job = job
         self.finished: tuple[str, str] | None = None
 
+    async def recover_expired_jobs(self, *, now):
+        return 0
+
+    async def read_job(self, job_id):
+        return self.job if self.job.job_id == job_id else None
+
+    async def renew_lease(self, **kwargs):
+        assert kwargs["worker_id"] == self.job.worker_id
+        assert kwargs["lease_version"] == self.job.lease_version
+        return self.job
+
     async def claim_next_correction_signal_analysis_job(self, now: str):
         if self.job.status != "pending":
             return None
-        self.job = replace(self.job, status="running", started_at=now, updated_at=now)
+        self.job = replace(
+            self.job,
+            status="running",
+            started_at=now,
+            updated_at=now,
+            worker_id="worker-1",
+            lease_version=1,
+        )
         return self.job
 
-    async def mark_succeeded(self, job_id: str, result_id: str, finished_at: str, **_lease):
+    async def mark_succeeded(
+        self, job_id: str, result_id: str, finished_at: str, **_lease
+    ):
         self.finished = ("succeeded", result_id)
         self.job = replace(
             self.job,
@@ -72,7 +97,9 @@ class _Jobs:
         )
         return self.job
 
-    async def mark_failed(self, job_id: str, error_code: str, finished_at: str, **_lease):
+    async def mark_failed(
+        self, job_id: str, error_code: str, finished_at: str, **_lease
+    ):
         self.finished = ("failed", error_code)
         self.job = replace(
             self.job,
@@ -83,7 +110,9 @@ class _Jobs:
         )
         return self.job
 
-    async def mark_cancelled(self, job_id: str, error_code: str, finished_at: str, **_lease):
+    async def mark_cancelled(
+        self, job_id: str, error_code: str, finished_at: str, **_lease
+    ):
         self.finished = ("cancelled", error_code)
         self.job = replace(
             self.job,
@@ -100,8 +129,9 @@ class _Cases:
         self.calls = []
 
     async def upsert_case_from_correction_signal(
-        self, result, *, context_snapshot, source_signal_ids, now
+        self, result, *, job, context_snapshot, source_signal_ids, now
     ):
+        await correction_signal_worker.AnalysisJobRepo.mark_succeeded(job_id=job.job_id, result_id=result.result_id, finished_at=now)
         self.calls.append(
             {
                 "result": result,
@@ -109,6 +139,7 @@ class _Cases:
                 "source_signal_ids": source_signal_ids,
             }
         )
+
 
 
 def _messages(*, trigger_text: str = "不对，图注里有预热信息。"):
@@ -179,14 +210,18 @@ def test_correction_signal_job_key_is_bounded_and_content_digest_is_canonicalize
 
 async def test_handler_accepts_surrounding_trigger_whitespace():
     messages = _messages(trigger_text="  不对，图注里有预热信息。  ")
-    handler = CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    handler = CorrectionAnalyzerFixture()
     result, _, _ = await handler.handle(_job(messages))
     assert result.signal_id == "correction_signal:challenge-1"
 
 
 async def test_handler_produces_unresolved_candidate_without_inventing_target():
     messages = _messages()
-    handler = CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    handler = CorrectionAnalyzerFixture()
     result, snapshot, source_ids = await handler.handle(_job(messages))
 
     assert result.signal_id == "correction_signal:challenge-1"
@@ -206,17 +241,22 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
     from domain.feedback import Dataset, DatasetSample, FeedbackCase
     from tests.unit.feedback.test_source_coverage import _trajectory
 
-    source_turn, _, _ = _trajectory(answer_message_id="answer-2", tool_request_message_id="read-after-challenge")
+    source_turn, _, _ = _trajectory(
+        answer_message_id="answer-2", tool_request_message_id="read-after-challenge"
+    )
     original = _messages()
     messages = original + (
         replace(source_turn[1], created_at="2026-09-25T00:00:04+00:00"),
         replace(source_turn[2], created_at="2026-09-25T00:00:05+00:00"),
-        replace(source_turn[3], content="Paper B was preheated at 200 C.",
-                created_at="2026-09-25T00:00:06+00:00"),
+        replace(
+            source_turn[3],
+            content="Paper B was preheated at 200 C.",
+            created_at="2026-09-25T00:00:06+00:00",
+        ),
     )
-    result, snapshot, _ = await CorrectionSignalAnalysisHandler(
-        chat_repository=_Chat(messages)
-    ).handle(_job(original))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    result, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(original))
     assert snapshot["corrected_answer"] == "Paper B was preheated at 200 C."
     assert snapshot["corrected_message_id"] == "answer-2"
     assert "answer-2" in result.related_message_ids
@@ -225,20 +265,45 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
     dataset = Dataset(
         "fdset-1", "collection-1", "Preference", "preference", {}, 1, "user-1"
     )
-    sample = DatasetSample.pending(sample_id="sample-1", dataset_id="fdset-1", source_case_id="case-1",
-                                   source_digest="a" * 64, active_job_id="job-1", now=now.isoformat())
-    case = FeedbackCase("case-1", "collection-1", "session-1", "answer-1", (), (), snapshot,
-                        "needs_annotation", now.isoformat(), now.isoformat())
+    sample = DatasetSample.pending(
+        sample_id="sample-1",
+        dataset_id="fdset-1",
+        source_case_id="case-1",
+        source_digest="a" * 64,
+        active_job_id="job-1",
+        now=now.isoformat(),
+    )
+    case = FeedbackCase(
+        "case-1",
+        "collection-1",
+        "session-1",
+        "answer-1",
+        (),
+        (),
+        snapshot,
+        "needs_annotation",
+        now.isoformat(),
+        now.isoformat(),
+    )
+
     class Generator:
         model_name = "preference-judge"
 
         async def generate(self, **inputs):
             assert inputs["snapshot"]["response_b"] == snapshot["corrected_answer"]
             assert inputs["context"][0]["text"] == "The exact passage."
-            return {"suggested_preference": "unclear", "rationale": "The passage does not establish a preferred answer."}
+            return PreferenceSampleModelOutput.model_validate(
+                {
+                    "suggested_preference": "unclear",
+                    "rationale": "The passage does not establish a preferred answer.",
+                }
+            )
 
     built = await PreferenceSampleBuilder(generator=Generator()).build(
-        dataset=dataset, sample=sample, case=case, annotation=None,
+        dataset=dataset,
+        sample=sample,
+        case=case,
+        annotation=None,
     )
     assert isinstance(built, PreferenceBuildCandidate)
     assert built.content.response_b == snapshot["corrected_answer"]
@@ -248,30 +313,47 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
 async def test_challenge_does_not_link_an_answer_from_a_later_question():
     original = _messages()
     messages = original + (
-        ChatMessage.user(message_id="next-question", session_id="session-1", content="Another question",
-                         created_at="2026-09-25T00:00:04+00:00"),
-        ChatMessage.assistant(message_id="next-answer", session_id="session-1", content="Unrelated answer",
-                              created_at="2026-09-25T00:00:05+00:00"),
+        ChatMessage.user(
+            message_id="next-question",
+            session_id="session-1",
+            content="Another question",
+            created_at="2026-09-25T00:00:04+00:00",
+        ),
+        ChatMessage.assistant(
+            message_id="next-answer",
+            session_id="session-1",
+            content="Unrelated answer",
+            created_at="2026-09-25T00:00:05+00:00",
+        ),
     )
-    _, snapshot, _ = await CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages)).handle(_job(original))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    _, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(original))
     assert not snapshot.get("corrected_answer")
 
 
-@pytest.mark.parametrize("trigger_text", [
-    "不对，改为只总结 B。",
-    "That's wrong. Only summarize B instead.",
-])
-async def test_challenge_changing_task_scope_does_not_form_a_preference_pair(trigger_text):
+@pytest.mark.parametrize(
+    "trigger_text",
+    [
+        "不对，改为只总结 B。",
+        "That's wrong. Only summarize B instead.",
+    ],
+)
+async def test_challenge_changing_task_scope_does_not_form_a_preference_pair(
+    trigger_text,
+):
     original = _messages(trigger_text=trigger_text)
     messages = original + (
         ChatMessage.assistant(
-            message_id="changed-task-answer", session_id="session-1",
-            content="B 的独立总结。", created_at="2026-09-25T00:00:04+00:00",
+            message_id="changed-task-answer",
+            session_id="session-1",
+            content="B 的独立总结。",
+            created_at="2026-09-25T00:00:04+00:00",
         ),
     )
-    _, snapshot, _ = await CorrectionSignalAnalysisHandler(
-        chat_repository=_Chat(messages)
-    ).handle(_job(original))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    _, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(original))
     assert snapshot["analysis"]["resolution"] == "task_scope_changed"
     assert not snapshot.get("corrected_answer")
 
@@ -281,7 +363,9 @@ async def test_task_assessment_blocks_scope_changes_without_keyword_matches(rela
     original = _messages(trigger_text="不对，先看 B 的腐蚀表现。")
     messages = original + (
         ChatMessage.assistant(
-            message_id="answer-2", session_id="session-1", content="B 的腐蚀表现。",
+            message_id="answer-2",
+            session_id="session-1",
+            content="B 的腐蚀表现。",
             created_at="2026-09-25T00:00:04+00:00",
         ),
     )
@@ -290,14 +374,17 @@ async def test_task_assessment_blocks_scope_changes_without_keyword_matches(rela
         async def analyze(self, **inputs):
             assert inputs["messages"] == original
             return CorrectionSignalAnalysisDraft(
-                problem_type="undetermined_dissatisfaction", confidence=0.2,
-                suggested_evidence=(), suggested_target=None,
-                task_relation=relation, task_relation_reason="Follow-up changes the outcome.",
+                problem_type="undetermined_dissatisfaction",
+                confidence=0.2,
+                suggested_evidence=(),
+                suggested_target=None,
+                task_relation=relation,
+                task_relation_reason="Follow-up changes the outcome.",
             )
 
-    _, snapshot, _ = await CorrectionSignalAnalysisHandler(
-        chat_repository=_Chat(messages), engine=Engine(),
-    ).handle(_job(original))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    _, snapshot, _ = await CorrectionAnalyzerFixture(engine=Engine()).handle(_job(original))
     assert snapshot["pairing_assessment"]["task_relation"] == relation
     assert not snapshot.get("corrected_message_id")
 
@@ -321,11 +408,13 @@ async def test_handler_keeps_selected_context_requested_until_a_read_is_verified
         replace(_messages()[0], source_contexts=(selected,)),
         *_messages()[1:],
     )
-    result, snapshot, _ = await CorrectionSignalAnalysisHandler(
-        chat_repository=_Chat(messages)
-    ).handle(_job(messages))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    result, snapshot, _ = await CorrectionAnalyzerFixture().handle(_job(messages))
 
-    assert result.evidence_coverage.requested_scope[0]["origin"] == "user_selected_context"
+    assert (
+        result.evidence_coverage.requested_scope[0]["origin"] == "user_selected_context"
+    )
     assert result.evidence_coverage.inspected_sources == ()
     assert result.evidence_coverage.coverage_status == "partial"
     assert result.evidence_coverage.omitted_candidates[0]["reason"] == (
@@ -337,9 +426,18 @@ async def test_handler_keeps_selected_context_requested_until_a_read_is_verified
 @pytest.mark.parametrize(
     ("mutate", "error"),
     [
-        (lambda messages: (*messages[:2], replace(messages[2], session_id="other")), "cross_session"),
+        (
+            lambda messages: (*messages[:2], replace(messages[2], session_id="other")),
+            "cross_session",
+        ),
         (lambda messages: (messages[0], messages[2], messages[1]), "order_invalid"),
-        (lambda messages: (*messages[:2], replace(messages[2], content="请继续比较")), "not_candidate"),
+        (
+            lambda messages: (
+                *messages[:2],
+                replace(messages[2], content="请继续比较"),
+            ),
+            "not_candidate",
+        ),
     ],
 )
 async def test_handler_rejects_cross_session_order_and_non_correction(
@@ -349,7 +447,9 @@ async def test_handler_rejects_cross_session_order_and_non_correction(
     messages = mutate(original)
     job = _job(original) if error == "order_invalid" else _job(messages)
     with pytest.raises(ValueError, match=error):
-        await CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages)).handle(
+        correction_signal_handler.ChatRepo = _Chat(messages)
+        analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+        await CorrectionAnalyzerFixture().handle(
             job
         )
 
@@ -358,14 +458,18 @@ async def test_handler_rejects_a_job_with_an_unbound_idempotency_key():
     messages = _messages()
     invalid = replace(_job(messages), idempotency_key="correction-signal:wrong")
     with pytest.raises(ValueError, match="identity_mismatch"):
-        await CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages)).handle(
+        correction_signal_handler.ChatRepo = _Chat(messages)
+        analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+        await CorrectionAnalyzerFixture().handle(
             invalid
         )
 
 
 async def test_correction_signal_result_cannot_claim_a_training_target():
     messages = _messages()
-    handler_result = CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages))
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    handler_result = CorrectionAnalyzerFixture()
     result, _, _ = await handler_result.handle(_job(messages))
 
     with pytest.raises(ValueError, match="training target"):
@@ -376,17 +480,21 @@ async def test_worker_persists_case_only_after_valid_signal_analysis():
     messages = _messages()
     jobs = _Jobs(_job(messages))
     cases = _Cases()
-    outcome = await CorrectionSignalAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages)),
-    ).run_once()
+    correction_signal_handler.ChatRepo = _Chat(messages)
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    correction_signal_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = correction_signal_worker.AnalysisJobRepo
+    correction_signal_worker.FeedbackCaseRepo = cases
+    outcome = await CorrectionWorkerFixture(handler=CorrectionAnalyzerFixture()).run_once()
 
     assert outcome.status == "succeeded"
     assert jobs.finished and jobs.finished[0] == "succeeded"
     assert len(cases.calls) == 1
     assert cases.calls[0]["result"].suggested_target is None
-    assert cases.calls[0]["context_snapshot"]["correction_signal"]["trigger_message_id"] == "challenge-1"
+    assert (
+        cases.calls[0]["context_snapshot"]["correction_signal"]["trigger_message_id"]
+        == "challenge-1"
+    )
 
 
 async def test_worker_cancels_when_trigger_disappears_instead_of_creating_case():
@@ -394,11 +502,12 @@ async def test_worker_cancels_when_trigger_disappears_instead_of_creating_case()
     jobs = _Jobs(_job(messages))
     cases = _Cases()
     chat = _Chat(messages[:-1])
-    outcome = await CorrectionSignalAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=CorrectionSignalAnalysisHandler(chat_repository=chat),
-    ).run_once()
+    correction_signal_handler.ChatRepo = chat
+    analysis_handler.ChatRepo = conversation_context.ChatRepo = correction_signal_handler.ChatRepo
+    correction_signal_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = correction_signal_worker.AnalysisJobRepo
+    correction_signal_worker.FeedbackCaseRepo = cases
+    outcome = await CorrectionWorkerFixture(handler=CorrectionAnalyzerFixture()).run_once()
 
     assert outcome.status == "cancelled"
     assert jobs.finished == ("cancelled", "correction_signal_withdrawn")
@@ -413,16 +522,16 @@ async def test_chat_turn_trigger_requires_adjacent_final_answer_and_deduplicates
         async def enqueue_correction_signal_analysis(self, **kwargs):
             captured.append(kwargs)
 
-    service = ChatSessionService(
-        collection_service=SimpleNamespace(),
-        source_artifact_repository=SimpleNamespace(),
-        repository=SimpleNamespace(),
-        runner=SimpleNamespace(),
-        analysis_job_repository=_SignalJobs(),
-    )
+    chat_session_service.collection_service = SimpleNamespace()
+    chat_session_service.SourceArtifactRepo = SimpleNamespace()
+    chat_session_service.ChatRepo = SimpleNamespace()
+    runner = SimpleNamespace()
+    chat_session_service.AnalysisJobRepo = _SignalJobs()
+    service = chat_session_service.ChatSessionService(runner=runner)
     result = AgentRunResult(
         status=AgentRunStatus.COMPLETED,
-        messages=messages + (
+        messages=messages
+        + (
             ChatMessage.assistant(
                 message_id="answer-2",
                 session_id="session-1",
@@ -438,16 +547,22 @@ async def test_chat_turn_trigger_requires_adjacent_final_answer_and_deduplicates
         collection_id="collection-1",
         created_at="2026-09-25T00:00:00+00:00",
     )
-    assert await service._enqueue_correction_signal_candidate(
-        session, previous_messages=messages[:2], result=result
-    ) is True
+    assert (
+        await service._enqueue_correction_signal_candidate(
+            session, previous_messages=messages[:2], result=result
+        )
+        is True
+    )
     assert len(captured) == 1
     assert captured[0]["anchor_message_id"] == "answer-1"
     assert captured[0]["trigger_message_id"] == "challenge-1"
 
     non_adjacent = replace(result, messages=(messages[0], messages[2], messages[1]))
-    assert await service._enqueue_correction_signal_candidate(
-        session,
-        previous_messages=(messages[0], messages[1]),
-        result=non_adjacent,
-    ) is None
+    assert (
+        await service._enqueue_correction_signal_candidate(
+            session,
+            previous_messages=(messages[0], messages[1]),
+            result=non_adjacent,
+        )
+        is None
+    )

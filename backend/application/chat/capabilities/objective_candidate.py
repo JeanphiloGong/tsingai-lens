@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from application.core.objectives import objective_authoring_service
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from domain.chat import ToolResultStatus
+from exceptions import RequestInvalidException, ResourceConflictException, ResourceNotFoundException
+
+from pydantic import ConfigDict, Field, field_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -13,7 +16,6 @@ from application.chat.capabilities.contracts import (
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
     ShortText,
-    normalize_terms,
 )
 from application.chat.capabilities.objective_derivation import (
     ObjectiveDerivationBasis,
@@ -36,21 +38,8 @@ class CreateObjectiveCandidateToolRequest(ObjectiveDraftInput):
     @field_validator("seed_document_ids", "excluded_document_ids")
     @classmethod
     def _normalize_document_ids(cls, values: list[str]) -> list[str]:
-        return normalize_terms(values)
+        return list(dict.fromkeys(values))
 
-    @model_validator(mode="after")
-    def _validate_derivation_lineage(self) -> "CreateObjectiveCandidateToolRequest":
-        if (self.parent_objective_id is None) != (
-            self.parent_analysis_version is None
-        ):
-            raise ValueError(
-                "derived Objective candidate requires parent objective and analysis version"
-            )
-        if self.derivation_basis and self.parent_objective_id is None:
-            raise ValueError(
-                "derived Objective candidate basis requires a parent Objective"
-            )
-        return self
 
 
 class CreateObjectiveCandidateCapability:
@@ -70,23 +59,28 @@ class CreateObjectiveCandidateCapability:
         input_model=CreateObjectiveCandidateToolRequest,
     )
 
-    def __init__(self, *, objective_authoring_service: Any) -> None:
-        self.objective_authoring_service = objective_authoring_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateObjectiveCandidateToolRequest,
     ) -> ChatToolResult:
-        objective = await self.objective_authoring_service.create_chat_assisted_candidate(
-            collection_id=context.collection_id,
-            user_id=context.user_id,
-            tool_call_id=context.tool_call_id,
-            **arguments.model_dump(),
-        )
+        try:
+            objective = await objective_authoring_service.create_chat_assisted_candidate(
+                collection_id=context.collection_id,
+                user_id=context.user_id,
+                tool_call_id=context.tool_call_id,
+                **arguments.model_dump(),
+            )
+        except (RequestInvalidException, ResourceConflictException, ResourceNotFoundException) as exc:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="objective_candidate_rejected",
+                error_message=f"{exc.message} Check the question, single outcome and current published derivation basis.",
+                data=exc.data or {},
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": objective.objective_id,
                 "confirmation_status": objective.confirmation_status,

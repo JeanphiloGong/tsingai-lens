@@ -10,6 +10,7 @@ import tiktoken
 from openai import LengthFinishReasonError
 from pydantic import BaseModel, ValidationError
 
+from application.core.structured_extraction.json_support import StructuredOutputError
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
@@ -22,7 +23,6 @@ from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionsModelOutput,
     ObjectiveSourceExtractor,
     RequestedContextFactsModelOutput,
-    _normalize_objective_evidence_payload,
     _objective_evidence_repair_instruction,
     build_objective_evidence_prompt,
 )
@@ -31,6 +31,8 @@ from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchResult,
     build_objective_paper_frame_prompt,
 )
+from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.source_validation import validate_source_fact
 from application.core.objectives.discovery.axis_equivalence import (
     AxisCanonicalizationPlanModelOutput,
     ResearchAxisEquivalenceClassifier,
@@ -56,8 +58,8 @@ from application.core.paper_facts.extraction import (
     TableMatrixRepairModelOutput,
     build_table_matrix_repair_prompt,
 )
-from application.repositories.pipeline_run_repository import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
+from infra.execution_stats import ModelUsage, TokenUsage
 
 
 def test_paper_research_map_contract_bounds_model_output():
@@ -178,6 +180,16 @@ def test_paper_map_rejects_unknown_enum_values_instead_of_downgrading_them(
         response_model.model_validate({field_name: value})
 
 
+@pytest.mark.parametrize("confidence", [None, "0.6", True, -0.1, 1.1])
+def test_paper_map_rejects_invalid_confidence_at_extractor(confidence):
+    client = _FakeOpenAIClient(json.dumps({"confidence": confidence}))
+    with pytest.raises(ValidationError):
+        PaperResearchMapExtractor(_response_client(client)).extract(
+            {"document_id": "paper-1", "source_units": []}
+        )
+    assert len(client.chat.completions.calls) == 2
+
+
 def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_lineage():
     client = _FakeOpenAIClient(
         json.dumps(
@@ -290,7 +302,7 @@ def test_paper_research_map_contract_represents_bounded_preliminary_scope():
 
 
 def test_paper_research_map_contract_bounds_diagnostic_warnings():
-    parsed = StructuredPaperResearchMap.model_validate(
+    parsed = ExperimentalPaperMapModelOutput.model_validate(
         {"warnings": ["w" * 241, "second", "third"]}
     )
 
@@ -324,9 +336,22 @@ def test_paper_research_map_contract_bounds_diagnostic_warnings():
         },
     ],
 )
-def test_paper_research_map_contract_rejects_duplicate_source_unit_ids(payload):
-    with pytest.raises(ValidationError, match="source-unit ids must be unique"):
-        StructuredPaperResearchMap.model_validate(payload)
+def test_paper_research_map_contract_rejects_duplicate_source_labels(payload):
+    with pytest.raises(ValidationError, match="Source labels must be unique"):
+        if "studies" in payload:
+            relationship = payload["studies"][0]["relationships"][0]
+            relationship["factor_assertions"] = [{
+                "label": relationship.pop("varied_factors")[0], "role": "varied",
+                "source_labels": ["S1"],
+            }]
+            relationship.pop("source_unit_ids")
+            relationship["source_labels"] = ["S1", "S1"]
+        else:
+            signal = payload["unresolved_signals"][0]
+            signal.pop("source_unit_ids")
+            signal["source_labels"] = ["S1", "S1"]
+            signal["variable_role"] = "varied"
+        ExperimentalPaperMapModelOutput.model_validate(payload)
 
 
 def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
@@ -945,6 +970,36 @@ def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning()
     assert result.confidence == 0.9
 
 
+@pytest.mark.parametrize("confidence", [None, "0.6", True, -0.1, 1.1])
+def test_document_profile_rejects_invalid_confidence_with_bounded_attempts(confidence):
+    client = _FakeOpenAIClient(
+        json.dumps({"doc_type": "experimental", "confidence": confidence})
+    )
+    extractor = _document_profile_extractor(client)
+
+    with pytest.raises(DocumentProfileExtractionError):
+        extractor.extract_document_profile(
+            {
+                "title": "LPBF paper",
+                "abstract_or_lead_text": "Laser power versus porosity.",
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 2
+    assert extractor.consume_last_trace()["trace_status"] == "failed"
+
+
+def test_document_profile_omitted_confidence_uses_contract_default():
+    client = _FakeOpenAIClient('{"doc_type":"uncertain"}')
+    result = _document_profile_extractor(client).extract_document_profile(
+        {"title": "LPBF paper"}
+    )
+
+    assert result.confidence == 0.0
+    assert result.profile_warnings == []
+    assert len(client.chat.completions.calls) == 1
+
+
 def test_document_profile_retry_includes_the_invalid_output_it_must_correct():
     client = _FakeOpenAIClient(
         [
@@ -1225,7 +1280,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
     invalid_output = "classification: experimental"
     extractor = _response_client(_FakeOpenAIClient(invalid_output))
 
-    with pytest.raises(RuntimeError, match="returned no JSON object"):
+    with pytest.raises(ValueError, match="returned no JSON object"):
         extractor.complete(
             system_prompt="Return structured axis decisions.",
             user_prompt="No Source content is needed for this transport test.",
@@ -1237,7 +1292,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["trace_status"] == "failed"
-    assert trace["error_type"] == "RuntimeError"
+    assert trace["error_type"] == "StructuredOutputError"
     assert trace["error"] == "structured extraction returned no JSON object"
     assert trace["raw_output"] == invalid_output
     assert trace["attempts"] == [
@@ -1246,7 +1301,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
             "finish_reason": "stop",
             "response_chars": len(invalid_output),
             "response_preview": invalid_output,
-            "error_type": "RuntimeError",
+            "error_type": "StructuredOutputError",
             "error": "structured extraction returned no JSON object",
         },
         {
@@ -1254,7 +1309,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
             "finish_reason": "stop",
             "response_chars": len(invalid_output),
             "response_preview": invalid_output,
-            "error_type": "RuntimeError",
+            "error_type": "StructuredOutputError",
             "error": "structured extraction returned no JSON object",
         },
     ]
@@ -1466,10 +1521,14 @@ def test_paper_research_map_downgrades_descriptive_factor_clause_to_unresolved_o
                 "claim_scope": "current_work",
                 "relationships": [
                     {
-                        "varied_factors": [
-                            "microstructural features including grain morphology, "
-                            "phase distribution, and crystallographic texture from "
-                            "pole figures"
+                        "factor_assertions": [
+                            {
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                                "label": "microstructural features including grain morphology, "
+                                "phase distribution, and crystallographic texture from "
+                                "pole figures",
+                            }
                         ],
                         "outcome": "alpha phase fraction",
                         "source_labels": ["S1"],
@@ -1515,25 +1574,49 @@ def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_los
                 "process_context": ["post-build annealing"],
                 "relationships": [
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                            }
+                        ],
                         "outcome": "microstructure",
                         "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S2"],
+                            }
+                        ],
                         "outcome": "strength and ductility of SLMed Ti-6Al-4V",
                         "source_labels": ["S2"],
                         "confidence": 0.86,
                     },
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S3"],
+                            }
+                        ],
                         "outcome": "mechanical property combination",
                         "source_labels": ["S3"],
                         "confidence": 0.81,
                     },
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S4"],
+                            }
+                        ],
                         "outcome": (
                             "microstructure (grain size, shape, phase fraction, "
                             "composition)"
@@ -2193,6 +2276,21 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
     assert "different processing stages" in prompt
 
 
+@pytest.mark.parametrize("response", [
+    {"decisions": [{"pair_id": "pair-1", "equivalent": "false"}]},
+    {"decisions": [{"pair_id": "pair-1", "equivalent": 0}]},
+    {"decisions": None},
+])
+def test_axis_classifier_rejects_invalid_response_types(response):
+    client = _FakeOpenAIClient(json.dumps(response))
+    classifier = ResearchAxisEquivalenceClassifier(_response_client(client))
+
+    with pytest.raises(ValidationError):
+        classifier.classify({"axis_pairs": [{"pair_id": "pair-1", "axis_type": "variable", "left": "laser power", "right": "scan speed"}]})
+
+    assert len(client.chat.completions.calls) == 2
+
+
 def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
     invalid = json.dumps(
         {
@@ -2312,6 +2410,32 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
     assert "source_accounting_origin" not in frame_schema["properties"]
     assert "source_accounting_errors" not in frame_schema["properties"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("relevance", "INVALID"), ("relevance", None), ("paper_role", "other"),
+    ("changed_variables", None), ("relevant_source_labels", None),
+])
+def test_objective_paper_frame_rejects_invalid_model_fields(field, value):
+    response = {"relevance": "uncertain", "relevant_source_labels": ["S1"], field: value}
+    client = _FakeOpenAIClient(json.dumps(response))
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceScreener(_response_client(client)).screen_batch({
+            "source_units": [{"source_unit_id": "source-1", "source_kind": "section", "source_ref": "methods", "text": "Laser power was varied."}]
+        })
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_objective_paper_frame_keeps_explicit_scientific_uncertainty():
+    client = _FakeOpenAIClient(json.dumps({"relevance": "uncertain", "paper_role": "uncertain", "relevant_source_labels": ["S1"]}))
+    frame = ObjectiveSourceScreener(_response_client(client)).screen_batch({
+        "source_units": [{"source_unit_id": "source-1", "source_kind": "section", "source_ref": "methods", "text": "The outcome is unclear."}]
+    })
+
+    assert frame.relevance == frame.paper_role == "uncertain"
+    assert frame.relevant_source_unit_ids == ["source-1"]
 
 
 def test_objective_paper_frame_preserves_more_than_eight_explicit_outcomes():
@@ -2578,6 +2702,64 @@ def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
         )
 
     assert len(client.chat.completions.calls) == 2
+
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+def test_objective_paper_frame_rejects_extra_confidence_in_both_parse_modes(extraction_mode):
+    response = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": [],
+        "confidence": 0.9,
+    }
+    client = _FakeOpenAIClient(json.dumps(response), parsed=response)
+    extractor = StructuredResponseClient(
+        client=client, model="fake-model", extraction_mode=extraction_mode,
+    )
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "source_units": [{"source_unit_id": "results-1", "source_kind": "section", "source_ref": "results", "text": "Ti-6Al-4V porosity changed with laser power."}],
+    }
+
+    with pytest.raises(ValidationError, match="confidence"):
+        ObjectiveSourceScreener(extractor).screen_batch(payload)
+
+    assert len(client.beta.chat.completions.calls) == (extraction_mode == "provider_parse")
+    assert len(client.chat.completions.calls) == 2
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "failed"
+    assert len(trace["attempts"]) == 2
+    assert all(attempt["error_type"] == "ValidationError" for attempt in trace["attempts"])
+    assert all('"confidence": 0.9' in attempt["response_preview"] for attempt in trace["attempts"])
+
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+def test_objective_paper_frame_accepts_model_correction_of_extra_confidence(extraction_mode):
+    corrected = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": [],
+    }
+    invalid = {**corrected, "confidence": 0.9}
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(corrected)], parsed=invalid)
+    extractor = StructuredResponseClient(
+        client=client, model="fake-model", extraction_mode=extraction_mode,
+    )
+
+    frame = ObjectiveSourceScreener(extractor).screen_batch({
+        "objective": {"question": "How does laser power affect porosity?"},
+        "source_units": [{"source_unit_id": "results-1", "source_kind": "section", "source_ref": "results", "text": "Ti-6Al-4V porosity changed with laser power."}],
+    })
+
+    assert frame.relevant_source_unit_ids == ["results-1"]
+    assert frame.source_accounting_origin == "model"
+    assert len(client.chat.completions.calls) == 2
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "available"
+    assert trace["attempts"][0]["error_type"] == "ValidationError"
+    assert "error_type" not in trace["attempts"][1]
 
 
 def test_provider_parsed_objective_paper_frame_repairs_omission(
@@ -3011,6 +3193,52 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 3072
 
 
+@pytest.mark.parametrize("has_result", [True, False])
+def test_parsed_source_fact_keeps_no_change_and_context_only_meanings(has_result):
+    text = (
+        "The elongation remained unchanged at 12% for Ti-6Al-4V."
+        if has_result else "All specimens used Ti-6Al-4V."
+    )
+    extraction = {
+        "evidence_role": "direct_result" if has_result else "condition_context",
+        "reported_result": {
+            "outcome": "elongation", "value": 12, "unit": "%",
+            "direction": "unknown", "result_text": text,
+        } if has_result else None,
+        "scientific_context": {"material": [{"name": "alloy", "value": "Ti-6Al-4V"}]},
+        "attribution_scope": "descriptive_only" if has_result else "not_attributable",
+    }
+    source = {"source_kind": "text_window", "source_ref": "results-1", "text": text}
+    client = _FakeOpenAIClient(json.dumps({"extractions": [extraction]}))
+    parsed = ObjectiveSourceExtractor(_response_client(client)).extract_source({
+        "objective": {"question": "How does laser power affect elongation?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "results-1"},
+        "source": source,
+    })
+    route = EvidenceCandidate(
+        objective_id="objective-1", document_id="paper-1",
+        source_kind="text_window", source_ref="results-1", role="current_experimental_evidence",
+        extractable=True, reason=None, table_schema={}, column_roles={}, join_plan={}, confidence=0.8,
+    )
+
+    facts = validate_source_fact(
+        route=route, source=source, objective_context=None,
+        extracted_record=parsed.extractions[0].model_dump(),
+    )
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact["objective_id"] == "objective-1"
+    assert fact["document_id"] == "paper-1"
+    assert fact["source_refs"][0]["source_ref"] == "results-1"
+    if has_result:
+        assert fact["reported_result"]["direction"] == "no_change"
+        assert fact["reported_result"]["value"] == 12
+    else:
+        assert fact["reported_result"] is None
+        assert fact["scientific_context"]["material"][0]["value"] == "Ti-6Al-4V"
+
+
 def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
     client = _FakeOpenAIClient('{"extractions":[]}')
     extractor = _response_client(client)
@@ -3039,52 +3267,119 @@ def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
     assert client.chat.completions.calls == []
 
 
-def test_structured_objective_evidence_normalizes_compact_context_attributes():
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"material": ["316L stainless steel"]},
+        {"sample": [{"name": "cylindrical specimen", "shape": "cylindrical"}]},
+        {"process": [{"name": "hatch spacing", "value": [0.12, 0.111], "unit": "mm"}]},
+        {"test": [{"name": "density measurement", "method": "Archimedes"}]},
+    ],
+)
+def test_structured_objective_evidence_rejects_compact_context_attributes(context):
+    with pytest.raises(ValidationError):
+        EvidenceContextModelOutput.model_validate(context)
+
+
+def test_structured_objective_evidence_preserves_explicit_context_attributes():
     context = EvidenceContextModelOutput.model_validate(
         {
-            "material": ["316L stainless steel"],
-            "sample": [
-                {
-                    "name": "cylindrical specimen",
-                    "shape": "cylindrical",
-                    "size": "10 mm diameter x 10 mm height",
-                }
-            ],
-            "process": [
-                {
-                    "name": "hatch spacing",
-                    "value": [0.12, 0.111],
-                    "unit": "mm",
-                }
-            ],
+            "material": [{"name": "alloy", "value": "316L stainless steel"}],
+            "process": [{"name": "hatch spacing", "value": 0.12, "unit": "mm"}],
             "test": [
                 {
-                    "name": "density measurement",
-                    "method": "Archimedes",
+                    "name": "method",
+                    "value": "Archimedes",
+                    "context_scope": "experimental",
                 }
             ],
         }
     )
+    assert context.material[0].value == "316L stainless steel"
+    assert context.process[0].value == 0.12
+    assert context.process[0].unit == "mm"
+    assert context.test[0].context_scope == "experimental"
 
-    assert context.material[0].model_dump() == {
-        "name": "material",
-        "value": "316L stainless steel",
-        "unit": None,
-        "context_scope": "unknown",
-        "applies_to_outcomes": [],
+
+@pytest.mark.parametrize("response", [
+    {"extractions": None},
+    {"extractions": [{"evidence_role": "INVALID"}]},
+    {"extractions": [{"evidence_role": "current_experimental_evidence", "scientific_context": {"material": [{"name": "alloy", "value": "Ti-6Al-4V"}]}}]},
+    {"extractions": [{"evidence_role": "condition_context", "confidence": None}]},
+    {"extractions": [{"evidence_role": "condition_context", "confidence": "0.8"}]},
+    {"extractions": [{"evidence_role": "condition_context", "scientific_context": {"material": ["Ti-6Al-4V"]}}]},
+    {"extractions": [{"evidence_role": "direct_result", "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured.", "result_kind": "INVALID"}}]},
+    {"extractions": [{"evidence_role": "condition_context", "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": "false"}}]},
+])
+def test_evidence_extractor_rejects_invalid_output_types(response):
+    client = _FakeOpenAIClient(json.dumps(response))
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "block-1"},
+        "source": {"source_kind": "text_window", "source_ref": "block-1", "text": "Ti-6Al-4V porosity was measured."},
     }
-    assert json.loads(str(context.sample[0].value)) == {
-        "shape": "cylindrical",
-        "size": "10 mm diameter x 10 mm height",
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceExtractor(_response_client(client)).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
+
+
+@pytest.mark.parametrize("response", [
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": None, "scientific_context": {"material": [{"name": "alloy", "value": "Ti-6Al-4V"}]}}]},
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 100, "unknown_field": "value"}], "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": True}, "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."}}]},
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 140}], "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": None, "comparable": True}, "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."}, "attribution_scope": "isolated_effect"}]},
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 100}], "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": "true"}, "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."}}]},
+    {"extractions": [], "SOURCE": "echoed source"},
+])
+def test_evidence_extractor_does_not_hide_invalid_data_during_semantic_repair(response):
+    client = _FakeOpenAIClient(json.dumps(response))
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "block-1"},
+        "source": {"source_kind": "text_window", "source_ref": "block-1", "text": "Ti-6Al-4V porosity was measured."},
     }
-    assert json.loads(str(context.process[0].value)) == [0.12, 0.111]
-    assert json.loads(str(context.test[0].value)) == {"method": "Archimedes"}
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceExtractor(_response_client(client)).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("evidence_role", ["direct_result"]),
+    ("evidence_role", {"role": "direct_result"}),
+    ("evidence_role", "INVALID"),
+    ("attribution_scope", "INVALID"),
+    ("resolution_status", "INVALID"),
+    ("comparison", {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": False}),
+    ("comparison", {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": True, "incomparability_reasons": ["different test conditions"]}),
+    ("changed_variables", [{"name": "power", "baseline_value": 100, "target_value": 100}] * 2),
+    ("changed_variables", [{"name": f"factor-{index}", "baseline_value": 100, "target_value": 100} for index in range(13)]),
+])
+def test_evidence_extractor_preserves_rejections_when_removing_fixed_variables(field, value):
+    extraction = {
+        "evidence_role": "direct_result",
+        "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 100}],
+        "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": True},
+        "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."},
+        "attribution_scope": "isolated_effect",
+    }
+    extraction[field] = value
+    client = _FakeOpenAIClient(json.dumps({"extractions": [extraction]}))
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "block-1"},
+        "source": {"source_kind": "text_window", "source_ref": "block-1", "text": "Ti-6Al-4V porosity was measured."},
+    }
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceExtractor(_response_client(client)).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
 
 
 def test_structured_objective_evidence_rejects_single_variable_joint_effect():
     with pytest.raises(
         ValidationError,
-        match="joint effect requires multiple changed variables",
+        match="joint effect requires at least two changed variables",
     ):
         EvidenceExtractionModelOutput.model_validate(
             {
@@ -3121,7 +3416,7 @@ def test_structured_objective_evidence_rejects_single_variable_joint_effect():
 def test_structured_objective_evidence_rejects_repeated_variable_intervals():
     with pytest.raises(
         ValidationError,
-        match="changed variable names must be unique per extraction",
+        match="objective evidence changed variables must be unique",
     ):
         EvidenceExtractionModelOutput.model_validate(
             {
@@ -3198,7 +3493,7 @@ def test_structured_objective_evidence_rejects_unbound_experimental_attribution(
         )
 
 
-def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
+def test_domain_model_extractors_rejects_top_level_prompt_echo_for_evidence():
     response = json.dumps(
         {
             "extractions": [
@@ -3224,9 +3519,10 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
             "SOURCE": "Relative density reached 99.5%.",
         }
     )
-    extractor = _response_client(_FakeOpenAIClient(response))
+    client = _FakeOpenAIClient(response)
+    extractor = _response_client(client)
 
-    parsed = ObjectiveSourceExtractor(extractor).extract_source(
+    payload = (
         {
             "objective": {
                 "question": "How does energy density affect relative density?"
@@ -3243,8 +3539,9 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
         }
     )
 
-    assert len(parsed.extractions) == 1
-    assert parsed.extractions[0].reported_result is not None
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ObjectiveSourceExtractor(extractor).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
 
 
 def test_objective_evidence_retries_direct_result_missing_reported_result():
@@ -3376,7 +3673,7 @@ def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
     client = _FakeOpenAIClient(response)
     extractor = _response_client(client)
 
-    with pytest.raises(ValueError, match="echoed input fields"):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ObjectiveSourceExtractor(extractor).extract_source(
             {
                 "objective": {
@@ -3908,7 +4205,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
     assert parsed.extractions[0].comparison is not None
     assert len(client.chat.completions.calls) == 3
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "experimental attribution requires comparison" in repair_prompt
+    assert "experimental attribution requires a comparable comparison" in repair_prompt
     invalid_item = json.dumps(
         json.loads(invalid)["extractions"][0],
         ensure_ascii=False,
@@ -3935,7 +4232,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
     assert still_invalid_item in second_repair_prompt
 
 
-def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_repair():
+def test_objective_evidence_retries_fixed_factor_and_preserves_reported_context():
     invalid = json.dumps(
         {
             "extractions": [
@@ -3976,7 +4273,15 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
             ]
         }
     )
-    client = _FakeOpenAIClient(invalid)
+    corrected = json.loads(invalid)
+    extraction = corrected["extractions"][0]
+    extraction["changed_variables"] = extraction["changed_variables"][:1]
+    extraction["comparison"]["axis_names"] = ["laser power"]
+    extraction["attribution_scope"] = "isolated_effect"
+    extraction["scientific_context"] = {"process": [
+        {"name": "scan speed", "value": 100, "unit": "mm/s"}
+    ]}
+    client = _FakeOpenAIClient([invalid, json.dumps(corrected)])
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -4009,10 +4314,11 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
     assert parsed.extractions[0].attribution_scope == "isolated_effect"
     assert parsed.extractions[0].comparison is not None
     assert parsed.extractions[0].comparison.axis_names == ["laser power"]
-    assert len(client.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 2
+    assert parsed.extractions[0].scientific_context.process[0].value == 100
 
 
-def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variables():
+def test_objective_evidence_retries_missing_comparison_axes():
     response = json.dumps(
         {
             "extractions": [
@@ -4047,7 +4353,9 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
             ]
         }
     )
-    client = _FakeOpenAIClient(response)
+    corrected = json.loads(response)
+    corrected["extractions"][0]["comparison"]["axis_names"] = ["laser power"]
+    client = _FakeOpenAIClient([response, json.dumps(corrected)])
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -4077,7 +4385,7 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
     comparison = parsed.extractions[0].comparison
     assert comparison is not None
     assert comparison.axis_names == ["laser power"]
-    assert len(client.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -4098,7 +4406,7 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
     ),
     ids=("all-variables-are-fixed", "model-returned-no-axis"),
 )
-def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
+def test_objective_evidence_retries_axisless_result_without_rewriting_it(
     changed_variables,
     axis_names,
 ):
@@ -4129,7 +4437,12 @@ def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
             ]
         }
     )
-    client = _FakeOpenAIClient(response)
+    corrected = json.loads(response)
+    extraction = corrected["extractions"][0]
+    extraction["changed_variables"] = []
+    extraction["comparison"] = None
+    extraction["attribution_scope"] = "descriptive_only"
+    client = _FakeOpenAIClient([response, json.dumps(corrected)])
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -4156,7 +4469,7 @@ def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
     assert extraction.comparison is None
     assert extraction.attribution_scope == "descriptive_only"
     assert extraction.reported_result is not None
-    assert len(client.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 2
 
 
 @pytest.mark.parametrize("baseline_value", (None, "", [], {}))
@@ -4179,12 +4492,11 @@ def test_objective_evidence_does_not_invent_axes_for_incomplete_variables(
         ]
     }
 
-    normalized = _normalize_objective_evidence_payload(payload)
+    with pytest.raises(ValidationError):
+        EvidenceExtractionsModelOutput.model_validate(payload)
 
-    assert normalized == payload
 
-
-def test_objective_evidence_demotes_unbound_experimental_result_without_repair():
+def test_objective_evidence_rejects_unbound_experimental_result():
     payload = {
         "extractions": [
             {
@@ -4218,18 +4530,8 @@ def test_objective_evidence_demotes_unbound_experimental_result_without_repair()
         ]
     }
 
-    normalized = _normalize_objective_evidence_payload(payload)
-
-    extraction = normalized["extractions"][0]
-    assert extraction["attribution_scope"] == "association_only"
-    assert extraction["resolution_status"] == "partial"
-    assert extraction["changed_variables"] == payload["extractions"][0][
-        "changed_variables"
-    ]
-    assert extraction["comparison"] == payload["extractions"][0]["comparison"]
-    assert extraction["reported_result"] == payload["extractions"][0][
-        "reported_result"
-    ]
+    with pytest.raises(ValidationError):
+        EvidenceExtractionsModelOutput.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -4261,9 +4563,8 @@ def test_objective_evidence_does_not_normalize_invalid_fixed_endpoints(
         ]
     }
 
-    normalized = _normalize_objective_evidence_payload(payload)
-
-    assert normalized == payload
+    with pytest.raises(ValidationError):
+        EvidenceExtractionsModelOutput.model_validate(payload)
 
 
 def test_objective_evidence_repair_prompt_requires_role_result_consistency():
@@ -4315,11 +4616,22 @@ def test_objective_evidence_repair_prompt_requires_role_result_consistency():
     assert "A fixed control does not make the comparison incomparable" in repair_prompt
 
 
-def test_table_repair_normalizes_null_optional_output_containers():
-    client = _FakeOpenAIClient(
-        '{"repaired_table_matrix":null,"repairs":null,"warnings":null,"confidence":null}'
-    )
+@pytest.mark.parametrize("payload", [
+    {"repaired_table_matrix": None}, {"repairs": None}, {"warnings": None},
+    {"confidence": None}, {"confidence": "0.8"}, {"confidence": True},
+    {"repaired_table_matrix": [["Sample", 560]]}, {"repairs": [{"row_index": "1"}]},
+])
+def test_table_repair_rejects_invalid_output_types(payload):
+    client = _FakeOpenAIClient(json.dumps(payload))
 
+    with pytest.raises(ValidationError):
+        _paper_facts_extractor(client).repair_table_matrix({"source": {}})
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_table_repair_uses_defaults_only_for_omitted_fields():
+    client = _FakeOpenAIClient('{"repaired_table_matrix":[]}')
     repaired = _paper_facts_extractor(client).repair_table_matrix({"source": {}})
 
     assert repaired.model_dump() == {
@@ -4347,7 +4659,7 @@ def test_table_repair_rejects_unknown_extra_keys_after_bounded_retry():
 def test_table_repair_falls_back_to_json_when_provider_parse_is_unavailable():
     client = _FakeOpenAIClient(
         '{"repaired_table_matrix":[["Sample","Strength (MPa)"],["A","560"]]}',
-        parse_error=RuntimeError("provider parse unavailable"),
+        parse_error=StructuredOutputError("invalid provider output"),
     )
     extractor = PaperFactsExtractor(
         client=client, model="fake-model", extraction_mode="provider_parse"
@@ -4373,3 +4685,123 @@ def test_domain_model_extractors_falls_back_to_default_for_invalid_mode(monkeypa
 
     assert extractor.extraction_mode == "provider_parse"
     assert "Invalid CORE_LLM_EXTRACTION_MODE=not-a-mode" in caplog.text
+
+
+@pytest.mark.parametrize("mode", ["provider_parse", "json_text"])
+def test_deadline_options_apply_to_each_structured_request(mode):
+    client = _FakeOpenAIClient(["not JSON", '{"decisions":[]}'], parsed=AxisCanonicalizationPlanModelOutput())
+    options = []
+    def with_options(**kwargs):
+        options.append(kwargs)
+        return client
+    client.with_options = with_options
+    timeouts = iter([4.0, 2.0])
+    response = StructuredResponseClient(client=client, model="test", extraction_mode=mode)
+    response.complete(
+        system_prompt="Classify axes", user_prompt="No pairs", response_model=AxisCanonicalizationPlanModelOutput,
+        before_request=lambda: next(timeouts),
+    )
+    assert options == ([{"timeout": 4.0, "max_retries": 0}] if mode == "provider_parse" else [
+        {"timeout": 4.0, "max_retries": 0}, {"timeout": 2.0, "max_retries": 0},
+    ])
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("internal bug"), TypeError("invalid SDK argument"), ValueError("invalid request option")])
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+def test_provider_programming_failure_does_not_issue_a_json_repair(owner, failure):
+    client = _FakeOpenAIClient('{"decisions":[]}', parse_error=failure)
+    if owner == "objective":
+        invoke = lambda: StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse").complete(
+            system_prompt="Classify axes", user_prompt="No pairs", response_model=AxisCanonicalizationPlanModelOutput,
+        )
+    else:
+        invoke = lambda: PaperFactsExtractor(client=client, model="test", extraction_mode="provider_parse").repair_table_matrix({"source": {}})
+    with pytest.raises(type(failure), match=str(failure)):
+        invoke()
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("postprocess bug"), TypeError("bad implementation"), ValueError("not an output rejection")])
+def test_postprocess_programming_error_does_not_issue_a_json_repair(failure):
+    client = _FakeOpenAIClient('{"decisions":[]}', parsed=AxisCanonicalizationPlanModelOutput())
+    def postprocess(_response):
+        raise failure
+    response = StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse")
+    with pytest.raises(type(failure), match=str(failure)):
+        response.complete(
+            system_prompt="Classify axes", user_prompt="No pairs", response_model=AxisCanonicalizationPlanModelOutput,
+            postprocess_response=postprocess,
+        )
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+def test_provider_malformed_json_can_be_repaired(owner):
+    client = _FakeOpenAIClient('{}', parse_error=json.JSONDecodeError("invalid output", "{", 1))
+    if owner == "objective":
+        parsed = StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse").complete(
+            system_prompt="Classify axes", user_prompt="No pairs",
+            response_model=AxisCanonicalizationPlanModelOutput,
+        )
+        assert parsed == AxisCanonicalizationPlanModelOutput()
+    else:
+        parsed = PaperFactsExtractor(client=client, model="test", extraction_mode="provider_parse").repair_table_matrix({"source": {}})
+        assert parsed == TableMatrixRepairModelOutput()
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+
+
+@pytest.mark.parametrize("mode", ["provider_parse", "json_text"])
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+def test_provider_refusal_does_not_issue_a_json_repair(owner, mode):
+    client = _FakeOpenAIClient('{}')
+    completions = client.beta.chat.completions if mode == "provider_parse" else client.chat.completions
+    request = completions.parse if mode == "provider_parse" else completions.create
+
+    def refuse(**kwargs):
+        completion = request(**kwargs)
+        completion.choices[0].message.refusal = "The provider declined the request"
+        return completion
+
+    if mode == "provider_parse":
+        completions.parse = refuse
+    else:
+        completions.create = refuse
+    with pytest.raises(RuntimeError, match="provider refused"):
+        if owner == "objective":
+            StructuredResponseClient(client=client, model="test", extraction_mode=mode).complete(
+                system_prompt="Classify axes", user_prompt="No pairs",
+                response_model=AxisCanonicalizationPlanModelOutput,
+            )
+        else:
+            PaperFactsExtractor(client=client, model="test", extraction_mode=mode).repair_table_matrix({"source": {}})
+    assert len(completions.calls) == 1
+    if mode == "provider_parse":
+        assert client.chat.completions.calls == []
+
+
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+@pytest.mark.parametrize("status", [None, 401, 429])
+def test_provider_transport_and_http_errors_do_not_issue_output_repair(owner, status):
+    import httpx
+    from openai import APIConnectionError, APIStatusError
+
+    request = httpx.Request("POST", "https://provider.invalid/chat/completions")
+    failure = (
+        APIConnectionError(request=request)
+        if status is None
+        else APIStatusError("provider failure", response=httpx.Response(status, request=request), body=None)
+    )
+    client = _FakeOpenAIClient('{}', parse_error=failure)
+    with pytest.raises(type(failure)):
+        if owner == "objective":
+            StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse").complete(
+                system_prompt="Classify axes", user_prompt="No pairs",
+                response_model=AxisCanonicalizationPlanModelOutput,
+            )
+        else:
+            PaperFactsExtractor(client=client, model="test", extraction_mode="provider_parse").repair_table_matrix({"source": {}})
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []

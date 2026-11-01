@@ -1,7 +1,8 @@
+import json
 from datetime import datetime, timedelta, timezone
 
+from application.chat import session_service as shared_chat_service
 import pytest
-
 from application.chat import (
     CapabilityRegistry,
     ModelToolCall,
@@ -9,19 +10,23 @@ from application.chat import (
     ResearchAgentRunner,
     ToolSpec,
 )
-from application.chat.session_service import ChatSessionService
+from application.chat import session_service as chat_session_service
 from domain.chat import ToolPermissionMode, ToolRisk
 from domain.chat.permissions import AUTO_ACTIONS, change_permission, permits_automatic
-from tests.support.chat_repository import MemoryChatRepository
+from exceptions import ResourceConflictException, ResourceNotFoundException
+from repositories.chat_repository import ChatRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.postgres import read_tool_calls, seed_collection
 from tests.unit.application.test_chat_session_service import (
     _CollectionService,
     _Question,
-    _SourceArtifactRepository,
     _WriteCapability,
 )
 from tests.unit.application.test_research_agent_runner import _Model
 
-pytestmark = pytest.mark.anyio
+from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
 
 @pytest.fixture
@@ -29,24 +34,64 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.parametrize("mode,expected", [("confirm", "approval_required"), ("read_only", "failed"), ("auto", "completed")])
-async def test_session_permission_controls_actual_write(mode, expected):
-    repository = MemoryChatRepository()
+@pytest.mark.parametrize(
+    "mode,expected",
+    [("confirm", "approval_required"), ("read_only", "failed"), ("auto", "completed")],
+)
+async def test_session_permission_controls_actual_write(
+    mode, expected, *, postgres_session_factory
+):
+    repository = ChatRepository()
     write = _WriteCapability()
-    write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
-    model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Correct the trend"}),)),
-                   ModelTurn(content="The feedback is saved."), discover=(write.spec.name,))
-    service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-                                source_artifact_repository=_SourceArtifactRepository(),
-                                runner=ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,))))
+    write.spec = ToolSpec(
+        name="record_finding_feedback",
+        description="Save feedback",
+        risk=ToolRisk.WRITE,
+        input_model=_Question,
+    )
+    model = _Model(
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    name=write.spec.name, arguments={"question": "Correct the trend"}
+                ),
+            )
+        ),
+        ModelTurn(content="The feedback is saved."),
+        discover=(write.spec.name,),
+    )
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    runner = ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((write,))
+    )
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    permission = await repository.set_permission(session.session_id, "user-1", mode=mode,
+    permission = await repository.set_permission(
+        session.session_id,
+        "user-1",
+        mode=mode,
         actions=[write.spec.name] if mode == "auto" else [],
-        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat() if mode == "auto" else None,
-        expected_revision=0)
-    result = await service.post_message_for_user(session.session_id, "user-1", message="Save feedback on this published Finding.")
-    assert result["status"] == expected, [(c.name, c.error_code) for c in repository.calls.values()]
-    calls = [call for call in repository.calls.values() if call.name == write.spec.name]
+        expires_at=(
+            (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            if mode == "auto"
+            else None
+        ),
+        expected_revision=0,
+    )
+    result = await service.send_message(
+        session.session_id, "user-1", message="Save feedback on this published Finding."
+    )
+    assert result["status"] == expected, [
+        (c.name, c.error_code)
+        for c in (await read_tool_calls(repository, session.session_id))
+    ]
+    calls = [
+        call
+        for call in (await read_tool_calls(repository, session.session_id))
+        if call.name == write.spec.name
+    ]
     if mode == "read_only":
         # The write schema is hidden from discovery. A forged model call is
         # still retained as a denied trajectory event for auditability.
@@ -64,117 +109,224 @@ async def test_session_permission_controls_actual_write(mode, expected):
         assert not write.executed
 
 
-async def test_automatic_grant_is_not_reinterpreted_from_user_phrases():
-    repository = MemoryChatRepository()
+async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(
+    *, postgres_session_factory
+):
+    repository = ChatRepository()
     write = _WriteCapability()
-    write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
-    service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        runner=ResearchAgentRunner(model=_Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Review"}),)),
+    write.spec = ToolSpec(
+        name="record_finding_feedback",
+        description="Save feedback",
+        risk=ToolRisk.WRITE,
+        input_model=_Question,
+    )
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(
+                tool_calls=(
+                    ModelToolCall(
+                        name=write.spec.name, arguments={"question": "Review"}
+                    ),
+                )
+            ),
             ModelTurn(content="The review remains unsaved."),
-            discover=(write.spec.name,)), capabilities=CapabilityRegistry((write,))))
+            discover=(write.spec.name,),
+        ),
+        capabilities=CapabilityRegistry((write,)),
+    )
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    await repository.set_permission(session.session_id, "user-1", mode="auto", actions=[write.spec.name],
-        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
-    result = await service.post_message_for_user(session.session_id, "user-1", message="Inspect this feedback, do not save anything.")
+    await repository.set_permission(
+        session.session_id,
+        "user-1",
+        mode="auto",
+        actions=[write.spec.name],
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        expected_revision=0,
+    )
+    result = await service.send_message(
+        session.session_id,
+        "user-1",
+        message="Inspect this feedback, do not save anything.",
+    )
     assert result["status"] == "completed"
     assert write.executed
 
 
 @pytest.mark.parametrize("revoke", [False, True])
-async def test_each_automatic_write_rechecks_current_permission(revoke):
+async def test_each_automatic_write_rechecks_current_permission(
+    revoke, *, postgres_session_factory
+):
     from tests.unit.application.test_research_agent_runner import _Capability
 
-    repository = MemoryChatRepository()
+    repository = ChatRepository()
 
     class RevisionCapability(_Capability):
         async def execute(self, context, arguments):
             result = await super().execute(context, arguments)
             if revoke:
-                await repository.set_permission(context.session_id, "user-1", mode="read_only",
-                    actions=[], expires_at=None, expected_revision=1)
+                await repository.set_permission(
+                    context.session_id,
+                    "user-1",
+                    mode="read_only",
+                    actions=[],
+                    expires_at=None,
+                    expected_revision=1,
+                )
             return result
 
     finding_write = RevisionCapability(
         "create_finding_version", ToolRisk.WRITE, _Question
     )
-    plan_write = _Capability(
-        "create_research_plan", ToolRisk.WRITE, _Question
-    )
+    plan_write = _Capability("create_research_plan", ToolRisk.WRITE, _Question)
     model = _Model(
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    "update_execution_plan",
+                    {
+                        "steps": [
+                            {
+                                "step_id": "correct",
+                                "action": "Save the verified correction",
+                                "status": "in_progress",
+                            },
+                            {
+                                "step_id": "follow_up",
+                                "action": "Record the next experiment",
+                                "status": "pending",
+                            },
+                        ],
+                        "status": "in_progress",
+                        "explanation": "Apply the reviewed correction before recording the next experiment.",
+                    },
+                ),
+            )
+        ),
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    finding_write.spec.name,
+                    {"question": "Publish the revised Finding"},
+                ),
+            )
+        ),
+        ModelTurn(
+            tool_calls=(
+                ModelToolCall(
+                    plan_write.spec.name,
+                    {"question": "Save the follow-up plan"},
+                ),
+            )
+        ),
         ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
             "steps": [
-                {"step_id": "correct", "action": "Save the verified correction", "status": "in_progress"},
-                {"step_id": "follow_up", "action": "Record the next experiment", "status": "pending"},
+                {"step_id": "correct", "action": "Save the verified correction", "status": "completed"},
+                {"step_id": "follow_up", "action": "Record the next experiment", "status": "completed"},
             ],
-            "status": "in_progress",
-            "explanation": "Apply the reviewed correction before recording the next experiment.",
+            "status": "completed", "explanation": "Both requested revisions were saved.",
         }),)),
-        ModelTurn(tool_calls=(ModelToolCall(
-            finding_write.spec.name, {"question": "Publish the revised Finding"},
-        ),)),
-        ModelTurn(tool_calls=(ModelToolCall(
-            plan_write.spec.name, {"question": "Save the follow-up plan"},
-        ),)),
         ModelTurn(content="Both revisions are saved."),
     )
-    service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        runner=ResearchAgentRunner(
-            model=model,
-            capabilities=CapabilityRegistry((finding_write, plan_write)),
-        ))
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    runner = ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((finding_write, plan_write))
+    )
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    await repository.set_permission(session.session_id, "user-1", mode="auto", actions=[
-        finding_write.spec.name, plan_write.spec.name,
-    ],
-        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
-    stream = await service.stream_message_for_user(session.session_id, "user-1", message="Apply the two corrections.")
+    await repository.set_permission(
+        session.session_id,
+        "user-1",
+        mode="auto",
+        actions=[
+            finding_write.spec.name,
+            plan_write.spec.name,
+        ],
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        expected_revision=0,
+    )
+    stream = await service.send_message_stream(
+        session.session_id, "user-1", message="Apply the two corrections."
+    )
     events = [event async for event in stream]
     result = next(event["turn"] for event in events if event["type"] == "turn")
     assert result["status"] == ("failed" if revoke else "completed")
     assert len(finding_write.executed_arguments) == 1
     assert len(plan_write.executed_arguments) == (0 if revoke else 1)
     calls = [
-        call for call in repository.calls.values()
+        call
+        for call in (await read_tool_calls(repository, session.session_id))
         if call.name in {finding_write.spec.name, plan_write.spec.name}
     ]
     assert len(calls) == 2
     assert len({call.tool_call_id for call in calls}) == 2
     assert calls[0].decision_basis == "scope_grant"
     assert calls[-1].status.value == ("rejected" if revoke else "succeeded")
-    assert result["execution_plan"]["status"] == ("permission_denied" if revoke else "completed")
+    assert result["execution_plan"]["status"] == (
+        "permission_denied" if revoke else "completed"
+    )
     if revoke:
         assert result["execution_plan"]["blocking_reason"] == "permission_write_denied"
     snapshot = await repository.read_response_snapshot(session.session_id)
     assert snapshot.status == result["status"]
     assert snapshot.progress["execution_plan"] == result["execution_plan"]
-    last_progress = [event["progress"] for event in events if event["type"] == "progress"][-1]
+    last_progress = [
+        event["progress"] for event in events if event["type"] == "progress"
+    ][-1]
     assert last_progress["execution_plan"] == result["execution_plan"]
 
 
-async def test_permission_controller_enforces_owner_and_revision():
+async def test_permission_controller_enforces_owner_and_revision(
+    monkeypatch, *, postgres_session_factory
+):
+    from controllers.chat.chat_session_routes import (
+        get_chat_permission,
+        set_chat_permission,
+    )
+    from controllers.chat.schemas import ChatPermissionRequest
     from fastapi import HTTPException
 
-    from controllers.chat.schemas import ChatPermissionRequest
-    from controllers.chat.sessions import get_chat_permission, set_chat_permission
-    from tests.unit.routers.test_chat_sessions_api import _request
-    repository = MemoryChatRepository()
-    service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())))
+    repository = ChatRepository()
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    runner = ResearchAgentRunner(
+        model=_Model(), capabilities=CapabilityRegistry(())
+    )
+    service = chat_session_service.ChatSessionService(runner=runner)
+    monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    assert (await get_chat_permission(session.session_id, _request(service)))["mode"] == "confirm"
+    assert (
+        json.loads((await get_chat_permission(session.session_id, "user-1")).body)[
+            "data"
+        ]["mode"]
+        == "confirm"
+    )
     payload = ChatPermissionRequest(mode="read_only", expected_revision=0)
-    assert (await set_chat_permission(session.session_id, payload, _request(service)))["revision"] == 1
-    with pytest.raises(HTTPException) as conflict:
-        await set_chat_permission(session.session_id, payload, _request(service))
-    assert conflict.value.status_code == 409
-    with pytest.raises(HTTPException) as forbidden:
-        await get_chat_permission(session.session_id, _request(service, "another-user"))
-    assert forbidden.value.status_code == 404
+    assert (
+        json.loads(
+            (await set_chat_permission(session.session_id, payload, "user-1")).body
+        )["data"]["revision"]
+        == 1
+    )
+    with pytest.raises(ResourceConflictException) as conflict:
+        await set_chat_permission(session.session_id, payload, "user-1")
+    assert conflict.value.code == 200204
+    with pytest.raises(ResourceNotFoundException) as forbidden:
+        await get_chat_permission(session.session_id, "another-user")
+    assert forbidden.value.code == 200201
     fresh = await service.create_session(collection_id="col-1", user_id="user-1")
-    assert (await get_chat_permission(fresh.session_id, _request(service)))["mode"] == "confirm"
+    assert (
+        json.loads((await get_chat_permission(fresh.session_id, "user-1")).body)[
+            "data"
+        ]["mode"]
+        == "confirm"
+    )
 
 
 @pytest.mark.parametrize(
@@ -193,7 +345,9 @@ async def test_permission_controller_enforces_owner_and_revision():
             {
                 "mode": "auto",
                 "actions": ["create_finding_version"],
-                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(hours=1)
+                ).isoformat(),
                 "revision": 4,
             },
             None,
@@ -209,19 +363,22 @@ async def test_permission_controller_enforces_owner_and_revision():
         ),
     ],
 )
-async def test_new_session_inherits_collection_default_permission(default, expected) -> None:
+async def test_new_session_inherits_collection_default_permission(
+    default, expected, *, postgres_session_factory
+) -> None:
     class _CollectionDefaults(_CollectionService):
         async def get_agent_default_permission_for_user(self, collection_id, user_id):
             assert (collection_id, user_id) == ("col-1", "user-1")
             return default
 
-    repository = MemoryChatRepository()
-    service = ChatSessionService(
-        repository=repository,
-        collection_service=_CollectionDefaults(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())),
+    repository = ChatRepository()
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = _CollectionDefaults()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    runner = ResearchAgentRunner(
+        model=_Model(), capabilities=CapabilityRegistry(())
     )
+    service = chat_session_service.ChatSessionService(runner=runner)
 
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
@@ -235,8 +392,10 @@ async def test_new_session_inherits_collection_default_permission(default, expec
         assert permission == expected
 
 
-async def test_collection_read_only_default_is_applied_before_runner_tool_selection() -> None:
-    repository = MemoryChatRepository()
+async def test_collection_read_only_default_is_applied_before_runner_tool_selection(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
 
     class _CollectionDefaults(_CollectionService):
         async def get_agent_default_permission_for_user(self, collection_id, user_id):
@@ -247,12 +406,13 @@ async def test_collection_read_only_default_is_applied_before_runner_tool_select
                 "revision": 2,
             }
 
-    service = ChatSessionService(
-        repository=repository,
-        collection_service=_CollectionDefaults(),
-        source_artifact_repository=_SourceArtifactRepository(),
-        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())),
+    chat_session_service.ChatRepo = repository
+    chat_session_service.collection_service = _CollectionDefaults()
+    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
+    runner = ResearchAgentRunner(
+        model=_Model(), capabilities=CapabilityRegistry(())
     )
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
     assert (
@@ -289,7 +449,9 @@ def test_automatic_permission_covers_every_registered_write_action() -> None:
         expected_revision=0,
     )
     assert all(
-        permits_automatic(permission, action, now=datetime.now(timezone.utc).isoformat())
+        permits_automatic(
+            permission, action, now=datetime.now(timezone.utc).isoformat()
+        )
         for action in expected
     )
 
@@ -345,3 +507,8 @@ def test_automatic_permission_expiry_is_bounded() -> None:
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=25)).isoformat(),
             expected_revision=0,
         )
+
+
+@pytest.fixture(autouse=True)
+async def research_collection(postgres_session_factory, anyio_backend):
+    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))

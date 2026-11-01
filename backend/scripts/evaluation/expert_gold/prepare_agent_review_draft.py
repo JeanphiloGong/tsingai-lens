@@ -12,7 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from domain.core import Finding  # noqa: E402
+from application.evaluation.finding_review_import_service import parse_curated_finding
 
 
 DEFAULT_REVIEWER = "ai-reviewer-codex"
@@ -93,8 +93,8 @@ def _draft_row(row: dict[str, Any], *, reviewer: str) -> dict[str, Any]:
 
 
 def _initial_note(row: dict[str, Any]) -> str:
-    checks = _strings(_mapping(row.get("acceptance_gate")).get("review_checks"))
-    blockers = _strings(row.get("protocol_blocking_missing"))
+    checks = ((row.get("acceptance_gate") or {}).get("review_checks") or [])
+    blockers = (row.get("protocol_blocking_missing") or [])
     bits = []
     if checks:
         bits.append("Verify before recommending: " + "; ".join(checks))
@@ -107,16 +107,14 @@ def _initial_note(row: dict[str, Any]) -> str:
 
 def _curated_finding(row: dict[str, Any]) -> dict[str, Any]:
     target = (
-        _mapping(row.get("curated_finding"))
-        or _mapping(row.get("training_target"))
-        or _mapping(row.get("system_prediction"))
+        (row.get("curated_finding") or {})
+        or (row.get("training_target") or {})
+        or (row.get("system_prediction") or {})
     )
     if not target:
         raise ValueError("decision row requires one complete canonical Finding")
-    finding = Finding.from_mapping(target)
-    if finding.to_record() != target:
-        raise ValueError("decision row Finding is not canonical")
-    return finding.to_record()
+    parse_curated_finding(target)
+    return target
 
 
 def _agent_reviewer(value: str) -> str:
@@ -133,16 +131,12 @@ def _jsonl(rows: list[dict[str, Any]]) -> str:
     return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
-def _strings(value: Any) -> list[str]:
-    return [_text(item) for item in value if _text(item)] if isinstance(value, list) else []
 
 
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
+def _text(value: str | None) -> str:
+    return value.strip() if value is not None else ""
 
 
 if __name__ == "__main__":

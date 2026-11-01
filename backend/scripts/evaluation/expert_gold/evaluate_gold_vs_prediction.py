@@ -238,7 +238,7 @@ def build_evaluation_report(
     relative_tolerance: float,
 ) -> dict[str, Any]:
     selected_gold_papers = _select_gold_papers(gold, gold_paper_ids)
-    prediction_papers = _list_records(prediction, "papers")
+    prediction_papers = prediction["papers"]
     paper_reports: list[dict[str, Any]] = []
     for gold_paper in selected_gold_papers:
         mapping = _map_prediction_paper(gold_paper, prediction_papers)
@@ -738,18 +738,14 @@ def _select_gold_papers(
     gold: dict[str, Any],
     gold_paper_ids: list[str] | None,
 ) -> list[dict[str, Any]]:
-    papers = _list_records(gold, "papers")
+    papers = gold["papers"]
     if not gold_paper_ids:
         return papers
-    selected = {
-        _text(item)
-        for item in gold_paper_ids
-        if _text(item)
-    }
+    selected = set(gold_paper_ids)
     return [
         paper
         for paper in papers
-        if _text(paper.get("paper_id")) in selected
+        if paper["paper_id"] in selected
     ]
 
 
@@ -757,10 +753,10 @@ def _map_prediction_paper(
     gold_paper: dict[str, Any],
     prediction_papers: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    gold_id = _text(gold_paper.get("paper_id"))
+    gold_id = gold_paper["paper_id"]
     gold_title = _text(gold_paper.get("title"))
     for paper in prediction_papers:
-        if _text(paper.get("paper_id")) == gold_id:
+        if paper["paper_id"] == gold_id:
             return {
                 "status": "mapped",
                 "reason": "paper_id exact match",
@@ -817,7 +813,7 @@ def _paper_scoped_records(
     ):
         scoped[key] = [
             row
-            for row in _list_records(bundle, key)
+            for row in bundle.get(key, [])
             if _record_paper_id(row) == paper_id
         ]
     return scoped
@@ -1091,18 +1087,18 @@ def _summarize_paper_reports(paper_reports: list[dict[str, Any]]) -> dict[str, A
 
 
 def _read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _list_records(bundle: dict[str, Any], key: str) -> list[dict[str, Any]]:
-    value = bundle.get(key)
-    if not isinstance(value, list):
-        return []
-    return [
-        item
-        for item in value
-        if isinstance(item, dict)
-    ]
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(bundle, dict):
+        raise ValueError(f"{path}: bundle must be an object")
+    for key in ("papers", "samples", "process_parameters", "test_conditions",
+                "measurement_results", "comparisons", "observations", "evidence"):
+        rows = bundle[key] if key == "papers" else bundle.get(key, [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError(f"{path}: {key} must be a list of records")
+    for paper in bundle["papers"]:
+        if not isinstance(paper.get("paper_id"), str) or not paper["paper_id"]:
+            raise ValueError(f"{path}: paper_id is required")
+    return bundle
 
 
 def _sample_key_from_gold(sample: dict[str, Any]) -> str:

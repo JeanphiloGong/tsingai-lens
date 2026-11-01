@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import { LoaderCircle, Clock3, CircleAlert, Trash2, Pin, PinOff, ChevronDown } from '@lucide/svelte';
+	import { LoaderCircle, Clock3, CircleAlert, Trash2, Pencil, Pin, PinOff, ChevronDown } from '@lucide/svelte';
 	import type { ChatSessionActivity } from './conversationPresentation';
 
 	type SessionSummary = {
@@ -24,6 +24,7 @@
 	export let onNewSession: () => void = () => {};
 	export let onSwitchSession: (sessionId: string) => void = () => {};
 	export let onDeleteSession: (sessionId: string) => void = () => {};
+	export let onRenameSession: (sessionId: string) => void = () => {};
 	export let onTogglePin: (sessionId: string) => void = () => {};
 	export let onLoadMoreHistory: () => void = () => {};
 	export let formatHistoryTime: (value: string) => string = () => '';
@@ -102,6 +103,7 @@
 							<time>{formatHistoryTime(item.updated_at)}</time>
 						{/if}
 					</button>
+					<button class="pin-session" type="button" {disabled} aria-label={$t('researchAgent.renameSession')} title={$t('researchAgent.renameSession')} on:click={() => onRenameSession(item.session_id)}><Pencil size={14} aria-hidden="true" /></button>
 					<button
 						class="pin-session"
 						class:pinned={item.is_pinned}

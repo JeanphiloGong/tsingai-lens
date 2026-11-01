@@ -199,6 +199,9 @@ def select_tool_specs(
         for name in result.get("loaded_tool_names", ())
         if isinstance(name, str) and name in capabilities.discovery.tools
     }
+    loaded_names.update(spec.name for spec in specs if spec.initially_available)
+    if any(spec.initially_available for spec in capabilities.specs):
+        loaded_names.add(capabilities.execution_plan.spec.name)
     loaded_names.update(
         set(successful_results).intersection(capabilities.discovery.tools)
     )
@@ -257,7 +260,10 @@ def _section_reading_progress(
                 else:
                     failed_reads[document_id] = failed_reads.get(document_id, 0) + 1
     for result in successful_results.get("search_sources", ()):
-        documents.update(str(item) for item in result.get("document_ids", ()))
+        # None is the supported collection-wide search scope. Only returned
+        # matches identify candidate papers; a search hit is not an exact read.
+        documents.update(result.get("document_ids") or ())
+        documents.update(item["document_id"] for item in result.get("matches", ()))
     for result in successful_results.get("inspect_published_finding", ()):
         items = [*result.get("evidence", ()), *result.get("replacement_evidence", ())]
         finding = result.get("finding")
@@ -275,15 +281,37 @@ def _section_reading_progress(
         document_id = str(result.get("document", {}).get("document_id") or "")
         documents.add(document_id)
         if "document_outline" in result:
-            outlines[document_id] = result
-        if result.get("heading_path") is not None:
-            filters = {key: result[key] for key in ("heading_path", "page", "query", "source_ref", "source_types")
+            previous = outlines.get(document_id)
+            version_changed = (previous is not None and result.get("source_version")
+                               and previous.get("source_version")
+                               and result["source_version"] != previous["source_version"])
+            if (previous is None or version_changed
+                    or not (result.get("heading_path") or result.get("section_id"))):
+                outlines[document_id] = result
+            else:
+                # A selected section is a partial view, not a replacement for
+                # the known document outline and its unread sibling sections.
+                known_sections = {section["heading_path"]: section for section in previous["document_outline"]}
+                known_sections.update((section["heading_path"], section) for section in result["document_outline"])
+                outlines[document_id] = {**previous, "document_outline": list(known_sections.values())}
+        if "offset" in result or result.get("heading_path") is not None or result.get("section_id") is not None:
+            filters = {key: result[key] for key in ("section_id", "heading_path", "page", "query", "source_ref", "source_types", "source_version")
                        if result.get(key) not in (None, "", [], ())}
-            section_batches[(document_id, json.dumps(filters, sort_keys=True))] = {
-                "arguments": {"document_id": document_id, **filters, "offset": result.get("next_offset")},
-                "last_batch_block_types": sorted({str(item.get("block_type") or item.get("source_type") or "unknown")
-                                                  for item in result.get("sources", ())}),
-            }
+            key = (document_id, json.dumps(filters, sort_keys=True))
+            entry = section_batches.setdefault(key, {"ranges": []})
+            offset = result.get("offset", 0)
+            entry["ranges"].append((offset, offset + len(result.get("sources", ()))))
+            covered = 0
+            for start, end in sorted(entry["ranges"]):
+                if start > covered:
+                    break
+                covered = max(covered, end)
+            next_offset = result.get("next_offset")
+            if "match_total" in result:
+                next_offset = None if covered == result["match_total"] else covered
+            entry["arguments"] = {**(result.get("continuation") or {"document_id": document_id, **filters}), "offset": next_offset}
+            entry["last_batch_block_types"] = sorted({str(item.get("block_type") or item.get("source_type") or "unknown")
+                                                      for item in result.get("sources", ())})
         sources.extend({**item, "document_id": document_id} for item in result.get("sources", ()))
     sources.extend(successful_results.get("read_source", ()))
     sources.extend({**item, "source_kind": "table", "source_ref": item.get("table_ref")}
@@ -315,11 +343,7 @@ def _section_reading_progress(
         for (doc, _filters), batch in section_batches.items():
             if doc != document_id or type(batch["arguments"]["offset"]) is not int:
                 continue
-            if any(section["heading_path"] == batch["arguments"]["heading_path"]
-                   and section["completely_read_passages"] >= section["available_passages"]
-                   for section in section_progress or ()):
-                continue
-            pending.append(batch)
+            pending.append({key: value for key, value in batch.items() if key != "ranges"})
         progress.append({
             "document_id": document_id,
             "outline_status": ("inspected" if overview is not None else
@@ -334,9 +358,11 @@ def _section_reading_progress(
             "pending_source_reads": [{
                 "tool_name": "inspect_table" if kind == "table" else "read_source",
                 "arguments": ({"document_id": doc, "table_ref": ref,
+                               **({"source_version": source["source_version"]} if source.get("source_version") else {}),
                                **({"row_offset": source["next_row_offset"]} if type(source.get("next_row_offset")) is int else {})}
                               if kind == "table" else
                               {"document_id": doc, "source_kind": kind, "source_ref": ref,
+                               **({"source_version": source["source_version"]} if source.get("source_version") else {}),
                                **({"offset": source["next_offset"]} if "content_offset" in source
                                   and type(source.get("next_offset")) is int else {})}),
             } for (doc, kind, ref, _digest), source in incomplete_sources.items() if doc == document_id],
@@ -455,6 +481,62 @@ def stage_instruction(
 ) -> str | None:
     """Return factual execution observations without prescribing a route."""
     observations: dict[str, Any] = {}
+    browsing: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for page in successful_results.get("browse_collection_papers", ()):
+        key = (page.get("query"), page.get("catalog_digest"), page.get("paper_total"))
+        ledger = browsing.setdefault(key, {
+            "query": page.get("query"), "paper_total": page.get("paper_total"),
+            "covered_ranges": [], "papers": {},
+        })
+        papers = page.get("papers", ())
+        offset = page.get("offset", 0)
+        if papers:
+            ledger["covered_ranges"].append([offset, offset + len(papers)])
+        for paper in papers:
+            document_id = paper.get("document_id")
+            if document_id:
+                ledger["papers"][document_id] = {
+                    "document_id": document_id,
+                    "title": str(paper.get("title") or paper.get("filename") or "")[:240],
+                }
+    for ledger in browsing.values():
+        merged: list[list[int]] = []
+        for start, end in sorted(ledger["covered_ranges"]):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        covered = merged[0][1] if merged and merged[0][0] == 0 else 0
+        ledger["covered_ranges"] = merged
+        ledger["next_unread_offset"] = None if covered == ledger["paper_total"] else covered
+        ledger["seen_document_count"] = len(ledger["papers"])
+        ledger["omitted_paper_count"] = max(0, len(ledger["papers"]) - 100)
+        ledger["papers"] = list(ledger["papers"].values())[-100:]
+    if browsing:
+        observations["paper_browsing"] = list(browsing.values())[-3:]
+    if successful_results.get("discover_research_tools"):
+        observations["loaded_tools"] = list(tool_names)
+    plans = successful_results.get("update_execution_plan", ())
+    if (len(plans) > 1 and calls and calls[-1].name == "update_execution_plan"
+            and all(plans[-1].get(key) == plans[-2].get(key) for key in ("steps", "status"))):
+        observations["unchanged_plan"] = (
+            "This plan state was already accepted. Continue the active step with available research tools; "
+            "another explanation or plan submission does not inspect evidence. Update it when the phase, "
+            "remaining work or final disposition changes."
+        )
+    if calls:
+        latest = calls[-1]
+        previous_count = sum(
+            call.name == latest.name and call.arguments_digest == latest.arguments_digest
+            and call.status is ToolCallStatus.SUCCEEDED
+            for call in calls[:-1]
+        )
+        if previous_count:
+            observations["repeated_action"] = {
+                "tool": latest.name, "arguments": dict(latest.arguments),
+                "previous_successful_count": previous_count,
+                "note": "These exact arguments already succeeded. Reuse the result unless a new check requires rereading it.",
+            }
     if "inspect_document_sources" in tool_names:
         coverage = _section_reading_progress(successful_results, calls=calls)
         if coverage:

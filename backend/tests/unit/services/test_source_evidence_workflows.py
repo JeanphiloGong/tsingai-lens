@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import asyncio
 from dataclasses import replace
 from hashlib import sha256
@@ -12,7 +13,10 @@ import pandas as pd
 from PIL import Image
 import pytest
 
-from domain.source import resolve_heading_path_for_page
+from domain.source import (
+    SourceLayoutBlock,
+    resolve_heading_path_for_page,
+)
 from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -761,24 +765,10 @@ def _pdf_pipeline_device(converter) -> str:  # noqa: ANN001
 
 def test_heading_path_binding_uses_last_heading_at_or_before_page():
     heading_blocks = [
-        {
-            "page": 1,
-            "heading_path": "Introduction",
-            "block_order": 1,
-            "block_type": "heading",
-        },
-        {
-            "page": 1,
-            "heading_path": "Results > Mechanical Properties",
-            "block_order": 2,
-            "block_type": "heading",
-        },
-        {
-            "page": 1,
-            "heading_path": "Appendix",
-            "block_order": 3,
-            "block_type": "heading",
-        },
+        SourceLayoutBlock(None, None, 1, order, "heading", heading)
+        for order, heading in enumerate(
+            ("Introduction", "Results > Mechanical Properties", "Appendix"), start=1
+        )
     ]
 
     assert (

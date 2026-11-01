@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from application.source import collection_service
+from application.evaluation import finding_feedback_service
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from typing import Any, Literal
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from application.evaluation.finding_review_import_service import parse_curated_finding
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from domain.core import Finding
 from domain.core.scientific_fact import SCIENTIFIC_RESULT_DIRECTIONS
-
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 ReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
 IssueType = Literal[
@@ -45,14 +52,6 @@ class RecordFindingFeedbackToolRequest(BaseModel):
     issue_type: IssueType = "none"
     note: str | None = Field(default=None, max_length=2_000)
 
-    @model_validator(mode="after")
-    def _validate_decision(self) -> "RecordFindingFeedbackToolRequest":
-        if self.review_status == "correct" and self.issue_type != "none":
-            raise ValueError("correct feedback cannot report an issue")
-        if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
-            raise ValueError(f"{self.review_status} feedback requires an issue")
-        return self
-
 
 class CurateFindingToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -82,35 +81,12 @@ class CurateFindingToolRequest(BaseModel):
         )
     )
     note: str | None = Field(default=None, max_length=2_000)
-    _parsed_finding: Finding | None = PrivateAttr(default=None)
+    _parsed_finding: Finding = PrivateAttr()
 
     @model_validator(mode="after")
     def _validate_complete_finding(self) -> "CurateFindingToolRequest":
-        direction = self.curated_finding.get("direction")
-        if (
-            not isinstance(direction, str)
-            or direction not in SCIENTIFIC_RESULT_DIRECTIONS
-        ):
-            raise ValueError(
-                "curated_finding.direction must be one of: "
-                + ", ".join(sorted(SCIENTIFIC_RESULT_DIRECTIONS))
-            )
-        candidate = Finding.from_mapping(self.curated_finding)
+        candidate = parse_curated_finding(self.curated_finding)
         self._parsed_finding = candidate
-        if candidate.to_record() != self.curated_finding:
-            canonical = candidate.to_record()
-            missing = sorted(set(canonical) - set(self.curated_finding))
-            unexpected = sorted(set(self.curated_finding) - set(canonical))
-            details = []
-            if missing:
-                details.append("missing keys: " + ", ".join(missing[:8]))
-            if unexpected:
-                details.append("unexpected keys: " + ", ".join(unexpected[:8]))
-            details.append("preserve canonical value types and field names")
-            raise ValueError(
-                "curated_finding must use the complete canonical Finding contract; "
-                + "; ".join(details)
-            )
         if candidate.objective_id != self.objective_id:
             raise ValueError("curated Finding belongs to another Objective")
         if candidate.analysis_version != self.analysis_version:
@@ -134,33 +110,53 @@ class RecordFindingFeedbackCapability:
         input_model=RecordFindingFeedbackToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, finding_feedback_service: Any) -> None:
-        self.collection_service = collection_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: RecordFindingFeedbackToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        feedback = await self.finding_feedback_service.record_feedback(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-            analysis_version=arguments.analysis_version,
-            finding_id=arguments.finding_id,
-            review_status=arguments.review_status,
-            issue_type=arguments.issue_type,
-            note=arguments.note,
-            reviewer=context.user_id,
-        )
+        try:
+            feedback = await finding_feedback_service.record_feedback(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                analysis_version=arguments.analysis_version,
+                finding_id=arguments.finding_id,
+                review_status=arguments.review_status,
+                issue_type=arguments.issue_type,
+                note=arguments.note,
+                reviewer=context.user_id,
+                user_id=context.user_id,
+            )
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="finding_feedback_rejected",
+                error_message="The Finding feedback was rejected. Reopen the current published Finding and review its analysis version.",
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
-            data=feedback.to_record(),
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "feedback_id": feedback.feedback_id,
+                "collection_id": feedback.collection_id,
+                "objective_id": feedback.objective_id,
+                "analysis_version": feedback.analysis_version,
+                "finding_id": feedback.finding_id,
+                "review_status": feedback.review_status,
+                "issue_type": feedback.issue_type,
+                "note": feedback.note,
+                "reviewer": feedback.reviewer,
+                "created_at": feedback.created_at,
+            },
             resource_refs=(
                 _finding_ref(
                     context.collection_id,
@@ -187,38 +183,227 @@ class CurateFindingCapability:
         input_model=CurateFindingToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, finding_feedback_service: Any) -> None:
-        self.collection_service = collection_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CurateFindingToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
         candidate = arguments._parsed_finding
-        if candidate is None:  # pragma: no cover - Pydantic runs the validator.
-            raise ValueError("curated Finding was not validated")
         if candidate.collection_id != context.collection_id:
-            raise ValueError("curated Finding belongs to another collection")
-        curation = await self.finding_feedback_service.record_curation(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-            analysis_version=arguments.analysis_version,
-            finding_id=arguments.finding_id,
-            curated_status=arguments.curated_status,
-            curated_finding=arguments.curated_finding,
-            note=arguments.note,
-            reviewer=context.user_id,
-        )
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="finding_collection_mismatch",
+                error_message="The curated Finding belongs to another collection. Reopen the target Finding in the current collection.",
+            )
+        try:
+            curation = await finding_feedback_service.record_curation(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                analysis_version=arguments.analysis_version,
+                finding_id=arguments.finding_id,
+                curated_status=arguments.curated_status,
+                curated_finding=candidate,
+                note=arguments.note,
+                reviewer=context.user_id,
+                user_id=context.user_id,
+            )
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="finding_curation_rejected",
+                error_message="The Finding curation was rejected. Preserve its identity, published version and paper coverage.",
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
-            data=curation.to_record(),
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "curation_id": curation.curation_id,
+                "collection_id": curation.collection_id,
+                "objective_id": curation.objective_id,
+                "analysis_version": curation.analysis_version,
+                "finding_id": curation.finding_id,
+                "curated_status": curation.curated_status,
+                "curated_finding": {
+                    "collection_id": curation.curated_finding.collection_id,
+                    "objective_id": curation.curated_finding.objective_id,
+                    "analysis_version": curation.curated_finding.analysis_version,
+                    "finding_id": curation.curated_finding.finding_id,
+                    "statement": curation.curated_finding.statement,
+                    "factors": list(curation.curated_finding.factors),
+                    "outcome": curation.curated_finding.outcome,
+                    "direction": curation.curated_finding.direction,
+                    "assertion_strength": curation.curated_finding.assertion_strength,
+                    "attribution_scope": curation.curated_finding.attribution_scope,
+                    "synthesis_status": curation.curated_finding.synthesis_status,
+                    "certainty": curation.curated_finding.certainty,
+                    "display_rank": curation.curated_finding.display_rank,
+                    "mechanisms": [
+                        {
+                            "source_term": mechanism.source_term,
+                            "relation_type": mechanism.relation_type,
+                            "target_term": mechanism.target_term,
+                            "direction": mechanism.direction,
+                            "assertion_strength": mechanism.assertion_strength,
+                            "supporting_evidence_ids": list(
+                                mechanism.supporting_evidence_ids
+                            ),
+                        }
+                        for mechanism in curation.curated_finding.mechanisms
+                    ],
+                    "scientific_context": {
+                        "material": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in curation.curated_finding.scientific_context.material
+                        ],
+                        "sample": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in curation.curated_finding.scientific_context.sample
+                        ],
+                        "process": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in curation.curated_finding.scientific_context.process
+                        ],
+                        "test": [
+                            {
+                                "name": attribute.name,
+                                "value": attribute.value,
+                                "unit": attribute.unit,
+                                **(
+                                    {"context_scope": attribute.context_scope}
+                                    if attribute.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            attribute.applies_to_outcomes
+                                        )
+                                    }
+                                    if attribute.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for attribute in curation.curated_finding.scientific_context.test
+                        ],
+                    },
+                    "limitations": list(curation.curated_finding.limitations),
+                    "paper_contributions": [
+                        {
+                            "document_id": contribution.document_id,
+                            "analysis_status": contribution.analysis_status,
+                            "supporting_evidence_ids": list(
+                                contribution.supporting_evidence_ids
+                            ),
+                            "contradicting_evidence_ids": list(
+                                contribution.contradicting_evidence_ids
+                            ),
+                            "context_evidence_ids": list(
+                                contribution.context_evidence_ids
+                            ),
+                            "condition_boundary_evidence_ids": list(
+                                contribution.condition_boundary_evidence_ids
+                            ),
+                        }
+                        for contribution in curation.curated_finding.paper_contributions
+                    ],
+                    "origin": curation.curated_finding.origin,
+                    "source_analysis_version": curation.curated_finding.source_analysis_version,
+                    "parent_finding_id": curation.curated_finding.parent_finding_id,
+                    "created_by_user_id": curation.curated_finding.created_by_user_id,
+                    "created_by_tool_call_id": curation.curated_finding.created_by_tool_call_id,
+                    "created_at": (
+                        curation.curated_finding.created_at.isoformat()
+                        if curation.curated_finding.created_at
+                        else None
+                    ),
+                    **(
+                        {"selection_ids": list(curation.curated_finding.selection_ids)}
+                        if curation.curated_finding.selection_ids
+                        else {}
+                    ),
+                    **(
+                        {
+                            "comparison_group_ids": list(
+                                curation.curated_finding.comparison_group_ids
+                            )
+                        }
+                        if curation.curated_finding.comparison_group_ids
+                        else {}
+                    ),
+                    **(
+                        {"warnings": list(curation.curated_finding.warnings)}
+                        if curation.curated_finding.warnings
+                        else {}
+                    ),
+                },
+                "note": curation.note,
+                "reviewer": curation.reviewer,
+                "updated_at": curation.updated_at,
+            },
             resource_refs=(
                 _finding_ref(
                     context.collection_id,

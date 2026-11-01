@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
-import math
-import re
-from typing import Any, Final, Mapping
+from typing import Any, Final, Iterable, Literal, Mapping
 
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
@@ -18,7 +18,6 @@ from domain.core.scientific_fact import (
     ScientificAttribute,
     ScientificContext,
 )
-
 
 FINDING_ASSERTION_STRENGTHS: Final[frozenset[str]] = frozenset(
     {"causal", "associative", "descriptive"}
@@ -76,68 +75,24 @@ class FindingMechanismRelation:
     relation_type: str
     target_term: str
     direction: str | None
-    assertion_strength: str
+    assertion_strength: Literal["causal", "associative", "descriptive"]
     supporting_evidence_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not all(
-            _text(value)
-            for value in (self.source_term, self.relation_type, self.target_term)
-        ):
-            raise ValueError("finding mechanism requires source, relation, and target")
-        if self.assertion_strength not in FINDING_ASSERTION_STRENGTHS:
-            raise ValueError(
-                "unsupported finding mechanism assertion strength: "
-                f"{self.assertion_strength}"
-            )
         if not self.supporting_evidence_ids:
             raise ValueError("finding mechanism requires supporting evidence")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingMechanismRelation":
-        return cls(
-            source_term=_text(payload.get("source_term")) or "",
-            relation_type=_text(payload.get("relation_type")) or "",
-            target_term=_text(payload.get("target_term")) or "",
-            direction=_text(payload.get("direction")),
-            assertion_strength=_choice(
-                payload.get("assertion_strength"),
-                FINDING_ASSERTION_STRENGTHS,
-                "descriptive",
-            ),
-            supporting_evidence_ids=_strings(
-                payload.get("supporting_evidence_ids")
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "source_term": self.source_term,
-            "relation_type": self.relation_type,
-            "target_term": self.target_term,
-            "direction": self.direction,
-            "assertion_strength": self.assertion_strength,
-            "supporting_evidence_ids": list(self.supporting_evidence_ids),
-        }
 
 
 @dataclass(frozen=True)
 class FindingPaperContribution:
     document_id: str
-    analysis_status: str
+    analysis_status: Literal["pending", "analyzed", "excluded", "failed"]
     supporting_evidence_ids: tuple[str, ...] = ()
     contradicting_evidence_ids: tuple[str, ...] = ()
     context_evidence_ids: tuple[str, ...] = ()
     condition_boundary_evidence_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _text(self.document_id):
-            raise ValueError("finding paper contribution requires document_id")
-        if self.analysis_status not in PAPER_CONTRIBUTION_STATUSES:
-            raise ValueError(
-                "unsupported finding paper contribution status: "
-                f"{self.analysis_status}"
-            )
         if self.analysis_status == "pending":
             raise ValueError("completed Finding cannot contain pending paper analysis")
         supporting = set(self.supporting_evidence_ids)
@@ -153,42 +108,10 @@ class FindingPaperContribution:
         if not set(self.condition_boundary_evidence_ids) <= linked:
             raise ValueError("condition-boundary evidence must already bind the paper")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingPaperContribution":
-        return cls(
-            document_id=_text(payload.get("document_id")) or "",
-            analysis_status=_choice(
-                payload.get("analysis_status"),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            supporting_evidence_ids=_strings(
-                payload.get("supporting_evidence_ids")
-            ),
-            contradicting_evidence_ids=_strings(
-                payload.get("contradicting_evidence_ids")
-            ),
-            context_evidence_ids=_strings(payload.get("context_evidence_ids")),
-            condition_boundary_evidence_ids=_strings(
-                payload.get("condition_boundary_evidence_ids")
-            ),
-        )
 
     @property
     def has_direct_evidence(self) -> bool:
         return bool(self.supporting_evidence_ids or self.contradicting_evidence_ids)
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "analysis_status": self.analysis_status,
-            "supporting_evidence_ids": list(self.supporting_evidence_ids),
-            "contradicting_evidence_ids": list(self.contradicting_evidence_ids),
-            "context_evidence_ids": list(self.context_evidence_ids),
-            "condition_boundary_evidence_ids": list(
-                self.condition_boundary_evidence_ids
-            ),
-        }
 
 
 @dataclass(frozen=True)
@@ -200,17 +123,17 @@ class Finding:
     statement: str
     factors: tuple[str, ...]
     outcome: str
-    direction: str
-    assertion_strength: str
+    direction: Literal["increase", "decrease", "improve", "worsen", "changed", "no_change", "mixed", "unknown"]
+    assertion_strength: Literal["causal", "associative", "descriptive"]
     attribution_scope: str
-    synthesis_status: str
+    synthesis_status: Literal["single_study", "agreement", "conflict", "condition_dependent", "insufficient_confirmation"]
     certainty: float
     display_rank: int
     mechanisms: tuple[FindingMechanismRelation, ...]
     scientific_context: ScientificContext
     limitations: tuple[str, ...]
     paper_contributions: tuple[FindingPaperContribution, ...]
-    origin: str = "system_generated"
+    origin: Literal["system_generated", "human_authored", "agent_authored", "hybrid"] = "system_generated"
     source_analysis_version: int | None = None
     parent_finding_id: str | None = None
     created_by_user_id: str | None = None
@@ -226,26 +149,14 @@ class Finding:
     comparison_group_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not all(
-            _text(value)
-            for value in (
-                self.collection_id,
-                self.objective_id,
-                self.finding_id,
-                self.statement,
-                self.outcome,
-            )
-        ):
+        if not all((self.collection_id, self.objective_id, self.finding_id,
+                    self.statement, self.outcome)):
             raise ValueError("finding requires scoped identity and one outcome")
         if len(self.finding_id) > 128:
             raise ValueError("finding ID exceeds 128 characters")
         if self.analysis_version < 1:
             raise ValueError("finding requires positive analysis_version")
-        selection_ids = _strings(self.selection_ids)
-        comparison_group_ids = _strings(self.comparison_group_ids)
-        object.__setattr__(self, "selection_ids", selection_ids)
-        object.__setattr__(self, "comparison_group_ids", comparison_group_ids)
-        if not self.paper_contributions and not selection_ids:
+        if not self.paper_contributions and not self.selection_ids:
             raise ValueError("finding requires paper coverage or experiment selections")
         if not self.factors:
             raise ValueError("finding requires factors")
@@ -254,22 +165,8 @@ class Finding:
             set(factor_keys)
         ):
             raise ValueError("finding factors must be non-empty and unique")
-        if self.direction not in SCIENTIFIC_RESULT_DIRECTIONS:
-            raise ValueError(f"unsupported finding direction: {self.direction}")
-        if self.assertion_strength not in FINDING_ASSERTION_STRENGTHS:
-            raise ValueError(
-                f"unsupported finding assertion strength: {self.assertion_strength}"
-            )
-        if self.attribution_scope not in EVIDENCE_ATTRIBUTION_SCOPES - {
-            "not_attributable"
-        }:
-            raise ValueError(
-                f"unsupported finding attribution scope: {self.attribution_scope}"
-            )
-        if self.synthesis_status not in FINDING_SYNTHESIS_STATUSES:
-            raise ValueError(
-                f"unsupported finding synthesis status: {self.synthesis_status}"
-            )
+        if self.attribution_scope == "not_attributable":
+            raise ValueError("Finding requires attributable scientific content")
         if not math.isfinite(self.certainty) or not 0 <= self.certainty <= 1:
             raise ValueError("finding certainty must be between 0 and 1")
         if self.display_rank < 0:
@@ -303,8 +200,6 @@ class Finding:
             self.assertion_strength != "descriptive"
         ):
             raise ValueError("descriptive Finding requires descriptive assertion")
-        if self.origin not in FINDING_ORIGINS:
-            raise ValueError(f"unsupported finding origin: {self.origin}")
         if self.origin == "system_generated":
             if (
                 self.created_by_user_id
@@ -319,15 +214,13 @@ class Finding:
                 raise ValueError("authored Finding requires source_analysis_version")
             if self.source_analysis_version >= self.analysis_version:
                 raise ValueError("authored Finding source must be an older version")
-            if not _text(self.created_by_user_id) or self.created_at is None:
+            if not self.created_by_user_id or self.created_at is None:
                 raise ValueError("authored Finding requires creator and creation time")
-            if self.origin == "agent_authored" and not _text(
-                self.created_by_tool_call_id
-            ):
+            if self.origin == "agent_authored" and not self.created_by_tool_call_id:
                 raise ValueError(
                     "agent-authored Finding requires tool-call provenance"
                 )
-        if self.origin == "hybrid" and not _text(self.parent_finding_id):
+        if self.origin == "hybrid" and not self.parent_finding_id:
             raise ValueError("hybrid Finding requires parent_finding_id")
         if self.origin in {"human_authored", "agent_authored"} and (
             self.parent_finding_id is not None
@@ -335,6 +228,16 @@ class Finding:
             raise ValueError("authored Finding cannot have a parent Finding")
         if self.parent_finding_id == self.finding_id:
             raise ValueError("Finding cannot derive from itself")
+
+    def validate_experiment_support(self, experiment_ids: frozenset[str]) -> None:
+        if len(experiment_ids) > 1 and not self.comparison_group_ids:
+            raise ValueError("cross-paper Finding requires a comparison group")
+        if len(experiment_ids) == 1 and self.synthesis_status == "agreement":
+            raise ValueError("agreement Finding requires independent experiment selections")
+        if len(experiment_ids) == 1 and self.synthesis_status != "single_study":
+            raise ValueError("one experiment selection must be marked single_study")
+        if len(experiment_ids) > 1 and self.synthesis_status == "single_study":
+            raise ValueError("multiple experiment selections cannot be single_study")
 
     @property
     def key(self) -> tuple[str, str, int, str]:
@@ -426,76 +329,6 @@ class Finding:
             return "cross_paper" if len(self.selection_ids) >= 2 else "paper"
         return "cross_paper" if self.direct_document_count >= 2 else "paper"
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "Finding":
-        factors = _strings(payload.get("factors"))
-        outcome = _text(payload.get("outcome")) or ""
-        return cls(
-            collection_id=_text(payload.get("collection_id")) or "",
-            objective_id=_text(payload.get("objective_id")) or "",
-            analysis_version=_positive_int(payload.get("analysis_version")),
-            finding_id=_text(payload.get("finding_id"))
-            or _stable_id(
-                "finding",
-                payload.get("objective_id"),
-                payload.get("analysis_version"),
-                factors,
-                outcome,
-                payload.get("supporting_evidence_ids"),
-            ),
-            statement=_text(payload.get("statement")) or "",
-            factors=factors,
-            outcome=outcome,
-            direction=_choice(
-                payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-            ),
-            assertion_strength=_choice(
-                payload.get("assertion_strength"),
-                FINDING_ASSERTION_STRENGTHS,
-                "descriptive",
-            ),
-            attribution_scope=_choice(
-                payload.get("attribution_scope"),
-                EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-                "descriptive_only",
-            ),
-            synthesis_status=_choice(
-                payload.get("synthesis_status"),
-                FINDING_SYNTHESIS_STATUSES,
-                "insufficient_confirmation",
-            ),
-            certainty=_certainty(payload.get("certainty")),
-            display_rank=_non_negative_int(payload.get("display_rank")),
-            mechanisms=tuple(
-                FindingMechanismRelation.from_mapping(item)
-                for item in _mapping_list(payload.get("mechanisms"))
-            ),
-            scientific_context=(
-                ScientificContext.from_mapping(
-                    _mapping(payload.get("scientific_context"))
-                )
-            ),
-            limitations=_strings(payload.get("limitations")),
-            paper_contributions=tuple(
-                FindingPaperContribution.from_mapping(item)
-                for item in _mapping_list(payload.get("paper_contributions"))
-            ),
-            origin=_choice(
-                payload.get("origin"), FINDING_ORIGINS, "system_generated"
-            ),
-            source_analysis_version=(
-                _positive_int(payload.get("source_analysis_version")) or None
-            ),
-            parent_finding_id=_text(payload.get("parent_finding_id")),
-            created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(
-                payload.get("created_by_tool_call_id")
-            ),
-            created_at=_datetime_or_none(payload.get("created_at")),
-            warnings=_strings(payload.get("warnings")),
-            selection_ids=_strings(payload.get("selection_ids")),
-            comparison_group_ids=_strings(payload.get("comparison_group_ids")),
-        )
 
     @staticmethod
     def synthesis_status_for(
@@ -745,42 +578,6 @@ class Finding:
         ):
             raise ValueError("finding outcome differs from direct evidence")
 
-    def to_record(self) -> dict[str, Any]:
-        record = {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "finding_id": self.finding_id,
-            "statement": self.statement,
-            "factors": list(self.factors),
-            "outcome": self.outcome,
-            "direction": self.direction,
-            "assertion_strength": self.assertion_strength,
-            "attribution_scope": self.attribution_scope,
-            "synthesis_status": self.synthesis_status,
-            "certainty": self.certainty,
-            "display_rank": self.display_rank,
-            "mechanisms": [item.to_record() for item in self.mechanisms],
-            "scientific_context": self.scientific_context.to_record(),
-            "limitations": list(self.limitations),
-            "paper_contributions": [
-                item.to_record() for item in self.paper_contributions
-            ],
-            "origin": self.origin,
-            "source_analysis_version": self.source_analysis_version,
-            "parent_finding_id": self.parent_finding_id,
-            "created_by_user_id": self.created_by_user_id,
-            "created_by_tool_call_id": self.created_by_tool_call_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-        }
-        if self.selection_ids:
-            record["selection_ids"] = list(self.selection_ids)
-        if self.comparison_group_ids:
-            record["comparison_group_ids"] = list(self.comparison_group_ids)
-        if self.warnings:
-            record["warnings"] = list(self.warnings)
-        return record
-
 
 def _common_attributes(
     evidence_records: tuple[ObjectiveEvidence, ...],
@@ -811,8 +608,8 @@ def _attribute_key(attribute: ScientificAttribute) -> tuple[str, str, str]:
     )
 
 
-def _ordered_union(values: Any) -> tuple[str, ...]:
-    return _strings(item for group in values for item in group)
+def _ordered_union(values: Iterable[Iterable[str]]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(item for group in values for item in group))
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:
@@ -831,98 +628,8 @@ def _stable_text(value: Any) -> str:
     return str(value or "")
 
 
-def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
-    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
-    return normalized if normalized in allowed else default
-
-
-def _text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _datetime_or_none(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    text = _text(value)
-    if text is None:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("invalid Finding creation time") from exc
-
-
-def _certainty(value: Any) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    if not math.isfinite(numeric):
-        return 0.0
-    return round(min(1.0, max(0.0, numeric)), 2)
-
-
-def _positive_int(value: Any) -> int:
-    if isinstance(value, bool):
-        return 0
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return numeric if numeric > 0 else 0
-
-
-def _non_negative_int(value: Any) -> int:
-    if isinstance(value, bool):
-        return 0
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, numeric)
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _mapping_list(value: Any) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(dict(item) for item in value if isinstance(item, Mapping))
-
-
-def _strings(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, Mapping):
-        items = value.values()
-    elif isinstance(value, str):
-        items = (value,)
-    else:
-        try:
-            items = tuple(value)
-        except TypeError:
-            items = (value,)
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        text = _text(item)
-        if not text:
-            continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(text)
-    return tuple(normalized)
-
-
-def _normalize_term(value: Any) -> str:
-    text = _text(value) or ""
+def _normalize_term(value: str | None) -> str:
+    text = value.strip() if value is not None else ""
     text = _VARIABLE_UNIT_SUFFIX_RE.sub("", text)
     text = _J_PER_CUBIC_MM_RE.sub("J/mm3", text)
     parts = "".join(

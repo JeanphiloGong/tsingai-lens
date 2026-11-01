@@ -1,46 +1,61 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from application.core.objectives.finding_summary import (
     FindingSummaryUnavailable,
     summarize_finding_evidence,
 )
+from domain.core.research_objective import ObjectiveEvidence
 from domain.core import Finding
+from domain.core.finding import (
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.scientific_fact import (
+    ScientificContext,
+    ScientificResult,
+)
+from exceptions import ResourceConflictException
 
 
 def review_input():
-    finding = {
-        "collection_id": "col-1",
-        "objective_id": "obj-1",
-        "analysis_version": 1,
-        "finding_id": "finding-1",
-        "statement": "Heat treatment can change 316L tensile strength.",
-        "factors": ["heat treatment"],
-        "outcome": "tensile strength",
-        "direction": "increase",
-        "assertion_strength": "associative",
-        "attribution_scope": "association_only",
-        "synthesis_status": "condition_dependent",
-        "paper_contributions": [
-            {
-                "document_id": "paper-a",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["ev-a"],
-            },
-            {
-                "document_id": "paper-b",
-                "analysis_status": "analyzed",
-                "contradicting_evidence_ids": ["ev-b"],
-                "condition_boundary_evidence_ids": ["ev-b"],
-            },
-        ],
-        "limitations": ["The two treatments are not identical."],
-    }
+    finding = Finding(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement="Heat treatment can change 316L tensile strength.",
+        factors=("heat treatment",),
+        outcome="tensile strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope="association_only",
+        synthesis_status="condition_dependent",
+        certainty=0.0,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("The two treatments are not identical.",),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-a",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("ev-a",),
+            ),
+            FindingPaperContribution(
+                document_id="paper-b",
+                analysis_status="analyzed",
+                contradicting_evidence_ids=("ev-b",),
+                condition_boundary_evidence_ids=("ev-b",),
+            ),
+        ),
+    )
     evidence = [
         {
             "evidence_id": "ev-a",
@@ -64,7 +79,139 @@ def review_input():
             },
         },
     ]
-    return Finding.from_mapping(finding).to_record(), evidence
+    return {
+        "collection_id": finding.collection_id,
+        "objective_id": finding.objective_id,
+        "analysis_version": finding.analysis_version,
+        "finding_id": finding.finding_id,
+        "statement": finding.statement,
+        "factors": list(finding.factors),
+        "outcome": finding.outcome,
+        "direction": finding.direction,
+        "assertion_strength": finding.assertion_strength,
+        "attribution_scope": finding.attribution_scope,
+        "synthesis_status": finding.synthesis_status,
+        "certainty": finding.certainty,
+        "display_rank": finding.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in finding.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.test
+            ],
+        },
+        "limitations": list(finding.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in finding.paper_contributions
+        ],
+        "origin": finding.origin,
+        "source_analysis_version": finding.source_analysis_version,
+        "parent_finding_id": finding.parent_finding_id,
+        "created_by_user_id": finding.created_by_user_id,
+        "created_by_tool_call_id": finding.created_by_tool_call_id,
+        "created_at": finding.created_at.isoformat() if finding.created_at else None,
+        **(
+            {"selection_ids": list(finding.selection_ids)}
+            if finding.selection_ids
+            else {}
+        ),
+        **(
+            {"comparison_group_ids": list(finding.comparison_group_ids)}
+            if finding.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(finding.warnings)} if finding.warnings else {}),
+    }, evidence
 
 
 class ModelStub:
@@ -99,11 +246,14 @@ def test_summary_returns_one_paragraph_with_exact_citations():
     payload = json.loads(model.calls[0]["user_prompt"])
     assert payload["evidence"] == evidence
     assert payload["finding"] == {
-        key: value for key, value in finding.items()
+        key: value
+        for key, value in finding.items()
         if key not in {"created_by_user_id", "created_by_tool_call_id", "created_at"}
     }
     assert "supporting_evidence_ids" not in finding
-    assert payload["finding"]["paper_contributions"][0]["supporting_evidence_ids"] == ["ev-a"]
+    assert payload["finding"]["paper_contributions"][0]["supporting_evidence_ids"] == [
+        "ev-a"
+    ]
     assert result["text"].startswith("Paper A reports 620 MPa")
     assert "\n" not in result["text"]
     assert not {"basis", "differences", "limitations", "counts"}.intersection(result)
@@ -135,71 +285,122 @@ def test_summary_rejects_invented_or_empty_citations(citation):
 def test_large_input_is_not_silently_truncated():
     finding, evidence = review_input()
     model = ModelStub(tokens=50000)
-    with pytest.raises(FindingSummaryUnavailable, match="summary_input_too_large"):
+    with pytest.raises(FindingSummaryUnavailable) as error:
         summarize_finding_evidence(
             finding=finding, evidence=evidence, language="en", response_client=model
         )
+    assert error.value.data["code"] == "summary_input_too_large"
     assert not model.calls
 
 
 def test_missing_linked_evidence_does_not_generate_partial_summary():
     finding, evidence = review_input()
     model = ModelStub()
-    with pytest.raises(FindingSummaryUnavailable, match="summary_evidence_incomplete"):
+    with pytest.raises(FindingSummaryUnavailable) as error:
         summarize_finding_evidence(
             finding=finding, evidence=evidence[:1], language="en", response_client=model
         )
+    assert error.value.data["code"] == "summary_evidence_incomplete"
     assert not model.calls
 
 
 def test_provider_failure_is_safe_and_does_not_modify_input():
     finding, evidence = review_input()
     original = json.dumps([finding, evidence])
-    with pytest.raises(
-        FindingSummaryUnavailable, match="summary_generation_failed"
-    ) as error:
+    with pytest.raises(FindingSummaryUnavailable) as error:
         summarize_finding_evidence(
             finding=finding,
             evidence=evidence,
             language="zh",
             response_client=ModelStub(fail=True),
         )
+    assert error.value.data["code"] == "summary_generation_failed"
     assert "secret" not in str(error.value)
     assert json.dumps([finding, evidence]) == original
 
 
 @pytest.mark.anyio
 async def test_service_rechecks_published_version_after_generation(monkeypatch):
-    from application.core.objectives.analysis_service import ObjectiveAnalysisService
+    from application.core.objectives import (
+        analysis_service as objective_analysis_service,
+    )
 
     finding, evidence = review_input()
-    service = ObjectiveAnalysisService(
-        objective_repository=SimpleNamespace(
-            list_evidence=AsyncMock(
-                return_value=(
-                    tuple(
-                        SimpleNamespace(to_record=lambda record=record: record)
-                        for record in evidence
-                    ),
-                    2,
-                )
+    records = tuple(
+        ObjectiveEvidence(
+            collection_id="col-1",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id=item["evidence_id"],
+            document_id=item["document_id"],
+            source_kind=item["source_kind"],
+            source_ref=item["source_ref"],
+            source_excerpt=item["source_excerpt"],
+            page_numbers=tuple(item["page_numbers"]),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="extracted",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=ScientificResult(
+                outcome="tensile strength",
+                result_text=item["source_excerpt"],
+                value=item.get("reported_result", {}).get("value"),
+                unit="MPa",
+                direction="unknown",
+            ),
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="resolved",
+            failure_reason=None,
+            confidence=0.8,
+        )
+        for item in evidence
+    )
+    objective_analysis_service.ObjectiveRepo = SimpleNamespace(
+        read_analysis=AsyncMock(
+            return_value=SimpleNamespace(
+                status="succeeded",
+                origin="human_authored",
+                scientific_record_source="authored_snapshot",
             )
         ),
-        experiment_analysis_service=None,
-        objective_input_service=None,
-        document_profile_service=None,
+        list_evidence=AsyncMock(return_value=(records, 2)),
     )
-    service.get_finding = AsyncMock(return_value={"finding": finding})
-    service._published_version = AsyncMock(
-        side_effect=ValueError("requested analysis version is not published")
+    analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
+    objective_analysis_service.experiment_analysis_service = None
+    objective_analysis_service.objective_input_service = None
+    objective_analysis_service.document_profile_service = None
+    service = objective_analysis_service
+    monkeypatch.setattr(
+        service, "get_finding", AsyncMock(return_value={"finding": finding})
+    )
+    monkeypatch.setattr(
+        service,
+        "_published_version",
+        AsyncMock(
+            side_effect=ResourceConflictException(
+                "requested analysis version is not published",
+                data={"code": "analysis_version_not_published"},
+            )
+        ),
     )
     monkeypatch.setattr(
         "application.core.objectives.analysis_service.summarize_finding_evidence",
         lambda **kwargs: {"model": "test"},
     )
-    with pytest.raises(ValueError, match="not published"):
-        await service.summarize_finding(
-            "col-1", "obj-1", "finding-1", analysis_version=1, language="en"
+    with pytest.raises(
+        ResourceConflictException, match="published analysis has changed"
+    ):
+        await service.summarize_objective_finding(
+            "col-1",
+            "obj-1",
+            "finding-1",
+            response_client=ModelStub(),
+            analysis_version=1,
+            language="en",
+            user_id="user-1",
         )
     service._published_version.assert_awaited_once_with("col-1", "obj-1", 1)
 
@@ -207,3 +408,63 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_summary_authorizes_before_constructing_provider(monkeypatch):
+    from application.core.objectives import analysis_service as service
+    from exceptions import ResourceNotFoundException
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(service, "get_finding", AsyncMock(side_effect=ResourceNotFoundException("hidden")))
+    factory = Mock(side_effect=AssertionError("Provider must not be constructed before authorization"))
+    monkeypatch.setattr(service, "build_default_structured_response_client", factory)
+    with pytest.raises(ResourceNotFoundException):
+        await service.summarize_objective_finding(
+            "col", "objective", "finding", user_id="other-user", analysis_version=1, language="en"
+        )
+    factory.assert_not_called()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure_stage", [None, "request", "options"])
+async def test_summary_owns_bounded_provider_until_request_finishes(monkeypatch, failure_stage):
+    from application.core.objectives import analysis_service as service
+    from unittest.mock import Mock
+
+    events = []
+    async def get_finding(*args, **kwargs):
+        events.append("authorized")
+        return {"finding": {}}
+    async def read_evidence(*args, **kwargs):
+        events.append("evidence")
+        return (), 0
+    def build():
+        events.append("construct")
+        return client
+    def summarize(**kwargs):
+        events.append("request")
+        if failure_stage == "request":
+            raise FindingSummaryUnavailable("summary_generation_failed")
+        return {"model": "test"}
+    provider = SimpleNamespace(
+        with_options=Mock(), close=Mock(side_effect=lambda: events.append("close"))
+    )
+    provider.with_options.return_value = provider
+    if failure_stage == "options":
+        provider.with_options.side_effect = RuntimeError("private provider details")
+    client = SimpleNamespace(client=provider)
+    monkeypatch.setattr(service, "get_finding", get_finding)
+    monkeypatch.setattr(service, "should_read_experiment_projection", AsyncMock(return_value=False))
+    monkeypatch.setattr(service, "ObjectiveRepo", SimpleNamespace(list_evidence=read_evidence))
+    monkeypatch.setattr(service, "build_default_structured_response_client", build)
+    monkeypatch.setattr(service, "summarize_finding_evidence", summarize)
+    monkeypatch.setattr(service, "_published_version", AsyncMock())
+    if failure_stage is not None:
+        with pytest.raises(FindingSummaryUnavailable):
+            await service.summarize_objective_finding("col", "obj", "finding", user_id="user", analysis_version=1, language="en")
+    else:
+        assert await service.summarize_objective_finding("col", "obj", "finding", user_id="user", analysis_version=1, language="en") == {"model": "test"}
+    assert events == ["authorized", "evidence", "construct", *(["request"] if failure_stage != "options" else []), "close"]
+    provider.with_options.assert_called_once_with(timeout=60.0, max_retries=0)
+    provider.close.assert_called_once()

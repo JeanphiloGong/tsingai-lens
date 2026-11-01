@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
+	for (const withEvidence of [false, true]) {
 	for (const width of [1440, 390]) {
-	test(`${taskType} missing candidate can be completed, saved and confirmed at ${width}px`, async ({ page }, testInfo) => {
+	test(`${taskType} missing candidate can be completed, saved and confirmed at ${width}px evidence=${withEvidence}`, async ({ page }, testInfo) => {
 		await page.setViewportSize({ width, height: 900 });
 		await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'zh'));
 		const collectionId = 'col_input';
@@ -27,7 +28,7 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 				const payload = request.postDataJSON();
 				expect(payload.expected_revision_id).toBeNull();
 				expect(payload.expected_generation).toBe(1);
-				expect(payload.content.context).toEqual([{ document_title: '文献 B', text: '预热温度为 200 C。' }]);
+				expect(payload.content.context).toEqual(withEvidence ? [{ document_title: '文献 B', text: '预热温度为 200 C。' }] : []);
 				if (taskType === 'evaluation') expect(payload.content.criteria).toEqual(['必须给出 200 C。', '不能外推到其他预热条件。']);
 				content = payload.content;
 				status = 'needs_confirmation';
@@ -46,9 +47,11 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 		});
 		await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
 		await expect(page.getByText('待补充', { exact: true }).last()).toBeVisible();
-		await page.getByRole('button', { name: '添加证据片段' }).click();
-		await page.getByRole('textbox', { name: '文献标题', exact: true }).fill('文献 B');
-		await page.getByRole('textbox', { name: '片段', exact: true }).fill('预热温度为 200 C。');
+		if (withEvidence) {
+			await page.getByRole('button', { name: '添加证据片段' }).click();
+			await page.getByRole('textbox', { name: '文献标题', exact: true }).fill('文献 B');
+			await page.getByRole('textbox', { name: '片段', exact: true }).fill('预热温度为 200 C。');
+		}
 		if (taskType === 'sft') await page.getByRole('textbox', { name: '回答内容' }).fill('文献 B 的预热温度为 200 C。');
 		if (taskType === 'preference') {
 			await page.getByRole('textbox', { name: '回答 A', exact: true }).fill('没有预热。');
@@ -80,5 +83,6 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 		expect(overflow).toBe(false);
 		await page.screenshot({ path: testInfo.outputPath(`${taskType}-confirmed-${width}.png`), fullPage: true });
 	});
+	}
 	}
 }

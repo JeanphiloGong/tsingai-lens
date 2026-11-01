@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from repositories.source_artifact_repository import SourceArtifactRepo
+
 import hashlib
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any, Literal
 from urllib.parse import urlencode
-
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from domain.source import render_markdown_table
 from application.chat.context_builder import ChatContextBuilder
-
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from domain.source import (
+    SourceBlock,
+    SourceDocument,
+    SourceFigure,
+    SourceTable,
+    render_markdown_table,
+    build_source_document_tree,
+)
+from exceptions import ResourceNotFoundException
+from infra.source.artifact_bundle import source_table_payload
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _SOURCE_CONTENT_LIMIT = 2_500
 _SEARCH_CONTENT_LIMIT = 800
@@ -28,45 +38,59 @@ ReadableSourceKind = Literal["text_window", "table", "figure"]
 
 
 async def _unavailable_document_sources(
-    collection_service: Any, context: CapabilityExecutionContext, document_ids: list[str],
+    context: CapabilityExecutionContext,
+    document_ids: list[str],
 ) -> ChatToolResult:
     missing = []
     for document_id in document_ids:
         try:
             await collection_service.get_document(context.collection_id, document_id)
-        except FileNotFoundError:
+        except ResourceNotFoundException:
             missing.append(document_id)
     return ChatToolResult(
-        tool_call_id=context.tool_call_id, status="failed",
+        tool_call_id=context.tool_call_id,
+        status=ToolResultStatus.FAILED,
         error_code="document_not_found" if missing else "document_sources_not_ready",
         error_message=(
             "These document identifiers are not in this collection. Use browse_collection_papers "
             "to locate the papers and copy their exact document_id; this does not establish "
             "that the papers lack Source content."
-            if missing else "These papers exist, but their canonical Source content is not prepared."
+            if missing
+            else "These papers exist, but their canonical Source content is not prepared."
         ),
-        data={"missing_document_ids": missing,
-              "unprepared_document_ids": [item for item in document_ids if item not in missing]},
+        data={
+            "missing_document_ids": missing,
+            "unprepared_document_ids": [
+                item for item in document_ids if item not in missing
+            ],
+        },
     )
 
 
 class InspectDocumentSourcesToolRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     document_id: str = Field(min_length=1, max_length=240)
     query: str | None = Field(default=None, max_length=240)
-    source_ref: str | None = Field(default=None, max_length=240)
+    source_ref: str | None = Field(default=None, min_length=1, max_length=240)
+    section_id: str | None = Field(default=None, min_length=1, max_length=500, description="Copy the section_id from the outline; reads its complete subtree.")
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
     heading_path: str | None = Field(
-        default=None, max_length=1000,
-        description="Exact heading_path from the document outline; omit to inspect the whole prepared document.",
+        default=None,
+        max_length=1000,
+        description="Exact heading_path from the document outline. Reads that section and its subsections; omit to inspect the whole prepared document.",
     )
     source_types: list[SourceType] = Field(default_factory=list, max_length=3)
     page: int | None = Field(default=None, ge=1)
     offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=200, ge=1, le=200,
-                       description="Optional record cap. Omit to read a batch of complete passages fitted to the available context.")
+    limit: int = Field(
+        default=200,
+        ge=1,
+        le=200,
+        description="Optional record cap. Omit to read a batch of complete passages fitted to the available context.",
+    )
 
-    @field_validator("document_id", "query", "source_ref", "heading_path")
+    @field_validator("query", "heading_path")
     @classmethod
     def _normalize_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -83,7 +107,8 @@ class InspectDocumentSourcesToolRequest(BaseModel):
 class SearchSourcesToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    document_ids: list[str] = Field(min_length=1, max_length=20)
+    document_ids: list[str] | None = Field(default=None, min_length=1, description="Omit to search the current collection; supply IDs to narrow it.")
+    match_mode: Literal["any", "all", "phrase"] = Field(default="any", description="Case-insensitive terms; all requires every term somewhere in the same paper, phrase requires an exact phrase.")
     query: str = Field(min_length=1, max_length=240)
     source_types: list[SourceType] = Field(default_factory=list, max_length=3)
     offset: int = Field(default=0, ge=0)
@@ -91,7 +116,9 @@ class SearchSourcesToolRequest(BaseModel):
 
     @field_validator("document_ids")
     @classmethod
-    def _unique_document_ids(cls, values: list[str]) -> list[str]:
+    def _unique_document_ids(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
         normalized = [value.strip() for value in values]
         if any(not value for value in normalized):
             raise ValueError("document IDs cannot be empty")
@@ -111,34 +138,28 @@ class SearchSourcesToolRequest(BaseModel):
 
 
 class InspectTableToolRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     document_id: str = Field(min_length=1, max_length=240)
     table_ref: str = Field(min_length=1, max_length=240)
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
     row_offset: int = Field(default=0, ge=0)
     row_limit: int = Field(default=20, ge=1, le=50)
-
-    @field_validator("document_id", "table_ref")
-    @classmethod
-    def _normalize_text(cls, value: str) -> str:
-        return value.strip()
 
 
 class ReadSourceToolRequest(BaseModel):
     """Identify one canonical Source and request a bounded exact excerpt."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     document_id: str = Field(min_length=1, max_length=240)
     source_kind: ReadableSourceKind
     source_ref: str = Field(min_length=1, max_length=240)
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
     offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=_READ_SOURCE_CONTENT_LIMIT, ge=1, le=_READ_SOURCE_CONTENT_LIMIT)
-
-    @field_validator("document_id", "source_ref")
-    @classmethod
-    def _normalize_text(cls, value: str) -> str:
-        return value.strip()
+    limit: int = Field(
+        default=_READ_SOURCE_CONTENT_LIMIT, ge=1, le=_READ_SOURCE_CONTENT_LIMIT
+    )
 
 
 class ReadSourceCapability:
@@ -154,41 +175,51 @@ class ReadSourceCapability:
             "it does not itself create Evidence or a Finding. Use inspect_table for "
             "row-aware inspection of an oversized table."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=ReadSourceToolRequest,
         parallel_safe=True,
     )
-
-    def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ReadSourceToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document = await self.source_artifact_repository.read_document(
+        document = await SourceArtifactRepo.read_document(
             context.collection_id,
             arguments.document_id,
         )
         if document is None:
-            return await _unavailable_document_sources(self.collection_service, context, [arguments.document_id])
+            return await _unavailable_document_sources(
+                context, [arguments.document_id]
+            )
+
+        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        if arguments.source_version is not None and arguments.source_version != source_version:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="source_version_changed",
+                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
+                data={"document_id": document.document_id, "source_version": source_version},
+            )
 
         source = self._source_record(document, arguments)
         if source is None:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="source_not_found",
                 error_message="The requested canonical Source was not found in this paper.",
             )
-        source["source_label"] = InspectDocumentSourcesCapability._source_label_for_document(
-            document, source["source_ref"]
+        source["source_label"] = (
+            InspectDocumentSourcesCapability._source_label_for_document(
+                document, source["source_ref"]
+            )
         )
 
         canonical_content = source.pop("_canonical_content")
@@ -202,7 +233,7 @@ class ReadSourceCapability:
         if arguments.offset > 0 and arguments.offset >= canonical_length:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     **source,
                     "document_id": document.document_id,
@@ -233,11 +264,11 @@ class ReadSourceCapability:
             )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 **source,
                 "document_id": document.document_id,
-                "document_title": str(document.title or "")[:500],
+                "document_title": document.title[:500],
                 "content": content,
                 "content_offset": start,
                 "canonical_length": canonical_length,
@@ -245,37 +276,78 @@ class ReadSourceCapability:
                 "complete_source": complete_source,
                 "content_truncated": not complete_source,
                 "source_digest": digest,
+                "source_version": source_version,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                 "offset": next_offset} if next_offset is not None else None,
                 "support_is_evidence": False,
             },
             resource_refs=(source_ref,),
             warnings=tuple(warnings),
         )
-        if InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+        if (
+            InspectDocumentSourcesCapability._result_tokens(result)
+            > context.max_result_tokens
+        ):
             low, high = start, end
             while low < high:
                 candidate_end = (low + high + 1) // 2
-                candidate = replace(result, data={**result.data,
-                    "content": canonical_content[start:candidate_end], "next_offset": candidate_end,
-                    "complete_source": False, "content_truncated": True,
-                }, warnings=("Continue at next_offset before treating this Source as completely read.",))
-                if InspectDocumentSourcesCapability._result_tokens(candidate) <= context.max_result_tokens:
+                candidate = replace(
+                    result,
+                    data={
+                        **result.data,
+                        "content": canonical_content[start:candidate_end],
+                        "next_offset": candidate_end,
+                        "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                         "offset": candidate_end},
+                        "complete_source": False,
+                        "content_truncated": True,
+                    },
+                    warnings=(
+                        "Continue at next_offset before treating this Source as completely read.",
+                    ),
+                )
+                if (
+                    InspectDocumentSourcesCapability._result_tokens(candidate)
+                    <= context.max_result_tokens
+                ):
                     low = candidate_end
                 else:
                     high = candidate_end - 1
             if low == start:
-                return ChatToolResult(tool_call_id=context.tool_call_id, status="failed",
-                                      error_code="source_batch_too_large",
-                                      error_message="Read this Source individually to leave room for its content and locator.")
-            result = replace(result, data={**result.data, "content": canonical_content[start:low],
-                "next_offset": low, "complete_source": False, "content_truncated": True,
-            }, warnings=("Continue at next_offset before treating this Source as completely read.",))
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id,
+                    status=ToolResultStatus.FAILED,
+                    error_code="source_batch_too_large",
+                    error_message="Read this Source individually to leave room for its content and locator.",
+                )
+            result = replace(
+                result,
+                data={
+                    **result.data,
+                    "content": canonical_content[start:low],
+                    "next_offset": low,
+                    "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                     "offset": low},
+                    "complete_source": False,
+                    "content_truncated": True,
+                },
+                warnings=(
+                    "Continue at next_offset before treating this Source as completely read.",
+                ),
+            )
         return result
 
     @staticmethod
-    def _source_record(document: Any, arguments: ReadSourceToolRequest) -> dict[str, Any] | None:
+    def _source_record(
+        document: SourceDocument, arguments: ReadSourceToolRequest
+    ) -> dict[str, Any] | None:
         if arguments.source_kind == "text_window":
             item = next(
-                (block for block in document.blocks if block.block_id == arguments.source_ref),
+                (
+                    block
+                    for block in document.blocks
+                    if block.block_id == arguments.source_ref
+                ),
                 None,
             )
             if item is None:
@@ -286,17 +358,21 @@ class ReadSourceCapability:
                 "source_ref": item.block_id,
                 "page": item.page,
                 "heading_path": item.heading_path,
-                "block_type": str(item.block_type or "paragraph"),
-                "_canonical_content": str(item.text or ""),
+                "block_type": item.block_type,
+                "_canonical_content": item.text,
             }
         if arguments.source_kind == "table":
             item = next(
-                (table for table in document.tables if table.table_id == arguments.source_ref),
+                (
+                    table
+                    for table in document.tables
+                    if table.table_id == arguments.source_ref
+                ),
                 None,
             )
             if item is None:
                 return None
-            record = item.to_record()
+            record = source_table_payload(item)
             return {
                 "source_type": "table",
                 "source_kind": "table",
@@ -306,10 +382,14 @@ class ReadSourceCapability:
                 "caption": item.caption_text,
                 "row_count": item.row_count,
                 "column_count": item.col_count,
-                "_canonical_content": str(record.get("table_markdown") or "").strip(),
+                "_canonical_content": (record["table_markdown"] or "").strip(),
             }
         item = next(
-            (figure for figure in document.figures if figure.figure_id == arguments.source_ref),
+            (
+                figure
+                for figure in document.figures
+                if figure.figure_id == arguments.source_ref
+            ),
             None,
         )
         if item is None:
@@ -321,7 +401,7 @@ class ReadSourceCapability:
             "page": item.page,
             "heading_path": item.heading_path,
             "figure_label": item.figure_label,
-            "_canonical_content": str(item.caption_text or ""),
+            "_canonical_content": (item.caption_text or ""),
         }
 
 
@@ -329,58 +409,74 @@ class SearchSourcesCapability:
     spec = ToolSpec(
         name="search_sources",
         description=(
-            "Search exact phrases or terms across prepared Sources in an explicit "
-            "paper scope. Results are bounded, paginated navigation candidates with "
+            "Search the current collection for paper content; omit document_ids for the whole collection. "
+            "Use match_mode to match any terms, all terms across a paper, or an exact phrase. "
+            "Returns ranked papers and passages around actual hits with exact reading arguments. "
+            "Results are bounded, paginated navigation candidates with "
             "canonical Source digests. A match is not Evidence and does not prove "
             "relevance; inspect the exact Source before making a scientific judgment."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=SearchSourcesToolRequest,
         parallel_safe=True,
     )
-
-    def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: SearchSourcesToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        documents = await self.source_artifact_repository.read_documents(
-            context.collection_id,
-            tuple(arguments.document_ids),
-        )
+        try:
+            documents = (
+                await SourceArtifactRepo.read_collection_documents(context.collection_id)
+                if arguments.document_ids is None else
+                await SourceArtifactRepo.read_documents(context.collection_id, tuple(arguments.document_ids))
+            )
+        except FileNotFoundError:
+            return await _unavailable_document_sources(
+                context, arguments.document_ids or []
+            )
         documents_by_id = {document.document_id: document for document in documents}
         missing = [
             document_id
-            for document_id in arguments.document_ids
+            for document_id in arguments.document_ids or []
             if document_id not in documents_by_id
         ]
         if missing:
-            return await _unavailable_document_sources(self.collection_service, context, missing)
+            return await _unavailable_document_sources(
+                context, missing
+            )
 
         selected_types = set(arguments.source_types)
         matches: list[dict[str, Any]] = []
-        for document_id in arguments.document_ids:
-            document = documents_by_id[document_id]
+        terms = list(dict.fromkeys(arguments.query.casefold().split()))
+        paper_scores: dict[str, tuple[int, int]] = {}
+        for document in documents:
+            document_id = document.document_id
+            source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables, figures=document.figures)
+            sections = {" > ".join(node.heading_path): node.node_id for node in tree.nodes.values()
+                        if node.node_type in {"section", "references_section"}}
+            paper_terms = {term for term in terms if term in document.title.casefold()}
+            title_terms = len(paper_terms)
+            paper_start = len(matches)
             candidates = (
                 *(
                     (InspectDocumentSourcesCapability._text_source(block), block.text)
                     for block in sorted(
                         document.blocks, key=lambda item: item.block_order
                     )
-                    if str(block.text or "").strip()
+                    if block.text.strip()
                 ),
                 *(
                     (
                         InspectDocumentSourcesCapability._table_source(table),
-                        str(table.to_record()["table_markdown"] or "").strip(),
+                        (source_table_payload(table)["table_markdown"] or "").strip(),
                     )
                     for table in sorted(
                         document.tables, key=lambda item: item.table_order
@@ -389,12 +485,12 @@ class SearchSourcesCapability:
                 *(
                     (
                         InspectDocumentSourcesCapability._figure_source(figure),
-                        str(figure.caption_text or ""),
+                        (figure.caption_text or ""),
                     )
                     for figure in sorted(
                         document.figures, key=lambda item: item.figure_order
                     )
-                    if str(figure.caption_text or "").strip()
+                    if (figure.caption_text or "").strip()
                 ),
             )
             for item, canonical_content in candidates:
@@ -402,24 +498,42 @@ class SearchSourcesCapability:
                 searchable_item = {**item, "content": canonical_content}
                 if selected_types and item["source_type"] not in selected_types:
                     continue
-                if not InspectDocumentSourcesCapability._matches_query(
-                    searchable_item,
-                    arguments.query,
-                ):
+                searchable = " ".join(str(searchable_item.get(key) or "") for key in ("heading_path", "caption", "figure_label", "content")).casefold()
+                matched = [term for term in terms if term in searchable]
+                paper_terms.update(matched)
+                if not matched or (arguments.match_mode == "phrase" and arguments.query.casefold() not in searchable):
                     continue
-                content, truncated = InspectDocumentSourcesCapability._bounded(
-                    canonical_content,
-                    limit=_SEARCH_CONTENT_LIMIT,
-                )
-                matches.append(
-                    {
-                        **item,
-                        "document_id": document.document_id,
-                        "document_title": str(document.title or "")[:500],
-                        "content": content,
-                        "content_truncated": truncated,
-                    }
-                )
+                positions = [canonical_content.casefold().find(term) for term in matched]
+                positions = [position for position in positions if position >= 0]
+                offset = max(0, min(positions) - 160) if positions else 0
+                content = canonical_content[offset:offset + _SEARCH_CONTENT_LIMIT]
+                matches.append({
+                    **item, "document_id": document_id, "document_title": document.title[:500],
+                    "content": content, "content_offset": offset,
+                    "content_truncated": offset > 0 or offset + len(content) < len(canonical_content),
+                    "matched_terms": matched, "section_id": sections.get(item.get("heading_path")),
+                    "source_version": source_version, "support_is_evidence": False,
+                    "read_arguments": {"document_id": document_id, "source_kind": item["source_kind"],
+                                       "source_ref": item["source_ref"], "source_version": source_version},
+                })
+            if arguments.match_mode == "all" and len(paper_terms) != len(terms):
+                del matches[paper_start:]
+                continue
+            paper_scores[document_id] = (len(paper_terms), title_terms)
+        matches.sort(key=lambda item: (*paper_scores[item["document_id"]], len(item["matched_terms"])), reverse=True)
+        papers = []
+        paper_hits = []
+        for document_id in sorted(paper_scores, key=paper_scores.get, reverse=True):
+            hits = [item for item in matches if item["document_id"] == document_id]
+            if hits:
+                paper_hits.append(hits)
+                papers.append({"document_id": document_id, "title": documents_by_id[document_id].title[:500],
+                               "matching_source_count": len(hits),
+                               "matched_terms": sorted({term for item in hits for term in item["matched_terms"]})})
+        # Surface each ranked paper before returning additional passages from
+        # the same paper, so a long paper cannot hide the rest of the corpus.
+        matches = [hits[index] for index in range(max((len(hits) for hits in paper_hits), default=0))
+                   for hits in paper_hits if index < len(hits)]
 
         visible = matches[arguments.offset : arguments.offset + arguments.limit]
         next_offset = arguments.offset + len(visible)
@@ -436,12 +550,16 @@ class SearchSourcesCapability:
                 f"{len(matches) - next_offset} additional matching Source record(s) "
                 "remain on later pages."
             )
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
-                "document_ids": list(arguments.document_ids),
+                "document_ids": arguments.document_ids,
+                "match_mode": arguments.match_mode,
+                "papers": [paper for paper in papers
+                           if paper["document_id"] in {item["document_id"] for item in visible}],
+                "matching_paper_total": len(papers),
                 "source_types": list(arguments.source_types),
                 "match_total": len(matches),
                 "offset": arguments.offset,
@@ -461,6 +579,22 @@ class SearchSourcesCapability:
             warnings=tuple(warnings),
         )
 
+        while InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+            if len(visible) > 1:
+                visible.pop()
+            elif result.data["papers"]:
+                result = replace(result, data={**result.data, "papers": result.data["papers"][:-1]})
+            else:
+                return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                                      error_code="source_batch_too_large",
+                                      error_message="Narrow the search scope to fit one Source preview.")
+            next_offset = arguments.offset + len(visible)
+            result = replace(result, data={**result.data, "matches": list(visible),
+                                          "next_offset": next_offset if next_offset < len(matches) else None},
+                             resource_refs=tuple(InspectDocumentSourcesCapability._source_ref(
+                                 context.collection_id, item["document_id"], item) for item in visible))
+        return result
+
 
 class InspectTableCapability:
     spec = ToolSpec(
@@ -471,30 +605,38 @@ class InspectTableCapability:
             "into header-preserving row windows. The complete-table digest remains "
             "stable across windows. A table read is Source inspection, not Evidence."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=InspectTableToolRequest,
         parallel_safe=True,
     )
-
-    def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectTableToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document = await self.source_artifact_repository.read_document(
+        document = await SourceArtifactRepo.read_document(
             context.collection_id,
             arguments.document_id,
         )
         if document is None:
-            return await _unavailable_document_sources(self.collection_service, context, [arguments.document_id])
+            return await _unavailable_document_sources(
+                context, [arguments.document_id]
+            )
+        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        if arguments.source_version is not None and arguments.source_version != source_version:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="source_version_changed",
+                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
+                data={"document_id": document.document_id, "source_version": source_version},
+            )
+
         table = next(
             (item for item in document.tables if item.table_id == arguments.table_ref),
             None,
@@ -502,19 +644,19 @@ class InspectTableCapability:
         if table is None:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="table_source_not_found",
                 error_message="The requested table Source was not found in this paper.",
             )
 
-        record = table.to_record()
-        canonical_markdown = str(record["table_markdown"] or "").strip()
+        record = source_table_payload(table)
+        canonical_markdown = (record["table_markdown"] or "").strip()
         digest = hashlib.sha256(canonical_markdown.encode("utf-8")).hexdigest()
         data_rows = table.table_matrix[table.header_row_count :]
         if arguments.row_offset > 0 and arguments.row_offset >= len(data_rows):
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     "document_id": document.document_id,
                     "table_ref": table.table_id,
@@ -561,11 +703,14 @@ class InspectTableCapability:
             oversized_row_offset: int | None = None
             remaining_rows = data_rows[arguments.row_offset :]
             for relative_index, row in enumerate(remaining_rows[: arguments.row_limit]):
-                candidate = render_markdown_table(
-                    [list(item) for item in (*selected_rows, row)],
-                    headers,
-                    header_row_count=0,
-                ) or ""
+                candidate = (
+                    render_markdown_table(
+                        [list(item) for item in (*selected_rows, row)],
+                        headers,
+                        header_row_count=0,
+                    )
+                    or ""
+                )
                 if len(candidate.encode("utf-8")) > _TABLE_CONTENT_LIMIT:
                     oversized_row_offset = arguments.row_offset + relative_index
                     break
@@ -575,11 +720,14 @@ class InspectTableCapability:
             # a preview but keep the continuation at that row; callers can use
             # read_source's character pagination for the complete table content.
             if not selected_rows and oversized_row_offset is not None:
-                oversized_markdown = render_markdown_table(
-                    [list(remaining_rows[0])],
-                    headers,
-                    header_row_count=0,
-                ) or ""
+                oversized_markdown = (
+                    render_markdown_table(
+                        [list(remaining_rows[0])],
+                        headers,
+                        header_row_count=0,
+                    )
+                    or ""
+                )
                 markdown, _ = self._bounded_utf8(
                     oversized_markdown,
                     limit=_TABLE_CONTENT_LIMIT,
@@ -588,27 +736,31 @@ class InspectTableCapability:
                 next_row_offset = oversized_row_offset
                 content_truncated = True
             else:
-                markdown = render_markdown_table(
-                    [list(row) for row in selected_rows],
-                    headers,
-                    header_row_count=0,
-                ) or ""
+                markdown = (
+                    render_markdown_table(
+                        [list(row) for row in selected_rows],
+                        headers,
+                        header_row_count=0,
+                    )
+                    or ""
+                )
                 returned_row_count = len(selected_rows)
                 next_row_offset = arguments.row_offset + returned_row_count
                 content_truncated = (
-                    oversized_row_offset is not None
-                    or next_row_offset < len(data_rows)
+                    oversized_row_offset is not None or next_row_offset < len(data_rows)
                 )
             if next_row_offset >= len(data_rows):
                 next_row_offset = None
 
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "document_id": document.document_id,
                 "document_title": document.title,
                 "table_ref": table.table_id,
+                "source_version": source_version,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version, "row_offset": next_row_offset} if next_row_offset is not None else None,
                 "caption": table.caption_text,
                 "page": table.page,
                 "heading_path": table.heading_path,
@@ -636,21 +788,47 @@ class InspectTableCapability:
                 ),
             ),
             warnings=(
-                "The table window stopped before a row that exceeds the bounded "
-                "response. Continue from next_row_offset; if that offset repeats, "
-                "use read_source character pagination.",
-            )
-            if oversized_row_offset is not None
-            else (),
+                (
+                    "The table window stopped before a row that exceeds the bounded "
+                    "response. Continue from next_row_offset; if that offset repeats, "
+                    "use read_source character pagination.",
+                )
+                if oversized_row_offset is not None
+                else ()
+            ),
         )
+
+        while InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+            count = result.data["returned_row_count"]
+            if count <= 1:
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                    error_code="table_row_exceeds_budget",
+                    error_message="A complete table row and its headers do not fit. Read the canonical table with read_source.",
+                    data={"read_arguments": {"document_id": document.document_id, "source_kind": "table",
+                                             "source_ref": table.table_id, "source_version": source_version}},
+                )
+            count -= 1
+            next_row_offset = arguments.row_offset + count
+            headers = list(table.column_headers) or [f"column_{i+1}" for i in range(table.col_count)]
+            markdown = render_markdown_table(
+                [list(row) for row in data_rows[arguments.row_offset:next_row_offset]], headers, header_row_count=0,
+            ) or ""
+            result = replace(result, data={**result.data,
+                "returned_row_count": count, "table_markdown": markdown,
+                "next_row_offset": next_row_offset, "complete_table": False, "content_truncated": True,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                 "row_offset": next_row_offset},
+            })
+        return result
 
     @staticmethod
     def _bounded_utf8(
-        value: Any,
+        value: str,
         *,
         limit: int,
     ) -> tuple[str, bool]:
-        text = str(value or "")
+        text = value
         encoded = text.encode("utf-8")
         if len(encoded) <= limit:
             return text, False
@@ -669,36 +847,44 @@ class InspectDocumentSourcesCapability:
             "limit for automatic batching; continue with next_offset, and use read_source "
             "for any oversized truncated Source."
         ),
+        initially_available=True,
         risk=ToolRisk.READ,
         input_model=InspectDocumentSourcesToolRequest,
         parallel_safe=True,
     )
-
-    def __init__(self, *, collection_service: Any, source_artifact_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectDocumentSourcesToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document = await self.source_artifact_repository.read_document(
+        document = await SourceArtifactRepo.read_document(
             context.collection_id,
             arguments.document_id,
         )
         if document is None:
-            return await _unavailable_document_sources(self.collection_service, context, [arguments.document_id])
+            return await _unavailable_document_sources(
+                context, [arguments.document_id]
+            )
+
+        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        if arguments.source_version is not None and arguments.source_version != source_version:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="source_version_changed",
+                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
+                data={"document_id": document.document_id, "source_version": source_version},
+            )
 
         sources = [
             *(
                 self._text_source(block)
                 for block in sorted(document.blocks, key=lambda item: item.block_order)
-                if str(block.text or "").strip()
+                if block.text.strip()
             ),
             *(
                 self._table_source(table)
@@ -706,24 +892,37 @@ class InspectDocumentSourcesCapability:
             ),
             *(
                 self._figure_source(figure)
-                for figure in sorted(document.figures, key=lambda item: item.figure_order)
-                if str(figure.caption_text or "").strip()
+                for figure in sorted(
+                    document.figures, key=lambda item: item.figure_order
+                )
+                if (figure.caption_text or "").strip()
             ),
         ]
         for source in sources:
             content = source.pop("_canonical_content")
-            source.update(content=content, content_truncated=False, canonical_length=len(content),
-                          estimated_tokens=ChatContextBuilder.estimate_tokens(content))
+            source.update(
+                content=content,
+                content_truncated=False,
+                canonical_length=len(content),
+                estimated_tokens=ChatContextBuilder.estimate_tokens(content),
+            )
         for index, source in enumerate(sources, start=1):
             source["source_label"] = f"S{index:03d}"
         sections: dict[str, dict[str, Any]] = {}
         for source in sources:
-            heading = " ".join(str(source.get("heading_path") or "").split())
-            section = sections.setdefault(heading, {
-                "heading_path": heading, "pages": [], "source_count": 0,
-                "source_types": [], "first_source_ref": source["source_ref"],
-                "canonical_length": 0, "estimated_tokens": 0,
-            })
+            heading = " ".join((source["heading_path"] or "").split())
+            section = sections.setdefault(
+                heading,
+                {
+                    "heading_path": heading,
+                    "pages": [],
+                    "source_count": 0,
+                    "source_types": [],
+                    "first_source_ref": source["source_ref"],
+                    "canonical_length": 0,
+                    "estimated_tokens": 0,
+                },
+            )
             section["source_count"] += 1
             section["canonical_length"] += source["canonical_length"]
             section["estimated_tokens"] += source["estimated_tokens"]
@@ -731,14 +930,42 @@ class InspectDocumentSourcesCapability:
                 section["pages"].append(source["page"])
             if source["source_type"] not in section["source_types"]:
                 section["source_types"].append(source["source_type"])
+        tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables,
+                                          figures=document.figures, collection_id=context.collection_id)
+        section_nodes = {node.node_id: node for node in tree.nodes.values()
+                         if node.node_type in {"section", "references_section"}}
+        for heading, section in sections.items():
+            node = next((node for node in section_nodes.values() if " > ".join(node.heading_path) == heading), None)
+            section["section_id"] = node.node_id if node else None
+        selected_refs = None
+        if arguments.section_id is not None:
+            if arguments.section_id not in section_nodes:
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                    error_code="section_not_found", error_message="Copy an exact section_id from the current outline.",
+                    data={"document_id": document.document_id, "source_version": source_version,
+                          "document_outline": list(sections.values())[:80]},
+                )
+            selected_refs = set()
+            pending = [arguments.section_id]
+            while pending:
+                node = tree.nodes[pending.pop()]
+                if node.source_ref_id is not None:
+                    selected_refs.add(node.source_ref_id)
+                pending.extend(node.child_ids)
         selected_types = set(arguments.source_types)
         matches = [
             item
             for item in sources
-            if (not selected_types or item["source_type"] in selected_types)
+            if (selected_refs is None or item["source_ref"] in selected_refs)
+            and (not selected_types or item["source_type"] in selected_types)
             and (arguments.page is None or item["page"] == arguments.page)
-            and (arguments.heading_path is None
-                 or " ".join(str(item.get("heading_path") or "").split()) == arguments.heading_path)
+            and (
+                arguments.heading_path is None
+                or " ".join((item["heading_path"] or "").split())
+                == arguments.heading_path
+                or " ".join((item["heading_path"] or "").split()).startswith(arguments.heading_path + " > ")
+            )
             and (
                 arguments.source_ref is None
                 or item["source_ref"] == arguments.source_ref
@@ -746,29 +973,17 @@ class InspectDocumentSourcesCapability:
             and self._matches_query(item, arguments.query)
         ]
         # Keep complete passages together. Reserve space for the outline,
-        # Source locators, result framing, and continuation metadata.
+        # Size the complete tool envelope once, including locators and warnings.
         outline = list(sections.values())[:80]
         if arguments.heading_path is not None:
-            # A section read needs body space; retain every section's coverage
-            # but repeat detailed size/locator metadata only for the requested one.
-            outline = [section if section["heading_path"] == arguments.heading_path else
-                       {key: section[key] for key in ("heading_path", "pages", "source_count")}
-                       for section in outline]
-        framing_tokens = 900 if arguments.heading_path is not None else 1800
-        remaining_tokens = max(256, context.max_result_tokens - ChatContextBuilder.estimate_tokens(outline) - framing_tokens)
-        visible = []
-        for source in matches[arguments.offset : arguments.offset + arguments.limit]:
-            cost = ChatContextBuilder.estimate_tokens(json.dumps(source, ensure_ascii=True)) + 250
-            if cost > remaining_tokens:
-                if not visible:
-                    preview = dict(source)
-                    preview["content"] = ""
-                    preview["content_truncated"] = True
-                    preview["reading_note"] = "This Source exceeds this batch. Read its exact source_ref with read_source or inspect_table."
-                    visible.append(preview)
-                break
-            visible.append(source)
-            remaining_tokens -= cost
+            outline = [section for heading, section in sections.items()
+                       if heading == arguments.heading_path
+                       or heading.startswith(arguments.heading_path + " > ")][:80]
+        if arguments.section_id is not None:
+            outline = [section for section in outline if section["first_source_ref"] in selected_refs]
+        continuation_args = arguments.model_dump(exclude_none=True, exclude={"offset", "limit"})
+        continuation_args["source_version"] = source_version
+        visible = list(matches[arguments.offset : arguments.offset + arguments.limit])
         next_offset = arguments.offset + len(visible)
         if next_offset >= len(matches):
             next_offset = None
@@ -778,27 +993,18 @@ class InspectDocumentSourcesCapability:
             self._source_ref(context.collection_id, document.document_id, item)
             for item in visible
         )
-        warnings: list[str] = []
-        if not matches:
-            warnings.append(
-                "No prepared Source matched these filters; this is not evidence that "
-                "the scientific result is absent from the paper."
-            )
-        omitted = len(matches) - len(visible) - arguments.offset
-        if omitted > 0:
-            warnings.append(
-                f"{omitted} additional matching Source record(s) were omitted from "
-                "this bounded page."
-            )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "document": {
                     "document_id": document.document_id,
-                    "title": str(document.title or "")[:500],
+                    "title": document.title[:500],
                 },
                 "query": arguments.query,
+                "section_id": arguments.section_id,
+                "source_version": source_version,
+                "continuation": {**continuation_args, "offset": next_offset} if next_offset is not None else None,
                 "source_ref": arguments.source_ref,
                 "heading_path": arguments.heading_path,
                 "source_types": list(arguments.source_types),
@@ -808,10 +1014,13 @@ class InspectDocumentSourcesCapability:
                     "table": len(document.tables),
                     "figure": len(document.figures),
                 },
-                "prepared_source_pages": sorted({item["page"] for item in sources if item["page"] is not None}, key=str),
+                "prepared_source_pages": sorted(
+                    {item["page"] for item in sources if item["page"] is not None},
+                    key=str,
+                ),
                 "document_outline": outline,
                 "outline_section_total": len(sections),
-                "outline_truncated": len(sections) > 80,
+                "outline_truncated": len(sections) > len(outline),
                 "coverage_note": (
                     "This outline describes prepared Sources, not the original PDF's total pages "
                     "or a completed scientific review. When outline_truncated is false, it lists "
@@ -826,66 +1035,91 @@ class InspectDocumentSourcesCapability:
                 "next_offset": next_offset,
                 "sources": visible,
                 "source_label_to_ref": {
-                    source["source_label"]: source["source_ref"]
-                    for source in visible
+                    source["source_label"]: source["source_ref"] for source in visible
                 },
                 "batch_token_budget": context.max_result_tokens,
                 "returned_source_count": len(visible),
                 "support_is_evidence": False,
             },
             resource_refs=tuple(refs),
-            warnings=tuple(warnings),
         )
 
-        while self._result_tokens(result) > context.max_result_tokens - 192:
+        while True:
+            result = replace(result, warnings=tuple([
+                *(["No prepared Source matched these filters; this is not evidence of scientific absence."]
+                  if not matches else []),
+                *(["Continue with next_offset for additional matching Sources."]
+                  if result.data["next_offset"] is not None else []),
+                *(["An oversized Source is listed without its content; read it separately."]
+                  if any(source["content_truncated"] for source in visible) else []),
+            ]))
+            if self._result_tokens(result) <= context.max_result_tokens:
+                return result
             if len(visible) > 1:
                 visible.pop()
             elif outline:
                 outline.pop()
             elif visible and visible[0]["content"]:
-                visible[0] = {**visible[0], "content": "", "content_truncated": True,
-                              "reading_note": "Read this oversized Source with read_source or inspect_table."}
+                visible[0] = {
+                    **visible[0],
+                    "content": "",
+                    "content_truncated": True,
+                    "reading_note": "Read this oversized Source with read_source or inspect_table.",
+                }
             else:
-                return ChatToolResult(tool_call_id=context.tool_call_id, status="failed",
-                                      error_code="source_batch_too_large",
-                                      error_message="Request this paper individually with an exact Source or narrower section.")
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id,
+                    status=ToolResultStatus.FAILED,
+                    error_code="source_batch_too_large",
+                    error_message="Request this paper individually with an exact Source or narrower section.",
+                )
             next_offset = arguments.offset + len(visible)
-            result = replace(result, data={**result.data, "sources": list(visible), "document_outline": list(outline),
-                "source_label_to_ref": {
-                    source["source_label"]: source["source_ref"]
-                    for source in visible
+            result = replace(
+                result,
+                data={
+                    **result.data,
+                    "sources": list(visible),
+                    "document_outline": list(outline),
+                    "source_label_to_ref": {
+                        source["source_label"]: source["source_ref"]
+                        for source in visible
+                    },
+                    "outline_truncated": len(sections) > len(outline),
+                    "returned_source_count": len(visible),
+                    "next_offset": next_offset if next_offset < len(matches) else None,
+                    "continuation": {**continuation_args, "offset": next_offset} if next_offset < len(matches) else None,
                 },
-                "outline_truncated": len(sections) > len(outline), "returned_source_count": len(visible),
-                "next_offset": next_offset if next_offset < len(matches) else None,
-            }, resource_refs=(self._document_ref(context.collection_id, document.document_id), *(
-                self._source_ref(context.collection_id, document.document_id, source) for source in visible
-            )))
-        return replace(result, warnings=tuple([
-            *(["No prepared Source matched these filters; this is not evidence of scientific absence."] if not matches else []),
-            *(["Continue with next_offset for additional matching Sources."] if result.data["next_offset"] is not None else []),
-            *(["An oversized Source is listed without its content; read it separately."]
-              if any(source["content_truncated"] for source in visible) else []),
-        ]))
-
+                resource_refs=(
+                    self._document_ref(context.collection_id, document.document_id),
+                    *(
+                        self._source_ref(
+                            context.collection_id, document.document_id, source
+                        )
+                        for source in visible
+                    ),
+                ),
+            )
     @staticmethod
     def _result_tokens(result: ChatToolResult) -> int:
-        return ChatContextBuilder.estimate_tokens({
-            "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
-        })
+        return ChatContextBuilder.estimate_tokens(
+            ChatContextBuilder.tool_result_message(result)
+        )
 
     @staticmethod
-    def _source_label_for_document(document: Any, source_ref: str) -> str:
+    def _source_label_for_document(document: SourceDocument, source_ref: str) -> str:
         refs = [
             block.block_id
             for block in sorted(document.blocks, key=lambda item: item.block_order)
-            if str(block.text or "").strip()
+            if block.text.strip()
         ]
-        refs.extend(table.table_id for table in sorted(document.tables, key=lambda item: item.table_order))
+        refs.extend(
+            table.table_id
+            for table in sorted(document.tables, key=lambda item: item.table_order)
+        )
         refs.extend(
             figure.figure_id
             for figure in sorted(document.figures, key=lambda item: item.figure_order)
-            if str(figure.caption_text or "").strip()
+            if (figure.caption_text or "").strip()
         )
         try:
             return f"S{refs.index(source_ref) + 1:03d}"
@@ -893,30 +1127,30 @@ class InspectDocumentSourcesCapability:
             return ""
 
     @staticmethod
-    def _text_source(block: Any) -> dict[str, Any]:
+    def _text_source(block: SourceBlock) -> dict[str, Any]:
         content, truncated = InspectDocumentSourcesCapability._bounded(block.text)
         return {
             "source_type": "text",
             # `source_kind` is the stable Evidence locator kind. Keep the
             # parser-specific block type as separate display metadata.
             "source_kind": "text_window",
-            "block_type": str(block.block_type or "paragraph"),
+            "block_type": block.block_type,
             "source_ref": block.block_id,
             "page": block.page,
             "heading_path": block.heading_path,
             "content": content,
-            "_canonical_content": str(block.text or ""),
+            "_canonical_content": block.text,
             "content_truncated": truncated,
-            "source_digest": hashlib.sha256(str(block.text or "").encode("utf-8")).hexdigest(),
+            "source_digest": hashlib.sha256(block.text.encode("utf-8")).hexdigest(),
         }
 
     @staticmethod
-    def _table_source(table: Any) -> dict[str, Any]:
-        record = table.to_record()
+    def _table_source(table: SourceTable) -> dict[str, Any]:
+        record = source_table_payload(table)
         # Empty parser tables are still valid navigation records. Keep their
         # canonical content representation stable instead of letting the
         # digest path call ``encode`` on ``None``.
-        canonical_markdown = str(record.get("table_markdown") or "").strip()
+        canonical_markdown = (record["table_markdown"] or "").strip()
         content, truncated = InspectDocumentSourcesCapability._bounded(
             canonical_markdown
         )
@@ -938,7 +1172,7 @@ class InspectDocumentSourcesCapability:
         }
 
     @staticmethod
-    def _figure_source(figure: Any) -> dict[str, Any]:
+    def _figure_source(figure: SourceFigure) -> dict[str, Any]:
         content, truncated = InspectDocumentSourcesCapability._bounded(
             figure.caption_text
         )
@@ -950,18 +1184,20 @@ class InspectDocumentSourcesCapability:
             "heading_path": figure.heading_path,
             "figure_label": figure.figure_label,
             "content": content,
-            "_canonical_content": str(figure.caption_text or ""),
+            "_canonical_content": (figure.caption_text or ""),
             "content_truncated": truncated,
-            "source_digest": hashlib.sha256(str(figure.caption_text or "").encode("utf-8")).hexdigest(),
+            "source_digest": hashlib.sha256(
+                (figure.caption_text or "").encode("utf-8")
+            ).hexdigest(),
         }
 
     @staticmethod
     def _bounded(
-        value: Any,
+        value: str | None,
         *,
         limit: int = _SOURCE_CONTENT_LIMIT,
     ) -> tuple[str, bool]:
-        text = str(value or "").strip()
+        text = (value or "").strip()
         return text[:limit], len(text) > limit
 
     @staticmethod
@@ -969,7 +1205,7 @@ class InspectDocumentSourcesCapability:
         if not query:
             return True
         searchable = " ".join(
-            str(item.get(key) or "")
+            (item.get(key) or "")
             for key in ("heading_path", "caption", "figure_label", "content")
         ).casefold()
         normalized = query.casefold()

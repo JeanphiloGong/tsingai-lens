@@ -5,6 +5,10 @@ import re
 from typing import Any
 
 
+class StructuredOutputError(ValueError):
+    """A decoded model output failed an explicit output contract."""
+
+
 _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
 

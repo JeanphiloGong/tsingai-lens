@@ -8,19 +8,16 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import (
+from domain.source import Collection, Document
+from infra.persistence.postgres.models.document import DocumentORM
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationORM,
+)
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.collection_repository import (
+    CollectionRepository,
     StoredCollection,
     StoredDocument,
-)
-from domain.source import Collection, Document
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
-from infra.persistence.postgres.models.document import Document as DocumentRow
-from infra.persistence.postgres.models.document_preparation import (
-    DocumentPreparationRow,
 )
 
 pytestmark = pytest.mark.anyio
@@ -28,7 +25,7 @@ pytestmark = pytest.mark.anyio
 
 @pytest.fixture
 async def collection_repository(postgres_session_factory):
-    auth_repository = PostgresAuthRepository(postgres_session_factory)
+    auth_repository = AuthRepository()
     now = datetime(2026, 8, 27, tzinfo=timezone.utc)
     for user_id in ("user_a", "user_b"):
         await auth_repository.add_user(
@@ -40,7 +37,7 @@ async def collection_repository(postgres_session_factory):
                 created_at=now.isoformat(),
             )
         )
-    return PostgresCollectionRepository(postgres_session_factory)
+    return CollectionRepository()
 
 
 def _collection(collection_id: str, owner_user_id: str = "user_a") -> StoredCollection:
@@ -137,7 +134,7 @@ async def test_collection_repository_updates_metadata_without_losing_documents(
 
 
 async def test_collection_repository_round_trips_preparation_stage_fingerprints(
-    collection_repository,
+    postgres_session_factory, collection_repository,
 ) -> None:
     collection = _collection("col_stage_fingerprints")
     document = _document(collection.collection.collection_id, "paper")
@@ -147,9 +144,9 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         (document,),
         updated_at=document.created_at,
     )
-    async with collection_repository.session_factory.begin() as session:
+    async with postgres_session_factory.begin() as session:
         session.add(
-            DocumentPreparationRow(
+            DocumentPreparationORM(
                 document_id=document.document.document_id,
                 source_format="pdf",
                 parser_name="test-parser",
@@ -229,7 +226,7 @@ async def test_collection_repository_rejects_duplicate_document_content(
 
 
 async def test_collection_delete_removes_its_current_documents(
-    collection_repository,
+    postgres_session_factory, collection_repository,
 ) -> None:
     collection = _collection("col_delete_documents")
     document = _document(collection.collection.collection_id, "paper")
@@ -249,8 +246,8 @@ async def test_collection_delete_removes_its_current_documents(
         await collection_repository.read_collection(collection.collection.collection_id)
         is None
     )
-    async with collection_repository.session_factory() as session:
-        assert await session.get(DocumentRow, document.document.document_id) is None
+    async with postgres_session_factory() as session:
+        assert await session.get(DocumentORM, document.document.document_id) is None
 
 
 async def test_collection_repository_rejects_unknown_owner(collection_repository) -> None:
@@ -261,7 +258,7 @@ async def test_collection_repository_rejects_unknown_owner(collection_repository
 
 
 async def test_collection_list_reads_only_summaries_in_two_queries(
-    collection_repository, postgres_sync_engine
+    postgres_session_factory, collection_repository, postgres_sync_engine
 ) -> None:
     for number in range(4):
         collection = replace(
@@ -282,7 +279,7 @@ async def test_collection_list_reads_only_summaries_in_two_queries(
             )
     await collection_repository.add_collection(_collection("col_private", "user_b"))
     statements = []
-    engine = collection_repository.session_factory.kw["bind"].sync_engine
+    engine = postgres_session_factory.kw["bind"].sync_engine
 
     def capture(_connection, _cursor, statement, _parameters, _context, _many):
         statements.append(statement)

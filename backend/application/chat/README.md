@@ -56,11 +56,11 @@ that arithmetic remains possible and mechanisms use only the allowed premises.
 
 ## Start Here
 
-- HTTP entry: `controllers/chat/sessions.py`
-- Turn orchestration: `ChatSessionService.post_message_for_user()`
+- HTTP entry: `controllers/chat/chat_session_routes.py`
+- Turn orchestration: `application.chat.session_service.send_message()`
 - Agent loop: `ResearchAgentRunner.run_turn()`
 - Tool lookup: `CapabilityRegistry`
-- Approval continuation: `ChatSessionService.decide_tool_call_for_user()`
+- Approval continuation: `application.chat.session_service.decide_tool_call_for_user()`
 
 One turn follows this sequence:
 
@@ -80,7 +80,7 @@ choose read-only, confirmation, or an automatic grant for new sessions; a
 session permission can then override that authority. An automatic grant may
 be persistent (`expires_at: null`, until revoked or changed) or temporary (up
 to 24 hours). Both scopes can authorize any currently registered write action
-selected by the user, and the backend expands an all-actions request. ChatSessionService
+selected by the user, and the backend expands an all-actions request. application.chat.session_service
 claims every automatic write in the repository before resuming the same Runner;
 it never sends write calls through the parallel read executor. Revocation and
 claim share the session row lock. Chat never owns a second Objective,
@@ -108,9 +108,19 @@ Saving a revision does not create an Objective Selection or publish an analysis.
 
 ## Main Flow
 
+When an answer completes normally, `session_service.py` names an untitled
+conversation from the first question and the answer using the request's model
+connection. This optional background call has no tools and a 45-second timeout;
+the answer and next question do not wait for it. The service owns and cancels
+pending naming tasks on shutdown. It supplies
+navigation metadata only; the title is not appended to the research trajectory.
+The repository fills only a null title, preserving concurrent manual edits.
+Once a title exists it is kept across later turns. Naming failure leaves the
+answer intact and the first-question label available for navigation.
+
 ```text
 authenticated user + collection
-  -> ChatSessionService validates and persists the user message
+  -> application.chat.session_service validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
   -> ResearchAgentRunner exposes a catalog of registered read, draft and write tools
   -> ChatModel selects names through discover_research_tools when needed
@@ -118,7 +128,7 @@ authenticated user + collection
   -> ChatModel returns an answer, independent reads, or one draft/write call
   -> Runner checkpoints the complete ordered request before execution
   -> capabilities return paired observations or exact approval_required
-  -> ChatSessionService checkpoints the trajectory and final response
+  -> application.chat.session_service checkpoints the trajectory and final response
 ```
 
 Exact Finding reads return review_scope:
@@ -194,10 +204,11 @@ when the target needs identification. After an approved feedback or curation
 write, the runner resumes the same research loop so remaining requested work
 can finish. If response generation then fails, the saved result remains
 authoritative while the turn stays `failed` with the technical error.
-Before a curation write, the runner carries forward the complete Finding envelope
-from the exact inspection. Only the proposed scientific wording and other
-reviewed fields may change; identity, Evidence bindings, paper coverage, and
-lineage remain subject to the canonical validator and the user's approval.
+Before a curation write, the capability validates the complete canonical Finding
+arguments. Missing fields and the retired singular `limitation` alias are rejected
+before approval; the runner does not fill them from earlier inspections. Identity,
+Evidence bindings, paper coverage, and lineage remain subject to the canonical
+validator and the user's approval.
 
 Discovery also records whether the request needs a particular paper's claims
 or measurements inspected. That model-selected obligation survives later
@@ -230,9 +241,12 @@ section from its offset, or reduce parallel requests when the result allowance
 only fits headings; a successful heading read does not complete a Methods check.
 Source placeholders also remain pending after the last section page; their
 exact text/table reader clears them only when whole-source coverage is recorded.
-Section reads retain all outline headings, pages and counts, while repeating
-detailed size and locator metadata only for the selected section to leave room
-for its body. Final result-size checks still enforce the supplied context budget.
+Section reads return the selected section's outline and size the complete result
+once, including Source locators, warnings and pagination. Oversized passages
+remain explicitly unread with an exact-reader instruction. Independent body-read
+batches are sized to the available context; deferred calls keep their exact
+arguments in a runtime note and are never recorded as executed. This changes the
+batch size, not the number of papers a research task may inspect.
 
 The comparison instructions apply these checks to ordinary paper comparisons as
 well as Finding corrections: inspect available material/feedstock, fabrication,
@@ -301,8 +315,9 @@ At mandatory action stages the model context requests a provider tool call
 action occurred, and suppresses answer deltas that would otherwise appear
 before that check. Provider failures remain failures: the deterministic reply
 preserves the reading ledger and distinguishes unread papers and failed reads
-from scientific absence. Empty-response diagnostics contain only model name,
-normalized stop reason, reasoning presence, and token count.
+from scientific absence. Invalid-response logs contain the known model name and
+normalized reason; structured errors retain reported usage and partial-response
+state for the runner.
 
 Answer finalization separates the current request's reading ledger from earlier
 complete Source inspections. Zero new reads cannot erase the preceding research
@@ -360,7 +375,11 @@ for researcher review. This remains a transient conversation draft,
 not published Evidence or a saved scientific correction.
 
 Answer-only finalization cannot restart tool work. Its response must distinguish
-completed observations from unresolved checks. Tool activity remains visible
+completed observations from unresolved checks. The research phase reserves 20% of
+the same total deadline, capped by the existing finalization allowance. Normal
+model calls, retries, compaction and reads use the research remainder; finalization
+uses the total remainder. This does not extend the deadline or guarantee provider
+availability. The answer is buffered and validated before emitting it. Tool activity remains visible
 separately. Explicit evidence, evaluation against real research scenarios and
 researcher review remain necessary to assess scientific correctness.
 
@@ -369,14 +388,20 @@ default to 300 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
 Their environment settings accept a positive limit; zero explicitly disables
 that ceiling. Approval waiting time is excluded; active usage survives approval.
 Individual model/read requests retain a 180-second timeout, cancellation and
-the repeated-observation guard. Context compaction is runtime memory rather
+the repeated-observation guard. Before stopping for repeated observations, the
+runner gives one correction decision with tools still available and the actual
+recent calls plus reading ledger. Restating a plan does not count as new
+evidence; if the correction still makes no progress, the guard stops the turn.
+Other resource ceilings still apply during that correction.
+Context compaction is runtime memory rather
 than evidence: when the provider cannot produce its optional working-notes
 JSON, the runner keeps bounded raw records with their message IDs and
 continues from the durable trajectory. A failed compaction counter is reset
 for each approval or Continue slice so a recoverable context failure cannot
 block later work.
-Provider failures use structured HTTP status, known stream error codes and
-chained transport exceptions. HTTP 408/429/5xx and known transient stream or
+The OpenAI request and stream boundaries classify supported SDK failures once
+and expose reason, retryability, HTTP status, and retry delay through
+`ModelResponseError`. The runner consumes these fields directly. HTTP 408/429/5xx and known transient stream or
 connection failures receive up to five retries with exponential jittered
 backoff and `Retry-After`. The retry allowance is shared across the turn and its
 approval continuations. Missing streamed tool arguments retry without streaming
@@ -384,32 +409,67 @@ before executing any tool; partial visible text is not replayed as a new answer.
 Authentication, malformed requests, exhausted quota and unclassified
 errors stop visibly. Successful tool observations remain in the trajectory
 during retries. Trace records contain normalized reasons, status, attempt and
-delay. Failure logs may add a bounded message only for low-risk structural
-exceptions, plus a message fingerprint, exception-chain types and the final
-source location; provider messages, response bodies, prompt text, credentials
-and full tracebacks are never retained.
+delay. Failure logs use operation, call identity, known reason, and exception
+type, without scanning arbitrary exception messages, causes, or tracebacks.
+Known capability business rejections return explicit tool error codes at their
+owning operation; unexpected internal failures use a fixed technical message.
+Permission denials retain their distinct error code. Provider bodies and
+credentials do not enter these diagnostics.
 Model requests recheck the remaining output allowance after context preparation;
 an exhausted optional cumulative allowance cannot produce a zero or negative
 provider output limit.
-`LENS_AGENT_CONTEXT_TOKENS` defaults to 65,536 for the entire model request,
+`LENS_AGENT_CONTEXT_TOKENS` defaults to 200,000 for the entire model request,
 including system instructions, tool schemas, observations, output reserve and
 protocol margin. Token counts use the existing cl100k tokenizer with 20% reserve;
 operators must choose a window supported by their configured model. Both normal
 decisions and context compaction are checked at the provider boundary.
+Explicit provider context-size rejections receive up to two recovery attempts
+within the existing retry allowance. Each reduces the smaller of the effective
+window and the rejected input plus reserved output by 20%,
+rebuilds notes and complete exchanges, and sends again only if the actual input
+is smaller. The effective window and recovery count survive approval
+continuations alongside usage and elapsed time. A pinned request that cannot
+fit, input unchanged after the allowed reductions, exhausted recovery, or
+partial visible output stops visibly. Recovery sends model requests only; successful capabilities are not
+replayed. Output truncation, authentication failures and rate limits retain
+their separate handling.
 
 Section inspection packs complete Sources into the available result allowance
-and exposes canonical lengths and estimated tokens in the outline. It defaults
+and exposes canonical lengths and estimated tokens in the outline. One complete
+tool-envelope size check includes warnings and continuation metadata; selected
+section reads repeat only that section's outline. Context-sized independent read
+batches retain deferred names and arguments as explicitly unexecuted runtime notes
+in the existing assistant trajectory. It defaults
 to at most 200 records, rather than eight truncated previews; token capacity
 usually determines the batch size. Oversized Sources remain explicitly unread
 and provide their exact reference for individual paginated reading. Independent
 reads share the allowance while retaining their individual provenance.
+
+Context preparation follows an explicit select -> compact -> rebuild loop.
+`context_builder.py` owns pure budget and complete-exchange selection;
+`agent_runner.py` owns model calls and publishes the replacement notes with
+the retired message IDs after construction succeeds.
+When capacity is sufficient, original messages stay in context. When it is not,
+selection retains a continuous suffix of complete exchanges alongside pinned
+researcher inputs; it does not skip a large recent exchange to fill space with
+older small ones. Only the omitted prefix enters model compaction. Earlier
+compaction, the number of omitted exchanges and time remaining do not switch
+normal preparation to fixed excerpts. Bounded archived records are used only
+when optional model summary construction fails. State retains every original
+message throughout; the context projection never overwrites that history.
 
 When older operations leave context, the runner creates provisional working
 notes containing scope, comparison conditions, conclusions, basis message IDs,
 uncertainties and next actions. It validates references before retiring those
 operations from model input. The full trajectory remains in storage. Working
 notes are not primary evidence, approval or published results. Source claims require
-their actual passages. A failed compaction preserves history and fails visibly.
+their actual passages. Repeated archival compaction merges previous notes with
+recent result excerpts instead of replacing the previous investigation. Notes
+have a bounded budget and explicitly mark omitted or truncated details; retiring
+a message means it is archived, not that every fact was retained. Failed note
+construction leaves previous notes and retired IDs unchanged. Invalid optional
+summary output can fall back to excerpts; transport and persistence failures
+remain failures.
 Working notes and retired message IDs are checkpointed in the existing response
 snapshot for approval and interruption recovery, without copying notes to logs.
 Pinned execution hints retain draft references and saved revision identities;
@@ -417,13 +477,61 @@ full scientific payloads remain in durable tool results. Identical, current,
 unexpired experiment drafts reuse their stored reference after Source validation.
 Unknown document identities return `document_not_found` with navigation advice;
 only known papers without Source content return `document_sources_not_ready`.
-Recent user requests receive a reserved share of the context before tool
-outputs. Adding one paper or deferring a review preserves other paper choices;
+All researcher input messages are pinned verbatim before tool outputs. If the
+inputs cannot fit, selection fails explicitly rather than summarizing parameter
+numbers. Ordinary new requests may inherit validated notes from the previous
+terminal snapshot and unfinished plan actions as historical runtime work. They
+receive fresh counters and plan scope; earlier approval is never inherited.
+Same-request approval continuations retain their existing consumed budgets. Adding one paper or deferring a review preserves other paper choices;
 compaction retains those choices separately from Agent recommendations.
 The active request is also identified after historical records and runtime hints,
 including during compaction. Its token cost is reserved in context selection.
 A later request for detailed results supersedes an earlier identification-only
-request while preserving the selected paper.
+request while preserving the selected paper. An ordinary model answer does not
+complete an active execution plan: the model must continue or explicitly report
+completed, waiting_for_clarification, or scientific_refusal. One corrective
+opportunity precedes a stalled finalization; technical stops retain their reason.
+The browsing tool fits up to 100 paper identities into the available model
+context instead of requiring a fixed twelve-paper page. It returns an exact
+`next_offset` when another page is needed. The runtime reconstructs covered
+identity ranges and a compact paper list from successful page records, grouped
+by query and catalog identity. This ledger survives compaction and continued
+requests; revisiting an earlier page cannot move its next unread position back.
+It reports navigation only and does not certify relevance or Source coverage.
+When fallback compaction receives new observations, it retires earlier next-action
+suggestions and points to the current ledgers; uncertainties stay in attributed
+checks. For archived Source batches, fallback notes retain bounded verbatim
+passages with their document IDs, Source references, digests, pages, and truncation
+flags, instead of losing body text behind an outline JSON prefix. These excerpts
+are explicitly incomplete, untrusted paper content, not scientific summaries.
+Model-visible Source results retain complete text, digests, labels, pages
+and citation links while omitting duplicated locator metadata. Selecting a
+parent heading reads its child sections as well, so a Methods heading cannot
+stand in for its unread Powder and Process paragraphs. Pending section offsets
+remain explicit until their selected subtree has been read. Durable tool
+results retain their complete original shape. Read batching sizes this same
+model representation.
+Reading a selected section merges its outline into the known document outline;
+it cannot hide unread sibling sections. A changed Source version replaces the
+old outline. On reaching the no-progress threshold, the runner reports recent
+actions and gives the model one corrective decision with its current tools.
+Only a new observation resets this opportunity; another plan-only or repeated
+action closes with `no_progress`. Time, tool, token, and cycle exhaustion still
+take precedence over this correction.
+Plan reminders are sent after an attempted final answer leaves an active plan,
+not after every read. Rewording the same plan receives an explicit instruction
+to continue the actual checks. A collection search presents a first hit from
+each ranked paper before additional hits from one paper; its paper summaries
+cover the returned page. Reworded searches and smaller subsets of the same
+Source previews do not count as new observations.
+
+Source reading history is rebuilt from complete tool records in the current
+request and earlier requests, even after their messages are compacted. Bounded
+verbatim excerpts retain conditions, units, Source references, digests and pages.
+Fallback notes preserve paper passages rather than serialized envelope prefixes;
+omissions remain explicit and do not establish scientific absence. Attributed
+working checks remain provisional, distinct from formal Evidence or approval.
+
 Across user requests, a bounded reading summary is rebuilt from successful
 historical Source results, including versioned references, verbatim excerpts
 and explicit omissions. A new empty search cannot erase an earlier abstract
@@ -521,7 +629,7 @@ review status of their supporting Findings and unverified feasibility checks.
 
 A researcher may leave while the Agent explains the conditions needed to compare
 LPBF tensile results, then return from history to read what has already been
-generated and continue waiting for the answer. `ChatSessionService` captures
+generated and continue waiting for the answer. `application.chat.session_service` captures
 the exact partial response and current progress independently of its browser
 connection. The runner allocates each assistant message ID before emitting text;
 the final checkpoint keeps that identity. A bounded PostgreSQL snapshot permits
@@ -534,25 +642,41 @@ checks, certify a scientific stage, or automatically restart interrupted work.
 Each complex run may expose a model-authored `execution_plan` in progress
 snapshots and the turn response. The Agent updates it through the registered
 `update_execution_plan` capability after framing the request and when new
-observations change the remaining work. The runtime recovers the latest plan
-from the ordered trajectory and assigns `plan_version` from durable capability
-request/result events, including pending and failed events, then adds approval,
-resource, and technical status without inventing a version;
+observations change the remaining work. On entry or resume, the runtime restores
+the latest plan once from successful durable plan updates. Each successful plan
+result then updates the current plan and its version directly. Final result
+assembly applies approval, resource, and technical status to that current plan
+without rescanning the trajectory or inventing a version;
 it does not infer research steps from a metadata read or a local draft result.
 Simple answers may have no plan. It is operational state only; it never becomes
 Evidence, permission, or a Finding.
 
 ## Key Areas
 
-- `session_service.py`: owns session reads, source-context validation, turn
-  persistence, streaming, and approval execution.
+Cycle diagnostics and response snapshots include the successful Source-content
+character count, nonempty Source-entry batch count, batches containing entries
+but no body text, reading-token allowance, and remaining request time alongside
+the stop reason. These counters reset per runner invocation and measure transfer
+volume: repeated reads count repeatedly and are not independent scientific
+evidence. Empty entry lists do not count as batches. Diagnostics contain counts,
+not raw Source text; an unlimited time budget is recorded as `null`.
+
+- `session_service.py`: `ChatSessionService` owns session reads, source-context
+  validation, turn persistence, streaming, and approval execution. The current
+  app owns its runner, model-call observer, and active stream tasks. Its shutdown
+  cancels and awaits those tasks before the database engine closes. Repository
+  access uses the concrete module instances directly.
 - `agent_runner.py`: runs the bounded model, capability, and continuation loop
   and reports `completed`, `approval_required`, or `failed`. Completion records
   why work stopped: a model answer, resource budget, repeated observations, or
   the emergency cycle ceiling. One private request path enforces model
   deadlines and output allowances for both decisions and answer-only
-  finalization. Technical limits permit finalization with scope warnings only
-  while turn time remains. A response or finalization failure remains a failure
+  finalization. With a finite total deadline, research uses at most 80% of it;
+  the reserve is capped by the finalization allowance. Decisions, retries,
+  compaction and tools stop at that research deadline, leaving time to explain
+  partial results within the same total time. Answer-only finalization is
+  validated before streaming; tool invocation envelopes are not displayed as
+  completed answers. A response or finalization failure remains a failure
   even when an approved durable write in the current continuation already has a
   matching successful result. The runner checkpoints a short deterministic
   confirmation that the saved result remains authoritative, while preserving the
@@ -560,7 +684,7 @@ Evidence, permission, or a Finding.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
   together. Selection uses the token capacity remaining after request overhead
-  and answer/reading reserves. Explicit character/message caps remain available
+  and reserved output. Explicit character/message caps remain available
   to local callers; the production default uses token capacity. The same model
   message representation is counted and transmitted. Omitted operations have
   validated provisional working notes while stored history remains complete;
@@ -579,6 +703,19 @@ Evidence, permission, or a Finding.
 - `capabilities/`: contains the explicit typed capability registry and handlers
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
+
+Collection context, paper browsing, research-scope preview, and Source inspection
+handlers import their owning business modules and concrete repositories directly.
+Their classes implement the tool protocol and need no dependency-only constructors.
+Objective proposal, creation, confirmation, derivation and inspection follow the
+same direct calls. Starting an analysis directly calls the queue function; the independent
+analysis worker owns execution. Preparation submission uses the same direct calls.
+Finding review, Finding authoring, and paper-experiment authoring also call their
+owning modules directly. Draft validation always checks the canonical selections;
+experiment writes read their approved draft and digest from the actual Chat store.
+Published-Finding reads and research-plan proposals, writes and revisions use the
+same direct calls. Plan writes recheck the current source snapshot against the
+approved draft before persisting an immutable revision.
 
 ## Boundaries
 
@@ -615,13 +752,19 @@ The handler calls the owning Source, Core, or Goal service. The Runner does not
 need a branch for each new capability. A read or draft returns an observation;
 an approved write may persist a scientific resource through its existing owner.
 
+Resource, state-conflict and request rejections from the shared business
+exceptions retain their public message, reason and data in the tool observation.
+Objective creation and confirmation preserve their existing tool rejection codes
+and include the owning operation's reason and correction guidance. Ordinary
+`ValueError`, file and unexpected dependency failures remain internal errors.
+
 Provider and capability exception logs contain sanitized metadata only. Provider
 and capability messages, response bodies and tracebacks are omitted; low-risk
 structural model errors may retain a bounded message and source location for
 diagnosis. Model failure, invalid tool arguments, rejected approval, and incomplete work
 are recorded in the trajectory. They never become Evidence or a negative
 scientific answer. After a turn stops, the next user message or exact approval
-decision starts its continuation through `ChatSessionService`.
+decision starts its continuation through `application.chat.session_service`.
 
 ## Tests
 

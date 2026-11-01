@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from domain.chat import ChatMessageRole, ToolResultStatus
+
+from dataclasses import asdict, replace
 import json
 import pytest
 from domain.chat import ChatToolRequest
@@ -8,6 +10,7 @@ from domain.chat import ChatToolRequest
 from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ChatToolResult
 
 from application.chat import ChatContextBuilder
+from application.chat.model import ModelResponseError
 
 
 @pytest.fixture
@@ -26,6 +29,57 @@ class _CompactionModel:
         if isinstance(turn, Exception):
             raise turn
         return turn
+
+
+@pytest.mark.anyio
+async def test_three_compactions_retain_earlier_conditions_and_new_observations():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Compare Inconel 718 elongation using only the collection; density >= 99.9%.")
+    notes = {"scope": active.content, "checks": [{
+        "statement": "Paper A reports an as-built measurement; Source methods-A.",
+        "conditions": "Liquid-floating process; orientation unknown.",
+        "basis_message_ids": ["msg-result-first"],
+        "unresolved": "Do not transfer heat-treated measurements to the as-built ranking.",
+    }], "next_actions": ["Check tensile orientation."]}
+    # Later provider failures exercise archived-record recovery explicitly;
+    # a prior summary no longer bypasses model compaction.
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)),
+                             ModelTurn(content="invalid summary"), ModelTurn(content="invalid summary"))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    messages = [active, *_tool_pair(call_id="first"), *_tool_pair(call_id="second")]
+    original = tuple(messages)
+    for name in ("third", "fourth", "fifth"):
+        view = await runner._prepare_model_context(tuple(messages), (), progress, active_user_message_id="active")
+        messages.extend(_tool_pair(call_id=name, payload={"source_ref": name, "content": "New observation"}))
+    saved = json.loads(view.working_summary)
+    assert any("orientation unknown" in check["conditions"] for check in saved["checks"])
+    assert any("msg-result-third" in check["basis_message_ids"] for check in saved["checks"])
+    # Remaining scientific uncertainty stays in checks; fallback cannot assert
+    # that an old next action is still pending after later observations.
+    assert any("ledger" in action for action in saved["next_actions"])
+    assert tuple(messages[:len(original)]) == original
+    assert len(model.contexts) == 3
+
+
+def test_fallback_marks_loss_and_preserves_old_and_recent_records():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    active = _user("active", "Preserve material and test conditions.")
+    old = runner._fallback_working_notes(active, list(_tool_pair(call_id="first")), max_tokens=6000)
+    batch = [message for i in range(12) for message in _tool_pair(
+        call_id=f"next-{i}", payload={"source_ref": f"results-{i}", "content": "measurement " * 100})]
+    notes = runner._fallback_working_notes(active, batch, max_tokens=1600,
+                                           working_summary=old.model_dump_json())
+    assert len(notes.checks) <= 16
+    assert runner.context_builder.estimate_tokens(notes.model_dump_json()) <= 1600
+    assert any("first" in check.statement for check in notes.checks)
+    assert any("next-11" in check.statement for check in notes.checks)
+    assert any("omitted" in action for action in notes.next_actions)
 
 
 def test_context_token_budget_preserves_complete_call_result_batches():
@@ -156,7 +210,7 @@ def test_prior_reading_keeps_abstract_before_later_metadata_within_token_budget(
         ),)), pair[1]))
     messages = (_user("prior", "Read the abstract."), *pairs, _user("active", "Continue checking the comparison."))
     runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
-    summary = runner._prior_source_reading(messages, active_user_message_id="active", max_tokens=800)
+    summary = runner._source_reading(messages, max_tokens=800)
     assert ChatContextBuilder.estimate_tokens(summary) <= 800
     paper = json.loads(summary)["papers"][0]
     assert paper["complete_source_count"] == 21
@@ -200,8 +254,8 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
 
 
 @pytest.mark.anyio
-async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
-    from application.chat import CapabilityRegistry, ResearchAgentRunner
+async def test_long_trajectory_uses_model_compaction_without_changing_history():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
 
     active = _user("active", "Continue the saved experiment review.")
@@ -212,7 +266,14 @@ async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
             "source_ref": f"results-{index}",
             "content": "reported result " + str(index),
         }))
-    model = _CompactionModel()
+    original = tuple(history)
+    notes = {"scope": active.content, "checks": [{
+        "statement": f"Paper A reports result {index}; exact interpretation remains unresolved.",
+        "conditions": "Test orientation unknown.",
+        "basis_message_ids": [f"msg-result-source-{index}"],
+        "unresolved": "Check comparable test conditions.",
+    } for index in range(9)], "next_actions": ["Check the remaining result."]}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(()),
@@ -224,10 +285,11 @@ async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
         (active, *history), (), progress, active_user_message_id=active.message_id,
     )
 
-    assert not model.contexts
+    assert len(model.contexts) == 1 and model.contexts[0].compacting
     assert set(message.message_id for message in history[:-2]).issubset(progress.compacted_message_ids)
-    assert "Raw runtime record" in progress.working_summary
+    assert json.loads(progress.working_summary) == notes
     assert view.messages == (active, *history[-2:])
+    assert tuple(history) == original
 
 
 @pytest.mark.anyio
@@ -323,14 +385,14 @@ async def test_failed_compaction_keeps_archived_observations_recoverable():
     progress = _RunProgress(runner.limits)
     view = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
     assert progress.compacted_message_ids == {message.message_id for message in messages[1:3]}
-    assert "Raw runtime record" in progress.working_summary
+    assert "Runtime navigation only" in progress.working_summary
     assert "old" in progress.working_summary
     assert view.messages[0] == active
 
 
 @pytest.mark.anyio
 async def test_oversized_completed_write_unit_is_compacted_as_lineage_only():
-    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat import AgentRunLimits, CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
 
     active = _user("active", "Generate the Finding from the saved experiment selection.")
@@ -355,6 +417,7 @@ async def test_oversized_completed_write_unit_is_compacted_as_lineage_only():
         model=model,
         capabilities=CapabilityRegistry(()),
         context_builder=ChatContextBuilder(max_messages=3),
+        limits=AgentRunLimits(max_context_tokens=64_000),
     )
     progress = _RunProgress(runner.limits)
 
@@ -431,15 +494,23 @@ def _tool_pair(
 
         created_at="2026-08-19T00:00:00+00:00",
     )
-    result = ChatMessage.from_tool_result(
+    tool_result = ChatToolResult(
+        tool_call_id=call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        data=payload or {"collection_id": "col-1"},
+    )
+    result = ChatMessage(
         message_id=f"msg-result-{call_id}",
         session_id="chat-1",
-        result=ChatToolResult(
-            tool_call_id=call_id,
-            status="succeeded",
-            data=payload or {"collection_id": "col-1"},
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
         ),
         created_at="2026-08-19T00:00:00+00:00",
+        tool_call_id=tool_result.tool_call_id,
+        tool_result=tool_result,
     )
     return call, result
 
@@ -460,7 +531,7 @@ def test_context_builder_keeps_tool_call_and_result_as_one_protocol_unit() -> No
     assert selected == (messages[0], call, result)
 
 
-def test_context_builder_returns_a_bounded_recent_suffix() -> None:
+def test_context_builder_pins_user_inputs_before_recent_tool_output() -> None:
     call, result = _tool_pair()
     latest = _user("msg-latest", "new question")
     messages = (
@@ -474,7 +545,7 @@ def test_context_builder_returns_a_bounded_recent_suffix() -> None:
     selected = ChatContextBuilder(max_messages=3, max_chars=1_000).for_model(messages).messages
 
     assert selected[-1] == latest
-    assert selected == (call, result, latest)
+    assert selected == (messages[0], latest)
     assert len(selected) <= 3
     assert sum(len(item.content) for item in selected) <= 1_000
     assert not (
@@ -493,15 +564,23 @@ def test_context_builder_budgets_tool_result_once_for_model_wire_content() -> No
 
         created_at="2026-08-19T00:00:00+00:00",
     )
-    result = ChatMessage.from_tool_result(
+    first_tool_result = ChatToolResult(
+        tool_call_id="call-scope",
+        status=ToolResultStatus.SUCCEEDED,
+        data={"scope_records": ["x" * 4000]},
+    )
+    result = ChatMessage(
         message_id="msg-scope-result",
         session_id="chat-1",
-        result=ChatToolResult(
-            tool_call_id="call-scope",
-            status="succeeded",
-            data={"scope_records": ["x" * 4000]},
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(first_tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
         ),
         created_at="2026-08-19T00:00:00+00:00",
+        tool_call_id=first_tool_result.tool_call_id,
+        tool_result=first_tool_result,
     )
 
     selected = ChatContextBuilder(max_messages=3, max_chars=5_000).for_model(
@@ -616,10 +695,21 @@ def test_complete_batch_is_indivisible_under_message_budget() -> None:
     first, result = _tool_pair()
     second_request = ChatToolRequest("call-2", "read_source", {}, 1)
     first = replace(first, tool_calls=(*first.tool_calls, second_request))
-    second_result = ChatMessage.from_tool_result(
-        message_id="result-2", session_id="chat-1",
-        result=ChatToolResult(tool_call_id="call-2", status="succeeded", data={"document_id": "paper-2"}),
+    second_tool_result = ChatToolResult(
+        tool_call_id="call-2", status=ToolResultStatus.SUCCEEDED, data={"document_id": "paper-2"}
+    )
+    second_result = ChatMessage(
+        message_id="result-2",
+        session_id="chat-1",
+        role=ChatMessageRole.TOOL,
+        content=json.dumps(
+            asdict(second_tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-08T00:00:00+00:00",
+        tool_call_id=second_tool_result.tool_call_id,
+        tool_result=second_tool_result,
     )
     active = _user("active", "Compare the two papers")
     messages = (active, first, result, second_result)
@@ -640,21 +730,41 @@ def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() 
         requests.append(ChatToolRequest(call_id, "inspect_published_finding", {
             "objective_id": "elongation", "finding_id": f"finding-{index}"
         }, index))
-        results.append(ChatMessage.from_tool_result(
-            message_id=f"result-{index}", session_id="chat-1",
-            result=ChatToolResult(tool_call_id=call_id, status="succeeded", data={
-                "finding": {"finding_id": f"finding-{index}", "statement": "Annealing changes elongation; process conditions limit transferability."},
-                "evidence": [{
-                    "evidence_id": f"evidence-{index}-{page}",
-                    "document_id": "lpbf-tc4",
-                    "source_ref": f"results-{page}",
-                    "source_excerpt": (
-                        "The annealed Ti-6Al-4V specimen showed improved elongation with reduced strength. "
-                        "Specimen orientation and test temperature were held fixed; no independent laser-power effect was measured. "
-                    ) * 4,
-                } for page in range(8)],
-            }), created_at="2026-09-09T00:00:00+00:00",
-        ))
+        third_tool_result = ChatToolResult(
+            tool_call_id=call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "finding": {
+                    "finding_id": f"finding-{index}",
+                    "statement": "Annealing changes elongation; process conditions limit transferability.",
+                },
+                "evidence": [
+                    {
+                        "evidence_id": f"evidence-{index}-{page}",
+                        "document_id": "lpbf-tc4",
+                        "source_ref": f"results-{page}",
+                        "source_excerpt": "The annealed Ti-6Al-4V specimen showed improved elongation with reduced strength. Specimen orientation and test temperature were held fixed; no independent laser-power effect was measured. "
+                        * 4,
+                    }
+                    for page in range(8)
+                ],
+            },
+        )
+        results.append(
+            ChatMessage(
+                message_id=f"result-{index}",
+                session_id="chat-1",
+                role=ChatMessageRole.TOOL,
+                content=json.dumps(
+                    asdict(third_tool_result),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+                created_at="2026-09-09T00:00:00+00:00",
+                tool_call_id=third_tool_result.tool_call_id,
+                tool_result=third_tool_result,
+            )
+        )
     call = ChatMessage.assistant_tool_calls(
         message_id="finding-batch", session_id="chat-1", content="",
         tool_calls=tuple(requests), created_at="2026-09-09T00:00:00+00:00",
@@ -663,3 +773,98 @@ def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() 
     view = ChatContextBuilder().for_model(messages)
     assert view.messages == messages
     assert not view.rollover_summary
+
+
+@pytest.mark.anyio
+async def test_failed_compaction_does_not_publish_new_notes_or_retired_ids():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    runner = ResearchAgentRunner(model=_CompactionModel(TimeoutError("provider timeout")),
+                                 capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    active = _user("active", "Compare only matching test conditions.")
+    messages = (active, *_tool_pair(call_id="old"), *_tool_pair(call_id="recent"))
+    with pytest.raises(ModelResponseError, match="timed out"):
+        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert progress.working_summary == ""
+    assert not progress.compacted_message_ids
+    assert len(messages) == 5
+
+
+def test_working_notes_with_no_room_fail_without_returning_an_oversized_summary():
+    from application.chat import CapabilityRegistry, ModelResponseError, ResearchAgentRunner
+    from application.chat.model import ResearchWorkingNotesModelOutput
+
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    notes = ResearchWorkingNotesModelOutput(scope="Only collection evidence.", checks=[], next_actions=[])
+    with pytest.raises(ModelResponseError, match="cannot fit"):
+        runner._bounded_working_notes(notes, max_tokens=1)
+    assert notes.scope == "Only collection evidence."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure_count,finalizing", [(1, False), (3, False), (1, True)])
+async def test_context_recovery_shrinks_real_requests_and_keeps_full_trajectory(failure_count, finalizing):
+    from application.chat import CapabilityRegistry, ModelResponseError, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    class Model:
+        def __init__(self):
+            self.requests = []
+
+        async def respond(self, *, context, **kwargs):
+            if context.compacting:
+                return ModelTurn(content='{"scope":"Only comparable Inconel 718 observations.","checks":[],"next_actions":[]}')
+            self.requests.append(context)
+            if len(self.requests) <= failure_count:
+                raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
+            return ModelTurn(content="Comparable density and elongation evidence remain insufficient.")
+
+    active = _user("active", "Rank Inconel 718 using collection evidence only; density >= 99.9%.")
+    pairs = [_tool_pair(call_id=f"paper-{i}", payload={
+        "document_id": f"paper-{i}", "source_ref": "results",
+        "content": "As-built orientation is unreported; density does not establish elongation. " * 900,
+    }) for i in range(10)]
+    messages = (active, *(message for pair in pairs for message in pair))
+    model = Model()
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    progress = _RunProgress(runner.limits)
+    progress.retry_count = 1
+    progress.model_tokens = 123
+    if failure_count == 3:
+        with pytest.raises(ModelResponseError):
+            await runner._model_turn(messages, (), progress, None, active_user_message_id="active", finalizing=finalizing)
+    else:
+        turn = await runner._model_turn(messages, (), progress, None, active_user_message_id="active", finalizing=finalizing)
+        assert "insufficient" in turn.content
+    assert len(model.requests) == min(failure_count + 1, 3)
+    sizes = [runner.context_builder.estimate_tokens(request.provider_messages("system")) for request in model.requests]
+    assert all(after < before for before, after in zip(sizes, sizes[1:]))
+    assert progress.context_recovery_attempts == min(failure_count, 2)
+    assert progress.retry_count == 1 + min(failure_count, 2)
+    assert progress.model_tokens == 123
+    assert len(messages) == 21 and all(pair[1].tool_result.data["content"].endswith("elongation. ") for pair in pairs)
+    assert all(active in request.messages for request in model.requests)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reason,partial", [("context_window_exceeded", True), ("output_token_limit", False),
+                                           ("context_window_exceeded", False)])
+async def test_recovery_does_not_replay_partial_output_or_unchanged_small_requests(reason, partial):
+    from application.chat import CapabilityRegistry, ModelResponseError, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    error = ModelResponseError("rejected", reason=reason, partial_content=partial, retryable=False)
+    model = _CompactionModel(error)
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    progress = _RunProgress(runner.limits)
+    with pytest.raises(ModelResponseError):
+        await runner._model_turn((_user("active", "Explain the research workflow."),), (), progress, None,
+                                 active_user_message_id="active")
+    assert len(model.contexts) == 1
+    if reason == "context_window_exceeded" and not partial:
+        assert 1 <= progress.context_recovery_attempts <= 2
+    else:
+        assert progress.context_recovery_attempts == 0

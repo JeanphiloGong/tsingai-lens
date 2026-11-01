@@ -1,39 +1,35 @@
 from __future__ import annotations
 
+from infra.persistence.file import object_store as store_module
+from application.source import collection_service, source_import_service
+
+import json
 from hashlib import sha256
 from io import BytesIO
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
+from exceptions import ProjectException
+from infra.persistence import database
 from pypdf import PdfWriter
-
-from application.repositories.collection_repository import StoredDocument
+from repositories.collection_repository import StoredDocument
+from tests.support.postgres import seed_collection
+from tests.support.source_artifacts import build_source_documents
 
 try:
     from fastapi import HTTPException
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.core.document_profiles.service import (
-    DocumentProfileService,
-)
-from application.source.document_markdown_service import DocumentMarkdownService
-from application.source.source_archive_service import SourceArchiveService
-from controllers.core import documents as documents_controller
+from application.core.document_profiles import service as document_profile_service
+from application.source import document_markdown_service, source_archive_service
+from controllers.core import document_routes as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
     Document,
-    source_documents_from_records,
 )
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemorySourceArtifactRepository,
-)
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
-from tests.support.collection_service import (
-    build_test_collection_service,
-    build_test_source_import_service,
-)
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -44,35 +40,51 @@ def anyio_backend() -> str:
 
 
 async def _store_document_profiles(
-    document_profile_service: DocumentProfileService,
+    document_profile_service: ModuleType,
     collection_id: str,
     profiles: list[dict],
 ) -> None:
     for row in profiles:
-        await document_profile_service.document_profile_repository.replace(
+        await seed_collection(
+            database.AsyncSessionLocal,
             collection_id,
-            DocumentProfile.from_mapping(row)
+            document_ids=(row["document_id"],),
+        )
+        await document_profile_service.DocumentProfileRepo.replace(
+            collection_id,
+            DocumentProfile(
+                document_id=row["document_id"],
+                title=row.get("title"),
+                doc_type=row.get("doc_type", "uncertain"),
+                profile_warnings=tuple(row.get("profile_warnings", ())),
+                confidence=row.get("confidence", 0.0),
+                profile_status=row.get("profile_status", "completed"),
+                source_fingerprint=row.get("source_fingerprint"),
+                profile_version=row.get("profile_version"),
+                profile_fingerprint=row.get("profile_fingerprint"),
+                generated_at=row.get("generated_at"),
+            ),
         )
 
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
+        await seed_collection(
+            database.AsyncSessionLocal,
+            collection_id,
+            document_ids=(document.document_id,),
+        )
         await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
-def document_services(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    source_repository = MemorySourceArtifactRepository()
-    document_profile_service = DocumentProfileService(
-        collection_service,
-        source_artifact_repository=source_repository,
-        document_profile_repository=MemoryDocumentProfileRepository(),
-    )
-    document_markdown_service = DocumentMarkdownService(
-        collection_service,
-        source_artifact_repository=source_repository,
-    )
+def document_services(tmp_path, *, postgres_session_factory):
+    source_repository = SourceArtifactRepository()
+    document_profile_service.collection_service = collection_service
+    document_profile_service.SourceArtifactRepo = source_repository
+    document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
+    document_markdown_service.collection_service = collection_service
+    document_markdown_service.SourceArtifactRepo = source_repository
 
     return (
         collection_service,
@@ -81,29 +93,32 @@ def document_services(tmp_path):
     )
 
 
-def _document_request(document_services):
+def _document_request(
+    monkeypatch,
+    document_services,
+    *,
+    object_store,
+):
+    monkeypatch.setattr(store_module, "Store", object_store, raising=False)
     (
         collection_service,
         document_profile_service,
         document_markdown_service,
     ) = document_services
+    documents_controller.source_archive_service = source_archive_service
+    documents_controller.document_profile_service = document_profile_service
+    documents_controller.document_markdown_service = document_markdown_service
     return SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                collection_service=collection_service,
-                source_archive_service=SourceArchiveService(
-                    repository=collection_service.repository,
-                    object_store=collection_service.object_store,
-                ),
-                document_profile_service=document_profile_service,
-                document_markdown_service=document_markdown_service,
-            )
-        )
+        state=SimpleNamespace(current_user={"user_id": "local-user"})
     )
 
 
 async def test_documents_route_returns_409_when_profiles_are_not_ready(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -112,44 +127,71 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
     ) = document_services
     record = await collection_service.create_collection(name="Pending Collection")
 
-    with pytest.raises(HTTPException) as exc_info:
-        await documents_controller.list_collection_document_profiles(
-                record["collection_id"],
-                _document_request(document_services),
-            )
+    with pytest.raises(ProjectException) as exc_info:
+        documents_controller.DocumentProfileListResponse.model_validate(
+            json.loads(
+                (
+                    await documents_controller.list_collection_document_profiles(
+                        collection_id=record.collection.collection_id,
+                        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                            "user_id"
+                        ],
+                    )
+                ).body
+            )["data"]
+        )
 
     exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "document_profiles_not_ready"
-    assert exc.detail["collection_id"] == record["collection_id"]
+    assert exc.code == 200204
+    assert exc.data["code"] == "document_profiles_not_ready"
+    assert exc.data["collection_id"] == record.collection.collection_id
 
 
-async def test_documents_route_returns_404_for_missing_collection(document_services):
+async def test_documents_route_returns_404_for_missing_collection(
+    monkeypatch,
+    document_services,
+    *,
+    object_store,
+):
     (
         _collection_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
 
-    with pytest.raises(HTTPException) as exc_info:
-        await documents_controller.list_collection_document_profiles(
-                "col_missing",
-                _document_request(document_services),
-            )
+    with pytest.raises(ProjectException) as exc_info:
+        documents_controller.DocumentProfileListResponse.model_validate(
+            json.loads(
+                (
+                    await documents_controller.list_collection_document_profiles(
+                        collection_id="col_missing",
+                        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                            "user_id"
+                        ],
+                    )
+                ).body
+            )["data"]
+        )
 
     exc = exc_info.value
-    assert exc.status_code == 404
-    assert "collection not found" in str(exc.detail)
+    assert exc.code == 200201
+    assert "collection not found" in exc.message
 
 
-async def test_documents_route_forwards_profile_search_filters_and_pagination(document_services):
+async def test_documents_route_forwards_profile_search_filters_and_pagination(
+    monkeypatch,
+    document_services,
+    *,
+    collection_workspace,
+    object_store,
+):
     (
         collection_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Searchable Collection")
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -178,14 +220,22 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(do
         ],
     )
 
-    payload = await documents_controller.list_collection_document_profiles(
-        collection_id,
-        _document_request(document_services),
-        limit=1,
-        offset=0,
-        query="laser",
-        doc_type="experimental",
-        has_warnings=True,
+    payload = documents_controller.DocumentProfileListResponse.model_validate(
+        json.loads(
+            (
+                await documents_controller.list_collection_document_profiles(
+                    collection_id=collection_id,
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                        "user_id"
+                    ],
+                    limit=1,
+                    offset=0,
+                    query="laser",
+                    doc_type="experimental",
+                    has_warnings=True,
+                )
+            ).body
+        )["data"]
     )
 
     assert payload.total == 1
@@ -193,16 +243,22 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(do
     assert payload.items[0].document_id == "paper-1"
 
 
-async def test_document_profile_route_returns_single_profile(document_services):
+async def test_document_profile_route_returns_single_profile(
+    monkeypatch,
+    document_services,
+    *,
+    collection_workspace,
+    object_store,
+):
     (
         collection_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Single Profile Collection"
+        name="Single Profile Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -216,18 +272,30 @@ async def test_document_profile_route_returns_single_profile(document_services):
             }
         ],
     )
-    payload = await documents_controller.get_collection_document_profile(
-            collection_id,
-            "paper-1",
-            _document_request(document_services),
-        )
+    payload = documents_controller.DocumentProfileItemResponse.model_validate(
+        json.loads(
+            (
+                await documents_controller.get_collection_document_profile(
+                    collection_id=collection_id,
+                    document_id="paper-1",
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                        "user_id"
+                    ],
+                )
+            ).body
+        )["data"]
+    )
 
     assert payload.document_id == "paper-1"
     assert payload.title == "Single Paper"
 
 
-async def test_document_profile_route_normalizes_invalid_profile_status_values(
+async def test_document_profile_route_preserves_normalized_stored_values(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -235,9 +303,9 @@ async def test_document_profile_route_normalizes_invalid_profile_status_values(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Invalid Profile Collection"
+        name="Invalid Profile Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_document_profiles(
         document_profile_service,
         collection_id,
@@ -245,23 +313,35 @@ async def test_document_profile_route_normalizes_invalid_profile_status_values(
             {
                 "document_id": "paper-1",
                 "title": "Single Paper",
-                "doc_type": "research_article",
+                "doc_type": "experimental",
                 "profile_warnings": [],
                 "confidence": 0.91,
             }
         ],
     )
-    payload = await documents_controller.get_collection_document_profile(
-            collection_id,
-            "paper-1",
-            _document_request(document_services),
-        )
+    payload = documents_controller.DocumentProfileItemResponse.model_validate(
+        json.loads(
+            (
+                await documents_controller.get_collection_document_profile(
+                    collection_id=collection_id,
+                    document_id="paper-1",
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                        "user_id"
+                    ],
+                )
+            ).body
+        )["data"]
+    )
 
     assert payload.doc_type == "experimental"
 
 
 async def test_document_content_route_uses_stable_block_locator(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -269,13 +349,13 @@ async def test_document_content_route_uses_stable_block_locator(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Document Locator Collection"
+        name="Document Locator Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_source_documents(
-        document_profile_service.source_artifact_repository,
+        document_profile_service.SourceArtifactRepo,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -312,11 +392,19 @@ async def test_document_content_route_uses_stable_block_locator(
             }
         ],
     )
-    payload = await documents_controller.get_collection_document_content(
-            collection_id,
-            "paper-1",
-            _document_request(document_services),
-        )
+    payload = documents_controller.DocumentContentResponse.model_validate(
+        json.loads(
+            (
+                await documents_controller.get_collection_document_content(
+                    collection_id=collection_id,
+                    document_id="paper-1",
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                        "user_id"
+                    ],
+                )
+            ).body
+        )["data"]
+    )
 
     first = payload.blocks[0]
     assert first.block_id == "blk-result"
@@ -333,20 +421,26 @@ async def test_document_content_route_uses_stable_block_locator(
     }
 
 
-async def test_document_markdown_route_returns_markdown_projection(document_services):
+async def test_document_markdown_route_returns_markdown_projection(
+    monkeypatch,
+    document_services,
+    *,
+    collection_workspace,
+    object_store,
+):
     (
         collection_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Markdown Route Collection"
+        name="Markdown Route Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_source_documents(
-        markdown_service.source_artifact_repository,
+        markdown_service.SourceArtifactRepo,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -382,11 +476,19 @@ async def test_document_markdown_route_returns_markdown_projection(document_serv
         ),
     )
 
-    payload = await documents_controller.get_collection_document_markdown(
-            collection_id,
-            "paper-1",
-            _document_request(document_services),
-        )
+    payload = documents_controller.DocumentMarkdownResponse.model_validate(
+        json.loads(
+            (
+                await documents_controller.get_collection_document_markdown(
+                    collection_id=collection_id,
+                    document_id="paper-1",
+                    user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                        "user_id"
+                    ],
+                )
+            ).body
+        )["data"]
+    )
 
     assert payload.collection_id == collection_id
     assert payload.document_id == "paper-1"
@@ -401,7 +503,11 @@ async def test_document_markdown_route_returns_markdown_projection(document_serv
 
 
 async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -409,77 +515,105 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Markdown Pending Collection"
+        name="Markdown Pending Collection",
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await documents_controller.get_collection_document_markdown(
-                record["collection_id"],
-                "paper-1",
-                _document_request(document_services),
-            )
-
-    exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "document_markdown_not_ready"
-    assert exc.detail["collection_id"] == record["collection_id"]
-
-
-async def test_document_source_route_streams_current_collection_document(document_services):
-    (
-        collection_service,
-        _document_profile_service,
-        _markdown_service,
-    ) = document_services
-    record = await collection_service.create_collection(name="Source File Collection")
-    collection_id = record["collection_id"]
-    writer = PdfWriter()
-    writer.add_blank_page(width=72, height=72)
-    pdf = BytesIO()
-    writer.write(pdf)
-    payload = pdf.getvalue()
-    document = await build_test_source_import_service(
-        collection_service
-    ).add_document(
-        collection_id, "paper-1.pdf", payload, "application/pdf",
-    )
-
-    response = await documents_controller.get_collection_document_source(
-            collection_id,
-            document["document_id"],
-            _document_request(document_services),
+    with pytest.raises(ProjectException) as exc_info:
+        documents_controller.DocumentMarkdownResponse.model_validate(
+            json.loads(
+                (
+                    await documents_controller.get_collection_document_markdown(
+                        collection_id=record.collection.collection_id,
+                        document_id="paper-1",
+                        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
+                            "user_id"
+                        ],
+                    )
+                ).body
+            )["data"]
         )
 
-    assert response.body == payload
-    assert response.media_type == "application/pdf"
-    assert response.headers["content-disposition"].startswith("inline;")
+    exc = exc_info.value
+    assert exc.code == 200204
+    assert exc.data["code"] == "document_markdown_not_ready"
+    assert exc.data["collection_id"] == record.collection.collection_id
 
 
-async def test_document_source_route_returns_404_when_document_is_missing(
+@pytest.mark.parametrize("filename, expected_disposition", [
+    ("paper-1.pdf", "inline; filename*=UTF-8''paper-1.pdf"),
+    ("论文.pdf", "inline; filename*=UTF-8''%E8%AE%BA%E6%96%87.pdf"),
+])
+async def test_document_source_route_streams_current_collection_document(
+    monkeypatch,
     document_services,
+    filename,
+    expected_disposition,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Missing Source Collection")
+    record = await collection_service.create_collection(name="Source File Collection")
+    collection_id = record.collection.collection_id
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    pdf = BytesIO()
+    writer.write(pdf)
+    payload = pdf.getvalue()
+    document = await source_import_service.add_document(
+        collection_id, filename, payload, "application/pdf", user_id="local-user",
+    )
 
-    with pytest.raises(HTTPException) as exc_info:
+    response = await documents_controller.get_collection_document_source(
+        collection_id=collection_id,
+        document_id=document.document.document_id,
+        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+    )
+
+    assert response.body == payload
+    assert response.media_type == "application/pdf"
+    assert response.headers["content-disposition"] == expected_disposition
+
+
+async def test_document_source_route_returns_404_when_document_is_missing(
+    monkeypatch,
+    document_services,
+    *,
+    collection_workspace,
+    object_store,
+):
+    (
+        collection_service,
+        _document_profile_service,
+        _markdown_service,
+    ) = document_services
+    record = await collection_service.create_collection(
+        name="Missing Source Collection",
+    )
+
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_source(
-                record["collection_id"],
-                "paper-1",
-                _document_request(document_services),
-            )
+            collection_id=record.collection.collection_id,
+            document_id="paper-1",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
     exc = exc_info.value
-    assert exc.status_code == 404
-    assert exc.detail["code"] == "document_not_found"
-    assert exc.detail["document_id"] == "paper-1"
+    assert exc.code == 200201
+    assert exc.data["code"] == "document_not_found"
+    assert exc.data["document_id"] == "paper-1"
 
 
 async def test_document_source_route_rejects_path_outside_collection(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -487,7 +621,7 @@ async def test_document_source_route_rejects_path_outside_collection(
         _markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Unsafe Source Collection")
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     unsafe_document = StoredDocument(
         document=Document(
             document_id="paper-1",
@@ -499,29 +633,33 @@ async def test_document_source_route_rejects_path_outside_collection(
         ),
         stored_filename="outside.pdf",
         storage_key="../outside.pdf",
-        created_at="2026-07-19T00:00:00+00:00",
+        created_at=record.created_at,
     )
-    await collection_service.repository.add_documents(
+    await collection_service.CollectionRepo.add_documents(
         collection_id,
         (unsafe_document,),
         updated_at=unsafe_document.created_at,
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_source(
-                collection_id,
-                "paper-1",
-                _document_request(document_services),
-            )
+            collection_id=collection_id,
+            document_id="paper-1",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
     exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "document_source_path_invalid"
-    assert "outside.pdf" not in str(exc.detail)
+    assert exc.code == 200204
+    assert exc.data["code"] == "document_source_path_invalid"
+    assert "outside.pdf" not in exc.message
 
 
 async def test_document_source_route_rejects_another_collections_storage_key(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -531,9 +669,9 @@ async def test_document_source_route_rejects_another_collections_storage_key(
     first = await collection_service.create_collection(name="First source collection")
     second = await collection_service.create_collection(name="Second source collection")
     payload = b"%PDF-1.4\nsecond collection\n"
-    storage_key = f"{second['collection_id']}/input/paper-2.pdf"
+    storage_key = f"{second.collection.collection_id}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
-    collection_service.object_store.write(storage_key, payload, digest)
+    object_store.write(storage_key, payload, digest)
     foreign_document = StoredDocument(
         document=Document(
             document_id="paper-1",
@@ -545,33 +683,39 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         ),
         stored_filename="paper-2.pdf",
         storage_key=storage_key,
-        created_at="2026-07-19T00:00:00+00:00",
+        created_at=first.created_at,
     )
-    await collection_service.repository.add_documents(
-        first["collection_id"],
+    await collection_service.CollectionRepo.add_documents(
+        first.collection.collection_id,
         (foreign_document,),
         updated_at=foreign_document.created_at,
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_source(
-                first["collection_id"],
-                "paper-1",
-                _document_request(document_services),
-            )
+            collection_id=first.collection.collection_id,
+            document_id="paper-1",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail["code"] == "document_source_path_invalid"
+    assert exc_info.value.code == 200204
+    assert exc_info.value.data["code"] == "document_source_path_invalid"
 
 
-async def test_document_figure_image_route_streams_extracted_asset(document_services):
+async def test_document_figure_image_route_streams_extracted_asset(
+    monkeypatch,
+    document_services,
+    *,
+    collection_workspace,
+    object_store,
+):
     (
         collection_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
     record = await collection_service.create_collection(name="Figure Image Collection")
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     content = b"\x89PNG\r\n\x1a\nfixture\n"
     asset_sha256 = sha256(content).hexdigest()
     storage_key = collection_service.write_figure_asset(
@@ -580,11 +724,12 @@ async def test_document_figure_image_route_streams_extracted_asset(document_serv
         "image_assets/fig-1.png",
         content,
         asset_sha256,
+        object_store=object_store,
     )
     await _store_source_documents(
-        markdown_service.source_artifact_repository,
+        markdown_service.SourceArtifactRepo,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -603,19 +748,23 @@ async def test_document_figure_image_route_streams_extracted_asset(document_serv
     )
 
     response = await documents_controller.get_collection_document_figure_image(
-            collection_id,
-            "paper-1",
-            "fig-1",
-            _document_request(document_services),
-        )
+        collection_id=collection_id,
+        document_id="paper-1",
+        figure_id="fig-1",
+        user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+    )
 
     assert response.body == content
     assert response.media_type == "image/png"
-    assert response.headers["content-disposition"] == 'inline; filename="fig-1.png"'
+    assert response.headers["content-disposition"] == "inline; filename*=UTF-8''fig-1.png"
 
 
 async def test_document_figure_image_route_rejects_figure_from_other_document(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -623,13 +772,13 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
         markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Cross Document Figure Collection"
+        name="Cross Document Figure Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     await _store_source_documents(
-        markdown_service.source_artifact_repository,
+        markdown_service.SourceArtifactRepo,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
                 {"id": "paper-2", "title": "Paper 2", "text": ""},
@@ -646,24 +795,28 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
         ),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_figure_image(
-                collection_id,
-                "paper-1",
-                "fig-2",
-                _document_request(document_services),
-            )
+            collection_id=collection_id,
+            document_id="paper-1",
+            figure_id="fig-2",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
     exc = exc_info.value
-    assert exc.status_code == 404
-    assert exc.detail["code"] == "figure_not_found"
-    assert exc.detail["document_id"] == "paper-1"
-    assert exc.detail["figure_id"] == "fig-2"
+    assert exc.code == 200201
+    assert exc.data["code"] == "figure_not_found"
+    assert exc.data["document_id"] == "paper-1"
+    assert exc.data["figure_id"] == "fig-2"
 
 
 async def test_document_figure_image_route_rejects_path_outside_collection(
+    monkeypatch,
     document_services,
     tmp_path,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -671,15 +824,15 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
         markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Unsafe Figure Image Collection"
+        name="Unsafe Figure Image Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
     await _store_source_documents(
-        markdown_service.source_artifact_repository,
+        markdown_service.SourceArtifactRepo,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -693,22 +846,26 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
         ),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_figure_image(
-                collection_id,
-                "paper-1",
-                "fig-1",
-                _document_request(document_services),
-            )
+            collection_id=collection_id,
+            document_id="paper-1",
+            figure_id="fig-1",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
     exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "figure_image_path_invalid"
-    assert "outside.png" not in str(exc.detail)
+    assert exc.code == 200204
+    assert exc.data["code"] == "figure_image_path_invalid"
+    assert "outside.png" not in exc.message
 
 
 async def test_document_figure_image_route_rejects_another_collections_object_key(
+    monkeypatch,
     document_services,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -720,16 +877,17 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
     content = b"figure"
     digest = sha256(content).hexdigest()
     foreign_key = collection_service.write_figure_asset(
-        second["collection_id"],
+        second.collection.collection_id,
         "build-figure",
         "image_assets/figure.png",
         content,
         digest,
+        object_store=object_store,
     )
     await _store_source_documents(
-        markdown_service.source_artifact_repository,
-        first["collection_id"],
-        source_documents_from_records(
+        markdown_service.SourceArtifactRepo,
+        first.collection.collection_id,
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -745,22 +903,26 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
         ),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_figure_image(
-                first["collection_id"],
-                "paper-1",
-                "fig-1",
-                _document_request(document_services),
-            )
+            collection_id=first.collection.collection_id,
+            document_id="paper-1",
+            figure_id="fig-1",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail["code"] == "figure_image_path_invalid"
+    assert exc_info.value.code == 200204
+    assert exc_info.value.data["code"] == "figure_image_path_invalid"
 
 
 @pytest.mark.parametrize("failure", ["missing", "hash_mismatch"])
 async def test_document_figure_image_route_reports_unavailable_object_bytes(
+    monkeypatch,
     document_services,
     failure,
+    *,
+    collection_workspace,
+    object_store,
 ):
     (
         collection_service,
@@ -768,9 +930,9 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
         markdown_service,
     ) = document_services
     record = await collection_service.create_collection(
-        name="Unavailable Figure Collection"
+        name="Unavailable Figure Collection",
     )
-    collection_id = record["collection_id"]
+    collection_id = record.collection.collection_id
     content = b"figure"
     digest = sha256(content).hexdigest()
     storage_key = collection_service.write_figure_asset(
@@ -779,15 +941,16 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
         "image_assets/figure.png",
         content,
         digest,
+        object_store=object_store,
     )
     if failure == "missing":
-        collection_service.object_store.delete(storage_key)
+        object_store.delete(storage_key)
     else:
-        (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
+        (collection_workspace.root_dir / storage_key).write_bytes(b"corrupt")
     await _store_source_documents(
-        markdown_service.source_artifact_repository,
+        markdown_service.SourceArtifactRepo,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -803,13 +966,13 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
         ),
     )
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(ProjectException) as exc_info:
         await documents_controller.get_collection_document_figure_image(
-                collection_id,
-                "paper-1",
-                "fig-1",
-                _document_request(document_services),
-            )
+            collection_id=collection_id,
+            document_id="paper-1",
+            figure_id="fig-1",
+            user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
+        )
 
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail["code"] == "figure_image_unavailable"
+    assert exc_info.value.code == 200204
+    assert exc_info.value.data["code"] == "figure_image_unavailable"

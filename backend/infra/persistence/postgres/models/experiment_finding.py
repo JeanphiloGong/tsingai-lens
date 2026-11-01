@@ -26,7 +26,7 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ExperimentFindingRow(Base):
+class ExperimentFindingORM(Base):
     """A published Finding that points to selections rather than copied facts."""
 
     __tablename__ = "finding"
@@ -94,7 +94,7 @@ class ExperimentFindingRow(Base):
     warnings_json: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 
 
-class FindingSelectionRow(Base):
+class FindingSelectionORM(Base):
     __tablename__ = "finding_selection"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -115,7 +115,7 @@ class FindingSelectionRow(Base):
     selection_id: Mapped[str] = mapped_column(String(120), primary_key=True)
 
 
-class FindingComparisonGroupRow(Base):
+class FindingComparisonGroupORM(Base):
     __tablename__ = "finding_comparison_group"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -137,7 +137,7 @@ class FindingComparisonGroupRow(Base):
 
 
 __all__ = [
-    "ExperimentFindingRow",
-    "FindingComparisonGroupRow",
-    "FindingSelectionRow",
+    "ExperimentFindingORM",
+    "FindingComparisonGroupORM",
+    "FindingSelectionORM",
 ]

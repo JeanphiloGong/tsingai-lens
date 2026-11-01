@@ -21,6 +21,9 @@ this file owns resource boundaries and cross-endpoint semantics.
 - Retired payloads and endpoints are not accepted through aliases or fallback
   parsers.
 
+All failure numbers below are business `code` values under HTTP 200. Stable
+reason strings shown beside a number are carried in `data.code`.
+
 ## Resource Map
 
 ### Authentication
@@ -29,9 +32,10 @@ this file owns resource boundaries and cross-endpoint semantics.
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
-Invalid credentials return `401`. A missing or expired session cookie also
-returns `401`; the frontend clears local auth state and returns the user to
-login.
+Invalid credentials return business code `200301` with reason `invalid_credentials`.
+A missing or expired session returns the same code with reason
+`authentication_required`; only this reason sends the browser to
+login after clearing local authentication and user-scoped chat storage.
 
 ### Collections, Documents, And Preparation
 
@@ -49,14 +53,14 @@ login.
 A Collection groups current Documents. Each Document independently owns its
 preparation status, current Source structure, and current DocumentProfile. The
 collection-scoped preparation, Pipeline Run, and experiment-plan endpoints are
-restricted to the authenticated Collection owner and return `404` for other
+restricted to the authenticated Collection owner and return `200201` for other
 users.
 Document upload accepts the optional query parameter `reuse_existing=true` for
 retrying an uncertain upload outcome. If the normalized content already exists
 in this Collection, the server returns that Document with `200`, preserving its
 identity, filename, and preparation state. Content matching uses server-side
 SHA-256; a matching filename alone never selects an existing Document. The
-default remains `false`, with duplicate content returning `400`. Neither mode
+default remains `false`, with duplicate content returning `200100`. Neither mode
 starts preparation automatically; the caller uses the returned Document ID with
 the existing preparation command. Ownership and upload validation apply before
 recovery just as they do before an ordinary upload.
@@ -93,7 +97,7 @@ One failed or processing Document does not block upload, preparation, Objective
 discovery, or analysis over other ready Documents.
 
 PDF uploads are opened with the Source PDF engine before persistence. A damaged,
-incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
+incomplete, password-protected, or otherwise unreadable PDF returns `200100` and is
 not added to the collection. This check establishes parser readability only;
 scientific structure extraction happens during that Document's preparation.
 A later parser or runtime failure sets only that Document and run to `failed`.
@@ -117,11 +121,11 @@ uploads under `sources/` plus `manifest.json` with their stable document IDs,
 archive paths, media types, sizes, and SHA-256 digests. Selection is atomic: a
 missing, oversized, unsafe, unavailable, or integrity-failing source prevents
 the complete archive from being returned.
-An unknown selected ID returns `404 collection_source_document_not_found`.
-An oversized selection returns `413 collection_source_archive_too_large`
+An unknown selected ID returns `200201 collection_source_document_not_found`.
+An oversized selection returns `200100 collection_source_archive_too_large`
 before any selected Source bytes are read.
 Persisted metadata whose bytes are unavailable, unsafe, or fail integrity
-verification returns `409` with the corresponding bounded
+verification returns `200204` with the corresponding bounded
 `collection_source_*` code; storage paths are never returned.
 The endpoint does not infer which papers failed. Parsing, Paper Map, and
 Objective analysis retain ownership of their failure states. Clients select
@@ -141,6 +145,61 @@ handoff and admission limit are not an external durable queue.
 Goal intake creates an empty collection directly; it does not create a durable
 handoff record or a second research-result identity.
 
+### Shared Model Connections
+
+`GET /api/v1/model-connections` requires authentication and returns the standard
+`{code,message,data,meta}` envelope. Its `data` is
+`{"items":[{"connection_id":"lab-a","display_name":"Lab A","model":"lab-chat-a"}]}`.
+Only enabled configurations appear. Empty configuration returns an empty array.
+The directory never exposes base URLs, key references, secret values, or provider
+payloads. It has no write endpoint; operators maintain the PostgreSQL
+table through their database tools.
+
+`POST /api/v1/chat-sessions/{session_id}/messages` accepts an optional
+`model_connection_id` alongside the existing message, Source, permission, and
+branch fields. Resolve it only after ownership checks and under the existing
+session execution lock. Omission selects `LENS_DEFAULT_MODEL_CONNECTION_ID`.
+No default or an invalid/disabled selection fails before appending a user message
+or calling the provider. A valid choice binds the whole response to that connection ID;
+another user's selection cannot mutate that response's client.
+
+Response snapshots include nullable `model_connection_id` and
+`model_connection_name`. Model-call summaries and detailed audits retain the ID;
+the existing `model` field records the model actually called. Existing completed
+snapshots may have NULLs. Approval continuation reads the saved connection ID,
+even when disabled, and never substitutes another enabled configuration. Auto-approved
+tools and context compaction reuse the same response runner. GET event reconnects
+read that saved snapshot without selecting a model or generating another answer.
+
+Trajectory responses (GET messages and SSE trajectory events) include nullable
+`retryable_decision`. It is the original call with status `approved` or `rejected`
+when its decision is saved, no result has been recorded, and no worker is running.
+`pending_approval` remains reserved for a decision the user has not made. A client
+may explicitly retry the saved decision through the existing decision endpoint,
+using that call's original decision and `arguments_digest`; it sends no model
+selection and must never convert a rejection to an approval. A rejection with no
+result resumes its refusal observation and explanation, without executing a write.
+A recorded result suppresses this recovery projection, and repeated completed
+requests do not create another response or execute again. GET and reconnect only
+observe; they never perform the retry. New questions wait until this outstanding
+continuation has been handled.
+
+JSON endpoints keep HTTP 200 and return the existing business error envelope.
+An unknown or disabled choice uses `ResourceConflictException` (business code
+`200204`) and `data.code = "model_connection_unavailable"`. The request schema
+accepts IDs of 1–64 characters; invalid input uses `200100`. A missing default,
+missing saved binding, invalid configuration or missing key uses
+`ServiceUnavailableException` (`200205`) with the stable reason in `data.code`:
+`model_connection_default_unavailable`, `model_connection_binding_missing`,
+`model_connection_invalid_configuration`, or `model_connection_key_unavailable`.
+Authentication failure uses the existing `200301` contract. The directory calls
+the concrete repository directly; unexpected database errors follow the existing
+application exception handler, without inventing a second directory error API.
+If an SSE stream has already started, connection failures arrive as sanitized
+`error` events within HTTP 200. No client may treat the status alone as a
+completed scientific answer. Provider failures after dispatch continue to use
+the existing `model_unavailable`/context error contract.
+
 ### Research Agent Chat
 
 Session operation permissions are exposed by authenticated
@@ -149,8 +208,8 @@ Session operation permissions are exposed by authenticated
 `expires_at` (`null` keeps an automatic grant active until it is
 revoked or changed, while a non-null value must be no more than 24 hours
 ahead), `all_actions`, and `expected_revision`. A session without a collection default and every branched session defaults
-to `confirm`; revision conflicts and invalid grants return `409`, inaccessible
-sessions return `404`. The model cannot call this settings endpoint.
+to `confirm`; revision conflicts and invalid grants return `200204`, inaccessible
+sessions return `200201`. The model cannot call this settings endpoint.
 
 Automatic grants can cover every currently registered write action listed in
 `domain/chat/permissions.py`, including research-process and Objective actions,
@@ -174,7 +233,7 @@ settings are the deterministic control.
 Collection owners can set a default for newly created collection Agent sessions through
 authenticated `GET/PUT /api/v1/collections/{collection_id}/agent-permissions`.
 The endpoint uses the same mode, action, optional expiry, and revision contract and
-returns `404` for a collection the caller does not own. A collection default is
+returns `200201` for a collection the caller does not own. A collection default is
 copied when a session is created; changing it does not silently change an
 active session. Branches continue to default to confirmation. `all_actions=true` is expanded by the backend to every current
 registered write action, so clients do not need to maintain that authoritative
@@ -184,6 +243,7 @@ list.
 - `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
 - `PUT /api/v1/chat-sessions/{session_id}/pin`
+- `PUT /api/v1/chat-sessions/{session_id}/title`
 - `DELETE /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
@@ -204,24 +264,43 @@ ordered by `is_pinned` descending, then `updated_at` descending and `session_id`
 descending, before applying `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
 may remember the active session but is not the authoritative history index. Each
-list item also includes `title`, the trimmed first line of the first user question
+list item also includes `title`: the saved manual or generated title, otherwise the trimmed first line of the first user question
 (up to 160 characters), or `null` for an empty conversation. A client can render
 history without loading every trajectory or relying on a local title cache.
+
+`PUT .../{session_id}/title` accepts `{"title": "IN718 comparison"}` and
+returns the saved session. The application service trims titles and then checks
+the 1–160 character limit. NUL, CR and LF are rejected in the original input,
+including at its edges; invalid requests return 200100. Both session and collection
+ownership are required; missing or unowned sessions return 200201. Renaming changes
+only the title, preserving messages, progress, pin state and activity time.
+Individual session reads expose the saved title or null. Later generation
+checkpoints do not overwrite it; branches start without a saved title.
+
+After the first normally completed answer, an untitled session receives a short
+model-generated topic title in the first question's language. Naming uses the
+same request-bound model connection, a bounded excerpt of the first question and
+answer, no tools, and a 45-second timeout. It runs in the background without
+holding the response or blocking the next question. It does not add a conversation message
+or change research evidence. Only a null title can be filled automatically, so
+manual renaming wins even while generation is pending. On naming failure the
+answer remains valid and the question-based label stays available; a later
+normally completed answer can retry naming. Named sessions are not regenerated.
 
 Session responses include `is_pinned` (false by default). `PUT .../{session_id}/pin`
 accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the
 saved session. Setting the same state is idempotent. The authenticated user must
-own both the session and its Collection; missing or unowned sessions return 404
+own both the session and its Collection; missing or unowned sessions return 200201
 `chat_session_not_found`. Pinning is independent of execution and does not
 change `updated_at`, messages, approvals, or Source attachments. Generation
 checkpoints preserve the saved preference, and new branches start unpinned.
 
-Deleting an owned idle session returns 204 and removes its trajectory. Execution
-conflicts return 409 `chat_session_busy`. A session still referenced by another
-session's `parent_session_id` or `root_session_id` returns 409
+Deleting an owned idle session returns a success envelope with empty `data` and removes its trajectory. Execution
+conflicts return 200204 `chat_session_busy`. A session still referenced by another
+session's `parent_session_id` or `root_session_id` returns 200204
 `chat_session_has_branches`; delete the dependent versions first. This preserves
 their saved questions, Source attachments, and tree checkpoints. Missing or
-unowned sessions return 404 `chat_session_not_found`. Deletion and branch copying
+unowned sessions return 200201 `chat_session_not_found`. Deletion and branch copying
 serialize on the source session row so a concurrent branch cannot lose its source.
 
 Message editing and answer regeneration preserve the original trajectory.
@@ -231,13 +310,13 @@ characters). Omitting `message` retries the original question. It returns an
 owned `ChatSession` with `root_session_id`, `parent_session_id`,
 `fork_message_id`, `fork_position`, and `fork_content`; these fields are null
 for an original session. The same UUID and revision return the same branch.
-Reusing a UUID for different content is rejected with 422.
+Reusing a UUID for different content is rejected with 200100.
 
 The optional `mode` is `revise` by default. `mode: continue` requires a new
 `message` and retains the selected question's completed answer before starting
 that question on a new branch. Its `fork_message_id` identifies the retained
 assistant answer and `fork_position` is the first position after that answer.
-An incomplete answer cannot be used as a continuation checkpoint (422).
+An incomplete answer cannot be used as a continuation checkpoint (200100).
 Continuation drafts have no new Source attachments: earlier messages retain
 their own Source context. Both modes use the existing branch storage and require
 an idle session with no unresolved approvals or tool results.
@@ -256,14 +335,14 @@ assigning new message and call identities while retaining canonical Source and
 resource references. Later answers and writes stay in their original branch.
 Copied terminal calls describe historical work; they cannot be claimed again.
 New writes require a new exact approval. Branching requires both session and
-current Collection ownership, and returns 409 during execution or unresolved
-approval/recovery, 404 for an unavailable saved user message, and 422 for an
+current Collection ownership, and returns 200204 during execution or unresolved
+approval/recovery, 200201 for an unavailable saved user message, and 200100 for an
 invalid revision or stale Source.
 
 To execute the saved revision, `POST /messages` accepts `branch_revision: true`
 with the exact `fork_content`. The backend restores Source contexts from the
 original question for revisions (none for continuations), validates them against current Sources, and accepts this
-branch's initial turn at most once. A repeated send returns 409
+branch's initial turn at most once. A repeated send returns 200204
 `chat_branch_already_started`; the client reads the saved trajectory to recover.
 Both ordinary JSON and SSE submission support this behavior.
 
@@ -286,7 +365,7 @@ This never changes an Objective, Evidence, Finding, approval, or model context.
 `reason: incorrect | incomplete | unclear | other | null`, and an optional
 `comment` of at most 2000 characters. A reason requires `not_helpful`.
 `rating: null` withdraws the record and requires absent/null reason and comment;
-the response is HTTP 200 with JSON `null`. Comments are trimmed and blank
+the response is HTTP 200 with `code: 200` and `data: {}`. Comments are trimmed and blank
 comments become null. Extra fields are rejected.
 
 A non-null rating returns `feedback_id`, `session_id`, `message_id`, `user_id`,
@@ -298,9 +377,9 @@ updates preserve identity and creation time, and identical PUTs also preserve
 update time. Withdrawal is idempotent and removes the optional details.
 
 The target must be a persisted, non-empty Assistant text message without tool
-requests in the owned session. Authentication is required (`401`); unavailable
-session, collection, or message ownership returns `404`; ineligible message
-roles or invalid input return `422`. Temporary streaming messages have no saved
+requests in the owned session. Authentication is required (`200301`); unavailable
+session, collection, or message ownership returns `200201`; ineligible message
+roles or invalid input return `200100`. Temporary streaming messages have no saved
 identity and cannot receive feedback.
 
 `GET /chat-sessions/{session_id}/messages` returns a separate `feedback` array
@@ -394,11 +473,16 @@ enqueue model work. The sample Worker backfills historical cases in bounded
 batches once at process startup, skips withdrawn cases, and preserves existing
 samples through idempotent collection. The `dataset_sample_build`
 Worker reads the case's frozen context
-and readable evidence, writes an immutable task-specific candidate
+and any available readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
 builders use the configured model to generate missing answers or criteria from
-the readable evidence. A first Preference build uses the configured model to
-assess the fixed answer pair against its shared readable evidence without
+the conversation and available evidence. A Helpful rating can seed the original
+answer as an SFT candidate, but never confirms it. Negative feedback alone
+cannot make the original answer a target. Captured input messages retain the
+conversation before the rated answer; the target and later corrections are
+excluded. Historical snapshots without messages retain their question input.
+A first Preference build uses the configured model to
+assess the fixed answer pair against its shared input without
 rewriting or swapping either answer. It records `suggested_preference`
 (`a`, `b`, `tie`, or `unclear`) and a nonempty evidence-grounded `rationale`,
 while leaving `human_preference` unset. Missing assessment configuration leaves
@@ -415,7 +499,11 @@ Confirmation saves any local Preference changes first and confirms exactly
 the revision returned by that save through the existing PATCH and confirm
 endpoints; a failed save cannot submit a confirmation. An invalid or
 unchanged result does not become a new confirmed sample.
-Missing evidence or an explicit model abstention produces `needs_input`;
+Paper titles and excerpts are optional for all three tasks. Empty context and
+evidence arrays do not block building, saving, confirmation or export. Supplied
+excerpts must still be complete and retain provenance. Missing task content
+(SFT target, a comparable answer pair, or evaluation criteria/reference) or an
+explicit model abstention produces `needs_input`;
 provider errors and invalid responses produce `build_failed`. No Worker result
 automatically confirms training data. Internal message/source identities stay
 in revision provenance and are not inserted into model-facing context or
@@ -473,14 +561,17 @@ and complete task-specific content. This creates the first human revision and
 transitions to `needs_confirmation`, without confirming it. Generation is also
 checked under the row lock, preventing an old editor from overwriting a rebuild.
 The service recomputes the source case digest before saving or confirming; if
-the case changed after the candidate was built, it returns `409
+the case changed after the candidate was built, it returns `200204
 sample_source_stale` and requires a rebuild from the current case.
 The browser provides editors for all three tasks, including missing questions,
 answers, criteria, and add/remove controls for readable evidence. The confirm
 body contains the same expected revision ID. Confirmation is conditional on the
 sample still pointing at that
 revision, records the confirming user and time, and is idempotent when the same
-revision was already confirmed. A stale revision returns `409
+revision was already confirmed. The confirmation transaction locks the persisted
+revision and verifies its content against its saved digest, including repeated
+confirmation. A mismatch returns `200204 sample_content_digest_mismatch` without
+changing the sample status or confirmation metadata. A stale revision returns `200204
 sample_revision_stale`; the browser keeps its draft and asks the user to reload
 or compare before submitting again. The interface presents questions,
 readable context, answer text, and evidence excerpts; users do not type sample,
@@ -496,8 +587,8 @@ The actions endpoint accepts `action` (`rebuild`, `retry`, `discard`, or
 `restore`), `expected_revision_id`, and an optional `reason`; `rebuild` requires
 a non-empty reason. It requires an `Idempotency-Key` header. Reusing the same
 key and request returns the original action result; changing the request under
-the same key returns `409 sample_action_identity_conflict`. A changed sample
-revision or generation returns `409 sample_revision_stale`. Rebuild and retry
+the same key returns `200204 sample_action_identity_conflict`. A changed sample
+revision or generation returns `200204 sample_revision_stale`. Rebuild and retry
 create a new pending build job; discard invalidates any running build; restore
 returns to `needs_confirmation` only when the retained candidate still matches
 the current source, otherwise to `needs_input`. Neither action automatically
@@ -506,15 +597,15 @@ confirms a sample. A late Worker result cannot replace a newer generation.
 The export flow always starts with `POST .../export-previews`. Its optional body
 `{"sample_ids": ["sample_123"]}` selects confirmed samples in this dataset.
 Omitting `sample_ids` selects all confirmed samples; an empty list, duplicates,
-or an unavailable sample returns `422`. The browser explicitly sends its selection.
+or an unavailable sample returns `200100`. The browser explicitly sends its selection.
 The server reads the selected confirmed revisions, validates readable context and provenance, and
 stores a short-lived member digest. The response contains the requested count,
 exportable count, sample previews, and user-readable issues. Publishing requires
 the preview ID and digest plus an `Idempotency-Key`; without
-`allow_partial: true`, any issue returns `422` and no export is created. With
+`allow_partial: true`, any issue returns `200100` and no export is created. With
 explicit partial consent, only the valid members are published; invalid samples
 remain in the queue. If a selected revision or confirmation changes after preview,
-publishing returns `409 export_preview_stale` and the browser must run a new
+publishing returns `200204 export_preview_stale` and the browser must run a new
 preview. Both preview queries and publication transaction checks are restricted
 to selected sample IDs. Unselected stale or withdrawn samples cannot block a
 selected export. Unselected sample changes do not invalidate the preview or add rows to
@@ -534,6 +625,9 @@ There are no standalone `context` or `evidence` fields in v2 main files.
 The `literature-context.v1` input template inserts each distinct reviewed context
 snippet as `文献：{document_title}\n原文：{text}`, joins snippets with a blank line,
 and prepends them to the last user message followed by `\n\n问题：{original content}`.
+With no context snippets, messages are exported unchanged, without an empty
+literature/question wrapper. Session and anchor provenance remain mandatory;
+evidence provenance is required when context or evidence is included.
 Earlier messages and roles remain unchanged. Evidence used only for review,
 targets, preferences, reference answers, and criteria never enter this input.
 The manifest includes `data_format` (`messages-sft`, `trl-conversational-dpo`,
@@ -568,7 +662,7 @@ page, heading, link, and digest metadata with canonical values. The persisted
 context includes the SHA-256 `source_digest` of the complete Source and is
 returned when the trajectory is reloaded. A missing Source, unsupported Source
 kind, forged locator or quote, or stale submitted digest returns
-`422 chat_source_context_invalid` without running the model or storing a partial
+`200100 chat_source_context_invalid` without running the model or storing a partial
 turn. This context is material for the Agent to inspect, not verified Evidence
 and not authorization to create or modify an Objective, Evidence, Finding, or
 Analysis. The quoted content is never treated as model instructions. Existing
@@ -611,8 +705,14 @@ same plan version because it adds no capability request/result event.
 Simple answers may have no plan. It never represents Evidence, permission, or a
 scientific conclusion.
 Progress also includes `retry_count`, `remaining_retry_budget`, `retry_attempt`,
-`retry_delay_ms` and `termination_reason`. `model_retry` and `context_compaction`
-describe technical work. The existing snapshot progress stores an internal
+`retry_delay_ms` and `termination_reason`. `model_retry`, `context_compaction`
+and `context_recovery` describe technical work. `no_progress_recovery` marks
+one correction decision before the repeated-observation guard stops a stalled
+turn; tools remain available within the existing budgets. `context_token_limit` records
+the reduced request window (zero means the configured default), and
+`context_recovery_attempts` counts the bounded reductions within this request,
+including approval continuations. A reduction sends another model request only
+when its input is smaller; successful tool work is preserved. The existing snapshot progress stores an internal
 `context_checkpoint` containing provisional working notes and compacted message
 IDs for recovery; clients must not render it as evidence. Context failures use
 `context_window_exceeded` or `context_compaction_unavailable`, separately from
@@ -680,11 +780,11 @@ An ordinary message may return a final answer without calling a tool. Registered
 `approval_required` before execution. The decision request must submit the
 stored 64-character `arguments_digest`; approval is bound to the tool call,
 exact stored arguments, authenticated user, and decision timestamp. Changed
-arguments, another user, or an incompatible call state return `409` or `404`
+arguments, another user, or an incompatible call state return `200204` or `200201`
 and never execute the call. Rejection records a tool result and does not execute
 the capability; the Agent then resumes the same research loop so remaining reads or
 non-write work can finish. While a write remains `approval_required`, posting another
-message to that session returns `409 chat_tool_approval_pending`; the user must
+message to that session returns `200204 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
 The production Research Agent registers the capabilities below. For each model
@@ -700,7 +800,11 @@ authoritative boundaries. The production Research Agent currently exposes these
 capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
-- `browse_collection_papers` returns a bounded, screening-only paper survey. A
+- `browse_collection_papers` returns a context-sized, screening-only paper survey.
+  Omitting `limit` permits up to 100 records; an explicit limit is a record cap.
+  The returned page fits the available context, and `next_offset` identifies
+  the first record after that page. `catalog_digest` identifies the ordered
+  collection membership used to reconstruct browsing progress across requests. A
   paper's `source_status` is `available` when canonical parsed Source content
   can be read, `preparing` while preparation is still running,
   `not_prepared` when an uploaded/stored paper has not been prepared,
@@ -715,6 +819,12 @@ capabilities:
   are normal navigation results, not warnings or scientific absence. Source
   read failures are isolated to the affected paper so other page results remain
   usable;
+- `search_sources` searches prepared content in the current collection when
+  `document_ids` is omitted; explicit IDs narrow that scope. `match_mode` is
+  `any` terms, `all` terms across a paper, or an exact `phrase`. Results rank
+  papers by matched terms and title matches, then passages by matched terms.
+  Hit-centered excerpts include character offsets, section IDs and exact
+  `read_arguments`; these navigation previews are not scientific Evidence.
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
   bounded table Markdown, and figure captions through exact or focused,
   paginated Source filters. Each Source includes a digest of its complete
@@ -727,8 +837,12 @@ capabilities:
   `outline_section_total` and `outline_truncated` expose outline truncation.
   This overview and `prepared_source_pages` are independent of search filters
   and describe prepared content, not the original PDF's total pages. The optional
-  exact `heading_path` filter, with `offset` and `next_offset`, supports reading
-  a section progressively. Omitting `limit` permits up to 200 complete records,
+  `section_id` selects a SourceDocumentTree section and its descendants.
+  `source_version` pins continuation to the prepared content; a changed version
+  returns `source_version_changed`. Returned `continuation` is the next complete
+  tool argument set, or null when the selection is fully returned. The
+  exact `heading_path` filter also selects that section and its descendant headings;
+  `offset` and `next_offset` support reading the selected subtree progressively. Omitting `limit` permits up to 200 complete records,
   packed to the current context allowance; explicit `limit` remains a record cap.
   `batch_token_budget` and `returned_source_count` describe the actual batch.
   An oversized first Source is returned without text and with
@@ -752,6 +866,8 @@ capabilities:
   digests, and pagination state. A search hit is an inspection lead, not
   Evidence or a scientific absence;
 - `inspect_table` returns a small canonical table as complete Markdown. Only a
+  The complete model message must fit the current result-token budget; oversized
+  tables split at complete rows, with repeated headers and exact continuation.
   table above the bounded response limit is split into row windows, and every
   window repeats the canonical headers and complete-table digest;
 - `inspect_research_process` reads each current Document and its latest
@@ -787,13 +903,16 @@ capabilities:
   accepts Evidence IDs, a hand-written statement, or assertion strength.
   After exact-argument approval it reads the canonical Finding aggregated for
   that selection set and returns the fixed analysis projection;
+  both Finding authoring capabilities report stale analyses, invalid references
+  and unavailable resources as tool rejections. Infrastructure and program
+  faults remain internal failures;
 - `record_finding_feedback` is a `write` capability. After exact-argument
-  approval, it calls the same `FindingFeedbackService.record_feedback()` path
+  approval, it calls the same `finding_feedback_service.record_feedback()` path
   as the Finding workbench and records the authenticated user as reviewer. It
   does not mutate the published Finding, Evidence, or Sources;
 - `curate_finding` is a `write` capability. After exact-argument approval, it
   passes one complete canonical Finding to the same
-  `FindingFeedbackService.record_curation()` path as the Finding workbench.
+  `finding_feedback_service.record_curation()` path as the Finding workbench.
   Service validation preserves Finding identity, paper coverage, Evidence IDs,
   and Source lineage; curation cannot create a new Finding;
 - `propose_objective_drafts` records at most three focused, single-outcome
@@ -829,7 +948,7 @@ capabilities:
   only the bounded detail projection;
 - `start_objective_analysis` is a `write` capability for an already confirmed
   Objective. A separate exact-argument approval calls the same canonical
-  `ObjectiveAnalysisService.start_analysis()` used by the HTTP route with the
+  `analysis_service.start_objective_analysis()` used by the HTTP route with the
   exact approved ready `document_ids`. An unconfirmed candidate is rejected
   without allocating an analysis version. It
   returns the persisted queued, running, succeeded, or failed state and never
@@ -871,7 +990,10 @@ capabilities:
   atomically without starting or publishing Objective analysis and without
   creating an Objective Selection. A later Objective analysis may select one or
   more fixed revisions for comparison. It does not create a Finding; a Finding
-  remains a separate Evidence/Selection-backed write;
+  remains a separate Evidence/Selection-backed write. A conflicting fixed revision
+  is rejected with `paper_experiment_revision_immutable` or
+  `paper_experiment_revision_identity_conflict`, preserving its experiment ID and
+  version in the tool result;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work;
@@ -1045,8 +1167,8 @@ synthesis match is navigation support only; `support_is_evidence` is always
 false. Incomplete maps, partial matches, broad-variable uncertainty, and review
 citation leads require researcher inspection and are not selected by default.
 The endpoint performs no LLM call and persists no scope. An unknown Objective
-returns `404`; a Collection with no Paper Maps returns
-`409 objective_scope_not_ready`.
+returns `200201`; a Collection with no Paper Maps returns
+`200204 objective_scope_not_ready`.
 
 `GET .../analysis/status` is the polling projection for the active analysis.
 It returns only lifecycle state, phase, processed/total document counts, the
@@ -1103,14 +1225,14 @@ task-local `AsyncSession` transactions. The repository claim transition still
 allows only one task to execute a specific Objective analysis version, and
 persisted analysis state remains the status authority queried by the client. If
 the backend cannot create the background task, it records that version as
-failed and returns `503`, allowing the client to retry without leaving a
+failed and returns `200205`, allowing the client to retry without leaving a
 permanently queued version. Only a complete succeeded version can become
 published. A succeeded version may have zero Findings when paper contributions
 and source-backed Evidence were published but no defensible comparison
 survived; this is a scientific abstention, not a technical failure. The Finding
 list then returns `total=0` without a placeholder Finding.
 
-`ObjectiveAnalysisService` owns queue-and-dispatch for this HTTP command and
+`analysis_service` owns queue-and-dispatch for this HTTP command and
 the Agent's automatic `start_objective_analysis` capability. Direct
 Agent-authored analysis does not call that extraction pipeline; its application
 service revalidates the approved Source-grounded payload and uses the same
@@ -1206,7 +1328,7 @@ can follow `parent_finding_id` to distinguish original and revised conclusions.
 Evidence reads expose `eligible_for_finding_authoring`: the Evidence must be
 structurally eligible and not superseded. `supports_finding` retains its
 historical structural meaning. New Finding writes reject superseded Evidence
-in every selected role with `409`; existing Findings retain their original
+in every selected role with `200204`; existing Findings retain their original
 Evidence and remain readable. Replacement never transfers a scientific role
 automatically.
 
@@ -1236,7 +1358,7 @@ browser.
 }
 ```
 
-A successful command returns `201` with a new immutable analysis snapshot and
+A successful command returns `code: 200` with a new immutable analysis snapshot and
 the canonical Finding synthesized from the requested selection/group set.
 Unknown selections, groups, or an unaggregated combination are rejected; the
 source snapshot remains unchanged.
@@ -1259,11 +1381,11 @@ an explanatory `limitations` entry and no selections, comparison groups, or
 parent. The new version retains the source analysis's document coverage.
 
 The new analysis version records the abstention as metadata and creates no
-placeholder Finding. An unauthenticated request returns `401`; missing or
-unowned collections and missing Objectives return `404`; stale source versions,
+placeholder Finding. An unauthenticated request returns `200301`; missing or
+unowned collections and missing Objectives return `200201`; stale source versions,
 concurrent analysis, unknown or ineligible Evidence, and scientifically
-inconsistent role selections return `409`; malformed request shapes return
-`422`.
+inconsistent role selections return `200204`; malformed request shapes return
+`200100`.
 
 ### Paper Experiment Analysis Projection
 
@@ -1349,9 +1471,9 @@ The summary is transient: it creates no analysis version and changes no Finding,
 Evidence, or review. Known citation IDs are checked, not the scientific truth of
 every generated sentence. Original records remain authoritative.
 
-Missing Findings return `404`; a changed or absent published version returns
-`409` with `summary_stale_analysis`, including if it changed during generation.
-Unavailable summaries return `503` with a safe `summary_*` reason code. Missing
+Missing Findings return `200201`; a changed or absent published version returns
+`200204` with `summary_stale_analysis`, including if it changed during generation.
+Unavailable summaries return `200205` with a safe `summary_*` reason code. Missing
 linked Evidence or input exceeding 200 records or the 24,000-token prompt budget
 is rejected explicitly, never silently truncated. Summary failure does not fail
 or replace the published analysis. Clients discard responses after changing the
@@ -1440,8 +1562,12 @@ Feedback requires `analysis_version`, `review_status`, and `issue_type`.
 Curation requires `analysis_version` and one complete canonical
 `curated_finding`. The service validates its exact identity and every
 version-local Evidence/PaperContribution binding. Unknown, stale, unpublished,
-partial, and cross-version references return `404`, `409`, or `422` and are
+partial, and cross-version references return `200201`, `200204`, or `200100` and are
 never silently rebound.
+
+Optional `curated_finding.created_at` is parsed as a datetime by the request
+model. Invalid timestamps return `200100` before curation runs. JSON timestamps
+remain ISO 8601 strings with their UTC offsets preserved.
 
 The Finding workbench and Research Agent share these same service operations.
 The Agent first reads the complete published Finding and linked Evidence,
@@ -1452,7 +1578,7 @@ exact arguments. Chat does not own a second Finding identity or review store.
 Finding authoring is distinct from review. The Agent may propose a new
 Evidence-to-Finding decision only from `supports_finding` Evidence in the exact
 current published version. The approved capability calls the same
-`FindingAuthoringService` as the HTTP workbench, including immutable version
+`finding_authoring_service` as the HTTP workbench, including immutable version
 publication, role validation, Source validation, and abstention semantics.
 Agent prose or raw Source text cannot become Evidence.
 
@@ -1496,7 +1622,7 @@ formatter (the default column names are already correct):
 Plans are human-editable downstream drafts, not scientific source records.
 The HTTP POST creates a manual draft without Chat provenance. The Research
 Agent can propose the same Objective-scoped plan structure and, after exact
-approval, save it through the same `ExperimentPlanService`. Agent-created plans
+approval, save it through the same `experiment_plan_service`. Agent-created plans
 store the approved tool-call identity, visible Evidence links, and complete
 Finding/Evidence fingerprints. Reads recheck those snapshots; stale grounded
 plans cannot be promoted to `ready_for_review`. Historical plans that reference
@@ -1506,6 +1632,12 @@ Saving a plan never schedules or claims that an experiment was executed.
 the request must include at least one of `title`, `content`, `status`, or
 `structured_plan`. The service creates a new immutable plan revision; it does
 not mutate the historical revision addressed by `plan_id`.
+Only one successor can be saved for a parent revision. A second update returns
+`200204` with `data.code: experiment_plan_revision_superseded` and the parent
+plan ID; it creates no revision and leaves the accepted successor intact.
+An attempted overwrite or duplicate revision identity also returns `200204`,
+with `experiment_plan_revision_immutable` or
+`experiment_plan_revision_identity_conflict` and the affected plan identity.
 
 ### Documents And Source Verification
 
@@ -1542,24 +1674,61 @@ collection-wide Graph routes are not part of the maintained HTTP contract.
 
 ## Error Contract
 
-Errors use the status appropriate to the failure:
+All application JSON success and failure responses use HTTP 200 and
+`{code, message, data, meta}`. `code` is numeric, `meta` is null unless supplied,
+and an absent result has `data: {}`. Successful commands, including creation,
+queuing and deletion, use `code: 200`; queued/running is expressed by the result's
+own execution state. The schema in OpenAPI describes the envelope around each
+existing response model.
 
-- `400`: malformed input;
-- `401`: invalid or expired authentication;
-- `403`: authenticated user lacks access;
-- `404`: collection, Chat, Objective, Finding, Evidence, or source record is absent;
-- `409`: lifecycle or Chat approval conflict, unpublished/stale version, or
-  artifact not ready;
-- `422`: request schema validation;
-- `500/502/503`: internal or upstream service failure.
+| Business code | Meaning |
+|---|---|
+| `200` | Success |
+| `200000` | Unexpected internal failure; diagnostic details stay in server logs |
+| `200100` | Invalid external input or rejected request decision |
+| `200201` | Resource missing or hidden from the caller |
+| `200202` | Method not allowed |
+| `200203` | Permission denied |
+| `200204` | Stale version, invalid state, approval or write conflict |
+| `200205` | Required work could not be scheduled or a dependency is unavailable |
+| `200301` | Missing/expired authentication or invalid login credentials |
 
-Where an endpoint returns a structured detail object, it includes a stable
-`code`, user-readable `message`, and relevant resource IDs. Internal stack
-traces and credentials never enter the HTTP response.
+Stable reason strings and relevant resource IDs live in `data`, for example:
+
+```json
+{
+  "code": 200204,
+  "message": "The published analysis has changed. Reload before generating a summary.",
+  "data": {"code": "summary_stale_analysis"},
+  "meta": null
+}
+```
+
+The centralized handlers cover explicit application errors, framework not-found
+and method errors, request validation, and unexpected exceptions. Builtin
+`ValueError`, `FileNotFoundError`, or `RuntimeError` is not automatically a client
+error. Public messages never include provider responses, credentials, or stack
+traces. Request correlation remains available through `X-Request-ID`.
+
+File successes keep their media type and bytes, with encoded `filename*` headers
+where applicable. Document Source and figure reads always use
+`inline; filename*=UTF-8''` followed by the percent-encoded filename.
+SSE successes remain `text/event-stream`. A failure before a
+file/SSE response starts uses the JSON envelope. After SSE starts, failure uses
+an `error` event; cancellation still releases the stream and execution lock.
+An enqueue failure after saving feedback reports the saved feedback ID, and an
+analysis scheduling failure reports its already allocated version. These
+failures do not imply that earlier durable writes were rolled back.
 
 ## Frontend Integration
 
-- Use same-origin requests through the shared API helper.
+- Use same-origin requests through the shared API helper; `requestJson` returns
+  `data` and raises `ApiError` for any business code other than 200.
+- Authentication expiry uses `200301` plus `authentication_required`; an HTTP
+  status or arbitrary error string is not an authentication decision.
+- `requestBlob` checks JSON failures before downloads, keeps actual file bytes,
+  and unwraps ordinary successful JSON exports. SSE readers verify the response
+  media type before parsing events.
 - Poll only queued/running Pipeline Run or Objective analysis states.
 - On a failed Objective analysis, show retry while retaining the last published
   Findings if one exists.

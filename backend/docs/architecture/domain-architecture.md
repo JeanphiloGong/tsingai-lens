@@ -69,7 +69,7 @@ domain/
 
 infra/
   source/       parsers and Source infrastructure
-  persistence/  explicit PostgreSQL and test-memory repositories
+  persistence/  PostgreSQL connections, ORM tables, transactions and file storage
 ```
 
 ## Boundary Rules

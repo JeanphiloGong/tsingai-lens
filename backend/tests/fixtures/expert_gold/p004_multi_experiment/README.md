@@ -64,7 +64,8 @@ but uninspected supplementary-material route (`S1`–`S4`).
 ## Mapping To The Domain Aggregate
 
 This sidecar is deliberately a review-friendly gold format rather than a
-runtime `PaperExperiment.to_record()` payload. The intended mapping is direct:
+runtime query or export payload. The intended mapping is direct at the
+paper-experiment extraction and query boundaries:
 
 | Gold field | `PaperExperiment` concept |
 | --- | --- |

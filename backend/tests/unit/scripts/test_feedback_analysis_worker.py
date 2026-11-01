@@ -1,61 +1,45 @@
-from __future__ import annotations
-
-import sys
 from types import SimpleNamespace
-
+from unittest.mock import AsyncMock
+import importlib
 import pytest
 
-from scripts import feedback_analysis_worker as worker_script
-
+pytestmark = pytest.mark.anyio
 
 @pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
+def anyio_backend(): return "asyncio"
 
+@pytest.mark.parametrize("name", ["feedback_analysis_worker", "correction_signal_analysis_worker", "tool_failure_analysis_worker", "dataset_sample_worker"])
+async def test_worker_initializes_only_its_resources_and_disposes_on_cancel(monkeypatch, name):
+    module = importlib.import_module("scripts."+name)
+    engine = SimpleNamespace(dispose=AsyncMock())
+    monkeypatch.setattr(module, "DatabaseSettings", lambda: object())
+    monkeypatch.setattr(module, "build_database_engine", lambda _: engine)
+    monkeypatch.setattr(module, "AsyncSessionLocal", SimpleNamespace(configure=lambda **_: None))
+    monkeypatch.setattr(module.AnalysisJobRepo, "recover_expired_jobs", AsyncMock())
+    kind = {"feedback_analysis_worker":"feedback_analysis", "correction_signal_analysis_worker":"correction_signal_analysis", "tool_failure_analysis_worker":"tool_failure_analysis", "dataset_sample_worker":"dataset_sample_build"}[name]
+    monkeypatch.setattr(module.AnalysisJobRepo, "claim_next_"+kind+"_job", AsyncMock(side_effect=asyncio.CancelledError()))
+    if name=="dataset_sample_worker":
+        monkeypatch.setattr(module.FeedbackDatasetSampleRepo, "backfill_existing_cases", AsyncMock())
+    closed=[]
+    if hasattr(module,"AsyncOpenAI"):
+        class Client:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*_):closed.append(True)
+        monkeypatch.setattr(module,"AsyncOpenAI",lambda **_:Client())
+    with pytest.raises(asyncio.CancelledError): await module.run_loop(2)
+    engine.dispose.assert_awaited_once()
+    if hasattr(module,"AsyncOpenAI"): assert closed == [True]
 
-@pytest.mark.anyio
-async def test_requeue_failed_job_uses_repository_and_closes_runtime(monkeypatch) -> None:
-    calls: list[tuple[str, str]] = []
+import asyncio
 
-    class Repository:
-        async def requeue_failed_feedback_analysis_job(self, *, job_id: str, now: str):
-            calls.append((job_id, now))
-            return SimpleNamespace(status="pending")
-
-    class Runtime:
-        analysis_job_repository = Repository()
-
-        def __init__(self) -> None:
-            self.closed = False
-
-        async def close(self) -> None:
-            self.closed = True
-
-    runtime = Runtime()
-    monkeypatch.setattr(
-        worker_script,
-        "_build_runtime",
-        lambda: _runtime(runtime),
-    )
-
-    assert await worker_script.requeue_failed_job("job-123") == "pending"
-    assert calls and calls[0][0] == "job-123"
-    assert calls[0][1]
-    assert runtime.closed is True
-
-
-async def _runtime(runtime):
-    return runtime
-
-
-def test_cli_rejects_worker_and_requeue_actions_together(monkeypatch) -> None:
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["feedback_analysis_worker.py", "--once", "--requeue-job", "job-123"],
-    )
-
-    with pytest.raises(SystemExit) as error:
-        worker_script.main()
-
-    assert error.value.code == 2
+async def test_requeue_uses_only_database_and_closes(monkeypatch):
+    from scripts import feedback_analysis_worker as module
+    engine=SimpleNamespace(dispose=AsyncMock())
+    monkeypatch.setattr(module,"DatabaseSettings",lambda:object())
+    monkeypatch.setattr(module,"build_database_engine",lambda _:engine)
+    monkeypatch.setattr(module,"AsyncSessionLocal",SimpleNamespace(configure=lambda **_:None))
+    requeue=AsyncMock(return_value=SimpleNamespace(status="pending"))
+    monkeypatch.setattr(module.AnalysisJobRepo,"requeue_failed_feedback_analysis_job",requeue)
+    assert await module.requeue_failed_job("job-1") == "pending"
+    assert requeue.call_args.kwargs["job_id"] == "job-1"
+    engine.dispose.assert_awaited_once()

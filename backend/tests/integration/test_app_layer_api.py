@@ -1,26 +1,21 @@
 from __future__ import annotations
 
+from infra.persistence.file import object_store as store_module
+
+from infra.persistence import database
+
 import asyncio
 from hashlib import sha256
 
 import pytest
+from application.auth import session_service as auth_service
+from application.pipeline import pipeline_run_service
+from domain.core import DocumentProfile
+from domain.source import SourceDocument
 from fastapi.testclient import TestClient
-
-from application.pipeline import PipelineRunService
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryObjectiveRepository,
-    MemoryPaperMapRepository,
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
-from tests.support.chat_repository import MemoryChatRepository
-from tests.support.experiment_plan_repository import (
-    InMemoryExperimentPlanRepository,
-)
-from tests.support.objective_review_repository import (
-    InMemoryObjectiveReviewRepository,
-)
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.pipeline_run_repository import PipelineRun, PipelineRunRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 API_V1_PREFIX = "/api/v1"
 
@@ -28,15 +23,21 @@ API_V1_PREFIX = "/api/v1"
 class _ImmediateDocumentPreparationService:
     """Complete the HTTP boundary test without invoking parser or LLM providers."""
 
-    def __init__(self, collection_service, pipeline_run_service) -> None:  # noqa: ANN001
+    def __init__(
+        self, collection_service, pipeline_run_service, object_store
+    ) -> None:  # noqa: ANN001
         self.collection_service = collection_service
         self.pipeline_run_service = pipeline_run_service
+        self.object_store = object_store
 
     async def queue_document_preparation(
         self,
         collection_id: str,
         document_id: str,
-    ) -> dict:
+        *,
+        user_id: str,
+    ) -> PipelineRun:
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
         document = await self.collection_service.get_document(
             collection_id,
             document_id,
@@ -52,6 +53,38 @@ class _ImmediateDocumentPreparationService:
         )
         if not created:
             return run
+        from datetime import timedelta
+        from repositories.pipeline_run_repository import PipelineRunRepo
+
+        job = await PipelineRunRepo.claim_next_document_preparation_job(
+            worker_id="test-worker", lease_duration=timedelta(seconds=300)
+        )
+        await SourceArtifactRepository().replace_document(
+            collection_id,
+            SourceDocument(
+                document_id=document_id,
+                document_order=0,
+                title=document.document.original_filename,
+                text=self.object_store.read(
+                    document.storage_key,
+                    document.document.sha256,
+                ).decode("utf-8"),
+                metadata={"source_fingerprint": fingerprint},
+            ),
+        )
+        await DocumentProfileRepository().replace(
+            collection_id,
+            DocumentProfile(
+                document_id=document_id,
+                title=document.document.original_filename,
+                doc_type="experimental",
+                profile_warnings=(),
+                confidence=1.0,
+                source_fingerprint=fingerprint,
+                profile_version="test-analysis",
+                profile_fingerprint=fingerprint,
+            ),
+        )
         await self.collection_service.update_document_preparation(
             collection_id,
             document_id,
@@ -60,21 +93,29 @@ class _ImmediateDocumentPreparationService:
             parser_version="test-parser",
             document_analysis_version="test-analysis",
         )
-        return await self.pipeline_run_service.finish_run(
-            run["run_id"],
-            status="completed",
-            current_node="ready",
-            progress_percent=100,
-            progress_detail={
-                "phase": "ready",
-                "unit": "document",
-                "message": "The document is ready.",
-            },
-        )
-
-
+        async with database.AsyncSessionLocal() as db, db.begin():
+            return await self.pipeline_run_service.finish_run(
+                run.run_id,
+                job=job,
+                status="completed",
+                current_node="ready",
+                progress_percent=100,
+                progress_detail={
+                    "phase": "ready",
+                    "unit": "document",
+                    "message": "The document is ready.",
+                },
+                db=db,
+            )
 @pytest.fixture()
-def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
+def app_client(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+    *,
+    postgres_session_factory,
+):
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -82,23 +123,20 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
 
     from main import create_app
 
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
-    with TestClient(
-        create_app(
-            auth_session_service=auth_session_service,
-            collection_service=collection_service,
-            pipeline_run_service=pipeline_run_service,
-            source_artifact_repository=MemorySourceArtifactRepository(),
-            document_profile_repository=MemoryDocumentProfileRepository(),
-            paper_map_repository=MemoryPaperMapRepository(),
-            objective_repository=MemoryObjectiveRepository(),
-            finding_review_repository=InMemoryObjectiveReviewRepository(),
-            experiment_plan_repository=InMemoryExperimentPlanRepository(),
-            chat_repository=MemoryChatRepository(),
-        )
-    ) as client:
-        client.app.state.document_preparation_service = (
-            _ImmediateDocumentPreparationService(collection_service, pipeline_run_service)
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "main.build_database_engine",
+        lambda _settings: postgres_session_factory.kw["bind"],
+    )
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    with TestClient(create_app()) as client:
+        monkeypatch.setattr(
+            "controllers.source.pipeline_run_routes.queue_document_preparation",
+            _ImmediateDocumentPreparationService(
+                collection_service,
+                pipeline_run_service,
+                store_module.Store,
+            ).queue_document_preparation,
         )
         login = client.post(
             f"{API_V1_PREFIX}/auth/login",
@@ -108,22 +146,26 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
         yield client
 
 
-def _create_collection(app_client, name: str = "Ti-6Al-4V papers") -> str:  # noqa: ANN001
+def _create_collection(
+    app_client, name: str = "Ti-6Al-4V papers"
+) -> str:  # noqa: ANN001
     response = app_client.post(
         f"{API_V1_PREFIX}/collections",
         json={"name": name},
     )
     assert response.status_code == 200
-    return response.json()["collection_id"]
+    return response.json()["data"]["collection_id"]
 
 
-def _upload(app_client, collection_id: str, filename: str, content: bytes) -> dict:  # noqa: ANN001
+def _upload(
+    app_client, collection_id: str, filename: str, content: bytes
+) -> dict:  # noqa: ANN001
     response = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         files={"file": (filename, content, "text/plain")},
     )
     assert response.status_code == 200
-    return response.json()
+    return response.json()["data"]
 
 
 def test_request_id_is_generated_and_echoed(app_client) -> None:
@@ -135,21 +177,24 @@ def test_request_id_is_generated_and_echoed(app_client) -> None:
 
 def test_lost_upload_response_can_be_retried_then_prepared_once(app_client) -> None:
     collection_id = _create_collection(app_client)
-    original = _upload(app_client, collection_id, "paper.txt", b"Methods\nLPBF treatment")
+    original = _upload(
+        app_client, collection_id, "paper.txt", b"Methods\nLPBF treatment"
+    )
     path = f"{API_V1_PREFIX}/collections/{collection_id}/documents"
     recovered = app_client.post(
-        path, params={"reuse_existing": "true"},
+        path,
+        params={"reuse_existing": "true"},
         files={"file": ("renamed.txt", b"Methods\nLPBF treatment", "text/plain")},
     )
     assert recovered.status_code == 200
-    assert recovered.json()["document_id"] == original["document_id"]
+    assert recovered.json()["data"]["document_id"] == original["document_id"]
     preparation_path = f"{path}/{original['document_id']}/preparation"
     prepared = app_client.post(preparation_path)
     assert prepared.status_code == 200
     repeated = app_client.post(preparation_path)
     assert repeated.status_code == 200
-    assert repeated.json()["run_id"] == prepared.json()["run_id"]
-    documents = app_client.get(path).json()["items"]
+    assert repeated.json()["data"]["run_id"] == prepared.json()["data"]["run_id"]
+    documents = app_client.get(path).json()["data"]["items"]
     assert len(documents) == 1
     assert documents[0]["status"] == "ready"
 
@@ -157,19 +202,30 @@ def test_lost_upload_response_can_be_retried_then_prepared_once(app_client) -> N
 def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> None:
     collection_id = _create_collection(app_client)
     _upload(app_client, collection_id, "private.txt", b"Private LPBF treatment")
-    asyncio.run(app_client.app.state.auth_session_service.create_user(
-        email="other@example.test", password="other-test-password",
-    ))
+    asyncio.run(
+        auth_service.create_user(
+            email="other@example.test",
+            password="other-test-password",
+        )
+    )
     app_client.cookies.clear()
-    assert app_client.post(f"{API_V1_PREFIX}/auth/login", json={
-        "email": "other@example.test", "password": "other-test-password",
-    }).status_code == 200
+    assert (
+        app_client.post(
+            f"{API_V1_PREFIX}/auth/login",
+            json={
+                "email": "other@example.test",
+                "password": "other-test-password",
+            },
+        ).status_code
+        == 200
+    )
     response = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         params={"reuse_existing": "true"},
         files={"file": ("private.txt", b"Private LPBF treatment", "text/plain")},
     )
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
 def test_collection_list_returns_compact_document_rows(app_client) -> None:
@@ -179,7 +235,7 @@ def test_collection_list_returns_compact_document_rows(app_client) -> None:
     response = app_client.get(f"{API_V1_PREFIX}/collections")
 
     assert response.status_code == 200
-    document = response.json()["items"][0]["documents"][0]
+    document = response.json()["data"]["items"][0]["documents"][0]
     assert document["document_id"] == uploaded["document_id"]
     assert document["original_filename"] == "paper-a.txt"
     assert document["status"] == "stored"
@@ -201,17 +257,14 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
         f"{first['document_id']}/preparation",
     )
     assert prepared.status_code == 200
-    assert prepared.json()["status"] == "completed"
-    assert prepared.json()["scope_type"] == "document"
-    assert prepared.json()["scope_id"] == first["document_id"]
+    assert prepared.json()["data"]["status"] == "completed"
+    assert prepared.json()["data"]["scope_type"] == "document"
+    assert prepared.json()["data"]["scope_id"] == first["document_id"]
 
     after_first_preparation = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}"
-    ).json()
-    by_id = {
-        item["document_id"]: item
-        for item in after_first_preparation["documents"]
-    }
+    ).json()["data"]
+    by_id = {item["document_id"]: item for item in after_first_preparation["documents"]}
     assert by_id[first["document_id"]]["status"] == "ready"
     assert by_id[first["document_id"]]["preparation_fingerprint"]
     assert by_id[second["document_id"]]["status"] == "stored"
@@ -219,7 +272,7 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     third = _upload(app_client, collection_id, "paper-c.txt", b"Discussion\nPaper C")
     after_addition = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}"
-    ).json()
+    ).json()["data"]
     by_id = {item["document_id"]: item for item in after_addition["documents"]}
     assert after_addition["paper_count"] == 3
     assert by_id[first["document_id"]]["status"] == "ready"
@@ -231,14 +284,14 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
         f"{first['document_id']}/preparation",
     )
     assert repeated.status_code == 200
-    assert repeated.json()["run_id"] == prepared.json()["run_id"]
+    assert repeated.json()["data"]["run_id"] == prepared.json()["data"]["run_id"]
 
     run_list = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"
     )
     assert run_list.status_code == 200
-    assert run_list.json()["count"] == 1
-    run_summary = run_list.json()["items"][0]
+    assert run_list.json()["data"]["count"] == 1
+    run_summary = run_list.json()["data"]["items"][0]
     assert set(run_summary) == {
         "run_id",
         "pipeline_name",
@@ -255,7 +308,7 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     assert run_summary["pipeline_name"] == "document_preparation"
 
     run_detail = app_client.get(
-        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['run_id']}"
+        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['data']['run_id']}"
     )
     assert run_detail.status_code == 200
     assert {
@@ -269,7 +322,7 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
         "created_at",
         "started_at",
         "finished_at",
-    } <= set(run_detail.json())
+    } <= set(run_detail.json()["data"])
 
 
 def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
@@ -281,10 +334,8 @@ def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
     )
     assert prepared.status_code == 200
 
-    auth = app_client.app.state.auth_session_service
-    asyncio.run(
-        auth.create_user(email="other@example.com", password="other-password")
-    )
+    auth = auth_service
+    asyncio.run(auth.create_user(email="other@example.com", password="other-password"))
     login = app_client.post(
         f"{API_V1_PREFIX}/auth/login",
         json={"email": "other@example.com", "password": "other-password"},
@@ -292,12 +343,15 @@ def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
     assert login.status_code == 200
 
     response = app_client.get(
-        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['run_id']}"
+        f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['data']['run_id']}"
     )
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
-def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(app_client) -> None:
+def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(
+    app_client,
+) -> None:
     collection_id = _create_collection(app_client, "Private pipeline history")
     document = _upload(app_client, collection_id, "paper.txt", b"Methods")
     prepared = app_client.post(
@@ -306,10 +360,8 @@ def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(app_client)
     )
     assert prepared.status_code == 200
 
-    auth = app_client.app.state.auth_session_service
-    asyncio.run(
-        auth.create_user(email="other@example.com", password="other-password")
-    )
+    auth = auth_service
+    asyncio.run(auth.create_user(email="other@example.com", password="other-password"))
     login = app_client.post(
         f"{API_V1_PREFIX}/auth/login",
         json={"email": "other@example.com", "password": "other-password"},
@@ -319,12 +371,14 @@ def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(app_client)
     listed = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"
     )
-    assert listed.status_code == 404
+    assert listed.status_code == 200
+    assert listed.json()["code"] == 200201
     queued = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
         f"{document['document_id']}/preparation",
     )
-    assert queued.status_code == 404
+    assert queued.status_code == 200
+    assert queued.json()["code"] == 200201
 
 
 def test_document_preparation_contract_has_no_request_body(app_client) -> None:
@@ -359,7 +413,8 @@ def test_retired_build_and_projection_routes_are_not_registered(
         else app_client.get(f"{API_V1_PREFIX}{path}")
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["code"] == 200201
 
 
 def test_objective_experiment_plan_routes_are_registered(app_client) -> None:
@@ -389,12 +444,12 @@ def test_goal_intake_creates_a_collection_with_no_documents(app_client) -> None:
     )
 
     assert response.status_code == 200
-    collection_id = response.json()["seed_collection"]["collection_id"]
+    collection_id = response.json()["data"]["seed_collection"]["collection_id"]
     collection = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
     assert collection.status_code == 200
-    assert collection.json()["collection_id"] == collection_id
-    assert collection.json()["documents"] == []
-    assert collection.json()["paper_count"] == 0
+    assert collection.json()["data"]["collection_id"] == collection_id
+    assert collection.json()["data"]["documents"] == []
+    assert collection.json()["data"]["paper_count"] == 0
 
 
 def test_delete_collection_removes_current_documents(app_client) -> None:
@@ -404,7 +459,6 @@ def test_delete_collection_removes_current_documents(app_client) -> None:
     deleted = app_client.delete(f"{API_V1_PREFIX}/collections/{collection_id}")
 
     assert deleted.status_code == 200
-    assert deleted.json()["collection_id"] == collection_id
-    assert app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}"
-    ).status_code == 404
+    assert deleted.json()["data"]["collection_id"] == collection_id
+    assert app_client.get(f'{API_V1_PREFIX}/collections/{collection_id}').status_code == 200
+    assert app_client.get(f'{API_V1_PREFIX}/collections/{collection_id}').json()["code"] == 200201

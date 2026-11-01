@@ -61,7 +61,7 @@
 	.icon-button.primary {
 		border-color: var(--brand-primary);
 		background: var(--brand-primary);
-		color: #fff;
+		color: var(--on-brand);
 	}
 	.icon-button[aria-pressed='true'] {
 		background: var(--bg-subtle);
@@ -70,7 +70,7 @@
 	.icon-button.primary:hover:not(:disabled) {
 		border-color: var(--brand-primary-hover);
 		background: var(--brand-primary-hover);
-		color: #fff;
+		color: var(--on-brand);
 	}
 	.icon-button:disabled {
 		cursor: not-allowed;

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
+from tests.support.research_jobs import pipeline_job_fixture
+
 import pytest
-
-from application.pipeline import PipelineRunService
+from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
-from infra.persistence.memory import MemoryPipelineRunRepository
-
+from controllers.schemas.source.pipeline_run import pipeline_run_response
+from repositories.pipeline_run_repository import PipelineRunRepository
+from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio
 
@@ -15,8 +19,18 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_pipeline_run_service_lists_scope_status_and_progress() -> None:
-    service = PipelineRunService(MemoryPipelineRunRepository())
+@pytest.fixture(autouse=True)
+async def owned_collection(postgres_session_factory, anyio_backend):
+    await seed_collection(
+        postgres_session_factory, "col_a", document_ids=("doc_a", "doc_b")
+    )
+
+
+async def test_pipeline_run_service_lists_scope_status_and_progress(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     run_a = await service.create_run(
         "col_a",
         "document_preparation",
@@ -31,29 +45,40 @@ async def test_pipeline_run_service_lists_scope_status_and_progress() -> None:
         scope_id="doc_b",
         input_fingerprint="fingerprint-b",
     )
-    await service.finish_run(run_a["run_id"], status="completed")
-    await service.finish_run(
-        run_b["run_id"],
-        status="failed",
-        current_node="source_parsing",
-        progress_percent=35,
-        errors=["invalid PDF"],
-    )
-
-    runs = await service.list_runs(collection_id="col_a")
-    assert [item["run_id"] for item in runs] == [
-        run_b["run_id"],
-        run_a["run_id"],
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await service.finish_run(
+            run_a.run_id,
+            status="completed",
+            job=await pipeline_job_fixture(service.PipelineRunRepo, run_a.run_id),
+            db=db,
+        )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await service.finish_run(
+            run_b.run_id,
+            status="failed",
+            current_node="source_parsing",
+            progress_percent=35,
+            errors=["invalid PDF"],
+            job=await pipeline_job_fixture(service.PipelineRunRepo, run_b.run_id),
+            db=db,
+        )
+    runs = await service.list_runs(collection_id="col_a", user_id="user-1")
+    assert [item.run_id for item in runs] == [
+        run_b.run_id,
+        run_a.run_id,
     ]
-    assert [item["scope_id"] for item in runs] == ["doc_b", "doc_a"]
+    assert [item.scope_id for item in runs] == ["doc_b", "doc_a"]
     completed = await service.list_runs(
-        collection_id="col_a", status="completed"
+        collection_id="col_a", status="completed", user_id="user-1"
     )
-    assert [item["run_id"] for item in completed] == [run_a["run_id"]]
+    assert [item.run_id for item in completed] == [run_a.run_id]
 
 
-async def test_pipeline_run_service_persists_node_and_terminal_failure() -> None:
-    service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_pipeline_run_service_persists_node_and_terminal_failure(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     run, _created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -61,30 +86,42 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure() -> None
         input_fingerprint="fingerprint-a",
     )
 
-    running = await service.update_run(
-        run["run_id"],
-        status="running",
-        current_node="source_parsing",
-        progress_percent=25,
-        progress_detail={"phase": "source_parsing", "unit": "document"},
-    )
-    assert running["nodes"]["source_parsing"]["status"] == "running"
+    async with database.AsyncSessionLocal() as db, db.begin():
+        running = await service.update_run(
+            run.run_id,
+            status="running",
+            current_node="source_parsing",
+            progress_percent=25,
+            progress_detail={"phase": "source_parsing", "unit": "document"},
+            job=await pipeline_job_fixture(service.PipelineRunRepo, run.run_id),
+            db=db,
+        )
+    assert running.nodes[0].status == "running"
 
-    failed = await service.finish_run(
-        run["run_id"],
-        status="failed",
-        current_node="source_parsing",
-        errors=["invalid PDF"],
-    )
-    assert failed["status"] == "failed"
-    assert failed["errors"] == [document_preparation_error_message("source_parsing")]
-    assert failed["nodes"]["source_parsing"]["status"] == "failed"
-    assert failed["finished_at"] is not None
-    assert failed["updated_at"] == failed["finished_at"]
+    async with database.AsyncSessionLocal() as db, db.begin():
+        failed = await service.finish_run(
+            run.run_id,
+            status="failed",
+            current_node="source_parsing",
+            errors=["invalid PDF"],
+            job=await pipeline_job_fixture(service.PipelineRunRepo, run.run_id),
+            db=db,
+        )
+    assert failed.status == "failed"
+    assert failed.errors == ("invalid PDF",)
+    assert pipeline_run_response(failed)["errors"] == [
+        document_preparation_error_message("source_parsing")
+    ]
+    assert failed.nodes[0].status == "failed"
+    assert failed.timestamps.finished_at is not None
+    assert failed.timestamps.updated_at == failed.timestamps.finished_at
 
 
-async def test_document_run_reuses_active_and_matching_completed_work() -> None:
-    service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_document_run_reuses_active_and_matching_completed_work(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     first, created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -99,9 +136,15 @@ async def test_document_run_reuses_active_and_matching_completed_work() -> None:
     )
     assert created is True
     assert active_created is False
-    assert active["run_id"] == first["run_id"]
+    assert active.run_id == first.run_id
 
-    await service.finish_run(first["run_id"], status="completed")
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await service.finish_run(
+            first.run_id,
+            status="completed",
+            job=await pipeline_job_fixture(service.PipelineRunRepo, first.run_id),
+            db=db,
+        )
     completed, completed_created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -115,13 +158,16 @@ async def test_document_run_reuses_active_and_matching_completed_work() -> None:
         input_fingerprint="fingerprint-b",
     )
     assert completed_created is False
-    assert completed["run_id"] == first["run_id"]
+    assert completed.run_id == first.run_id
     assert changed_created is True
-    assert changed["run_id"] != first["run_id"]
+    assert changed.run_id != first.run_id
 
 
-async def test_collection_run_reuses_only_active_work_and_preserves_context() -> None:
-    service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_collection_run_reuses_only_active_work_and_preserves_context(
+    *, postgres_session_factory
+) -> None:
+    pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
+    service = pipeline_run_service
     first, created = await service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -136,10 +182,16 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context() ->
     )
     assert created is True
     assert active_created is False
-    assert active["run_id"] == first["run_id"]
-    assert active["context"] == {"document_ids": ["doc_a"]}
+    assert active.run_id == first.run_id
+    assert active.context == {"document_ids": ["doc_a"]}
 
-    await service.finish_run(first["run_id"], status="failed")
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await service.finish_run(
+            first.run_id,
+            status="failed",
+            job=await pipeline_job_fixture(service.PipelineRunRepo, first.run_id),
+            db=db,
+        )
     retry, retry_created = await service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -147,12 +199,15 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context() ->
         context={"document_ids": ["doc_b"]},
     )
     assert retry_created is True
-    assert retry["run_id"] != first["run_id"]
+    assert retry.run_id != first.run_id
 
 
-async def test_historical_preparation_errors_are_safe_without_rewriting_storage():
-    repository = MemoryPipelineRunRepository()
-    service = PipelineRunService(repository)
+async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
+    *, postgres_session_factory
+):
+    repository = PipelineRunRepository()
+    pipeline_run_service.PipelineRunRepo = repository
+    service = pipeline_run_service
     run = await service.create_run(
         "col_a",
         "document_preparation",
@@ -160,17 +215,33 @@ async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
         scope_id="doc_a",
     )
     raw_error = "provider failed at /private/provider/config"
-    await service.finish_run(
-        run["run_id"],
-        status="failed",
-        current_node="document_profile",
-        errors=[raw_error],
-    )
-    detail = await service.get_run(run["run_id"])
-    listing = await service.list_runs(collection_id="col_a")
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await service.finish_run(
+            run.run_id,
+            status="failed",
+            current_node="document_profile",
+            errors=[raw_error],
+            job=await pipeline_job_fixture(service.PipelineRunRepo, run.run_id),
+            db=db,
+        )
+    detail = await service.get_run(run.run_id, user_id="user-1")
+    listing = await service.list_runs(collection_id="col_a", user_id="user-1")
+    assert detail.errors == (raw_error,)
+    detail = pipeline_run_response(detail)
+    listing = [pipeline_run_response(item) for item in listing]
     assert raw_error not in str(detail)
     assert raw_error not in str(listing)
     assert "classification" in detail["errors"][0].lower()
     assert detail["nodes"]["document_profile"]["errors"] == detail["errors"]
-    stored = await repository.read_run(run["run_id"])
+    async with database.AsyncSessionLocal() as db, db.begin():
+        stored = await repository.read_run(run.run_id, db=db)
     assert raw_error in stored.errors
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(
+        postgres_session_factory, "col_a", document_ids=("doc_a", "doc_b")
+    )

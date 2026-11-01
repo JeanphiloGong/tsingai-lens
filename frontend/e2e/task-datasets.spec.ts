@@ -8,8 +8,8 @@ function json(body: unknown, status = 200) {
 	return { status, contentType: 'application/json', body: JSON.stringify(body) };
 }
 
-async function mockTaskDataset(page: Page, startEmpty = false) {
-	await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'zh'));
+async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') {
+	await page.addInitScript((language) => localStorage.setItem('retrieval.lang', language), language);
 	const empty = startEmpty;
 	let buildingReads = 0;
 	let revision = 1;
@@ -125,7 +125,7 @@ for (const width of [1440, 390]) {
 		await answer.fill('人工核对后的回答。');
 		await page.getByRole('button', { name: '保存修改' }).click();
 		await expect(page.getByRole('status')).toContainText('修改已保存');
-		await page.getByRole('button', { name: '确认样本' }).click();
+		await page.getByRole('button', { name: '确认样本', exact: true }).click();
 		await expect(page.getByRole('region', { name: '样本编辑器' }).getByText('已确认', { exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
 		await page.screenshot({ path: testInfo.outputPath(`task-dataset-${width}.png`), fullPage: true });
@@ -184,14 +184,29 @@ test('a sample can be rebuilt, discarded, restored, and retried', async ({ page 
 	await page.getByRole('button', { name: '丢弃样本' }).click();
 	await expect(page.getByRole('button', { name: '恢复样本' })).toBeVisible();
 	await page.getByRole('button', { name: '恢复样本' }).click();
-	await expect(page.getByRole('button', { name: '确认样本' })).toBeEnabled();
+	await expect(page.getByRole('button', { name: '确认样本', exact: true })).toBeEnabled();
 
 	mock.setStatus('build_failed');
-	await page.getByRole('button', { name: '刷新样本队列' }).click();
+	await page.getByRole('button', { name: '刷新任务工作台' }).click();
 	await page.locator('.sample-options > summary').click();
 	await expect(page.getByRole('button', { name: '重试构建' })).toBeVisible();
 	await page.getByRole('button', { name: '重试构建' }).click();
 	await expect(page.getByText('构建任务已提交。')).toBeVisible();
 	expect(mock.actions.map(({ action }) => action)).toEqual(['rebuild', 'discard', 'restore', 'retry']);
 	expect(mock.actions.every(({ key }) => Boolean(key))).toBe(true);
+});
+
+
+test('English workbench labels persist on reload while Chinese source content stays intact', async ({page}) => {
+ await mockTaskDataset(page, false, 'en');
+ await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+ await expect(page.getByRole('heading',{name:'Literature question answering · SFT'})).toBeVisible();
+ await page.getByRole('button').filter({hasText:'比较文献 A、B 的预热条件。'}).click();
+ await expect(page.getByRole('heading',{name:'Correct answer'})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Confirm sample',exact:true})).toBeVisible();
+ await page.getByText('Original answer',{exact:true}).click();
+ await expect(page.getByText('文献 B 没有预热。',{exact:true})).toBeVisible();
+ await page.reload();
+ await expect(page.getByRole('heading',{name:'Literature question answering · SFT'})).toBeVisible();
+ await expect(page.getByPlaceholder('Search questions')).toBeVisible();
 });

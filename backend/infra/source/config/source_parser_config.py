@@ -61,15 +61,6 @@ class SourceParserConfig(BaseModel):
             )
         self.root_dir = str(root_dir)
 
-    def _normalize_input_pattern(self) -> None:
-        if self.input.file_pattern:
-            return
-        file_type = str(getattr(self.input.file_type, "value", self.input.file_type))
-        if file_type == "document":
-            self.input.file_pattern = r".*\.(?:txt|pdf)$"
-        else:
-            raise ValueError(f"unsupported Source input type: {file_type}")
-
     def _resolve_storage_dir(self, storage: StorageConfig) -> None:
         if storage.base_dir.strip() == "":
             raise ValueError("file storage requires a base_dir")
@@ -78,7 +69,10 @@ class SourceParserConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_model(self) -> "SourceParserConfig":
         self._resolve_root_dir()
-        self._normalize_input_pattern()
+        if not self.input.file_pattern:
+            if self.input.file_type != "document":
+                raise ValueError(f"unsupported Source input type: {self.input.file_type}")
+            self.input.file_pattern = r".*\.(?:txt|pdf)$"
         self._resolve_storage_dir(self.input.storage)
         self._resolve_storage_dir(self.output)
         return self

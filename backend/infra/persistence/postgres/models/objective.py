@@ -26,7 +26,7 @@ _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 _AUTOINCREMENT_ID = BigInteger().with_variant(Integer(), "sqlite")
 
 
-class ObjectiveResearchRecord(Base):
+class ObjectiveResearchORM(Base):
     """One current ResearchObjective aggregate."""
 
     __tablename__ = "research_objectives"
@@ -56,9 +56,10 @@ class ObjectiveResearchRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ObjectiveAnalysisRecord(Base):
+class ObjectiveAnalysisORM(Base):
     __tablename__ = "objective_analyses"
     __table_args__ = (
+        Index("ix_objective_analyses_worker_claim", "status", "lease_expires_at", "created_at"),
         ForeignKeyConstraint(
             ["collection_id", "objective_id"],
             ["research_objectives.collection_id", "research_objectives.objective_id"],
@@ -66,6 +67,11 @@ class ObjectiveAnalysisRecord(Base):
             ondelete="CASCADE",
         ),
     )
+
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -76,7 +82,7 @@ class ObjectiveAnalysisRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ObjectiveAnalysisLegacyCheckpointRecord(Base):
+class ObjectiveAnalysisLegacyCheckpointORM(Base):
     """Audit-only classification of retired per-document checkpoints."""
 
     __tablename__ = "objective_analysis_legacy_checkpoints"
@@ -115,7 +121,7 @@ class ObjectiveAnalysisLegacyCheckpointRecord(Base):
 
 
 __all__ = [
-    "ObjectiveAnalysisRecord",
-    "ObjectiveAnalysisLegacyCheckpointRecord",
-    "ObjectiveResearchRecord",
+    "ObjectiveAnalysisORM",
+    "ObjectiveAnalysisLegacyCheckpointORM",
+    "ObjectiveResearchORM",
 ]

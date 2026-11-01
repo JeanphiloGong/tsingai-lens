@@ -1,9 +1,9 @@
 from __future__ import annotations
+from application.source import collection_service
 
 import pytest
-
-from tests.support.collection_service import build_test_collection_service
-from application.goal.brief_service import GoalService
+from application.goal import brief_service as goal_service
+from exceptions import RequestInvalidException
 
 pytestmark = pytest.mark.anyio
 
@@ -13,9 +13,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_goal_service_creates_seed_collection_and_contract(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    service = GoalService(collection_service)
+async def test_goal_service_creates_seed_collection_and_contract(
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+):
+    goal_service.collection_service = collection_service
+    service = goal_service
 
     payload = await service.intake_goal(
         material_system="LiFePO4",
@@ -29,7 +34,9 @@ async def test_goal_service_creates_seed_collection_and_contract(tmp_path):
     collection_id = payload["seed_collection"]["collection_id"]
     collection = await collection_service.get_collection(collection_id)
 
-    assert payload["research_brief"]["objective"] == "Assess rate capability for LiFePO4."
+    assert (
+        payload["research_brief"]["objective"] == "Assess rate capability for LiFePO4."
+    )
     assert payload["coverage_assessment"]["level"] == "direct"
     assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
     assert payload["seed_collection"]["created"] is True
@@ -42,16 +49,21 @@ async def test_goal_service_creates_seed_collection_and_contract(tmp_path):
         "seeded_document_count",
         "source_channels",
     }
-    assert collection["collection_id"] == collection_id
-    assert collection["description"] == "Assess rate capability for LiFePO4."
-    assert collection["documents"] == []
+    assert collection.collection.collection_id == collection_id
+    assert collection.collection.description == "Assess rate capability for LiFePO4."
+    assert collection.documents == ()
 
 
-async def test_goal_service_rejects_empty_goal_signal(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    service = GoalService(collection_service)
+async def test_goal_service_rejects_empty_goal_signal(
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+):
+    goal_service.collection_service = collection_service
+    service = goal_service
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(RequestInvalidException) as exc_info:
         await service.intake_goal(
             material_system=None,
             target_property=None,

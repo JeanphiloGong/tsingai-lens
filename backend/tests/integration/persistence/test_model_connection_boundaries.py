@@ -70,3 +70,51 @@ async def test_missing_and_disabled_connections_are_not_selectable(postgres_sess
     assert await repository.read_enabled("lab-a") is None
     disabled = await repository.read("lab-a")
     assert disabled is not None and disabled.enabled is False
+
+
+async def test_priority_orders_enabled_models_with_stable_name_and_id_ties(postgres_session_factory):
+    from sqlalchemy import update
+
+    await _insert(postgres_session_factory, connection_id="lab-c", enabled=True)
+    await _insert(postgres_session_factory, connection_id="lab-b", enabled=True)
+    await _insert(postgres_session_factory, connection_id="lab-a", enabled=True)
+    await _insert(postgres_session_factory, connection_id="disabled", enabled=False)
+    async with postgres_session_factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).values(priority=100))
+        await database.execute(update(ModelConnectionORM).where(
+            ModelConnectionORM.connection_id.in_(("lab-b", "lab-c")),
+        ).values(display_name="Preferred", priority=200))
+        await database.execute(update(ModelConnectionORM).where(
+            ModelConnectionORM.connection_id == "disabled",
+        ).values(priority=1000))
+    repository = ModelConnectionRepository()
+    assert [row.connection_id for row in await repository.list_enabled()] == [
+        "lab-b", "lab-c", "lab-a",
+    ]
+
+
+def test_priority_migration_preserves_existing_connections(postgres_sync_engine):
+    from pathlib import Path
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect, text
+
+    config = Config(str(Path(__file__).resolve().parents[3] / "alembic.ini"))
+    with postgres_sync_engine.begin() as database:
+        config.attributes["connection"] = database
+        command.downgrade(config, "20261101_0092")
+        database.execute(text("""
+            INSERT INTO model_connections
+                (connection_id, display_name, base_url, model, enabled, created_at, updated_at)
+            VALUES ('existing', 'Existing model', 'https://model.example.invalid/v1',
+                    'model-existing', true, now(), now())
+        """))
+        command.upgrade(config, "head")
+        row = database.execute(text(
+            "SELECT model, enabled, priority FROM model_connections WHERE connection_id = 'existing'"
+        )).one()
+        assert tuple(row) == ("model-existing", True, 0)
+        command.downgrade(config, "20261101_0092")
+        assert "priority" not in {column["name"] for column in inspect(database).get_columns("model_connections")}
+        assert database.execute(text("SELECT model FROM model_connections WHERE connection_id = 'existing'")).scalar_one() == "model-existing"
+        command.upgrade(config, "head")

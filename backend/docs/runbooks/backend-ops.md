@@ -388,12 +388,26 @@ it. The application does not maintain configuration history.
 
 ### Chat Binding and Operational Recovery
 
-Before enabling registry-backed Chat, add the intended enabled connection and
-set `LENS_DEFAULT_MODEL_CONNECTION_ID` for callers that omit a choice. An omitted
-choice without a configured default fails with
+Before enabling registry-backed Chat, add the intended enabled connections.
+Available rows sort by `priority` descending, then `display_name` and
+`connection_id` ascending. The first row is the default for both a newly loaded
+browser selector and API clients that omit a choice. `priority` defaults to `0`;
+set the preferred model higher, for example:
+
+```sql
+UPDATE model_connections SET priority = 100, updated_at = now()
+WHERE connection_id = 'gpt-6-luna';
+```
+
+Migration `20261102_0098` adds this field to existing rows with value `0`.
+Remove the obsolete `LENS_DEFAULT_MODEL_CONNECTION_ID` from `backend.env`;
+Chat no longer reads it. An omitted choice with no enabled row fails with
 `model_connection_default_unavailable`; there is no fallback to `LLM_MODEL`.
-API clients may send an explicit selection on each new question. The browser
-lists enabled connections in the composer and sends the selected connection ID.
+Priority edits take effect on subsequent directory reads and new API requests
+without a restart. Reload an open browser to update its initial selection; a
+researcher's current explicit choice is not overwritten. API clients may also
+send an explicit selection on each new question. The browser lists enabled
+connections in the composer and sends the selected connection ID.
 Running answers and pending approvals retain the selected `connection_id` in their
 response snapshot; model-call audits record the same binding. Disabling a row
 only blocks new questions. It does not cancel generation or revoke credentials.

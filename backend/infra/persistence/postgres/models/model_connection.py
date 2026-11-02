@@ -14,6 +14,7 @@ class ModelConnectionORM(Base):
     model: Mapped[str] = mapped_column(Text, nullable=False)
     api_key_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     context_window_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     request_timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)

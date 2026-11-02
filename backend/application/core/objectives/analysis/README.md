@@ -70,6 +70,11 @@ existing Finding, ObjectiveEvidence and PaperContribution values; internal reade
 use their fields directly. Experiment display statuses and reasons retain the
 established client vocabulary in the concrete read views. Evaluation snapshots
 use the same domain identities, so a single-paper Finding keeps its document ID.
+Experiment-backed Findings retain the synthesis established from their fixed
+selections, including conflicting or condition-dependent results. Projected
+paper links support navigation; they do not replace comparison-level synthesis
+with the Evidence-backed paper-count rule. Evidence-backed Findings continue to
+validate synthesis against their paper contributions.
 
 ## Candidate Contract and Scientific Gates
 

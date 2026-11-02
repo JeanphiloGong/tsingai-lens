@@ -28,7 +28,7 @@ def anyio_backend():
     ("consecutive_no_progress", 2, "no_progress"),
 ])
 def test_runtime_stop_has_a_specific_reason(field, value, reason):
-    progress = _RunProgress(AgentRunLimits())
+    progress = _RunProgress(AgentRunLimits(max_elapsed_seconds=300, max_model_tokens=1_000_000))
     setattr(progress, field, value)
     assert progress.stop_before_model().value == reason
 
@@ -45,7 +45,7 @@ async def test_reading_volume_and_stop_reason_reach_snapshot():
             ModelTurn(content="Partial review; next check remains."),
         ),
         capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_tool_calls=2),
+        limits=AgentRunLimits(max_tool_calls=2, max_elapsed_seconds=300),
     ).run_turn(
         context=_context(), previous_messages=(), user_message="Review the paper",
         progress_callback=events.append,

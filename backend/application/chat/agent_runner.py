@@ -266,15 +266,11 @@ class ResearchExecutionPlan:
 
 @dataclass(frozen=True)
 class AgentRunLimits:
-    # Production defaults keep a research request resumable even when the
-    # deployment does not provide environment overrides. Tests and operators
-    # can still opt out explicitly with None through the application config.
-    # Keep one foreground request below the common browser/proxy patience
-    # window. A continuation starts from the durable snapshot when more work
-    # is needed, so a long study does not require one unbounded request.
-    max_elapsed_seconds: float | None = 300.0
+    # Progressing research has no default whole-turn time or cumulative token
+    # cutoff. Operators can still opt into either ceiling explicitly.
+    max_elapsed_seconds: float | None = None
     max_tool_calls: int | None = 96
-    max_model_tokens: int | None = 1_000_000
+    max_model_tokens: int | None = None
     max_consecutive_no_progress: int = 2
     emergency_max_model_cycles: int | None = 64
     max_model_retries: int = 5

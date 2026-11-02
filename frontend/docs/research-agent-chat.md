@@ -99,6 +99,7 @@ POST /api/v1/chat-sessions
 GET  /api/v1/chat-sessions/{session_id}
 GET  /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/messages
+POST /api/v1/chat-sessions/{session_id}/responses/{response_id}/stop
 POST /api/v1/chat-sessions/{session_id}/branches
 GET  /api/v1/chat-sessions/{session_id}/tree
 PUT  /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback
@@ -114,6 +115,17 @@ same-origin directory and include the selected connection ID when sending a
 question. Changing the selection does not cancel or repeat an active request.
 GET event reconnects carry no model selection. Account changes cancel the old
 directory request and clear its choices.
+
+While a response is running, both entrypoints replace Send with an accessible
+Stop response button. It remains available while the message input is disabled.
+Stopping submits the exact response identity, disables repeat clicks, and keeps
+observing the server until the saved terminal state arrives. A late running
+acknowledgement cannot overwrite an already received terminal snapshot. The
+`cancelled` notice explains that saved research results remain and invites new
+instructions; it is not shown as a model-service failure and does not offer an
+automatic Continue action. New instructions use the same conversation after the
+server releases it. Closing the page or event stream alone does not request a
+stop. If an approved write is already running, stopping waits for its checkpoint.
 
 The directory lists configured choices; it does not test provider health. There
 is no preflight provider request, refresh control, answer-source label or notice

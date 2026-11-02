@@ -96,6 +96,7 @@ def _now_iso() -> str:
 
 class AgentRunStatus(StrEnum):
     COMPLETED = "completed"
+    CANCELLED = "cancelled"
     APPROVAL_REQUIRED = "approval_required"
     FAILED = "failed"
 
@@ -110,6 +111,7 @@ class ResearchExecutionStatus(StrEnum):
     """Observable runtime disposition of one research request."""
 
     IN_PROGRESS = "in_progress"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     AWAITING_APPROVAL = "awaiting_approval"
     WAITING_FOR_CLARIFICATION = "waiting_for_clarification"
@@ -145,6 +147,8 @@ def _research_plan_status(
     model_status: ResearchExecutionStatus,
     error_code: str | None = None,
 ) -> ResearchExecutionStatus:
+    if run_status is AgentRunStatus.CANCELLED:
+        return ResearchExecutionStatus.CANCELLED
     if run_status is AgentRunStatus.FAILED:
         if _is_permission_failure(error_code):
             return ResearchExecutionStatus.PERMISSION_DENIED

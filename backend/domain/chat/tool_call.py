@@ -242,6 +242,7 @@ class ChatToolCall:
     def fail(self, error_code: str, finished_at: str) -> "ChatToolCall":
         if self.status not in {
             ToolCallStatus.REQUESTED,
+            ToolCallStatus.APPROVAL_REQUIRED,
             ToolCallStatus.APPROVED,
             ToolCallStatus.RUNNING,
         }:

@@ -139,6 +139,19 @@ Source context attached from the document reader is resolved against the
 canonical Source before the model runs. A quote is inspection material, not
 Evidence or permission to mutate a scientific record.
 
+An authenticated user can stop the exact active response through
+`stop_response_for_user()`. Its request is saved on the existing response
+snapshot, so a different Web process can receive the stop. Snapshot writes
+preserve that request for the same response identity. The owning turn polls
+for it while waiting and at trajectory checkpoints, cancels model/read waits,
+closes unfinished call/result pairs, and saves a `cancelled` response with
+`user_cancelled`. Completed observations and partial streamed text remain saved;
+partial text is not promoted into a completed model answer. An already claimed
+write finishes and checkpoints before the stop is delivered. The next user
+message supplies the revised direction without replaying completed writes.
+This uses the existing Web execution and database; it introduces no task queue
+or Worker. User cancellation is excluded from tool-failure analysis candidates.
+
 Collection paper screening prefers an explicitly labelled abstract section.
 When a parser retains `Abstract:` or an equivalent dash/Chinese label at the
 start of a paragraph instead of in its heading, browsing reads that paragraph

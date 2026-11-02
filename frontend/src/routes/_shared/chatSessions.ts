@@ -81,6 +81,7 @@ export type ChatTreeNode = {
 		| 'approval_required'
 		| 'failed'
 		| 'interrupted'
+		| 'cancelled'
 		| 'incomplete'
 		| 'draft';
 	can_branch: boolean;
@@ -121,7 +122,7 @@ export type ChatToolCall = {
 
 export type ChatTurn = {
 	execution_plan?: ChatExecutionPlan | null;
-	status: 'completed' | 'approval_required' | 'failed' | 'rejected';
+	status: 'completed' | 'approval_required' | 'failed' | 'rejected' | 'cancelled';
 	completion_reason:
 		| 'model_answer'
 		| 'resource_budget'
@@ -152,7 +153,8 @@ export type ChatResponseSnapshot = {
 	sequence: number;
 	started_at: string;
 	updated_at: string;
-	status: 'running' | 'completed' | 'approval_required' | 'failed' | 'interrupted';
+	status: 'running' | 'completed' | 'approval_required' | 'failed' | 'interrupted' | 'cancelled';
+	stop_requested?: boolean;
 	message_id: string | null;
 	message_created_at: string | null;
 	content: string;
@@ -392,6 +394,13 @@ export async function fetchChatTrajectory(sessionId: string, signal?: AbortSigna
 		signal,
 		method: 'GET'
 	})) as ChatTrajectory;
+}
+
+export async function stopChatResponse(sessionId: string, responseId: string, signal?: AbortSignal) {
+	return (await requestJson(
+		`${chatSessionPath(sessionId)}/responses/${encodeURIComponent(responseId)}/stop`,
+		{ method: 'POST', signal }
+	)) as ChatResponseSnapshot;
 }
 
 export async function setChatMessageFeedback(

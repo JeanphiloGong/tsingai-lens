@@ -321,6 +321,20 @@ async def get_chat_model_call(
 
 
 
+@chat_session_router.post(
+    "/{session_id}/responses/{response_id}/stop",
+    response_model=ApiResponse[ChatResponseSnapshotResponse],
+    summary="Stop one exact active response and retain saved observations",
+)
+async def stop_chat_response(
+    session_id: str,
+    response_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    snapshot = await session_service.ChatService.stop_response_for_user(session_id, user_id, response_id)
+    return make_api_response(data=ChatResponseSnapshotResponse.model_validate(snapshot, from_attributes=True))
+
+
 @chat_session_router.get(
     "/{session_id}/events",
     summary="Resume updates for one owned Research Agent response",

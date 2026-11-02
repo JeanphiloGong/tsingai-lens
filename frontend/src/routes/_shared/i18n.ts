@@ -561,6 +561,7 @@ const translations: Record<Language, Translations> = {
 					approval_required: 'Awaiting approval',
 					failed: 'Failed',
 					interrupted: 'Interrupted',
+					cancelled: 'Stopped',
 					incomplete: 'Incomplete',
 					draft: 'Unsent'
 				}
@@ -635,6 +636,7 @@ const translations: Record<Language, Translations> = {
 				planTitle: 'Current work',
 				planStatus: {
 					in_progress: 'In progress',
+					cancelled: 'Stopped',
 					completed: 'Completed',
 					awaiting_approval: 'Waiting for approval',
 					waiting_for_clarification: 'Needs clarification',
@@ -915,6 +917,9 @@ const translations: Record<Language, Translations> = {
 			modelServiceInvalidResponse:
 				'The model service returned an invalid response. Contact an administrator or try again later.',
 			responseInterrupted: 'Generation was interrupted. The text shown is incomplete.',
+			stop: 'Stop response',
+			stopping: 'Stopping…',
+			responseStopped: 'Stopped. Saved research results are retained. Send new instructions to change direction.',
 			responseDisconnected: 'Connection lost. The background task may still be running. Check the saved result before sending again.',
 			resultsRetained: 'Any answers and research results already received remain in this conversation.',
 			permissionDenied: 'Action not permitted',
@@ -4145,6 +4150,7 @@ const translations: Record<Language, Translations> = {
 					approval_required: '等待审批',
 					failed: '失败',
 					interrupted: '已中断',
+					cancelled: '已停止',
 					incomplete: '未完成',
 					draft: '尚未发送'
 				}
@@ -4210,6 +4216,7 @@ const translations: Record<Language, Translations> = {
 				planTitle: '当前工作',
 				planStatus: {
 					in_progress: '进行中',
+					cancelled: '已停止',
 					completed: '已完成',
 					awaiting_approval: '等待确认',
 					waiting_for_clarification: '需要澄清',
@@ -4475,6 +4482,9 @@ const translations: Record<Language, Translations> = {
 			modelServiceInvalidResponse:
 				'模型服务返回了无效响应，请联系管理员或稍后重试。',
 			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',
+			stop: '停止回复',
+			stopping: '正在停止…',
+			responseStopped: '已停止，已保存的研究结果仍保留。你可以发送新指令，调整研究方向。',
 			responseDisconnected: '连接已断开，后台任务可能仍在运行。请先检查已保存的结果，再发送问题。',
 			resultsRetained: '已收到的回答和研究结果仍保留在本对话中。',
 			permissionDenied: '当前权限不允许执行此操作',

@@ -372,7 +372,7 @@ not published Evidence or a saved scientific correction.
 Answer-only finalization cannot restart tool work. Its response must distinguish
 completed observations from unresolved checks. When an operator configures a
 whole-turn deadline, the research phase reserves 20% of that deadline, capped by
-the existing finalization allowance. Normal
+the finalization allowance when one is explicitly configured. Normal
 model calls, retries, compaction and reads use the research remainder; finalization
 uses the total remainder. This does not extend the deadline or guarantee provider
 availability. The answer is buffered and validated before emitting it. Tool activity remains visible
@@ -387,8 +387,16 @@ these ceilings with positive `LENS_AGENT_MAX_TURN_SECONDS` and
 Tool-call count and total model cycles retain defaults of 96 calls and 64 cycles.
 Their environment settings accept positive limits or zero to disable the ceiling.
 Approval waiting time is excluded; active usage survives approval.
-Individual model/read requests retain a 180-second timeout, cancellation and
-the repeated-observation guard. Before stopping for repeated observations, the
+Individual model/read requests and answer finalization have no default elapsed
+deadline. `LENS_AGENT_MAX_REQUEST_SECONDS` and
+`LENS_AGENT_MAX_FINALIZATION_SECONDS` accept positive operator limits; unset or
+zero leaves them disabled. The selected connection can impose its own explicit
+request limit. Chat passes `timeout=None` to the SDK when no limit applies, so
+neither the SDK default nor `LLM_REQUEST_TIMEOUT_SECONDS` can silently cut off a
+long answer. That shared variable remains available to Core and feedback clients.
+Connection/stream failures and the explicit Stop action still terminate a wait;
+browser disconnection continues to leave research running. Cancellation and
+the repeated-observation guard remain active. Before stopping for repeated observations, the
 runner gives one correction decision with tools still available and the actual
 recent calls plus reading ledger. Restating a plan does not count as new
 evidence; if the correction still makes no progress, the guard stops the turn.
@@ -679,9 +687,9 @@ not raw Source text; an unlimited time budget is recorded as `null`.
   and reports `completed`, `approval_required`, or `failed`. Completion records
   why work stopped: a model answer, resource budget, repeated observations, or
   the emergency cycle ceiling. One private request path enforces model
-  deadlines and output allowances for both decisions and answer-only
+  explicit deadlines and output allowances for both decisions and answer-only
   finalization. With a finite total deadline, research uses at most 80% of it;
-  the reserve is capped by the finalization allowance. Decisions, retries,
+  the reserve is capped when a finalization allowance is configured. Decisions, retries,
   compaction and tools stop at that research deadline, leaving time to explain
   partial results within the same total time. Answer-only finalization is
   validated before streaming; tool invocation envelopes are not displayed as

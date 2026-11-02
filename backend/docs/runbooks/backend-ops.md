@@ -61,11 +61,11 @@ export LENS_AGENT_MAX_MODEL_TOKENS=0
 export LENS_AGENT_NO_PROGRESS_LIMIT=2
 export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
 export LENS_AGENT_MAX_MODEL_RETRIES=5
-export LENS_AGENT_MAX_REQUEST_SECONDS=180
+export LENS_AGENT_MAX_REQUEST_SECONDS=0
 export LENS_AGENT_CONTEXT_TOKENS=200000
 export LENS_AGENT_MAX_PARALLEL_READS=4
 export LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS=16384
-export LENS_AGENT_MAX_FINALIZATION_SECONDS=300
+export LENS_AGENT_MAX_FINALIZATION_SECONDS=0
 export LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS=8192
 export LLM_REQUEST_TIMEOUT_SECONDS=180
 export LLM_MAX_RETRIES=2
@@ -110,6 +110,9 @@ The `LENS_AGENT_*` variables above are optional. Whole-turn seconds and cumulati
 model tokens have no default cutoff; unset or zero leaves them disabled. Existing
 deployments that explicitly set 300 seconds or 1,000,000 tokens must remove those
 overrides or set them to zero, then restart the backend to adopt the new behavior.
+Per-request and finalization seconds also have no default cutoff; unset or zero
+disables them. Existing explicit request/finalization limits must likewise be
+removed or set to zero when adopting this behavior.
 Tool calls and total model cycles retain defaults of 96 calls and 64 cycles;
 zero explicitly disables either ceiling. Other settings require finite positive
 values (integers for counts).
@@ -125,10 +128,14 @@ and pages remain new observations. This is a repetition guard, not a scientific
 completeness judgment. Only explicitly parallel-safe reads share the
 parallel-read allowance; writes always require exact approval.
 
-Each model/read request is bounded by `LENS_AGENT_MAX_REQUEST_SECONDS` and model
-requests also respect `LLM_REQUEST_TIMEOUT_SECONDS`. If a whole-turn deadline
-is explicitly enabled, all requests share it. Finalization also respects
-`LENS_AGENT_MAX_FINALIZATION_SECONDS` and any remaining whole-turn time.
+Model/read requests are bounded by `LENS_AGENT_MAX_REQUEST_SECONDS` only when an
+operator explicitly enables it. Chat does not inherit
+`LLM_REQUEST_TIMEOUT_SECONDS`; Core and feedback clients keep that setting.
+If a whole-turn deadline is explicitly enabled, all requests share it.
+Finalization respects an explicitly enabled `LENS_AGENT_MAX_FINALIZATION_SECONDS`
+and any remaining whole-turn time. Without these limits, the SDK receives an
+explicit `timeout=None` and the Runner waits for completion, a connection/stream
+failure, or an explicit Stop request. This is not an idle-timeout policy.
 Exhausting the whole-turn deadline preserves `resource_budget`, even when no
 time remains for a generated summary. A transient provider timeout or connection
 failure that returns before that deadline is retried up to five times, sharing
@@ -448,17 +455,18 @@ The three nullable limit fields use NULL to mean no connection-specific value,
 not unlimited. Agent defaults come from `LENS_AGENT_CONTEXT_TOKENS` (200000),
 `LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS` (16384),
 `LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS` (8192), and
-`LENS_AGENT_MAX_REQUEST_SECONDS` (180 seconds); parentheses give built-in values
+`LENS_AGENT_MAX_REQUEST_SECONDS` (no elapsed deadline); parentheses give built-in values
 when the environment variable is absent. Context and both output limits take
 the smaller of the global Agent value and the selected row's non-NULL value.
 Raise the global cap as well when enabling a larger context window.
 
-The SDK timeout uses `request_timeout_seconds` when set, otherwise
-`LLM_REQUEST_TIMEOUT_SECONDS`, otherwise 180 seconds. The actual request is
-further bounded by the Agent timeout passed for that call. For example, with
-an Agent cap of 90 seconds and SDK environment timeout of 40 seconds, a NULL
-row timeout yields 40 seconds, a row value of 20 yields 20, and a row value of
-180 yields 90. The per-response Runner does not change shared global limits.
+The effective SDK timeout is the smaller of the explicit Agent cap and the
+selected row's non-NULL `request_timeout_seconds`; either can supply a limit
+alone. When neither is set, Chat disables the SDK timeout explicitly. For
+example, with an Agent cap of 90 seconds, a NULL row timeout yields 90 seconds,
+a row value of 20 yields 20, and a row value of 180 yields 90. The shared
+`LLM_REQUEST_TIMEOUT_SECONDS` does not affect Chat. The per-response Runner
+does not change shared global limits.
 
 Provider usage records consumption for each request, not context capacity.
 Budget the current complete input plus reserved output and safety headroom;

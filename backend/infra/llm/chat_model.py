@@ -46,10 +46,7 @@ class OpenAIChatModel:
             or os.getenv("LLM_MODEL")
             or "gpt-4o-mini"
         ).strip()
-        self.request_timeout = (
-            request_timeout if request_timeout is not None
-            else _env_float("LLM_REQUEST_TIMEOUT_SECONDS", 180.0)
-        )
+        self.request_timeout = request_timeout
         self.reasoning_effort = os.getenv("LLM_REASONING_EFFORT", "").strip() or None
         if client is not None:
             self.client = client.with_options(max_retries=0)
@@ -74,7 +71,7 @@ class OpenAIChatModel:
                 }, ensure_ascii=False)},
             ],
             max_completion_tokens=1024,
-            timeout=min(45.0, self.request_timeout),
+            timeout=min(45.0, self.request_timeout) if self.request_timeout is not None else 45.0,
         )
         record_llm_completion(completion, requested_model=self.model)
         choice = completion.choices[0]
@@ -91,13 +88,16 @@ class OpenAIChatModel:
         context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
-        timeout_seconds: float = 180.0,
+        timeout_seconds: float | None = None,
         max_output_tokens: int = 16_384,
     ) -> ModelTurn:
+        timeout = timeout_seconds
+        if self.request_timeout is not None:
+            timeout = min(timeout, self.request_timeout) if timeout is not None else self.request_timeout
         request: dict[str, Any] = {
             "model": self.model,
             "temperature": 0.2,
-            "timeout": min(timeout_seconds, self.request_timeout),
+            "timeout": timeout,
             "max_completion_tokens": max_output_tokens,
             "messages": context.provider_messages(
                 RESEARCH_COMPACTION_SYSTEM_PROMPT if context.compacting else
@@ -516,11 +516,3 @@ def _provider_failure(
 
 
 __all__ = ["OpenAIChatModel"]
-
-
-def _env_float(name: str, default: float) -> float:
-    try:
-        value = float(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default

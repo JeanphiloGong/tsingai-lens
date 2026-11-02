@@ -1093,8 +1093,11 @@ technical trajectory outcomes; they are not scientific absence, uncertainty,
 or Evidence status. Provider response objects and internal exceptions are not
 part of the public contract. Limits protect technical resources, not scientific
 completeness. Whole-turn elapsed time and cumulative model usage have no default
-cutoff; operators may configure either explicitly. Individual model/read request
-timeouts, context capacity, cancellation and no-progress detection remain active.
+cutoff; operators may configure either explicitly. Individual model/read requests
+and answer finalization also have no default elapsed timeout. Explicit Agent or
+connection limits still apply. Connection failures and the explicit response Stop
+action can end a model wait; closing the browser does not cancel research.
+Context capacity, cancellation and no-progress detection remain active.
 The browser shows completed warnings as non-blocking notices,
 not failed turns.
 

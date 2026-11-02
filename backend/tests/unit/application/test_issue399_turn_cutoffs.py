@@ -44,7 +44,7 @@ def test_default_limits_do_not_stop_a_long_research_continuation(elapsed_ms, tot
     assert progress.stop_before_model() is None
     assert progress.restored_elapsed_seconds == elapsed_ms / 1000
     assert progress.model_tokens == total_tokens
-    assert progress.limits.max_request_seconds == 180
+    assert progress.limits.max_request_seconds is None
 
 
 @pytest.mark.anyio
@@ -79,7 +79,7 @@ async def test_progressing_reads_cross_old_time_and_token_cutoffs(monkeypatch):
     assert events[-1]["total_tokens"] > 1_000_000
     assert events[-1]["remaining_seconds"] is None
     assert events[-1]["remaining_token_budget"] is None
-    assert [timeout for timeout, _ in model.request_limits] == [180] * 4
+    assert [timeout for timeout, _ in model.request_limits] == [None] * 4
 
 
 @pytest.mark.anyio
@@ -116,7 +116,7 @@ async def test_unbounded_turn_still_cancels_an_inflight_request():
 
     class Model:
         async def respond(self, **kwargs):
-            assert kwargs["timeout_seconds"] == 180
+            assert kwargs["timeout_seconds"] is None
             entered.set()
             try:
                 await asyncio.Event().wait()

@@ -404,7 +404,7 @@ async def test_unbound_old_approval_refuses_to_guess_the_enabled_default(postgre
 @pytest.mark.parametrize(
     "row_limits, global_values, expected",
     [
-        ((None, None, None), {}, (200000, 16384, 8192, 180.0, 180.0)),
+        ((None, None, None), {}, (200000, 16384, 8192, None, None)),
         ((32768, 65536, 30.0), {}, (32768, 16384, 8192, 30.0, 30.0)),
         ((None, None, None), {
             "LENS_AGENT_CONTEXT_TOKENS": "98304",
@@ -412,7 +412,7 @@ async def test_unbound_old_approval_refuses_to_guess_the_enabled_default(postgre
             "LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS": "4096",
             "LENS_AGENT_MAX_REQUEST_SECONDS": "90",
             "LLM_REQUEST_TIMEOUT_SECONDS": "40",
-        }, (98304, 8192, 4096, 90.0, 40.0)),
+        }, (98304, 8192, 4096, 90.0, 90.0)),
         ((32768, 2048, 20.0), {
             "LENS_AGENT_CONTEXT_TOKENS": "98304",
             "LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS": "8192",

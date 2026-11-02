@@ -1420,6 +1420,9 @@ class ChatSessionService:
                 data={"code": "model_connection_invalid_configuration"},
             )
         base = self.runner.limits
+        request_timeout = base.max_request_seconds
+        if timeout is not None:
+            request_timeout = min(request_timeout, timeout) if request_timeout is not None else timeout
         try:
             limits = replace(
                 base,
@@ -1435,10 +1438,7 @@ class ChatSessionService:
                     min(base.max_finalization_output_tokens, connection.max_output_tokens)
                     if connection.max_output_tokens is not None else base.max_finalization_output_tokens
                 ),
-                max_request_seconds=(
-                    min(base.max_request_seconds, timeout)
-                    if timeout is not None else base.max_request_seconds
-                ),
+                max_request_seconds=request_timeout,
             )
         except ValueError as exc:
             raise ServiceUnavailableException(

@@ -278,11 +278,11 @@ class AgentRunLimits:
     max_consecutive_no_progress: int = 2
     emergency_max_model_cycles: int | None = 64
     max_model_retries: int = 5
-    max_request_seconds: float = 180.0
+    max_request_seconds: float | None = None
     max_context_tokens: int = 200_000
     max_parallel_reads: int = 4
     max_model_output_tokens: int = 16_384
-    max_finalization_seconds: float = 300.0
+    max_finalization_seconds: float | None = None
     max_finalization_output_tokens: int = 8_192
 
     def __post_init__(self) -> None:
@@ -312,7 +312,7 @@ class AgentRunLimits:
             ("max_request_seconds", self.max_request_seconds),
             ("max_finalization_seconds", self.max_finalization_seconds),
         ):
-            if isinstance(value, bool) or not isfinite(value) or value <= 0:
+            if value is not None and (isinstance(value, bool) or not isfinite(value) or value <= 0):
                 raise ValueError(f"{name} must be finite and positive")
 
 
@@ -404,8 +404,9 @@ class _RunProgress:
         # Reserve part of the same deadline; do not extend the total request.
         if self.limits.max_elapsed_seconds is None:
             return self.remaining_seconds()
-        reserve = min(self.limits.max_finalization_seconds,
-                      self.limits.max_elapsed_seconds * 0.2)
+        reserve = self.limits.max_elapsed_seconds * 0.2
+        if self.limits.max_finalization_seconds is not None:
+            reserve = min(self.limits.max_finalization_seconds, reserve)
         return max(0.0, self.remaining_seconds() - reserve)
 
     def restore_persisted_progress(self, payload: Mapping[str, Any] | None) -> None:
@@ -1602,12 +1603,13 @@ class ResearchAgentRunner:
         finalizing: bool = False,
     ) -> ModelTurn:
         timeout = min(progress.remaining_seconds() if finalizing else progress.remaining_research_seconds(),
-                      self.limits.max_request_seconds)
+                      self.limits.max_request_seconds or float("inf"))
         output_limit = self.limits.max_model_output_tokens
         if self.limits.max_model_tokens is not None:
             output_limit = min(output_limit, self.limits.max_model_tokens - progress.model_tokens)
         if finalizing:
-            timeout = min(timeout, self.limits.max_finalization_seconds)
+            if self.limits.max_finalization_seconds is not None:
+                timeout = min(timeout, self.limits.max_finalization_seconds)
             output_limit = self.limits.max_finalization_output_tokens
         if output_limit <= 0:
             raise ModelResponseError("The configured model allowance is exhausted.",
@@ -1616,6 +1618,7 @@ class ResearchAgentRunner:
             output_limit = min(output_limit, 8192)
         if timeout <= 0:
             raise TimeoutError("research turn deadline reached")
+        timeout = timeout if isfinite(timeout) else None
         purpose = "compaction" if model_context.compacting else (
             "finalization" if finalizing else "decision"
         )
@@ -2386,7 +2389,7 @@ class ResearchAgentRunner:
                             arguments=validated_arguments.get(call.tool_call_id),
                             max_result_tokens=max(512, progress.read_batch_tokens // len(requested)),
                         ),
-                        timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds),
+                        timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds or float("inf")),
                     )
                 except TimeoutError:
                     return self._failure(call, "capability_timeout", "The Source or action could not be completed in this turn.")
@@ -2892,7 +2895,7 @@ class ResearchAgentRunner:
                     handler,
                     arguments=arguments,
                 ),
-                timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds),
+                timeout=min(progress.remaining_research_seconds(), self.limits.max_request_seconds or float("inf")),
             )
         except TimeoutError:
             return self._failure(

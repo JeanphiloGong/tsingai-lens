@@ -76,7 +76,8 @@ def test_default_run_limits_keep_operation_and_progress_boundaries() -> None:
     assert limits.max_tool_calls is not None
     assert limits.max_model_tokens is None
     assert limits.emergency_max_model_cycles is not None
-    assert limits.max_request_seconds == 180
+    assert limits.max_request_seconds is None
+    assert limits.max_finalization_seconds is None
     assert limits.max_consecutive_no_progress == 2
 
 
@@ -134,7 +135,7 @@ class _Model:
         self.all_tool_spec_names: list[tuple[str, ...]] = []
         self.tool_spec_names: list[tuple[str, ...]] = []
         self.contexts: list[tuple[ChatMessage, ...]] = []
-        self.request_limits: list[tuple[float, int]] = []
+        self.request_limits: list[tuple[float | None, int]] = []
 
     async def generate_title(self, *, question: str, answer: str) -> str:
         return ""
@@ -607,7 +608,7 @@ async def test_explicit_unbounded_limits_allow_long_investigation_with_reported_
     assert traces[-1]["total_tokens"] > 240_000
     assert traces[-1]["remaining_tool_budget"] is None
     assert traces[-1]["remaining_token_budget"] is None
-    assert all(0 < timeout <= 180 and output == 16_384 for timeout, output in model.request_limits)
+    assert all(timeout is None and output == 16_384 for timeout, output in model.request_limits)
 
 
 def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
@@ -3519,8 +3520,8 @@ async def test_resource_budget_final_answer_has_time_to_summarize_large_trajecto
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert 30 < observed_timeouts[-1] <= AgentRunLimits().max_finalization_seconds
-    assert observed_timeouts[-1] <= observed_timeouts[0] <= AgentRunLimits().max_request_seconds
+    assert observed_timeouts[-1] is None
+    assert observed_timeouts[0] is None
 
 
 async def test_resource_budget_ledger_counts_complete_inspected_source_as_read() -> None:

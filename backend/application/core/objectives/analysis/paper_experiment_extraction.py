@@ -135,7 +135,7 @@ class PaperExperimentDraftEnvelope(BaseModel):
     )
 
 
-PAPER_EXPERIMENT_DRAFT_PROMPT_VERSION = "paper_experiment_draft.v3"
+PAPER_EXPERIMENT_DRAFT_PROMPT_VERSION = "paper_experiment_draft.v4"
 
 
 _DRAFT_SCHEMA_HINT: dict[str, Any] = {
@@ -205,8 +205,37 @@ _DRAFT_SCHEMA_HINT: dict[str, Any] = {
                     "test_binding_source_labels": ["S001"],
                 }
             ],
-            "comparisons": [],
-            "reported_interpretations": [],
+            "comparisons": [
+                {
+                    "comparison_key": "local-comparison-key",
+                    "baseline_variant_key": "declared-baseline-variant-key",
+                    "target_variant_key": "declared-target-variant-key",
+                    "outcome": "requested outcome",
+                    "baseline_measurement_keys": ["declared-baseline-measurement-key"],
+                    "target_measurement_keys": ["declared-target-measurement-key"],
+                    "changed_variables": [
+                        {
+                            "name": "reported varied factor",
+                            "baseline_value": "reported baseline setting",
+                            "target_value": "reported target setting",
+                            "unit": None,
+                        }
+                    ],
+                    "matched_conditions": [],
+                    "reported_statement": "source-supported comparison, if reported",
+                    "source_labels": ["S002"],
+                    "binding_source_labels": ["S001", "S002"],
+                }
+            ],
+            "reported_interpretations": [
+                {
+                    "statement": "interpretation explicitly reported by the paper",
+                    "kind": "result_summary",
+                    "measurement_keys": [],
+                    "comparison_keys": [],
+                    "source_labels": ["S002"],
+                }
+            ],
             "unresolved_issues": [],
         }
     ],
@@ -492,7 +521,11 @@ DECISION PROCESS
 5. Preserve repeated or conflicting reports as separate observations. Do not
    average, overwrite, infer significance, or turn a multi-factor comparison
    into a single-factor claim.
-6. Return the smallest complete JSON envelope described by the output schema.
+6. When Sources support a comparison for a requested factor and outcome, link
+   the declared baseline and target variants and their reported measurements.
+   Keep jointly changed factors together. If either side is unsupported, retain
+   the measurements and the gap, and leave comparisons empty.
+7. Return the smallest complete JSON envelope described by the output schema.
 
 HARD RULES
 - Never emit formal Lens IDs, request ownership, revision numbers, database
@@ -537,6 +570,18 @@ key identifies the candidate within the response, not a proven scientific
 binding. Only measurement references may be null when their edges are unknown.
 Every experiment needs label and scope_description. Put reported temperature,
 speed and repetition values in test parameters as name/value/unit objects.
+Every comparison needs comparison_key, baseline_variant_key, target_variant_key,
+outcome, baseline_measurement_keys, target_measurement_keys, changed_variables,
+and source_labels. Both variant keys must identify declared variants; both
+measurement lists must reference declared measurements for that outcome and
+the corresponding variant. Use supplied Source labels to justify the links.
+These keys express the source-reported comparison; the service validates its
+binding, numerical direction and scientific admissibility. Return comparisons=[]
+when no such comparison is supported.
+Reported interpretations require statement, kind (result_summary,
+mechanism_hypothesis, or limitation), and source_labels. Their optional
+measurement_keys and comparison_keys must reference declared members. Include
+only interpretations stated by the paper; otherwise return reported_interpretations=[].
 Top-level unresolved_issues target_ref must be document or experiment. Inside
 an experiment, use experiment or a path to a declared member:
 variants/<variant_key>, test_conditions/<test_key>, measurements/<measurement_key>,

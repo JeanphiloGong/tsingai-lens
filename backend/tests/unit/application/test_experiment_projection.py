@@ -364,7 +364,7 @@ async def test_projection_keeps_captured_response_and_typed_review_values(monkey
     assert json.loads(json.dumps(payload)) == baseline
     findings, evidence, contributions = await service.read_analysis_records(*identity)
     assert findings[0].synthesis_status == "insufficient_confirmation"
-    assert findings[0].selection_ids == ()
+    assert findings[0].selection_ids == ("selection-1",)
     assert set(findings[0].supporting_evidence_ids) == {
         item.evidence_id for item in evidence
     }

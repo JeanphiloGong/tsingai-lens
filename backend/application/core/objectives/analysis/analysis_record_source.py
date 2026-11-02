@@ -11,7 +11,6 @@ def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
 
     return (
         analysis is not None
-        and analysis.origin == "system_generated"
         and analysis.scientific_record_source == "experiment_graph"
     )
 
@@ -22,9 +21,9 @@ async def should_read_experiment_projection(
     objective_id: str,
     analysis_version: int,
 ) -> bool:
-    """Select the projection only for automatic experiment-backed versions.
+    """Select the records owned by the completed analysis version.
 
-    Authored and hybrid versions retain their immutable authored snapshots.
+    Authored and hybrid versions may also publish fixed experiment records.
     Selection follows the completed saved version, independent of runtime wiring.
     """
 

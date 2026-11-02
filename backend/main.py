@@ -290,7 +290,7 @@ def create_app() -> FastAPI:
                 "description": "Business errors use the JSON envelope under HTTP 200.",
             }
         },
-        version="0.13.10",
+        version="0.13.11",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

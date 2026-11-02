@@ -1078,7 +1078,10 @@ Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,
 or Evidence status. Provider response objects and internal exceptions are not
 part of the public contract. Limits protect technical resources, not scientific
-completeness. The browser shows completed warnings as non-blocking notices,
+completeness. Whole-turn elapsed time and cumulative model usage have no default
+cutoff; operators may configure either explicitly. Individual model/read request
+timeouts, context capacity, cancellation and no-progress detection remain active.
+The browser shows completed warnings as non-blocking notices,
 not failed turns.
 
 Tool result status is `succeeded`, `queued`, or `failed`. A `queued` result is a

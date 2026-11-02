@@ -69,13 +69,15 @@ def skip_retry_delays(monkeypatch):
 
 
 
-def test_default_run_limits_bound_an_unconfigured_turn() -> None:
+def test_default_run_limits_keep_operation_and_progress_boundaries() -> None:
     limits = AgentRunLimits()
 
-    assert limits.max_elapsed_seconds is not None
+    assert limits.max_elapsed_seconds is None
     assert limits.max_tool_calls is not None
-    assert limits.max_model_tokens is not None
+    assert limits.max_model_tokens is None
     assert limits.emergency_max_model_cycles is not None
+    assert limits.max_request_seconds == 180
+    assert limits.max_consecutive_no_progress == 2
 
 
 @pytest.fixture

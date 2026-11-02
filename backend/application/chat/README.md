@@ -357,18 +357,23 @@ for researcher review. This remains a transient conversation draft,
 not published Evidence or a saved scientific correction.
 
 Answer-only finalization cannot restart tool work. Its response must distinguish
-completed observations from unresolved checks. The research phase reserves 20% of
-the same total deadline, capped by the existing finalization allowance. Normal
+completed observations from unresolved checks. When an operator configures a
+whole-turn deadline, the research phase reserves 20% of that deadline, capped by
+the existing finalization allowance. Normal
 model calls, retries, compaction and reads use the research remainder; finalization
 uses the total remainder. This does not extend the deadline or guarantee provider
 availability. The answer is buffered and validated before emitting it. Tool activity remains visible
 separately. Explicit evidence, evaluation against real research scenarios and
 researcher review remain necessary to assess scientific correctness.
 
-Whole-turn time, tool-call count, cumulative model tokens and total model cycles
-default to 300 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
-Their environment settings accept a positive limit; zero explicitly disables
-that ceiling. Approval waiting time is excluded; active usage survives approval.
+Whole-turn time and cumulative model tokens have no default cutoff. A long,
+progressing study can continue past 300 seconds and 1,000,000 accumulated tokens;
+cumulative usage is not the size of one model context. Operators can opt into
+these ceilings with positive `LENS_AGENT_MAX_TURN_SECONDS` and
+`LENS_AGENT_MAX_MODEL_TOKENS` settings; unset or zero leaves them disabled.
+Tool-call count and total model cycles retain defaults of 96 calls and 64 cycles.
+Their environment settings accept positive limits or zero to disable the ceiling.
+Approval waiting time is excluded; active usage survives approval.
 Individual model/read requests retain a 180-second timeout, cancellation and
 the repeated-observation guard. Before stopping for repeated observations, the
 runner gives one correction decision with tools still available and the actual

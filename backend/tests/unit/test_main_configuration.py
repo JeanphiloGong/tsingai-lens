@@ -9,7 +9,11 @@ def test_agent_limits_defaults(
 ) -> None:
     for name in ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
-    assert _parse_agent_run_limits() == AgentRunLimits()
+    limits = _parse_agent_run_limits()
+    assert limits == AgentRunLimits()
+    assert limits.max_elapsed_seconds is None
+    assert limits.max_model_tokens is None
+    assert limits.max_request_seconds == 180
 
 
 def test_agent_limits_accept_environment(
@@ -17,11 +21,13 @@ def test_agent_limits_accept_environment(
 ) -> None:
     monkeypatch.setenv("LENS_AGENT_MAX_TOOL_CALLS", "12")
     monkeypatch.setenv("LENS_AGENT_MAX_TURN_SECONDS", "12.5")
+    monkeypatch.setenv("LENS_AGENT_MAX_MODEL_TOKENS", "50000")
     monkeypatch.setenv("LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS", "2048")
     monkeypatch.setenv("LENS_AGENT_MAX_FINALIZATION_SECONDS", "3.5")
     monkeypatch.setenv("LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS", "512")
     assert _parse_agent_run_limits().max_tool_calls == 12
     assert _parse_agent_run_limits().max_elapsed_seconds == 12.5
+    assert _parse_agent_run_limits().max_model_tokens == 50000
     assert _parse_agent_run_limits().max_model_output_tokens == 2048
     assert _parse_agent_run_limits().max_finalization_seconds == 3.5
     assert _parse_agent_run_limits().max_finalization_output_tokens == 512

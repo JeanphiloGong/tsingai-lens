@@ -126,7 +126,7 @@ def _parse_agent_run_limits() -> AgentRunLimits:
                 continue
             parser = float if field_name.endswith("_seconds") else int
             value = parser(raw) if raw else default
-            if value <= 0 or not isfinite(value):
+            if value is not None and (value <= 0 or not isfinite(value)):
                 raise ValueError("non-positive or non-finite limit")
         except (ValueError, OverflowError):
             logger.warning("Invalid %s; using default=%s", env_name, default)

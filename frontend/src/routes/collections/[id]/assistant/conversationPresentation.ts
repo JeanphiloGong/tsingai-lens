@@ -55,6 +55,10 @@ export function getModelServiceErrorKey(errorCode: string | null | undefined): s
 /** Derive one terminal notice from the current turn, including restored snapshots. */
 export function getTurnNotice(turn: ChatTurn | ChatResponseSnapshot | null) {
 	if (!turn) return null;
+	if (turn.status === 'cancelled') return {
+		messageKey: 'researchAgent.responseStopped', titleKey: null,
+		isError: false, canContinue: false
+	};
 	const recovery = getTurnRecoveryState(turn);
 	if (!recovery) return null;
 	const specificReason = getModelServiceErrorKey(turn.error_code);

@@ -121,6 +121,8 @@ def _parse_agent_run_limits() -> AgentRunLimits:
                 "max_tool_calls",
                 "max_model_tokens",
                 "emergency_max_model_cycles",
+                "max_request_seconds",
+                "max_finalization_seconds",
             }:
                 values[field_name] = None
                 continue

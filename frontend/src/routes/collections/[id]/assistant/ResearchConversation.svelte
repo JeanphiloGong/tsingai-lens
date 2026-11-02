@@ -26,6 +26,7 @@
 		storePendingChatSourceContexts,
 		streamChatMessage,
 		streamChatUpdates,
+		stopChatResponse,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
 		type ChatBranchOptions,
@@ -141,6 +142,7 @@
 	$: renameInvalid = !renameDraft.trim() || Array.from(renameDraft.trim()).length > 160 || /[\r\n\x00]/.test(renameDraft);
 	let loading = false;
 	let sending = false;
+	let stopping = false;
 	let submitting = false;
 	let deletingSessionId = '';
 	$: sessionNavigationDisabled =
@@ -640,6 +642,7 @@
 		branches = [];
 		branchDraft = null;
 		running = false;
+		stopping = false;
 		revising = false;
 		revisionRequest = null;
 		input = '';
@@ -1407,6 +1410,26 @@
 		}
 	}
 
+	async function stopResponse() {
+		if (!session || !responseSnapshot || responseSnapshot.status !== 'running' || stopping) return;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		stopping = true;
+		try {
+			const snapshot = await stopChatResponse(session.session_id, responseSnapshot.response_id);
+			if (isCurrentSession(generation, ownerCollectionId) &&
+				responseSnapshot?.response_id === snapshot.response_id && responseSnapshot.status === 'running') {
+				if (snapshot.status === 'running')
+					responseSnapshot = { ...responseSnapshot, stop_requested: snapshot.stop_requested };
+				else acceptSnapshot(snapshot);
+			}
+		} catch (err) {
+			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
+		} finally {
+			if (isCurrentSession(generation, ownerCollectionId)) stopping = false;
+		}
+	}
+
 	function handleComposerInput(value: string) {
 		input = value;
 	}
@@ -1471,6 +1494,7 @@
 		decidedToolName: string | null = null
 	) {
 		running = false;
+		stopping = false;
 		responseSnapshot = null;
 		settledTurn = turn;
 		recoveryError = '';
@@ -1816,6 +1840,9 @@
 				{collectionId}
 				{input}
 				{sending}
+				canStop={!checkpointId && responseSnapshot?.status === 'running'}
+				stopping={stopping || Boolean(responseSnapshot?.stop_requested)}
+				onStop={stopResponse}
 				disabled={!session ||
 					!selectedModelConnectionId ||
 					modelConnectionsLoading ||

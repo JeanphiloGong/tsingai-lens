@@ -626,7 +626,7 @@ class ChatModel(Protocol):
         context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
-        timeout_seconds: float = 180.0,
+        timeout_seconds: float | None = None,
         max_output_tokens: int = 16_384,
     ) -> ModelTurn: ...
 

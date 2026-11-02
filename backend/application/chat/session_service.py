@@ -878,6 +878,17 @@ class ChatSessionService:
 
         return events()
 
+    async def stop_response_for_user(
+        self, session_id: str, user_id: str, response_id: str,
+    ) -> ChatResponseSnapshot:
+        await self.get_session_for_user(session_id, user_id)
+        try:
+            return await ChatRepo.request_response_stop(session_id, user_id, response_id)
+        except ChatRecordNotFound as exc:
+            raise ResourceNotFoundException("chat session not found") from exc
+        except ChatWriteConflict as exc:
+            raise ResourceConflictException(str(exc), data={"code": exc.reason}) from exc
+
     async def set_message_feedback_for_user(
         self,
         session_id: str,
@@ -1275,6 +1286,7 @@ class ChatSessionService:
         }
         excluded_errors = {
             "user_rejected",
+            "user_cancelled",
             "permission_write_denied",
             "tool_permission_denied",
         }
@@ -1408,6 +1420,9 @@ class ChatSessionService:
                 data={"code": "model_connection_invalid_configuration"},
             )
         base = self.runner.limits
+        request_timeout = base.max_request_seconds
+        if timeout is not None:
+            request_timeout = min(request_timeout, timeout) if request_timeout is not None else timeout
         try:
             limits = replace(
                 base,
@@ -1423,10 +1438,7 @@ class ChatSessionService:
                     min(base.max_finalization_output_tokens, connection.max_output_tokens)
                     if connection.max_output_tokens is not None else base.max_finalization_output_tokens
                 ),
-                max_request_seconds=(
-                    min(base.max_request_seconds, timeout)
-                    if timeout is not None else base.max_request_seconds
-                ),
+                max_request_seconds=request_timeout,
             )
         except ValueError as exc:
             raise ServiceUnavailableException(
@@ -1496,6 +1508,9 @@ class ChatSessionService:
     ) -> AgentRunResult:
         # The caller holds the execution lock through the final snapshot write.
         loop = asyncio.get_running_loop()
+        execution_task = asyncio.current_task()
+        stop_requested = False
+        protected_write_id = approved_call.tool_call_id if approved_call is not None else None
         prior_snapshot = await ChatRepo.read_response_snapshot(session.session_id)
         connection = await self._resolve_model_connection(
             model_connection_id, prior_snapshot,
@@ -1601,7 +1616,17 @@ class ChatSessionService:
             else:
                 loop.call_soon_threadsafe(append)
 
+        async def refresh_stop_request() -> None:
+            nonlocal stop_requested
+            saved = await ChatRepo.read_response_snapshot(session.session_id)
+            if saved is not None and saved.response_id == snapshot.response_id and saved.stop_requested:
+                stop_requested = True
+                update_snapshot(stop_requested=True)
+
         async def record_checkpoint(messages: tuple[ChatMessage, ...]) -> None:
+            nonlocal protected_write_id
+            if messages and messages[-1].tool_result is not None and messages[-1].tool_call_id == protected_write_id:
+                protected_write_id = None
             saved_ids = {item.message_id for item in messages}
             update_snapshot(
                 checkpoint_message_id=messages[-1].message_id if messages else None,
@@ -1612,6 +1637,9 @@ class ChatSessionService:
                 ),
             )
             await flush_snapshot()
+            await refresh_stop_request()
+            if stop_requested:
+                raise asyncio.CancelledError()
             if emit:
                 emit(
                     {
@@ -1642,6 +1670,10 @@ class ChatSessionService:
                         }
                     )
                 try:
+                    await refresh_stop_request()
+                    if stop_requested and protected_write_id is None:
+                        execution_task.cancel()
+                        return
                     await flush_snapshot()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -1651,22 +1683,24 @@ class ChatSessionService:
 
         async with self._runner_for_connection(connection) as runner:
             await flush_snapshot()
-            # Resolve credentials before claiming the approved write.
-            claimed_call = None
-            if approved_call is not None:
-                claimed_call = await ChatRepo.claim_approved_tool_call(
-                    session_id=session.session_id,
-                    tool_call_id=approved_call.tool_call_id,
-                    user_id=session.user_id,
-                    started_at=_now_iso(),
-                )
-                if claimed_call is None:
-                    raise ResourceConflictException(
-                        "approved research action is already running",
-                        data={"code": "chat_tool_decision_conflict"},
-                    )
             writer = asyncio.create_task(save_updates())
             try:
+                # A stop may interrupt model/reads; an approved write finishes
+                # and checkpoints before cancellation is delivered.
+                claimed_call = None
+                if approved_call is not None:
+                    claimed_call = await ChatRepo.claim_approved_tool_call(
+                        session_id=session.session_id, tool_call_id=approved_call.tool_call_id,
+                        user_id=session.user_id, started_at=_now_iso(),
+                    )
+                    if claimed_call is None:
+                        raise ResourceConflictException(
+                            "approved research action is already running",
+                            data={"code": "chat_tool_decision_conflict"},
+                        )
+                    await refresh_stop_request()
+                    if stop_requested:
+                        raise asyncio.CancelledError()
                 arguments = {
                     "context": AgentContext(
                         session_id=session.session_id,
@@ -1761,13 +1795,18 @@ class ChatSessionService:
                             # replace the user-visible cause with a provider error.
                             result = replace(result, error_code="permission_write_denied")
                         continue
+                    protected_write_id = pending.tool_call_id
                     automatic = await ChatRepo.claim_automatic_call(
                         session_id=session.session_id,
                         tool_call_id=pending.tool_call_id,
                         user_id=session.user_id,
                         started_at=_now_iso(),
                     )
+                    await refresh_stop_request()
+                    if stop_requested:
+                        raise asyncio.CancelledError()
                     if automatic is None:
+                        protected_write_id = None
                         break
                     arguments["previous_messages"] = await ChatRepo.read_messages(
                         session.session_id
@@ -1805,12 +1844,16 @@ class ChatSessionService:
                     }
                 )
                 return result
-            except BaseException:
+            except BaseException as exc:
+                stopped = isinstance(exc, asyncio.CancelledError) and stop_requested
+                stop_updates.set()
+                interruption_code = "user_cancelled" if stopped else "chat_response_interrupted"
                 try:
                     aborted = await ChatRepo.abort_running_tool_calls(
                         session_id=session.session_id,
-                        error_code="chat_response_interrupted",
+                        error_code=interruption_code,
                         finished_at=_now_iso(),
+                        include_pending=stopped,
                     )
                     if aborted:
                         messages = list(await ChatRepo.read_messages(session.session_id))
@@ -1819,8 +1862,9 @@ class ChatSessionService:
                             result = ChatToolResult(
                                 tool_call_id=call.tool_call_id,
                                 status=ToolResultStatus.FAILED,
-                                error_code="chat_response_interrupted",
-                                error_message="The research action was interrupted before it finished.",
+                                error_code=interruption_code,
+                                error_message=("The user stopped this action." if stopped else
+                                               "The research action was interrupted before it finished."),
                             )
                             results.append(result)
                             messages.append(
@@ -1849,6 +1893,8 @@ class ChatSessionService:
                             tool_results=tuple(results),
                         )
                 except Exception:  # noqa: BLE001
+                    if stopped:
+                        raise
                     logger.exception(
                         "failed to abort interrupted chat tool calls session_id=%s",
                         session.session_id,
@@ -1859,12 +1905,20 @@ class ChatSessionService:
                         **snapshot.progress,
                         "execution_plan": {
                             **dict(plan),
-                            "status": "technical_failure",
-                            "blocking_reason": "chat_response_interrupted",
+                            "status": "cancelled" if stopped else "technical_failure",
+                            "blocking_reason": interruption_code,
                         },
                     }
                     update_snapshot(progress=snapshot_progress)
-                update_snapshot(status="interrupted", error_code="chat_response_interrupted")
+                update_snapshot(status="cancelled" if stopped else "interrupted", error_code=interruption_code)
+                if stopped:
+                    emit_progress({**snapshot.progress, "phase": "terminal", "termination_reason": interruption_code})
+                    return AgentRunResult(
+                        status=AgentRunStatus.CANCELLED,
+                        messages=await ChatRepo.read_messages(session.session_id),
+                        error_code=interruption_code,
+                        execution_plan=snapshot.progress.get("execution_plan"),
+                    )
                 raise
             finally:
                 stop_updates.set()

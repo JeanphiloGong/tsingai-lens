@@ -106,7 +106,7 @@ class ChatResponseSnapshot:
     started_at: str
     updated_at: str
     status: Literal[
-        "running", "completed", "approval_required", "failed", "interrupted"
+        "running", "completed", "approval_required", "failed", "interrupted", "cancelled"
     ] = "running"
     message_id: str | None = None
     message_created_at: str | None = None
@@ -118,6 +118,7 @@ class ChatResponseSnapshot:
     warnings: tuple[str, ...] = ()
     model_connection_id: str | None = None
     model_connection_name: str | None = None
+    stop_requested: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,13 +270,26 @@ class ChatRepository:
     ) -> None:
         payload = asdict(snapshot)
         async with AsyncSessionLocal() as db, db.begin():
-            await db.execute(
-                update(ChatSessionORM)
-                .where(
-                    ChatSessionORM.session_id == session_id,
-                )
-                .values(response_snapshot=payload)
-            )
+            row = await db.get(ChatSessionORM, session_id, with_for_update=True)
+            if row is None:
+                raise ChatRecordNotFound("chat session not found")
+            current = row.response_snapshot or {}
+            if current.get("response_id") == snapshot.response_id and current.get("stop_requested"):
+                payload["stop_requested"] = True
+            row.response_snapshot = payload
+
+    async def request_response_stop(self, session_id: str, user_id: str, response_id: str) -> ChatResponseSnapshot:
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(ChatSessionORM, session_id, with_for_update=True)
+            if row is None or row.user_id != user_id:
+                raise ChatRecordNotFound("chat session not found")
+            payload = dict(row.response_snapshot or {})
+            if payload.get("response_id") != response_id:
+                raise ChatWriteConflict("chat_response_changed", "the selected response is no longer current")
+            if payload["status"] == "running":
+                payload["stop_requested"] = True
+                row.response_snapshot = payload
+            return ChatResponseSnapshot(**{**payload, "warnings": tuple(payload.get("warnings") or ())})
 
     async def read_session_family(
         self, chat_session: ChatSession
@@ -1192,7 +1206,7 @@ class ChatRepository:
             )
 
     async def abort_running_tool_calls(
-        self, *, session_id: str, error_code: str, finished_at: str
+        self, *, session_id: str, error_code: str, finished_at: str, include_pending: bool = False
     ) -> tuple[ChatToolCall, ...]:
         async with AsyncSessionLocal() as db, db.begin():
             rows = tuple(
@@ -1200,7 +1214,10 @@ class ChatRepository:
                     select(ChatToolCallORM)
                     .where(
                         ChatToolCallORM.session_id == session_id,
-                        ChatToolCallORM.status == ToolCallStatus.RUNNING.value,
+                        ChatToolCallORM.status.in_(
+                            ("requested", "approval_required", "approved", "running")
+                            if include_pending else ("running",)
+                        ),
                     )
                     .with_for_update()
                 )

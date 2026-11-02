@@ -4,7 +4,7 @@
 	import { authState } from '../../../_shared/authState';
 
 	import IconButton from '../../../_shared/IconButton.svelte';
-	import { ChevronDown, Quote, X, ArrowUpRight } from '@lucide/svelte';
+	import { ChevronDown, Quote, X, ArrowUpRight, Square } from '@lucide/svelte';
 	import type { ChatSourceContext } from '../../../_shared/chatSessions';
 	import {
 		matchingResearchAgentSlashCommands,
@@ -18,6 +18,9 @@
 	export let collectionId = '';
 	export let input = '';
 	export let sending = false;
+	export let canStop = false;
+	export let stopping = false;
+	export let onStop: () => void = () => {};
 	export let disabled = false;
 	export let pendingSourceContexts: ChatSourceContext[] = [];
 	export let hasExtraContext = false;
@@ -494,6 +497,15 @@
 				>
 				<div class="composer-actions">
 					<slot name="model-picker" />
+					{#if canStop}
+						<IconButton
+							className="stop-response"
+							variant="primary"
+							tooltipAlign="end"
+							label={stopping ? $t('researchAgent.stopping') : $t('researchAgent.stop')}
+							disabled={stopping}
+							onClick={onStop}><Square size={14} fill="currentColor" /></IconButton>
+					{:else}
 					<IconButton
 						className="send-message"
 						type="submit"
@@ -502,6 +514,7 @@
 						label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
 						disabled={disabled || !input.trim()}>&uarr;</IconButton
 					>
+					{/if}
 				</div>
 			</div>
 		</div>

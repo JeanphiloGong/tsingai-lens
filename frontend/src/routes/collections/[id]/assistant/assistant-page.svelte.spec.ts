@@ -339,6 +339,43 @@ describe('collections/[id]/assistant Research Agent', () => {
 
 
 
+	it('stops a response, ignores a late running acknowledgement, and accepts revised instructions', async () => {
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		const question = message('question', 'user', 'Compare the tensile tests.');
+		const snapshot: ChatResponseSnapshot = {
+			response_id: 'response-one', sequence: 1, started_at: createdAt, updated_at: createdAt,
+			status: 'running', message_id: null, message_created_at: null, content: '', progress: { phase: 'model' },
+			checkpoint_message_id: 'question', completion_reason: null, error_code: null, warnings: []
+		};
+		const trajectory = { items: [question], feedback: [], pending_approval: null, response: snapshot };
+		installApi({ trajectory, messageTurn: {
+			status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null, error_code: null,
+			messages: [message('revised', 'user', 'Compare only the 293 K tests.'), message('answer', 'assistant', 'Now comparing only the 293 K tests.')]
+		} });
+		const base = fetchMock.getMockImplementation()!;
+		let updates: ReadableStreamDefaultController<Uint8Array>;
+		let acknowledgeStop: (response: Response) => void;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input).endsWith('/events')) return Promise.resolve(new Response(new ReadableStream({ start(controller) { updates = controller; } }), { headers: { 'Content-Type': 'text/event-stream' } }));
+			if (requestPath(input).endsWith('/responses/response-one/stop')) return new Promise<Response>((resolve) => { acknowledgeStop = resolve; });
+			return base(input, init);
+		});
+		render(Conversation);
+		await expect.element(browserPage.getByRole('button', { name: 'Stop response' })).toBeEnabled();
+		await browserPage.getByRole('button', { name: 'Stop response' }).click();
+		await vi.waitFor(() => expect(acknowledgeStop).toBeDefined());
+		trajectory.response = { ...snapshot, status: 'cancelled', error_code: 'user_cancelled', stop_requested: true };
+		updates!.enqueue(new TextEncoder().encode(`event: trajectory\ndata: ${JSON.stringify(trajectory)}\n\n`));
+		updates!.close();
+		await expect.element(browserPage.getByText(/Stopped\. Saved research results/)).toBeVisible();
+		acknowledgeStop!(jsonResponse({ ...snapshot, stop_requested: true }));
+		const composer = browserPage.getByRole('textbox', { name: 'Message', exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send('Compare only the 293 K tests.', composer);
+		await expect.element(browserPage.getByText('Now comparing only the 293 K tests.')).toBeVisible();
+		await expect.element(browserPage.getByRole('log').getByText(question.content, { exact: true })).toBeVisible();
+	});
+
 	it.each([
 		[false, 'approved'], [false, 'rejected'], [true, 'approved'], [true, 'rejected']
 	] as const)('recovers embedded=%s saved %s decision after a model failure', async (embedded, decision) => {

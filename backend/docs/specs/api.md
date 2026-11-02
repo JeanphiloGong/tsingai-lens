@@ -350,6 +350,20 @@ branch's initial turn at most once. A repeated send returns 200204
 `chat_branch_already_started`; the client reads the saved trajectory to recover.
 Both ordinary JSON and SSE submission support this behavior.
 
+`POST /chat-sessions/{session_id}/responses/{response_id}/stop` requires the
+authenticated session owner and targets the exact current response. It returns
+the response snapshot with `stop_requested: true` while execution is stopping.
+The request survives ordinary snapshot updates and can be received by a different
+Web process. A stale response ID returns `200204` with `chat_response_changed`;
+repeating a request for the same finished response returns its terminal snapshot.
+The executing turn cancels pending model/read waits, preserves saved observations,
+and closes unresolved tool requests before saving response/turn status `cancelled`
+and `error_code: user_cancelled`. An already claimed write finishes and checkpoints
+first. Partial streamed text stays in the snapshot and is not a completed answer.
+GET trajectory, tree and SSE expose the saved cancellation. Once execution
+releases the session, an ordinary new message can revise the research direction.
+Disconnecting an event stream alone continues to leave execution running.
+
 `GET /messages` also returns `branches` (per-question `message_id`, ordered
 `session_ids`, and `active_session_id`), `branch_draft` (the unsent revision or
 null), and `running`. These fields survive browser reloads. Execution uses a
@@ -1079,8 +1093,11 @@ technical trajectory outcomes; they are not scientific absence, uncertainty,
 or Evidence status. Provider response objects and internal exceptions are not
 part of the public contract. Limits protect technical resources, not scientific
 completeness. Whole-turn elapsed time and cumulative model usage have no default
-cutoff; operators may configure either explicitly. Individual model/read request
-timeouts, context capacity, cancellation and no-progress detection remain active.
+cutoff; operators may configure either explicitly. Individual model/read requests
+and answer finalization also have no default elapsed timeout. Explicit Agent or
+connection limits still apply. Connection failures and the explicit response Stop
+action can end a model wait; closing the browser does not cancel research.
+Context capacity, cancellation and no-progress detection remain active.
 The browser shows completed warnings as non-blocking notices,
 not failed turns.
 

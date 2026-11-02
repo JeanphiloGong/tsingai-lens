@@ -221,6 +221,7 @@ class ChatTurnResponse(BaseModel):
         "approval_required",
         "failed",
         "rejected",
+        "cancelled",
     ]
     messages: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
@@ -283,7 +284,7 @@ class ChatResponseSnapshotResponse(BaseModel):
     started_at: str
     updated_at: str
     status: Literal[
-        "running", "completed", "approval_required", "failed", "interrupted"
+        "running", "completed", "approval_required", "failed", "interrupted", "cancelled"
     ]
     message_id: str | None = None
     message_created_at: str | None = None
@@ -293,6 +294,7 @@ class ChatResponseSnapshotResponse(BaseModel):
     completion_reason: str | None = None
     error_code: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    stop_requested: bool = False
 
 
 class ChatMessageListResponse(BaseModel):
@@ -316,6 +318,7 @@ class ChatTreeNodeResponse(BaseModel):
         "approval_required",
         "failed",
         "interrupted",
+        "cancelled",
         "incomplete",
         "draft",
     ]

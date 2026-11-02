@@ -304,9 +304,12 @@ Research Agent Chat requires an enabled model connection in PostgreSQL; the
 registry is not populated from `LLM_MODEL`. Follow the
 [model connection setup and recovery runbook](../backend/docs/runbooks/backend-ops.md#chat-binding-and-operational-recovery)
 to provision a connection and its referenced key in `backend.env`. The browser
-lets each new question select an enabled connection. Set
-`LENS_DEFAULT_MODEL_CONNECTION_ID` for clients that omit the choice. Finish or
-explicitly interrupt old unbound approvals before upgrading.
+lets each new question select an enabled connection. Available connections sort
+by `priority` descending (default `0`), then name and ID; both the browser and
+clients that omit a choice use the first entry. Set the preferred connection's
+priority higher in PostgreSQL and remove the obsolete
+`LENS_DEFAULT_MODEL_CONNECTION_ID` from `backend.env`. Finish or explicitly
+interrupt old unbound approvals before upgrading.
 
 Edit `LENS_VERSION` in `.env`, stop the application and Workers, pull the new
 images, migrate with the new backend image, and start Lens again:

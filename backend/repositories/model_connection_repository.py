@@ -31,7 +31,10 @@ class ModelConnectionRepository:
             rows = await db.scalars(
                 select(ModelConnectionORM)
                 .where(ModelConnectionORM.enabled.is_(True))
-                .order_by(ModelConnectionORM.display_name, ModelConnectionORM.connection_id)
+                .order_by(
+                    ModelConnectionORM.priority.desc(),
+                    ModelConnectionORM.display_name, ModelConnectionORM.connection_id,
+                )
             )
             return tuple(
                 ModelConnectionRecord(

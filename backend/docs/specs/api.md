@@ -150,7 +150,10 @@ handoff record or a second research-result identity.
 `GET /api/v1/model-connections` requires authentication and returns the standard
 `{code,message,data,meta}` envelope. Its `data` is
 `{"items":[{"connection_id":"lab-a","display_name":"Lab A","model":"lab-chat-a"}]}`.
-Only enabled configurations appear. Empty configuration returns an empty array.
+Only enabled configurations appear, ordered by `priority` descending, then
+`display_name` and `connection_id` ascending for stable ties. The first entry is
+the default selected by the browser and by new Chat requests without an explicit
+choice. Empty configuration returns an empty array.
 The directory never exposes base URLs, key references, secret values, or provider
 payloads. It has no write endpoint; operators maintain the PostgreSQL
 table through their database tools.
@@ -158,8 +161,9 @@ table through their database tools.
 `POST /api/v1/chat-sessions/{session_id}/messages` accepts an optional
 `model_connection_id` alongside the existing message, Source, permission, and
 branch fields. Resolve it only after ownership checks and under the existing
-session execution lock. Omission selects `LENS_DEFAULT_MODEL_CONNECTION_ID`.
-No default or an invalid/disabled selection fails before appending a user message
+session execution lock. Omission selects the first enabled entry in the same
+priority order as the directory. No available model or an invalid/disabled
+selection fails before appending a user message
 or calling the provider. A valid choice binds the whole response to that connection ID;
 another user's selection cannot mutate that response's client.
 

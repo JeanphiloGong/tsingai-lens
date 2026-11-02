@@ -272,10 +272,8 @@ class ChatSessionService:
 
     def __init__(
         self, *, runner: ResearchAgentRunner,
-        default_model_connection_id: str | None = None,
     ) -> None:
         self.runner = runner
-        self.default_model_connection_id = default_model_connection_id
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -1356,10 +1354,12 @@ class ChatSessionService:
             if record is None:
                 raise ServiceUnavailableException("The selected model connection is unavailable.", data={"code": "model_connection_binding_missing"})
             return record
-        connection_id = requested_id or self.default_model_connection_id
-        if not connection_id:
-            raise ServiceUnavailableException("The selected model connection is unavailable.", data={"code": "model_connection_default_unavailable"})
-        record = await ModelConnectionRepo.read_enabled(connection_id)
+        if not requested_id:
+            connections = await ModelConnectionRepo.list_enabled()
+            if not connections:
+                raise ServiceUnavailableException("The selected model connection is unavailable.", data={"code": "model_connection_default_unavailable"})
+            return connections[0]
+        record = await ModelConnectionRepo.read_enabled(requested_id)
         if record is None:
             raise ResourceConflictException("The selected model connection is unavailable.", data={"code": "model_connection_unavailable"})
         return record

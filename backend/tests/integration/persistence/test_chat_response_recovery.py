@@ -99,7 +99,7 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
         )
         chat_model.OpenAIChatModel = lambda **options: runner.model
         service = chat_session_service.ChatSessionService(
-            runner=runner, default_model_connection_id="worker-test",
+            runner=runner,
         )
         app = FastAPI()
         shared_chat_service.ChatService = service

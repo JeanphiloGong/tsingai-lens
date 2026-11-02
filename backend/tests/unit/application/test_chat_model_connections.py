@@ -335,17 +335,52 @@ async def test_missing_key_keeps_a_saved_decision_visible_and_retryable(decision
     assert selected == ["model-lab-a"] * 2 and len(write.executed) == (1 if decision == "approved" else 0)
 
 
-async def test_omission_requires_a_configured_default(postgres_session_factory):
-    runtime = service(await configured(postgres_session_factory, connection()), lambda **_: ClosableModel(ModelTurn(content="Check the Source conditions.")))
+async def test_omission_uses_the_first_available_model_and_tracks_priority_changes(postgres_session_factory):
+    repository = await configured(postgres_session_factory, connection(), connection("lab-b"))
+    async with postgres_session_factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).where(
+            ModelConnectionORM.connection_id == "lab-b",
+        ).values(priority=100))
+    selected = []
+
+    def build_model(*, model, **options):
+        selected.append(model)
+        return ClosableModel(ModelTurn(content="Check the Source conditions."))
+
+    runtime = service(repository, build_model)
+    app = FastAPI()
+    app.include_router(model_router, prefix="/api/v1")
+    app.dependency_overrides[get_current_user_id] = lambda: "alice"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        directory = (await client.get("/api/v1/model-connections")).json()["data"]["items"]
+    assert [item["connection_id"] for item in directory] == ["lab-b", "lab-a"]
+    assert all(set(item) == {"connection_id", "display_name", "model"} for item in directory)
+    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    await runtime.set_session_title_for_user(session.session_id, "alice", title="Compare conditions")
+    await runtime.send_message(session.session_id, "alice", message="Compare papers")
+    snapshot = await session_service_module.ChatRepo.read_response_snapshot(session.session_id)
+    assert snapshot.model_connection_id == "lab-b"
+    async with postgres_session_factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).where(
+            ModelConnectionORM.connection_id == "lab-a",
+        ).values(priority=200))
+    # An existing response keeps its recorded choice after the directory changes.
+    assert (await session_service_module.ChatRepo.read_response_snapshot(session.session_id)).model_connection_id == "lab-b"
+    await runtime.send_message(session.session_id, "alice", message="Compare another outcome")
+    assert (await session_service_module.ChatRepo.read_response_snapshot(session.session_id)).model_connection_id == "lab-a"
+    assert selected == ["model-lab-b", "model-lab-a"]
+    await runtime.send_message(session.session_id, "alice", message="Use my explicit choice", model_connection_id="lab-b")
+    assert (await session_service_module.ChatRepo.read_response_snapshot(session.session_id)).model_connection_id == "lab-b"
+    assert selected[-1] == "model-lab-b"
+
+
+async def test_omission_with_no_enabled_models_does_not_append_a_question(postgres_session_factory):
+    runtime = service(await configured(postgres_session_factory, connection(enabled=False)), lambda **_: pytest.fail("provider called"))
     session = await runtime.create_session(collection_id="col-alice", user_id="alice")
     with pytest.raises(ProjectException) as captured:
         await runtime.send_message(session.session_id, "alice", message="Compare papers")
     assert captured.value.data["code"] == "model_connection_default_unavailable"
     assert await session_service_module.ChatRepo.read_messages(session.session_id) == ()
-    runtime.default_model_connection_id = "lab-a"
-    result = await runtime.send_message(session.session_id, "alice", message="Compare papers")
-    snapshot = await session_service_module.ChatRepo.read_response_snapshot(session.session_id)
-    assert result["status"] == "completed" and snapshot.model_connection_id == "lab-a"
 
 
 async def test_unbound_old_approval_refuses_to_guess_the_enabled_default(postgres_session_factory):
@@ -360,7 +395,6 @@ async def test_unbound_old_approval_refuses_to_guess_the_enabled_default(postgre
     snapshot = await session_service_module.ChatRepo.read_response_snapshot(session.session_id)
     await session_service_module.ChatRepo.save_response_snapshot(session.session_id, replace(snapshot,
         sequence=snapshot.sequence + 1, model_connection_id=None))
-    runtime.default_model_connection_id = "lab-a"
     with pytest.raises(ProjectException) as captured:
         await runtime.decide_tool_call_for_user(session.session_id, pending.tool_call_id, "alice",
             arguments_digest=pending.arguments_digest, decision="approved")

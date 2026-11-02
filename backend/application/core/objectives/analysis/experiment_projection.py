@@ -688,8 +688,10 @@ def _project_finding(
             "insufficient_confirmation"
             if finding.synthesis_status == "single_study" else finding.synthesis_status
         ),
-        selection_ids=(),
-        comparison_group_ids=(),
+        # Preserve selection identities so the objective detail view can load
+        # the exact experiment rows behind a Finding.
+        selection_ids=finding.selection_ids,
+        comparison_group_ids=finding.comparison_group_ids,
         paper_contributions=papers,
     )
     return projected

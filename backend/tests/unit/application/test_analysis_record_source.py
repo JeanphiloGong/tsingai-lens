@@ -37,7 +37,9 @@ def analysis():
         ("system_generated", "experiment_graph", True),
         ("system_generated", "legacy_snapshot", False),
         ("human_authored", "authored_snapshot", False),
-        ("agent_authored", "experiment_graph", False),
+        ("human_authored", "experiment_graph", True),
+        ("agent_authored", "experiment_graph", True),
+        ("agent_authored", "authored_snapshot", False),
     ],
 )
 async def test_completed_analysis_selects_its_saved_scientific_record_source(

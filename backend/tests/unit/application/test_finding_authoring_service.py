@@ -433,6 +433,13 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
     assert published.source_analysis_version == 1
     assert published.created_by_user_id == "user-1"
     assert published.created_by_tool_call_id is None
+    from application.core.objectives.analysis.analysis_record_source import (
+        should_read_experiment_projection,
+    )
+
+    assert await should_read_experiment_projection(
+        collection_id="collection-1", objective_id="objective-1", analysis_version=2,
+    )
     with pytest.raises(ValueError, match="source analysis version is stale"):
         await repository.queue_analysis(
             "collection-1",

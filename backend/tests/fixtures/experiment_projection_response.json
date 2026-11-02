@@ -295,6 +295,9 @@
         "sample": [],
         "test": []
       },
+      "selection_ids": [
+        "selection-1"
+      ],
       "source_analysis_version": null,
       "statement": "Preheat was associated with higher elongation.",
       "synthesis_status": "insufficient_confirmation"

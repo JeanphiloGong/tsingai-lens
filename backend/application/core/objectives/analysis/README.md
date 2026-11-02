@@ -60,8 +60,9 @@ response validation uses those same domain rules inside the existing model
 repair loop, so an invalid attribution is rejected before persistence.
 
 Scientific reads choose their owner from the saved completed analysis version.
-Automatic `experiment_graph` analyses use the experiment projection; authored and
-historical snapshots retain their saved scientific records. A missing or unfinished
+All `experiment_graph` analyses use the experiment projection, including authored
+versions that publish fixed selections. Authored and historical snapshots with
+other record sources retain their saved scientific records. A missing or unfinished
 analysis is rejected before record selection. Projection module availability is
 not a storage-source flag, and a view that already loaded its analysis reuses
 that source decision rather than rereading the same metadata. Both sources return
@@ -80,6 +81,12 @@ contains only:
 - reported sample/condition/test/result content and candidate local edges;
 - the supplied Source labels used by each fact or binding edge; and
 - unresolved boundary, conflict, or attribution issues.
+
+The extraction prompt shows the complete comparison contract: both declared
+variant keys, both measurement-key lists, the outcome, changed factors, and
+Source labels. A supported comparison must close over those reported results;
+when either side is missing, the model retains the gap and returns no comparison.
+Reported interpretations likewise declare their statement, kind and Sources.
 
 The model must not emit formal IDs, collection/objective ownership, revision
 numbers, `SourceReference` records, or final `binding_status`, `direction`,

@@ -413,6 +413,41 @@ def _extract_once(payload: dict, *, bundle: PaperExperimentSourceBundle | None =
     ).extract(objective=_objective(), bundle=bundle or _bundle())
 
 
+def test_prompt_comparison_shape_can_close_over_reported_measurements() -> None:
+    _, user_prompt = _prompt(
+        objective=_objective(), bundle=_bundle(), strategy="focused-single-pass",
+    )
+    comparison = deepcopy(
+        json.loads(user_prompt)["draft_schema"]["experiments"][0]["comparisons"][0]
+    )
+    comparison.update(
+        comparison_key="comparison-preheat",
+        baseline_variant_key="variant-np",
+        target_variant_key="variant-p150",
+        outcome="elongation",
+        baseline_measurement_keys=["measurement-np"],
+        target_measurement_keys=["measurement-p150"],
+        changed_variables=[
+            {"name": "preheating", "baseline_value": "none", "target_value": 150,
+             "unit": "C"}
+        ],
+        reported_statement="NP 72%; P150 82%.",
+    )
+    payload = _ready_payload()
+    payload["experiments"][0]["comparisons"] = [comparison]
+    interpretation = deepcopy(
+        json.loads(user_prompt)["draft_schema"]["experiments"][0]["reported_interpretations"][0]
+    )
+    interpretation["statement"] = "NP 72%; P150 82%."
+    interpretation["measurement_keys"] = ["measurement-np", "measurement-p150"]
+    payload["experiments"][0]["reported_interpretations"] = [interpretation]
+
+    result = _extract_once(payload)
+
+    assert result.status == "ready"
+    assert result.readiness.selected_comparison_keys == ("comparison-preheat",)
+
+
 def test_source_bundle_hides_service_ids_but_keeps_authoritative_catalog() -> None:
     bundle = build_source_bundle(
         document_id="document-1",

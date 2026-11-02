@@ -23,7 +23,7 @@ from application.chat.capabilities.research_planning import (
 from domain.goal import ExperimentPlanRecord
 from exceptions import ResourceConflictException
 from pydantic import ValidationError
-from tests.unit.application.test_research_agent_runner import _Model as _DiscoveryModel
+from tests.unit.application.test_research_agent_runner import _Model
 
 pytestmark = pytest.mark.anyio
 
@@ -196,55 +196,6 @@ class _StaleExperimentPlanService(_ExperimentPlanService):
             "research plan sources are stale: concurrent update",
             data={"code": "research_plan_sources_stale"},
         )
-
-
-class _Model(_DiscoveryModel):
-    def __init__(
-        self,
-        *turns: ModelTurn,
-        expected_tools: set[str] | None = None,
-    ) -> None:
-        super().__init__(*turns)
-        self.expected_tools = expected_tools or {
-            "propose_research_plan",
-            "create_research_plan",
-        }
-
-    async def respond(
-        self,
-        *,
-        context: tuple,
-        tool_specs: tuple,
-        text_delta_callback=None,
-        timeout_seconds=180.0,
-        max_output_tokens=16_384,
-    ):
-        messages = context.messages
-        assert messages
-        if any(spec.name == "discover_research_tools" for spec in tool_specs):
-            return await super().respond(
-                context=context,
-                tool_specs=tool_specs,
-                text_delta_callback=text_delta_callback,
-                timeout_seconds=timeout_seconds,
-                max_output_tokens=max_output_tokens,
-            )
-        # Once the final approval write has completed, the runner deliberately
-        # gives the model an answer-only turn so it cannot repeat that write.
-        expected_tools = self.expected_tools
-        next_call = (
-            self.turns[0].tool_calls[0]
-            if self.turns and self.turns[0].tool_calls
-            else None
-        )
-        if next_call is not None and next_call.name == "create_research_plan":
-            # After a transient proposal, only the exact approved write remains
-            # available for the next model decision.
-            expected_tools = {"create_research_plan"}
-        if len(self.turns) == 1 and not self.turns[0].tool_calls:
-            expected_tools = set()
-        assert {item.name for item in tool_specs} == expected_tools
-        return self.turns.popleft()
 
 
 def _context(call_id: str) -> CapabilityExecutionContext:
@@ -607,7 +558,7 @@ async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(
     research_planning.collection_service = _CollectionService()
     research_planning.finding_dataset_service = _FindingFeedbackService(label_status=label_status)
     proposal = ProposeResearchPlanCapability()
-    model = _DiscoveryModel(
+    model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)
         ),
@@ -660,7 +611,7 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
         "source_snapshots": _source_snapshots(),
     }
     runner = ResearchAgentRunner(
-        model=_DiscoveryModel(
+        model=_Model(
             ModelTurn(
                 tool_calls=(
                     ModelToolCall(

@@ -23,16 +23,62 @@ def test_discovery_reordering_is_not_new_progress():
     progress = _RunProgress(AgentRunLimits())
     for order, expected in ((["read_source", "inspect_table"], True),
                             (["inspect_table", "read_source"], False),
+                            (["read_source"], False),
                             (["read_source", "search_sources"], True)):
         call = ChatToolCall.requested(
             tool_call_id="discovery", session_id="chat", assistant_message_id="assistant",
             name="discover_research_tools", arguments={"tool_names": order}, risk=ToolRisk.READ,
         )
-        data = {"loaded_tool_names": order, "deferred_tool_names": [],
-                "source_inspection_required": True, "tools": [{"name": name} for name in order]}
+        data = {"loaded_tool_names": order,
+                "tools": [{"name": name} for name in order]}
         result = ChatToolResult(call.tool_call_id, ToolResultStatus.SUCCEEDED, data=data)
         assert progress.observe(call, result) is expected
         assert result.data["loaded_tool_names"] == order
+
+
+def test_discovery_catalog_contains_only_definitions_not_already_exposed():
+    from application.chat.capability_policy import select_tool_specs
+    from domain.chat import ChatMessage, ChatMessageRole
+
+    core = _Capability("read_source", ToolRisk.READ)
+    core.spec = replace(core.spec, initially_available=True)
+    extra = _Capability("query_published_findings", ToolRisk.READ)
+    registry = CapabilityRegistry((core, extra))
+    specs = select_tool_specs(registry, [], [])
+    catalog = next(spec for spec in specs if spec.name == "discover_research_tools")
+    assert "- read_source [" not in catalog.description
+    assert "- query_published_findings [" in catalog.description
+    assert set(catalog.input_model.model_fields) == {"tool_names"}
+    observed = ChatMessage(
+        "loaded", "chat", ChatMessageRole.TOOL, "", "2026-11-01", tool_call_id="discovery",
+        tool_result=ChatToolResult("discovery", ToolResultStatus.SUCCEEDED,
+                                  data={"loaded_tool_names": [extra.spec.name]}),
+    )
+    from domain.chat import ChatToolRequest
+    request = ChatMessage.assistant_tool_calls(
+        message_id="request", session_id="chat", content="", created_at="2026-11-01",
+        tool_calls=(ChatToolRequest("discovery", "discover_research_tools", {"tool_names": [extra.spec.name]}, 0),),
+    )
+    user = ChatMessage.user(message_id="u", session_id="chat", content="Review a Finding.", created_at="2026-11-01")
+    selected = select_tool_specs(registry, [user, request, observed], [])
+    assert {spec.name for spec in selected} == {core.spec.name, extra.spec.name, "update_execution_plan"}
+
+
+def test_rephrasing_a_plan_is_saved_without_counting_as_progress():
+    from domain.chat import ChatMessage
+
+    progress = _RunProgress(AgentRunLimits())
+    user = ChatMessage.user(message_id="u", session_id="chat", content="Compare elongation.", created_at="2026-11-01")
+    data = {"steps": [{"step_id": "read", "action": "Read relevant experiments", "status": "in_progress"}],
+            "status": "in_progress", "explanation": "Check the reported conditions."}
+    result = ChatToolResult("plan", ToolResultStatus.SUCCEEDED, data=data)
+    assert progress.accept_plan_update(result, request=user)
+    progress.plan_update_available = True
+    changed = {**data, "steps": [{**data["steps"][0], "action": "Inspect relevant paper experiments"}]}
+    assert not progress.accept_plan_update(replace(result, data=changed), request=user)
+    assert progress.execution_plan.steps[0]["action"] == changed["steps"][0]["action"]
+    completed = {**changed, "steps": [{**changed["steps"][0], "status": "completed"}], "status": "completed"}
+    assert progress.accept_plan_update(replace(result, data=completed), request=user)
 
 
 def test_section_read_keeps_the_full_outline_and_unread_results():
@@ -97,6 +143,28 @@ async def test_stalled_research_can_execute_a_new_read_after_specific_feedback()
                       if any("[STALLED EXECUTION: CORRECTION]" in message.content for message in context))
     assert any("read_source" in message.content for message in correction
                if "[STALLED EXECUTION: CORRECTION]" in message.content)
+
+
+@pytest.mark.anyio
+async def test_terminal_plan_transition_gets_a_normal_answer_after_repeated_reads():
+    reader = _Capability("read_source", ToolRisk.READ, _QuestionArguments)
+    step = {"step_id": "read", "action": "Check reported conditions", "status": "in_progress"}
+    plan = {"steps": [step], "status": "in_progress", "explanation": "Read the experiment."}
+    done = {"steps": [{**step, "status": "completed"}], "status": "completed",
+            "explanation": "Existing observations answer the bounded question."}
+    answer = "The inspected experiment leaves tensile orientation unknown."
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan),)),
+        *(ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "paper"}),)) for _ in range(3)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", done),)),
+        ModelTurn(content=answer), discover=("update_execution_plan", "read_source"),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((reader,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Check the experiment's tensile orientation.",
+    )
+    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
+    assert result.messages[-1].content == answer
+    assert result.execution_plan["status"] == "completed"
 
 
 def test_stall_correction_does_not_override_the_tool_budget():

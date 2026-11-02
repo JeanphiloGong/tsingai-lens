@@ -124,10 +124,10 @@ class _RevisionArguments(_ObjectiveArguments):
 class _Model:
     # Script domain decisions; perform the actual discovery round trip when a
     # scripted call needs a deferred schema. all_tool_spec_names includes both.
-    def __init__(self, *turns: ModelTurn | Exception, discover: tuple[str, ...] = (), source_inspection_required: bool = False) -> None:
+    def __init__(self, *turns: ModelTurn | Exception, discover: tuple[str, ...] = ()) -> None:
         self.turns = deque(turns)
         self.discover = discover
-        self.source_inspection_required = source_inspection_required
+
         self.discovery_decisions: list[tuple[str, ...]] = []
         self.all_tool_spec_names: list[tuple[str, ...]] = []
         self.tool_spec_names: list[tuple[str, ...]] = []
@@ -164,7 +164,7 @@ class _Model:
         if missing:
             self.discover = ()
             self.discovery_decisions.append(missing)
-            return ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": list(missing), "source_inspection_required": self.source_inspection_required}),))
+            return ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": list(missing)}),))
         self.contexts.append(messages)
         self.request_limits.append((timeout_seconds, max_output_tokens))
         self.tool_spec_names.append(tuple(name for name in names if name != "discover_research_tools"))
@@ -1649,7 +1649,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
         ),
         ModelTurn(content="已读取结果原文；目前只能对第一篇论文形成有依据的初步判断。"),
         discover=("browse_collection_papers", "search_sources", "read_source"),
-        source_inspection_required=True,
+
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -3877,7 +3877,7 @@ async def test_finding_recheck_can_choose_its_linked_source() -> None:
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
         ModelTurn(tool_calls=(ModelToolCall("create_finding_draft", {}),)),
         ModelTurn(content="单篇条件依赖结论的修订草案已形成，其他论文正文仍待核查。"),
-        source_inspection_required=True,
+
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((inspect, read, draft))).run_turn(
         context=_context(), previous_messages=(), user_message="请核对这个 Finding 的原文并给修订草案，先不要保存。",
@@ -3974,7 +3974,7 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
          if request_publication else
          ModelTurn(content="原始依据把先升后降简化成下降。已形成依据修订草案，保存后还需重新综合结论。")),
         discover=("inspect_published_finding", "read_source", "create_finding_draft", "create_evidence_draft", "update_execution_plan"),
-        source_inspection_required=True,
+
     )
     events: list[dict[str, object]] = []
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
@@ -4510,7 +4510,7 @@ async def test_research_request_discovers_source_and_experiment_tools_from_catal
     model = _Model(
         ModelTurn(content="已加载完成研究这项请求所需的工具。"),
         discover=names,
-        source_inspection_required=True,
+
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -4978,7 +4978,7 @@ async def test_oversized_current_question_stops_before_any_provider_call():
     model = _Model()
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
     result = await runner.run_turn(context=_context(), previous_messages=(),
-                                  user_message="Research question with immutable conditions. " * 20000)
+                                  user_message="Research question with immutable conditions. " * 50000)
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "context_window_exceeded"
     assert not model.contexts

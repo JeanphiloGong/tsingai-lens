@@ -11,7 +11,7 @@ from domain.chat import ChatMessage, ChatMessageRole, ChatToolCall, ChatToolResu
 
 
 _CITATION_MARKER = re.compile(r"\[\[cite:(?P<references>[^\]\r\n]+)\]\]")
-_MARKDOWN_LINK = re.compile(r"(?<!\!)\[[^\]\r\n]*\]\([^)\r\n]*\)")
+_MARKDOWN_LINK = re.compile(r"((?<!\!)\[[^\]\r\n]*\]\([^)\r\n]*\))")
 _BACKTICK = re.compile(r"`(?P<reference>[^`\r\n]+)`")
 _LOCATOR = re.compile(r"(?<![\w-])(?P<reference>[A-Za-z0-9][A-Za-z0-9_.:/-]{8,})(?![\w-])")
 _INTERNAL_SOURCE_ID = re.compile(

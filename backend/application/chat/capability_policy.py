@@ -52,13 +52,6 @@ def validate_batch(
     successful_results = active_successful_results_by_name(messages)
     validated_arguments: dict[str, BaseModel] = {}
     for call, handler in requested:
-        if any(call.name in result.get("deferred_tool_names", ())
-               for result in successful_results.get("discover_research_tools", ())):
-            return (
-                ("action_deferred_for_request",
-                 "This action was explicitly deferred for this user request. Continue the requested work without it; a plan update or write approval does not expand the request."),
-                validated_arguments,
-            )
         if (
             call.name == "discover_research_tools"
             and permission_mode is ToolPermissionMode.READ_ONLY
@@ -205,10 +198,6 @@ def select_tool_specs(
     loaded_names.update(
         set(successful_results).intersection(capabilities.discovery.tools)
     )
-    loaded_names.difference_update(
-        name for result in successful_results.get("discover_research_tools", ())
-        for name in result.get("deferred_tool_names", ())
-    )
 
     if permission_mode is ToolPermissionMode.READ_ONLY:
         write_names = {
@@ -222,12 +211,11 @@ def select_tool_specs(
     allowed_names = loaded_names
 
     selected = select_names(allowed_names)
-    if capabilities.discovery.tools:
+    missing_names = {spec.name for spec in select_names(set(capabilities.discovery.tools))} - loaded_names
+    if missing_names:
         return (
             *selected,
-            capabilities.discovery.spec_for_permission(
-                allow_writes=permission_mode is not ToolPermissionMode.READ_ONLY,
-            ),
+            capabilities.discovery.spec_for_names(missing_names),
         )
     return selected
 
@@ -597,8 +585,8 @@ def stage_instruction(
     return (
         "Execution observations, not a prescribed next step. Complete passage reads do not "
         "certify a paper or scientific conclusion. Unknown coverage is not unavailable text. "
-        "Transient drafts are not saved or approved. Use the prior paired tool results for "
-        "source locators and repair details; choose the next action for the active request.\n"
+        "Transient drafts are not saved or approved. Continuations describe available "
+        "unread content, not mandatory work beyond the research question.\n"
         + json.dumps(observations, ensure_ascii=False)
     )
 

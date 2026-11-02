@@ -61,3 +61,19 @@ def test_input_capacity_reserves_output_and_instructions_without_extra_read_quot
     without = builder.input_budget(**options, tool_schemas=[])
     with_tools = builder.input_budget(**options, tool_schemas=[schema])
     assert 0 < without - with_tools < 1000
+
+
+@pytest.mark.anyio
+async def test_current_request_is_not_reissued_after_completed_plan():
+    from dataclasses import replace
+    from application.chat.context_builder import ChatModelContext
+
+    active = _user("active", "Rank the inspected experiments by applicability.")
+    pair = _tool_pair(call_id="plan", payload={"status": "completed", "steps": [], "explanation": "Sources inspected."})
+    call = replace(pair[0], tool_calls=(replace(pair[0].tool_calls[0], name="update_execution_plan"),))
+    view = ChatModelContext((active, call, pair[1]), active_user_message_id=active.message_id,
+                            execution_plan={"status": "completed", "steps": []})
+    messages = view.provider_messages("system")
+    assert messages[-1]["role"] == "tool"
+    assert sum(message.get("content") == active.content for message in messages) == 1
+    assert not any("[CURRENT RESEARCHER REQUEST]" in (message.get("content") or "") for message in messages)

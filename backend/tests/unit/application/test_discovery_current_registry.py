@@ -44,7 +44,7 @@ def discovered_messages():
                     name="discover_research_tools",
                     arguments={
                         "tool_names": ["read_source"],
-                        "source_inspection_required": True,
+
                     },
                     position=0,
                 ),
@@ -113,7 +113,7 @@ async def test_discovery_then_read_produces_identifiable_domain_result():
     })
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={
-            "tool_names": ["read_source"], "source_inspection_required": True,
+            "tool_names": ["read_source"],
         }),)),
         ModelTurn(tool_calls=(ModelToolCall(name="read_source"),)),
         ModelTurn(content="The inspected passage reports 8% elongation."),

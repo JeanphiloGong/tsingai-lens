@@ -11,6 +11,15 @@ from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolRequ
 from application.chat.inline_citations import format_inline_citations, format_message_citations
 
 
+def test_existing_links_survive_formatting_and_repeated_trajectory_projection():
+    first = "[Measured density](/collections/c/documents/p?source_ref=results)"
+    second = "[Tensile conditions](/collections/c/documents/q?source_ref=methods)"
+    answer = f"| Finding | Source |\n|---|---|\n| Density | {first} |\n| Elongation | {second} |"
+    formatted = format_inline_citations(answer)
+    assert formatted == answer
+    assert format_inline_citations(formatted) == answer
+
+
 def _call(call_id: str, name: str) -> ChatToolCall:
     return ChatToolCall.requested(
         tool_call_id=call_id,

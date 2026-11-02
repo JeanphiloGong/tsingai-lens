@@ -184,8 +184,11 @@ class Finding:
             )
             if not mechanism_ids <= set(self.context_evidence_ids):
                 raise ValueError("finding mechanism evidence must bind as paper context")
-            if self.synthesis_status != self.synthesis_status_for(
-                self.paper_contributions
+            # Experiment selections own synthesis. Projected paper links provide
+            # navigation but do not encode the comparison directions or conditions.
+            if (
+                not self.selection_ids
+                and self.synthesis_status != self.synthesis_status_for(self.paper_contributions)
             ):
                 raise ValueError("finding synthesis status differs from paper evidence")
         if self.attribution_scope == "isolated_effect" and len(self.factors) != 1:

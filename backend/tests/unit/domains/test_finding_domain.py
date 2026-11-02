@@ -385,9 +385,33 @@ def test_cross_paper_agreement_is_derived_from_independent_direct_results() -> N
     assert finding.supporting_document_ids == ("paper-1", "paper-2")
 
 
-def test_finding_rejects_declared_status_that_differs_from_paper_evidence() -> None:
+@pytest.mark.parametrize("status", ("agreement", "condition_dependent", "conflict"))
+def test_finding_rejects_declared_status_that_differs_from_paper_evidence(status) -> None:
     with pytest.raises(ValueError, match="synthesis status differs"):
-        _finding(synthesis_status="agreement")
+        _finding(synthesis_status=status)
+
+
+@pytest.mark.parametrize("status", ("condition_dependent", "conflict"))
+def test_experiment_finding_keeps_synthesis_when_paper_links_are_projected(status) -> None:
+    finding = _finding(
+        direction="mixed",
+        synthesis_status=status,
+        paper_contributions=(),
+        selection_ids=("selection-1", "selection-2"),
+    )
+    links = tuple(
+        FindingPaperContribution(
+            document_id=f"paper-{number}", analysis_status="analyzed",
+            supporting_evidence_ids=(f"evidence-{number}",),
+        )
+        for number in (1, 2)
+    )
+
+    projected = replace(finding, paper_contributions=links)
+
+    assert projected.synthesis_status == status
+    assert projected.selection_ids == finding.selection_ids
+    assert projected.supporting_evidence_ids == ("evidence-1", "evidence-2")
 
 
 def test_joint_factor_finding_cannot_claim_isolated_or_causal_effect() -> None:

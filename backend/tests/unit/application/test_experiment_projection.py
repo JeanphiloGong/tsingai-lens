@@ -250,6 +250,30 @@ async def test_projection_preserves_existing_finding_and_evidence_shapes() -> No
         ObjectiveEvidenceResponse.model_validate(item, from_attributes=True)
 
 
+@pytest.mark.parametrize("status", ("condition_dependent", "conflict"))
+async def test_projection_retains_saved_experiment_synthesis(monkeypatch, status) -> None:
+    service = _service()
+
+    class MixedFindings(_Findings):
+        async def list_findings(self, *args):
+            findings = await super().list_findings(*args)
+            return (replace(findings[0], direction="mixed", synthesis_status=status),)
+
+    monkeypatch.setattr(
+        service.experiment_query_service, "ExperimentFindingRepo", MixedFindings(),
+    )
+
+    findings, total = await service.list_analysis_findings(
+        "collection-1", "objective-1", 1, offset=0, limit=50,
+    )
+
+    assert total == 1
+    assert findings[0].synthesis_status == status
+    assert findings[0].selection_ids == ("selection-1",)
+    assert findings[0].paper_contributions[0].supporting_evidence_ids
+    FindingResponse.model_validate(findings[0], from_attributes=True)
+
+
 async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> None:
     service = _service()
 

@@ -1,0 +1,2 @@
+# Regenerated from db/queries and migrations with sqlc generate.
+/internal/db/

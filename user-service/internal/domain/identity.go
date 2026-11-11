@@ -26,8 +26,8 @@ type Session struct {
 	RevokedAt *time.Time
 }
 
-// define a method of Session that answers: at the moment, does this session still identify an authenticated user?
-func (s Session) Resolve(now time.Time) (User, error) {
+// Authenticate returns the user only while the account and session remain valid.
+func (s Session) Authenticate(now time.Time) (User, error) {
 	if !s.User.Active || s.RevokedAt != nil || !s.ExpiresAt.After(now) {
 		return User{}, ErrUnauthenticated
 	}

@@ -6,7 +6,7 @@ SELECT * FROM users WHERE user_id=$1 FOR UPDATE;
 INSERT INTO users(user_id,email,display_name,password_hash) VALUES($1,$2,$3,$4);
 -- name: AddSession :exec
 INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '24 hours');
--- name: Resolve :one
+-- name: SessionByTokenHash :one
 SELECT u.user_id,u.email,u.display_name,u.active,s.expires_at,s.revoked_at
 FROM users u JOIN sessions s USING(user_id) WHERE s.token_hash=$1;
 -- name: Revoke :exec

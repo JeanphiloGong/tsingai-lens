@@ -31,28 +31,30 @@ func (s *Service) Login(ctx context.Context, email, password string) (domain.Use
 	})
 	return user, sessionToken, err
 }
-func authenticatedUser(row db.ResolveRow, now time.Time) (domain.User, error) {
+
+// authenticateSessionRow converts persisted state and delegates validity checks to Session.Authenticate.
+func authenticateSessionRow(sessionRow db.SessionByTokenHashRow, now time.Time) (domain.User, error) {
 	session := domain.Session{
-		User:      domain.User{ID: row.UserID, Email: row.Email, Name: row.DisplayName, Active: row.Active},
-		ExpiresAt: row.ExpiresAt.Time,
+		User:      domain.User{ID: sessionRow.UserID, Email: sessionRow.Email, Name: sessionRow.DisplayName, Active: sessionRow.Active},
+		ExpiresAt: sessionRow.ExpiresAt.Time,
 	}
-	if row.RevokedAt.Valid {
-		session.RevokedAt = &row.RevokedAt.Time
+	if sessionRow.RevokedAt.Valid {
+		session.RevokedAt = &sessionRow.RevokedAt.Time
 	}
-	return session.Resolve(now)
+	return session.Authenticate(now)
 }
 func (s *Service) Resolve(ctx context.Context, sessionToken string) (domain.User, error) {
 	if sessionToken == "" {
 		return domain.User{}, domain.ErrUnauthenticated
 	}
-	row, err := db.New(s.Pool).Resolve(ctx, tokenHash(sessionToken))
+	sessionRow, err := db.New(s.Pool).SessionByTokenHash(ctx, tokenHash(sessionToken))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, domain.ErrUnauthenticated
 	}
 	if err != nil {
 		return domain.User{}, err
 	}
-	return authenticatedUser(row, time.Now())
+	return authenticateSessionRow(sessionRow, time.Now())
 }
 func (s *Service) Logout(ctx context.Context, sessionToken string) error {
 	return db.New(s.Pool).Revoke(ctx, tokenHash(sessionToken))

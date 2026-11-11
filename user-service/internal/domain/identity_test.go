@@ -27,7 +27,7 @@ func TestIdentityRules(t *testing.T) {
 		{"revoked", Session{User: user, ExpiresAt: now.Add(time.Hour), RevokedAt: &now}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tc.session.Resolve(now)
+			got, err := tc.session.Authenticate(now)
 			if tc.allowed {
 				if err != nil || got.ID != user.ID {
 					t.Fatalf("identity: %+v, %v", got, err)

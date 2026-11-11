@@ -12,22 +12,28 @@ Secure unless local HTTP development explicitly disables Secure.
 
 ## Generate and build
 
-Run from `user-service/` with the Go version declared in `go.mod`, sqlc v1.30.0
-and Goose v3.24.3 available:
+Run from `user-service/` with the Go version declared in `go.mod`:
 
 ```sh
-sqlc generate
 go mod download
 go build -o /tmp/lens-user-service ./cmd/user-service
 ```
 
-`internal/db/` is generated from `migrations/` and `db/queries/`; regenerate it
-instead of editing or committing the generated files.
+`internal/db/` is generated from `migrations/` and `db/queries/` and committed
+to Git. Building a checkout does not require sqlc. After changing SQL sources,
+regenerate the Go files with sqlc v1.30.0:
+
+```sh
+sqlc generate
+```
+
+Commit the SQL sources and generated Go changes together. Do not hand-edit
+generated files.
 
 ## Run locally
 
-Use a separate database owned by this service. Set `USER_DATABASE_URL`, then
-apply its migration:
+Use a separate database owned by this service. With Goose v3.24.3 available,
+set `USER_DATABASE_URL`, then apply its migration:
 
 ```sh
 goose -dir migrations postgres "$USER_DATABASE_URL" up

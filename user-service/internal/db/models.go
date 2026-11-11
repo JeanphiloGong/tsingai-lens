@@ -8,6 +8,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuthRateLimit struct {
+	Key     string
+	Used    int32
+	ResetAt pgtype.Timestamptz
+}
+
+type EmailChallenge struct {
+	ChallengeID string
+	Email       string
+	Purpose     string
+	CodeDigest  []byte
+	State       string
+	ExpiresAt   pgtype.Timestamptz
+	Attempts    int32
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Session struct {
 	TokenHash string
 	UserID    string
@@ -16,10 +33,11 @@ type Session struct {
 }
 
 type User struct {
-	UserID       string
-	Email        string
-	DisplayName  string
-	PasswordHash string
-	Active       bool
-	CreatedAt    pgtype.Timestamptz
+	UserID          string
+	Email           string
+	DisplayName     string
+	PasswordHash    string
+	Active          bool
+	CreatedAt       pgtype.Timestamptz
+	EmailVerifiedAt pgtype.Timestamptz
 }

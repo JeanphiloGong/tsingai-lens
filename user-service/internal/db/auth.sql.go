@@ -179,7 +179,7 @@ func (q *Queries) SetPassword(ctx context.Context, arg SetPasswordParams) error 
 }
 
 const userByEmail = `-- name: UserByEmail :one
-SELECT user_id, email, display_name, password_hash, active, created_at
+SELECT user_id, email, display_name, password_hash, active, created_at, email_verified_at
 FROM users
 WHERE email = $1
 FOR UPDATE
@@ -195,12 +195,13 @@ func (q *Queries) UserByEmail(ctx context.Context, email string) (User, error) {
 		&i.PasswordHash,
 		&i.Active,
 		&i.CreatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const userByID = `-- name: UserByID :one
-SELECT user_id, email, display_name, password_hash, active, created_at
+SELECT user_id, email, display_name, password_hash, active, created_at, email_verified_at
 FROM users
 WHERE user_id = $1
 FOR UPDATE
@@ -216,6 +217,7 @@ func (q *Queries) UserByID(ctx context.Context, userID string) (User, error) {
 		&i.PasswordHash,
 		&i.Active,
 		&i.CreatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }

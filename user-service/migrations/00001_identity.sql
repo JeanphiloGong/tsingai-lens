@@ -15,7 +15,8 @@ CREATE TABLE sessions (
     revoked_at TIMESTAMPTZ
 );
 
-CREATE INDEX sessions_user_idx ON sessions(user_id);
+CREATE INDEX sessions_user_idx
+    ON sessions(user_id);
 
 -- +goose Down
 DROP TABLE sessions;

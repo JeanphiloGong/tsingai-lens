@@ -12,7 +12,16 @@ import (
 )
 
 const addSession = `-- name: AddSession :exec
-INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '24 hours')
+INSERT INTO sessions (
+    token_hash,
+    user_id,
+    expires_at
+)
+VALUES (
+    $1,
+    $2,
+    now() + interval '24 hours'
+)
 `
 
 type AddSessionParams struct {
@@ -26,7 +35,18 @@ func (q *Queries) AddSession(ctx context.Context, arg AddSessionParams) error {
 }
 
 const addUser = `-- name: AddUser :exec
-INSERT INTO users(user_id,email,display_name,password_hash) VALUES($1,$2,$3,$4)
+INSERT INTO users (
+    user_id,
+    email,
+    display_name,
+    password_hash
+)
+VALUES (
+    $1,
+    $2,
+    $3,
+    $4
+)
 `
 
 type AddUserParams struct {
@@ -47,7 +67,8 @@ func (q *Queries) AddUser(ctx context.Context, arg AddUserParams) error {
 }
 
 const countUsers = `-- name: CountUsers :one
-SELECT count(*) FROM users
+SELECT count(*)
+FROM users
 `
 
 func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
@@ -67,7 +88,9 @@ func (q *Queries) LockBootstrap(ctx context.Context) error {
 }
 
 const revoke = `-- name: Revoke :exec
-UPDATE sessions SET revoked_at=now() WHERE token_hash=$1
+UPDATE sessions
+SET revoked_at = now()
+WHERE token_hash = $1
 `
 
 func (q *Queries) Revoke(ctx context.Context, tokenHash string) error {
@@ -76,7 +99,10 @@ func (q *Queries) Revoke(ctx context.Context, tokenHash string) error {
 }
 
 const revokeUser = `-- name: RevokeUser :exec
-UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL
+UPDATE sessions
+SET revoked_at = now()
+WHERE user_id = $1
+    AND revoked_at IS NULL
 `
 
 func (q *Queries) RevokeUser(ctx context.Context, userID string) error {
@@ -85,8 +111,16 @@ func (q *Queries) RevokeUser(ctx context.Context, userID string) error {
 }
 
 const sessionByTokenHash = `-- name: SessionByTokenHash :one
-SELECT u.user_id,u.email,u.display_name,u.active,s.expires_at,s.revoked_at
-FROM users u JOIN sessions s USING(user_id) WHERE s.token_hash=$1
+SELECT
+    u.user_id,
+    u.email,
+    u.display_name,
+    u.active,
+    s.expires_at,
+    s.revoked_at
+FROM users u
+JOIN sessions s USING (user_id)
+WHERE s.token_hash = $1
 `
 
 type SessionByTokenHashRow struct {
@@ -113,7 +147,9 @@ func (q *Queries) SessionByTokenHash(ctx context.Context, tokenHash string) (Ses
 }
 
 const setActive = `-- name: SetActive :exec
-UPDATE users SET active=$2 WHERE user_id=$1
+UPDATE users
+SET active = $2
+WHERE user_id = $1
 `
 
 type SetActiveParams struct {
@@ -127,7 +163,9 @@ func (q *Queries) SetActive(ctx context.Context, arg SetActiveParams) error {
 }
 
 const setPassword = `-- name: SetPassword :exec
-UPDATE users SET password_hash=$2 WHERE user_id=$1
+UPDATE users
+SET password_hash = $2
+WHERE user_id = $1
 `
 
 type SetPasswordParams struct {
@@ -141,7 +179,10 @@ func (q *Queries) SetPassword(ctx context.Context, arg SetPasswordParams) error 
 }
 
 const userByEmail = `-- name: UserByEmail :one
-SELECT user_id, email, display_name, password_hash, active, created_at FROM users WHERE email=$1 FOR UPDATE
+SELECT user_id, email, display_name, password_hash, active, created_at
+FROM users
+WHERE email = $1
+FOR UPDATE
 `
 
 func (q *Queries) UserByEmail(ctx context.Context, email string) (User, error) {
@@ -159,7 +200,10 @@ func (q *Queries) UserByEmail(ctx context.Context, email string) (User, error) {
 }
 
 const userByID = `-- name: UserByID :one
-SELECT user_id, email, display_name, password_hash, active, created_at FROM users WHERE user_id=$1 FOR UPDATE
+SELECT user_id, email, display_name, password_hash, active, created_at
+FROM users
+WHERE user_id = $1
+FOR UPDATE
 `
 
 func (q *Queries) UserByID(ctx context.Context, userID string) (User, error) {

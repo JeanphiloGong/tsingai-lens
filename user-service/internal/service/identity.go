@@ -83,3 +83,62 @@ func (s *Service) Bootstrap(ctx context.Context, email, password string) error {
 		return queries.AddUser(ctx, db.AddUserParams{UserID: "user_" + randomID()[:24], Email: strings.ToLower(strings.TrimSpace(email)), DisplayName: "Administrator", PasswordHash: encodedPasswordHash})
 	})
 }
+
+// ChangePassword verifies the current password, stores a replacement, and revokes old sessions.
+func (s *Service) ChangePassword(ctx context.Context, sessionToken, oldPassword, newPassword string) error {
+	// rejects a new password before starting the transaction if it is too short
+	if len(newPassword) < 12 {
+		return ErrInvalid
+	}
+
+	// delegates the remaining work to a transaction helper
+	return s.transaction(ctx, func(queries *db.Queries) error {
+		// looks up information associated with the session token
+		sessionRow, err := queries.SessionByTokenHash(ctx, tokenHash(sessionToken))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrUnauthenticated
+		}
+		if err != nil {
+			return err
+		}
+
+		// loads the account associated with the located session
+		userRow, err := queries.UserByID(ctx, sessionRow.UserID)
+		if err != nil {
+			return err
+		}
+
+		// re-reads the session after the user lookup, using the same context and freshly computed token hash
+		sessionRow, err = queries.SessionByTokenHash(ctx, tokenHash(sessionToken))
+		if err != nil {
+			return err
+		}
+
+		// checks the re-read session before accepting the password change
+		if _, err = authenticateSessionRow(sessionRow, time.Now()); err != nil {
+			return err
+		}
+
+		// requires the supplied current password to match the hash stored in the loaded user row
+		if !passwordMatches(oldPassword, userRow.PasswordHash) {
+			return domain.ErrUnauthenticated
+		}
+
+		// prepares the value to store for the accepted new password
+		encodedPasswordHash, err := passwordHash(newPassword)
+		if err != nil {
+			return err
+		}
+
+		// attempts to store the new hash for the user identified through the session
+		if err = queries.SetPassword(ctx, db.SetPasswordParams{
+			UserID:       userRow.UserID,
+			PasswordHash: encodedPasswordHash,
+		}); err != nil {
+			return err
+		}
+
+		// asks the queries layer to revoke sessions for the same user whose password was updated
+		return queries.RevokeUser(ctx, userRow.UserID)
+	})
+}

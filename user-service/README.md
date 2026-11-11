@@ -2,8 +2,9 @@
 
 V1 provides a standalone HTTP identity service backed by PostgreSQL. It creates
 the initial account locally and supports password login, session lookup and
-logout. Lens and browser integration, password changes, registration and
-permissions belong to later tutorial versions.
+logout. V2 adds authenticated self-service password changes and revokes all
+existing sessions for that account. Lens and browser integration, registration
+and permissions belong to later tutorial versions.
 
 The service stores PBKDF2-SHA256 password hashes and SHA-256 session-token
 digests. Sessions expire after 24 hours; revoked sessions and disabled accounts
@@ -50,8 +51,11 @@ HTTP_ADDR=127.0.0.1:8097 BROWSER_ORIGIN=http://127.0.0.1:5196 COOKIE_SECURE=fals
 
 The initial password must contain at least 12 bytes. A second bootstrap is
 rejected. Browser writes must include an Origin matching `BROWSER_ORIGIN`.
-Routes are `POST /v1/login`, `GET /v1/me`, and `POST /v1/logout`.
-This V1 checkpoint is for local use; login throttling and public HTTPS setup
+Routes are `POST /v1/login`, `GET /v1/me`, `POST /v1/logout`, and
+`POST /v1/me/password`. The password endpoint accepts `old_password` and
+`password`, requires the current session, and clears the current cookie after
+success; the database revokes every older session for that account.
+This checkpoint is for local use; login throttling and public HTTPS setup
 are introduced in later versions. SIGINT/SIGTERM starts graceful HTTP shutdown
 with a five-second timeout.
 
@@ -71,5 +75,6 @@ Without `TEST_USER_DATABASE_URL`, database tests explicitly skip; the domain,
 password and error-contract unit tests still run. A configured database with a
 different naming suffix is rejected before clearing data. The suite exercises
 initial-account concurrency, password verification, token-digest persistence,
-login/current-user/logout, session expiry and revocation, disabled accounts,
-Cookie/Origin rules, strict JSON parsing and dependency/internal error handling.
+login/current-user/logout, self-service password changes, session expiry and
+revocation, disabled accounts, Cookie/Origin rules, strict JSON parsing and
+dependency/internal error handling.

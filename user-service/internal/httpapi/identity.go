@@ -10,9 +10,16 @@ import (
 
 const CookieName = "lens_session"
 
+// LoginRequest contains the credentials submitted during login
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+// ChangePasswordRequest contains the current and replacement passwords.
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	Password    string `json:"password"`
 }
 
 func readSessionToken(r *http.Request) string {
@@ -70,6 +77,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, OKResponse{OK: true})
 }
 
+// declares a method of Handler that gets the current user's info
 func (h *Handler) CurrentUser(w http.ResponseWriter, r *http.Request) {
 	user, err := h.Service.Resolve(r.Context(), readSessionToken(r))
 	if err != nil {
@@ -81,4 +89,23 @@ func (h *Handler) CurrentUser(w http.ResponseWriter, r *http.Request) {
 		Email:       user.Email,
 		DisplayName: user.Name,
 	})
+}
+
+// ChangePassword updates the authenticated user's password and clears its cookie.
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	var input ChangePasswordRequest
+	if !decode(w, r, &input) {
+		return
+	}
+	if err := h.Service.ChangePassword(
+		r.Context(),
+		readSessionToken(r),
+		input.OldPassword,
+		input.Password,
+	); err != nil {
+		writeError(w, err)
+		return
+	}
+	h.setCookie(w, "", -1)
+	respond(w, http.StatusOK, OKResponse{OK: true})
 }

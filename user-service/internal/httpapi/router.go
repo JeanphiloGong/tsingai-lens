@@ -54,5 +54,6 @@ func Router(s *service.Service, origin string, secure bool) http.Handler {
 	router.Post("/v1/login", handler.Login)
 	router.Post("/v1/logout", handler.Logout)
 	router.Get("/v1/me", handler.CurrentUser)
+	router.Post("/v1/me/password", handler.ChangePassword)
 	return router
 }

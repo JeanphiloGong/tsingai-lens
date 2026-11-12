@@ -56,6 +56,21 @@ func main() {
 		return
 	}
 
+	if os.Getenv("REGISTRATION_ENABLED") == "true" {
+		userService.RegistrationEnabled = true
+		userService.ChallengeSecret = required("CHALLENGE_SECRET")
+		if len(userService.ChallengeSecret) < 32 {
+			log.Fatal("CHALLENGE_SECRET needs at least 32 bytes")
+		}
+		userService.SMTP = service.SMTPSettings{
+			Address:  required("SMTP_ADDR"),
+			From:     required("SMTP_FROM"),
+			Username: os.Getenv("SMTP_USER"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			TLS:      os.Getenv("SMTP_TLS") != "false",
+		}
+	}
+
 	// constructs the HTTP server used when bootstrap mode was not selected.
 	server := &http.Server{
 		Addr:              required("HTTP_ADDR"),

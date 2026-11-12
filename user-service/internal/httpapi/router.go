@@ -6,6 +6,7 @@ import (
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/service"
 	"github.com/go-chi/chi/v5"
 	"io"
+	"net"
 	"net/http"
 )
 
@@ -14,7 +15,8 @@ type OKResponse struct {
 }
 
 type ErrorResponse struct {
-	Code string `json:"code"`
+	Code       string `json:"code"`
+	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
 func respond(w http.ResponseWriter, statusCode int, responseBody any) {
@@ -37,6 +39,15 @@ func decode(w http.ResponseWriter, r *http.Request, destination any) bool {
 	}
 	return true
 }
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func Router(s *service.Service, origin string, secure bool) http.Handler {
 	router := chi.NewRouter()
 	router.Use(func(next http.Handler) http.Handler {
@@ -55,5 +66,8 @@ func Router(s *service.Service, origin string, secure bool) http.Handler {
 	router.Post("/v1/logout", handler.Logout)
 	router.Get("/v1/me", handler.CurrentUser)
 	router.Post("/v1/me/password", handler.ChangePassword)
+	router.Post("/v1/email-challenges", handler.SendEmailCode)
+	router.Post("/v1/register", handler.Register)
+	router.Post("/v1/password-resets", handler.ResetPassword)
 	return router
 }

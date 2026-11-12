@@ -50,6 +50,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
+	if err := h.Service.LimitLogin(r.Context(), input.Email, clientIP(r)); err != nil {
+		writeError(w, err)
+		return
+	}
 	user, sessionToken, err := h.Service.Login(r.Context(), input.Email, input.Password)
 	if errors.Is(err, domain.ErrUnauthenticated) {
 		respond(w, http.StatusUnauthorized, ErrorResponse{Code: "invalid_credentials"})

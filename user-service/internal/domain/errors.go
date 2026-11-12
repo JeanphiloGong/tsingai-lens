@@ -9,6 +9,7 @@ const (
 	InvalidInput    Kind = "invalid_input"
 	Conflict        Kind = "conflict"
 	Unavailable     Kind = "unavailable"
+	RateLimit       Kind = "rate_limit"
 )
 
 func (k Kind) Error() string { return string(k) }

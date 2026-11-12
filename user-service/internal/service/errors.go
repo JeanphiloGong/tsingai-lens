@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/textproto"
 	"strings"
 
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/domain"
@@ -30,8 +31,16 @@ func ClassifyDependencyError(err error) error {
 	if errors.As(err, &networkError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return fmt.Errorf("%w: %w", errUnavailable, err)
 	}
+
 	var databaseError *pgconn.PgError
 	if errors.As(err, &databaseError) && (strings.HasPrefix(databaseError.Code, "08") || databaseError.Code == "57P01" || databaseError.Code == "57P02" || databaseError.Code == "57P03") {
+		return fmt.Errorf("%w: %w", errUnavailable, err)
+	}
+
+	// prepares a variable that can receive a matching SMTP error found inside `err`
+	var smtpError *textproto.Error
+	// checks whether `err` contains a client/server protocol error with an SMTP-style 4xx status code
+	if errors.As(err, &smtpError) && smtpError.Code >= 400 && smtpError.Code < 500 {
 		return fmt.Errorf("%w: %w", errUnavailable, err)
 	}
 	return err

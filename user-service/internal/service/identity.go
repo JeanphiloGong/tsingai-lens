@@ -142,3 +142,15 @@ func (s *Service) ChangePassword(ctx context.Context, sessionToken, oldPassword,
 		return queries.RevokeUser(ctx, userRow.UserID)
 	})
 }
+
+// declares a method of Service that attempts count even if they succeed
+func (s *Service) LimitLogin(ctx context.Context, email, clientIP string) error {
+	return s.transaction(ctx, func(queries *db.Queries) error {
+		return reserveRateLimits(
+			ctx,
+			queries,
+			rateRule{"login-ip:" + clientIP, 900, 60},
+			rateRule{"login-email:" + strings.ToLower(strings.TrimSpace(email)), 900, 10},
+		)
+	})
+}

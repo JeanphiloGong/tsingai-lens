@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/domain"
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/service"
@@ -30,9 +31,27 @@ func writeError(w http.ResponseWriter, err error) {
 			statusCode = http.StatusConflict
 		case domain.Unavailable:
 			statusCode = http.StatusServiceUnavailable
+		case domain.RateLimit:
+			statusCode = http.StatusTooManyRequests
 		}
 		if statusCode != http.StatusInternalServerError {
 			errorCode = businessError.Code
+		}
+	}
+
+	// detects the rate-limit response path selected above
+	if statusCode == http.StatusTooManyRequests {
+		// declares `rate` as a pointer to `service.RateLimited`, initially `nil`
+		var rate *service.RateLimited
+
+		if errors.As(err, &rate) {
+			// adds the HTTP `Retry-After` response header, telling the client how many seconds it should wait before retrying
+			w.Header().Set("Retry-After", strconv.Itoa(rate.Seconds))
+			respond(w, statusCode, ErrorResponse{
+				Code:       errorCode,
+				RetryAfter: rate.Seconds,
+			})
+			return
 		}
 	}
 

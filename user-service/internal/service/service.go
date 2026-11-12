@@ -6,7 +6,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Service struct{ Pool *pgxpool.Pool }
+type Service struct {
+	Pool                *pgxpool.Pool
+	RegistrationEnabled bool
+	ChallengeSecret     string
+	SMTP                SMTPSettings
+}
 
 func (s *Service) transaction(ctx context.Context, runQueries func(*db.Queries) error) error {
 	tx, err := s.Pool.Begin(ctx)

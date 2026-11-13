@@ -1,6 +1,3 @@
-# Copyright (c) 2024 Microsoft Corporation.
-# Licensed under the MIT License
-
 """Parse plain text into traceable Source artifacts."""
 
 from __future__ import annotations

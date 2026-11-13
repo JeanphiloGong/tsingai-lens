@@ -1,6 +1,3 @@
-# Copyright (c) 2024 Microsoft Corporation.
-# Licensed under the MIT License
-
 """Parse input documents and write the Source handoff artifacts."""
 
 from __future__ import annotations

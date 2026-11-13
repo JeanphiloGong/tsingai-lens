@@ -31,8 +31,8 @@ are carried in `data.code`.
 ### Authentication
 
 Identity HTTP routes belong to user-service: `POST /user-api/v1/login`,
-`POST /user-api/v1/logout`, `GET /user-api/v1/me`.
-The permissions endpoint is introduced with the later authorization capability. The former Lens `/auth/*` routes are removed.
+`POST /user-api/v1/logout`, `GET /user-api/v1/me`,
+`GET /user-api/v1/me/permissions`. The former Lens `/auth/*` routes are removed.
 
 User-service HTTP errors return a flat object such as
 `{"code":"invalid_credentials"}` with the corresponding HTTP error status.

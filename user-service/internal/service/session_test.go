@@ -108,7 +108,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), "TRUNCATE users CASCADE; TRUNCATE email_challenges, auth_rate_limits"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE users CASCADE; TRUNCATE auth_audit, email_challenges, auth_rate_limits"); err != nil {
 		t.Fatal(err)
 	}
 	return pool

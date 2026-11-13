@@ -73,4 +73,14 @@ class IdentityClient:
             "display_name": user.display_name,
         }
 
+    async def check(self, token: str | None, permission_code: str) -> bool:
+        if not token:
+            raise SessionNotFoundError("authentication_required")
+        result = await self._call(
+            self.stub.Check,
+            auth_pb2.CheckRequest(session_token=token, permission_code=permission_code),
+        )
+        return result.allowed
+
+
 Client: IdentityClient

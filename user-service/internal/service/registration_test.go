@@ -53,11 +53,14 @@ func TestRegistration(t *testing.T) {
 	if success != 1 {
 		t.Fatal("concurrent proof use", success)
 	}
-	_, sessionToken, err := s.Login(ctx, email, password)
+	user, sessionToken, err := s.Login(ctx, email, password)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	perms, err := s.Permissions(ctx, user.ID)
+	if err != nil || len(perms) != 0 {
+		t.Fatal("registration granted privileges", perms, err)
+	}
 	resetID, resetCode := issue(email, "password_reset")
 	if _, err = s.CompleteEmailChallenge(ctx, challengeID, email, "password_reset", verificationCode, "new-tutorial-password", "", "service-test"); err != domain.ErrChallenge {
 		t.Fatal("purpose reuse", err)

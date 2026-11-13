@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/db"
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/httpapi"
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/rpc"
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/service"
@@ -63,6 +64,12 @@ func main() {
 		return
 	}
 
+	if len(os.Args) == 2 && os.Args[1] == "grant-initial-admin" {
+		if err = userService.InitializeAdmin(ctx, required("BOOTSTRAP_EMAIL")); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if os.Getenv("REGISTRATION_ENABLED") == "true" {
 		userService.RegistrationEnabled = true
 		userService.ChallengeSecret = required("CHALLENGE_SECRET")
@@ -75,6 +82,13 @@ func main() {
 			Username: os.Getenv("SMTP_USER"),
 			Password: os.Getenv("SMTP_PASSWORD"),
 			TLS:      os.Getenv("SMTP_TLS") != "false",
+		}
+		administrators, err := db.New(pool).CountAdmins(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if administrators == 0 {
+			log.Fatal("initialize administrator before enabling registration")
 		}
 	}
 

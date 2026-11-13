@@ -65,3 +65,42 @@ async def test_resolve_session_rejects_response_without_subject():
     client.stub = SimpleNamespace(Resolve=AsyncMock(return_value=auth_pb2.ResolveReply()))
     with pytest.raises(IdentityUnavailableError, match="invalid_identity_response"):
         await client.resolve_session("session-token")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("allowed", [True, False])
+async def test_check_permission_awaits_rpc_and_returns_the_current_decision(allowed):
+    client = IdentityClient.__new__(IdentityClient)
+    check = AsyncMock(return_value=auth_pb2.CheckReply(allowed=allowed))
+    client.stub = SimpleNamespace(Check=check)
+
+    assert await client.check("session-token", "users.manage") is allowed
+    check.assert_awaited_once_with(
+        auth_pb2.CheckRequest(session_token="session-token", permission_code="users.manage"),
+        timeout=1.0,
+    )
+
+
+@pytest.mark.anyio
+async def test_check_permission_rejects_missing_session_without_rpc():
+    client = IdentityClient.__new__(IdentityClient)
+    client.stub = SimpleNamespace(Check=AsyncMock())
+    with pytest.raises(SessionNotFoundError):
+        await client.check(None, "users.manage")
+    client.stub.Check.assert_not_called()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("code,error_type", [
+    (grpc.StatusCode.UNAUTHENTICATED, SessionNotFoundError),
+    (grpc.StatusCode.UNAVAILABLE, IdentityUnavailableError),
+    (grpc.StatusCode.INTERNAL, IdentityUnavailableError),
+])
+async def test_check_permission_distinguishes_transport_failure_from_denial(code, error_type):
+    client = IdentityClient.__new__(IdentityClient)
+    client.stub = SimpleNamespace(Check=AsyncMock(side_effect=grpc.aio.AioRpcError(
+        code, (), (), "private diagnostic",
+    )))
+    with pytest.raises(error_type) as raised:
+        await client.check("session-token", "users.manage")
+    assert "private diagnostic" not in str(raised.value)

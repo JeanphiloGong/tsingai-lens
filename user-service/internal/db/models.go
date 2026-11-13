@@ -8,6 +8,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuthAudit struct {
+	ID         int64
+	ActorID    string
+	TargetID   string
+	Action     string
+	CreatedAt  pgtype.Timestamptz
+	TargetType string
+	Details    []byte
+}
+
 type AuthRateLimit struct {
 	Key     string
 	Used    int32
@@ -25,6 +35,25 @@ type EmailChallenge struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type Group struct {
+	Code        string
+	Name        string
+	Description string
+	IsSystem    bool
+}
+
+type GroupPermission struct {
+	GroupCode      string
+	PermissionCode string
+}
+
+type Permission struct {
+	Code        string
+	Name        string
+	Description string
+	IsSystem    bool
+}
+
 type Session struct {
 	TokenHash string
 	UserID    string
@@ -40,4 +69,9 @@ type User struct {
 	Active          bool
 	CreatedAt       pgtype.Timestamptz
 	EmailVerifiedAt pgtype.Timestamptz
+}
+
+type UserGroup struct {
+	UserID    string
+	GroupCode string
 }

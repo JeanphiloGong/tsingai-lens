@@ -69,5 +69,23 @@ func Router(s *service.Service, origin string, secure bool) http.Handler {
 	router.Post("/v1/email-challenges", handler.SendEmailCode)
 	router.Post("/v1/register", handler.Register)
 	router.Post("/v1/password-resets", handler.ResetPassword)
+
+	router.Get("/v1/me/permissions", handler.CurrentPermissions)
+	router.Get("/v1/admin/users", handler.ListUsers)
+	router.Patch("/v1/admin/users/{user_id}/status", handler.UpdateUserStatus)
+	router.Get("/v1/admin/users/{user_id}/groups", handler.ListUserGroups)
+	router.Put("/v1/admin/users/{user_id}/groups/{group_code}", handler.GrantUserGroup)
+	router.Delete("/v1/admin/users/{user_id}/groups/{group_code}", handler.RevokeUserGroup)
+	router.Get("/v1/admin/groups", handler.ListGroups)
+	router.Post("/v1/admin/groups", handler.CreateGroup)
+	router.Patch("/v1/admin/groups/{group_code}", handler.UpdateGroup)
+	router.Delete("/v1/admin/groups/{group_code}", handler.DeleteGroup)
+	router.Get("/v1/admin/groups/{group_code}/permissions", handler.ListGroupPermissions)
+	router.Put("/v1/admin/groups/{group_code}/permissions/{permission_code}", handler.GrantGroupPermission)
+	router.Delete("/v1/admin/groups/{group_code}/permissions/{permission_code}", handler.RevokeGroupPermission)
+	router.Get("/v1/admin/permissions", handler.ListPermissions)
+	router.Post("/v1/admin/permissions", handler.CreatePermission)
+	router.Patch("/v1/admin/permissions/{permission_code}", handler.UpdatePermission)
+	router.Delete("/v1/admin/permissions/{permission_code}", handler.DeletePermission)
 	return router
 }

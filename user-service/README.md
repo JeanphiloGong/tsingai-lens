@@ -6,8 +6,9 @@ logout. V2 adds authenticated self-service password changes and revokes all
 existing sessions for that account. V3 adds email-verified registration,
 email-based password recovery, SMTP delivery and persistent rate limits. V4
 adds the mTLS gRPC Resolve endpoint for Lens and same-origin browser login
-through `/user-api`. Permission checks belong to a later checkpoint; the
-existing proto Check declaration is not implemented in V4.
+through `/user-api`. V6 adds permission reads, user activation and group
+memberships, group/permission catalog management, first-administrator setup
+and the gRPC Check implementation.
 
 The service stores PBKDF2-SHA256 password hashes and SHA-256 session-token
 digests. Sessions expire after 24 hours; revoked sessions and disabled accounts
@@ -95,14 +96,17 @@ empty database once:
 
 ```sh
 /tmp/lens-user-service bootstrap
+/tmp/lens-user-service grant-initial-admin
 unset BOOTSTRAP_EMAIL BOOTSTRAP_PASSWORD
 ```
 
 Before starting the server, configure the mTLS material described below; then
 run `HTTP_ADDR=127.0.0.1:8097 BROWSER_ORIGIN=http://127.0.0.1:5196 COOKIE_SECURE=false /tmp/lens-user-service`.
 
-The initial password must contain at least 12 bytes. A second bootstrap is
-rejected. Browser writes must include an Origin matching `BROWSER_ORIGIN`.
+The initial password must contain at least 12 bytes. Bootstrap creates an
+account; the second command assigns the built-in admin group to that existing
+active account. A second bootstrap is rejected, and first-administrator setup
+is rejected once an effective administrator already exists. Browser writes must include an Origin matching `BROWSER_ORIGIN`.
 Account routes are `POST /v1/login`, `GET /v1/me`, `POST /v1/logout`, and
 `POST /v1/me/password`. The password endpoint accepts `old_password` and
 `password`, requires the current session, and clears the current cookie after
@@ -153,6 +157,59 @@ issuance/rotation and HTTPS ingress belong to the later launch checkpoint.
 Existing Lens databases require stopped writes, verified account import and a
 recoverable backup before migration 0099; this development checkpoint only
 replays fresh synthetic databases. Keep V1–V3 demo data separate.
+
+## V6 permissions and administration
+
+When upgrading a V5 database, apply pending Goose migrations and rebuild the
+binary with the commands above. Set `BOOTSTRAP_EMAIL` to an existing active
+account, then run `/tmp/lens-user-service grant-initial-admin` once. Existing
+accounts do not need another `bootstrap`; it is only for an empty user database.
+
+The [HTTP contract](docs/http-api.md#current-user-permissions) owns request and
+response fields. `GET /v1/me/permissions` returns the current effective codes;
+an ordinary registered account receives `{"permission_codes":[]}`. Management
+routes under `/v1/admin/` require a valid session and `users.manage`:
+
+- Users: paginated lists, enable/disable, and group membership reads/grants/removals.
+- Groups and permissions: paginated catalogs, create, update display metadata,
+  and delete unused custom entries; group permission associations are managed
+  separately.
+
+Group/permission codes are stable keys. PATCH changes name/description only;
+clients cannot rename codes or set `is_system`. Built-in entries cannot be
+deleted. Groups with members and permission codes still assigned to groups
+return a conflict on deletion. Ordinary accounts use email registration;
+there is no administrator account-creation or password-reset endpoint.
+
+Migration 00003 seeds four groups and six permission codes; 00004 adds catalog
+metadata and structured audit details while preserving existing associations.
+The admin group initially grants only `users.manage`. Scientific read,
+annotation and publication codes are registered for subsequent capabilities;
+their business entrypoints are outside V6. Registering a code does not add an
+automatic enforcement rule.
+
+First-administrator setup uses the existing account specified by
+`BOOTSTRAP_EMAIL`, requires an enabled account and no current effective
+administrator, and records the grant atomically. It does not infer authority
+from a display name. With `REGISTRATION_ENABLED=true`, startup refuses to serve
+until an enabled account has `users.manage`; custom management groups count.
+Normal startup does not grant or restore group memberships.
+
+Every administrative write takes the shared administration lock, rechecks the
+actor's current session and effective permission, and saves its audit in the
+same transaction. Failures roll back the entire operation. Disabling an account
+also revokes its sessions; enabling it does not revive them. Removing access
+must leave at least one enabled account with `users.manage`, including access
+from custom groups. The audit stores actor, target type/ID, action and changed
+metadata, with no passwords or tokens.
+
+The [gRPC contract](docs/grpc-api.md#2-check-an-action-permission-check) exposes
+`Check(session_token, permission_code)`. The server resolves the session before
+each check and returns `allowed=false` for missing permissions. Lens's
+`IdentityClient.check` distinguishes that denial from authentication errors and
+transport failures. There is no permission cache or caller-selected subject.
+Lens's existing resource ownership checks continue to apply independently.
+The administration browser UI belongs to V7.
 
 ## V3 email registration and recovery
 
@@ -214,7 +271,7 @@ go vet ./...
 Without `TEST_USER_DATABASE_URL`, database tests explicitly skip; the domain,
 password and error-contract unit tests still run. A configured database with a
 different naming suffix is rejected before clearing data. The suite exercises
-initial-account concurrency, password verification, token-digest persistence,
+initial-account and administrator concurrency, password verification, token-digest persistence,
 login/current-user/logout, self-service password changes, session expiry and
 revocation, disabled accounts, Cookie/Origin rules, strict JSON parsing and
 dependency/internal error handling.
@@ -224,3 +281,9 @@ they require no external mail provider or extra test dependency. They exercise
 real PostgreSQL transactions, concurrent one-time consumption, wrong-attempt
 persistence, replacement/expiry, SMTP rejection, recovery revocation, disabled
 registration, login throttling, and rollback when proof consumption fails.
+
+V6 adds catalog, staff and administration transaction tests, including last
+administrator races, rejected audit writes, immediate permission revocation,
+protected built-in entries, credential-change reauthentication and concurrent
+password recovery/disable. These tests use the same guarded disposable
+`*_test` database; run packages serially as shown above.

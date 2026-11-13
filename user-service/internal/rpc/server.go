@@ -54,3 +54,15 @@ func (s *Server) Resolve(ctx context.Context, request *pb.ResolveRequest) (*pb.R
 		DisplayName: user.Name,
 	}, nil
 }
+
+func (s *Server) Check(ctx context.Context, request *pb.CheckRequest) (*pb.CheckReply, error) {
+	user, err := s.Service.Resolve(ctx, request.SessionToken)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	allowed, err := s.Service.Check(ctx, user.ID, request.PermissionCode)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &pb.CheckReply{Allowed: allowed}, nil
+}

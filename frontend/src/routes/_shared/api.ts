@@ -6,6 +6,11 @@ import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {
 	invalid_credentials: 'auth.invalidCredentials',
+	invalid_email_proof: 'onboarding.invalidProof',
+	rate_limited: 'onboarding.rateLimited',
+	already_exists: 'onboarding.alreadyExists',
+	invalid_request: 'onboarding.invalidRequest',
+	identity_unavailable: 'onboarding.unavailable',
 	collection_not_found: 'error.collectionNotFound',
 	graph_not_ready: 'error.graphNotReady',
 	community_not_found: 'error.communityNotFound',
@@ -128,9 +133,14 @@ export async function requestJson(path: string, init: RequestInit = {}) {
 				403: 200203,
 				409: 200204,
 				422: 200100,
+				429: 200206,
 				503: 200205
 			};
-			throw new ApiError(codes[response.status] ?? 200000, reason, { code: reason });
+			throw new ApiError(codes[response.status] ?? 200000, reason, {
+				...payload,
+				code: reason,
+				retry_after: Number(response.headers.get('Retry-After') || payload.retry_after || 0)
+			});
 		}
 		return payload;
 	}

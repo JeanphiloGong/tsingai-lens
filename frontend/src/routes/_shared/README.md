@@ -68,6 +68,9 @@ normalizers, or parallel Objective result types.
 
 `authState.ts` owns browser authentication state, cross-tab invalidation, and
 user-scoped storage cleanup without making network requests. `auth.ts` owns
-login, logout, and current-session requests and updates that state. `api.ts`
+login, logout, current-session, email challenge, registration, recovery and
+self-service password requests. It updates session state only after the
+appropriate server result, and serializes login after pending requests that
+clear the Cookie. `api.ts`
 imports invalidation directly from `authState.ts`, so the base request helper
 does not depend on the network auth module.

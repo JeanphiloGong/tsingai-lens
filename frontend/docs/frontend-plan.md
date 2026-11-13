@@ -105,3 +105,11 @@ Source -> Document` 回溯关系。页面只调用 Objective 的 `evidence-map` 
 - 首页、集合文档、文件上传、单篇任务轮询、明确文档选择、Objective、Published Findings、
   ObjectiveEvidence 与 Source 核验都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`
+
+## 账号流程
+
+匿名用户可访问 `/login`、`/register`、`/forgot-password`；已登录用户通过页头进入 `/account`。账号请求使用同源 `/user-api/v1/*`，复用 user-service 的账号能力，不依赖权限组。
+
+注册、找回与本人改密都要求重复输入新密码；前端比较一致后只提交一次新密码，后端负责密码与邮箱证明规则。验证码保留前导零，仅与密码一起保存在表单内存；更换邮箱会丢弃旧挑战和验证码。重发倒计时来自服务端 `retry_after` / `Retry-After`，刷新后仍由后端限流。
+
+注册成功引导登录。本人改密成功后清理登录和私有聊天缓存，并同步其他标签；失败保留有效登录状态。正在改密时，新登录等待改密响应，避免清除 Cookie 的响应覆盖新登录。找回本人账号成功时也清理其本地登录状态。密码、验证码和邮箱不写入跳转 URL。

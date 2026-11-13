@@ -2909,3 +2909,55 @@ textarea {
     transition: none;
   }
 }
+
+/* Account forms extend the existing login and field primitives. */
+.account-form {
+  display: grid;
+  gap: 16px;
+}
+
+.account-form .field + .field {
+  margin-top: 0;
+}
+
+.account-form .btn {
+  margin-top: 8px;
+}
+
+.account-form .code-button {
+  margin-top: 0;
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+
+.account-form .code-button:not(:disabled):hover {
+  background: var(--brand-soft);
+}
+
+.account-notice {
+  color: var(--text-secondary);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.account-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+  font-size: 14px;
+}
+
+.account-panel {
+  width: min(480px, 100%);
+  margin-inline: auto;
+}
+
+.account-panel h1 {
+  margin: 0 0 16px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+}

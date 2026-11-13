@@ -21,12 +21,12 @@ import { fetchCurrentSession, logout } from './_shared/auth';
   let authError = '';
   const appVersion = `v${version}`;
 
-  $: isLoginRoute = $page.url.pathname === '/login';
+  $: isAuthRoute = ['/login', '/register', '/forgot-password'].includes($page.url.pathname);
   $: authenticatedUser = $authState.user;
   $: userInitial = (authenticatedUser?.display_name || authenticatedUser?.email || 'U')
     .slice(0, 1)
     .toUpperCase();
-  $: if (browser && $authState.status === 'anonymous' && !isLoginRoute) {
+  $: if (browser && $authState.status === 'anonymous' && !isAuthRoute) {
     collections.set([]);
     void goto('/login', { replaceState: true });
   }
@@ -89,12 +89,12 @@ import { fetchCurrentSession, logout } from './_shared/auth';
     authError = '';
     try {
       const user = await fetchCurrentSession();
-      if (!user && !isLoginRoute) {
+      if (!user && !isAuthRoute) {
         await goto('/login', { replaceState: true });
       }
     } catch (error) {
       authError = errorMessage(error);
-      if (!isLoginRoute) {
+      if (!isAuthRoute) {
         await goto('/login', { replaceState: true });
       }
     }
@@ -142,7 +142,7 @@ import { fetchCurrentSession, logout } from './_shared/auth';
 <div
   class="app-shell"
   class:app-shell--feedback={isFeedbackRoute}
-  class:app-shell--login={isLoginRoute}
+  class:app-shell--login={isAuthRoute}
 >
   <header class="site-header" class:site-header--collection={isCollectionRoute}>
     <div class="header-left">
@@ -174,6 +174,7 @@ import { fetchCurrentSession, logout } from './_shared/auth';
 
     <div class="header-actions">
       {#if authenticatedUser}
+        <a class="header-action" href="/account">{$t('onboarding.account')}</a>
         <ResearchAgentLauncher collectionId={headerCollectionId} />
       {/if}
       <div

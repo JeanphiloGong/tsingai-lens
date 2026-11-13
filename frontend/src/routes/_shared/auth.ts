@@ -43,6 +43,7 @@ export async function login(email: string, password: string) {
 	const generation = nextAuthGeneration();
 	// The earlier logout must clear its cookie before login sets a new one.
 	if (logoutRequest) await logoutRequest.catch(() => undefined);
+	if (passwordChangeRequest) await passwordChangeRequest.catch(() => undefined);
 	if (!isCurrentAuthGeneration(generation)) throw new Error('error.authSessionChanged');
 	const data = await requestJson('/user-api/v1/login', {
 		method: 'POST',
@@ -52,6 +53,7 @@ export async function login(email: string, password: string) {
 	return setAuthenticated(data);
 }
 let logoutRequest: Promise<void> | null = null;
+let passwordChangeRequest: Promise<void> | null = null;
 export function logout() {
 	if (logoutRequest) return logoutRequest;
 	clearAuthState();
@@ -61,4 +63,59 @@ export function logout() {
 			logoutRequest = null;
 		});
 	return logoutRequest;
+}
+
+export function changePassword(oldPassword: string, password: string) {
+	if (passwordChangeRequest) return passwordChangeRequest;
+	const generation = nextAuthGeneration();
+	passwordChangeRequest = requestJson('/user-api/v1/me/password', {
+		method: 'POST',
+		body: JSON.stringify({ old_password: oldPassword, password })
+	})
+		.then(() => {
+			if (!isCurrentAuthGeneration(generation)) throw new Error('error.authSessionChanged');
+			clearAuthState();
+		})
+		.finally(() => {
+			passwordChangeRequest = null;
+		});
+	return passwordChangeRequest;
+}
+
+export async function issueEmailChallenge(
+	email: string,
+	purpose: 'register' | 'password_reset'
+): Promise<{ challenge_id: string; expires_in: number; retry_after: number }> {
+	return requestJson('/user-api/v1/email-challenges', {
+		method: 'POST',
+		body: JSON.stringify({ email, purpose })
+	});
+}
+export async function registerAccount(input: {
+	email: string;
+	challenge_id: string;
+	code: string;
+	password: string;
+	display_name: string;
+}) {
+	return requestJson('/user-api/v1/register', { method: 'POST', body: JSON.stringify(input) });
+}
+export async function resetPassword(input: {
+	email: string;
+	challenge_id: string;
+	code: string;
+	password: string;
+}) {
+	const user = get(authState).user;
+	const result = await requestJson('/user-api/v1/password-resets', {
+		method: 'POST',
+		body: JSON.stringify(input)
+	});
+	if (
+		user &&
+		get(authState).user === user &&
+		user.email.toLowerCase() === input.email.trim().toLowerCase()
+	)
+		clearAuthState();
+	return result;
 }

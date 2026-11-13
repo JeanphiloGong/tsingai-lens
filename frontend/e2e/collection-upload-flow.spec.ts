@@ -7,7 +7,12 @@ function json(body: unknown, status = 200) {
 	return {
 		status,
 		contentType: 'application/json',
-		body: JSON.stringify(body)
+		body: JSON.stringify({
+			code: status >= 400 ? 200205 : 200,
+			message: status >= 400 ? 'Unavailable' : 'success',
+			data: body,
+			meta: null
+		})
 	};
 }
 
@@ -104,12 +109,13 @@ async function mockCurrentDocumentApis(page: Page) {
 		const url = new URL(route.request().url());
 		const path = url.pathname;
 		const method = route.request().method();
-		if (!path.startsWith('/api/v1/')) return route.continue();
+		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 
-		if (path === '/api/v1/auth/me') {
-			return route.fulfill(
-				json({ user: { user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' } })
-			);
+		if (path === '/user-api/v1/me') {
+			return route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' })
+			});
 		}
 		if (path === '/api/v1/collections') {
 			return route.fulfill(json({ items: [] }));

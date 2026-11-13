@@ -713,9 +713,8 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
     postgres_session_factory,
     collection_workspace,
 ):
-    from tests.support.postgres import seed_collection, seed_user
+    from tests.support.postgres import seed_collection
 
-    await seed_user(postgres_session_factory, "researcher-1")
     collection = await collection_service.create_collection(
         "316L preheat and elongation",
         owner_user_id="researcher-1",

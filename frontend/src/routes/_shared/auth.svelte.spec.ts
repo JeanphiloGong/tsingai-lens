@@ -6,7 +6,7 @@ import { fetchCurrentSession, login, logout } from './auth';
 
 const fetchMock = vi.fn();
 function jsonResponse(data: unknown) {
-	return new Response(JSON.stringify({ code: 200, message: 'success', data, meta: null }), {
+	return new Response(JSON.stringify(data), {
 		headers: { 'Content-Type': 'application/json' }
 	});
 }
@@ -24,7 +24,7 @@ describe('account-scoped chat storage', () => {
 	it.each([false, true])(
 		'waits for an earlier logout before signing in, logout failed: %s',
 		async (fails) => {
-			fetchMock.mockResolvedValueOnce(jsonResponse({ user }));
+			fetchMock.mockResolvedValueOnce(jsonResponse(user));
 			await login(user.email, 'test-only');
 			let finish!: () => void;
 			fetchMock.mockImplementationOnce(
@@ -36,7 +36,7 @@ describe('account-scoped chat storage', () => {
 			);
 			const signingOut = logout().catch(() => undefined);
 			const nextUser = { user_id: 'researcher_2', email: 'second@example.test' };
-			fetchMock.mockResolvedValueOnce(jsonResponse({ user: nextUser }));
+			fetchMock.mockResolvedValueOnce(jsonResponse(nextUser));
 			const signingIn = login(nextUser.email, 'test-only');
 			try {
 				expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -71,7 +71,7 @@ describe('account-scoped chat storage', () => {
 						newValue: 'other-tab-signout'
 					})
 				);
-				complete(jsonResponse({ user }));
+				complete(jsonResponse(user));
 				if (request === 'session') await expect(session).resolves.toBeNull();
 				else await expect(session).rejects.toThrow('error.authSessionChanged');
 				expect(get(authState).status).toBe('anonymous');
@@ -90,7 +90,7 @@ describe('account-scoped chat storage', () => {
 		sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', 'owned Source');
 		sessionStorage.setItem('lens.chatSourceContext.col_123', 'unscoped Source');
 		localStorage.setItem('lens.theme', 'dark');
-		fetchMock.mockImplementation(async () => jsonResponse({ user }));
+		fetchMock.mockImplementation(async () => jsonResponse(user));
 		await fetchCurrentSession();
 		expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe('chat_owned');
 		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBe(
@@ -108,7 +108,7 @@ describe('account-scoped chat storage', () => {
 	it.each([false, true])(
 		'clears history and pending Sources when logout fails: %s',
 		async (fails) => {
-			fetchMock.mockImplementation(async () => jsonResponse({ user }));
+			fetchMock.mockImplementation(async () => jsonResponse(user));
 			await login(user.email, 'test-only');
 			localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', 'private question');
 			sessionStorage.setItem('lens.chatSourceContext.researcher_1:col_123', 'private selection');

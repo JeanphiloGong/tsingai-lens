@@ -12,6 +12,11 @@ export default defineConfig(({ mode }) => {
 		plugins: [tailwindcss(), sveltekit()],
 		server: {
 			proxy: {
+				'/user-api': {
+					target: env.USER_SERVICE_ORIGIN || 'http://127.0.0.1:8097',
+					changeOrigin: true,
+					rewrite: (path) => path.replace(/^\/user-api/, '')
+				},
 				'/api': {
 					target: apiProxyTarget,
 					changeOrigin: true

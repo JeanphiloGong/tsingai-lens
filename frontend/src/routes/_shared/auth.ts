@@ -8,9 +8,8 @@ import {
 	nextAuthGeneration
 } from './authState';
 import type { AuthUser } from './authState';
-type AuthSessionPayload = { user: AuthUser };
 function setAuthenticated(payload: unknown) {
-	const user = (payload as AuthSessionPayload)?.user;
+	const user = payload as AuthUser;
 	if (
 		!user ||
 		typeof user.user_id !== 'string' ||
@@ -27,7 +26,7 @@ export async function fetchCurrentSession() {
 	const generation = nextAuthGeneration();
 	authState.set({ ...get(authState), status: 'loading' });
 	try {
-		const data = await requestJson('/auth/me', { method: 'GET' });
+		const data = await requestJson('/user-api/v1/me', { method: 'GET' });
 		if (!isCurrentAuthGeneration(generation)) return null;
 		return setAuthenticated(data);
 	} catch (error) {
@@ -45,7 +44,7 @@ export async function login(email: string, password: string) {
 	// The earlier logout must clear its cookie before login sets a new one.
 	if (logoutRequest) await logoutRequest.catch(() => undefined);
 	if (!isCurrentAuthGeneration(generation)) throw new Error('error.authSessionChanged');
-	const data = await requestJson('/auth/login', {
+	const data = await requestJson('/user-api/v1/login', {
 		method: 'POST',
 		body: JSON.stringify({ email, password })
 	});
@@ -56,7 +55,7 @@ let logoutRequest: Promise<void> | null = null;
 export function logout() {
 	if (logoutRequest) return logoutRequest;
 	clearAuthState();
-	logoutRequest = requestJson('/auth/logout', { method: 'POST' })
+	logoutRequest = requestJson('/user-api/v1/logout', { method: 'POST' })
 		.then(() => undefined)
 		.finally(() => {
 			logoutRequest = null;

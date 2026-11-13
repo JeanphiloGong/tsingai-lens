@@ -20,15 +20,18 @@ def anyio_backend():
 @pytest.fixture
 def resources(monkeypatch, tmp_path):
     events = []
-    engine = SimpleNamespace(dispose=AsyncMock(side_effect=lambda: events.append("database")))
+    engine = SimpleNamespace(
+        dispose=AsyncMock(side_effect=lambda: events.append("database"))
+    )
     model = SimpleNamespace(
-        client=SimpleNamespace(close=AsyncMock(side_effect=lambda: events.append("model")))
+        client=SimpleNamespace(
+            close=AsyncMock(side_effect=lambda: events.append("model"))
+        )
     )
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "DatabaseSettings", Mock())
     monkeypatch.setattr(main, "build_database_engine", lambda _: engine)
     monkeypatch.setattr(shared_database, "AsyncSessionLocal", Mock())
-    monkeypatch.setattr(main.auth_session_service, "ensure_bootstrap_user", AsyncMock())
     monkeypatch.setattr(main, "OpenAIChatModel", lambda: model)
     return engine, model, events
 

@@ -15,8 +15,8 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from application.auth import session_service as auth_session_service
-from application.auth.session_service import SESSION_COOKIE_NAME
+from tests.support.identity import subjects as identity_subjects
+from infra.identity.client import SESSION_COOKIE_NAME
 from application.chat import (
     CapabilityRegistry,
     ModelToolCall,
@@ -51,7 +51,6 @@ from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 
 
-from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
     CollectionRepository,
@@ -106,17 +105,21 @@ class _Sources:
 
 @pytest.fixture
 async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
-    auth_session_service.AuthRepo = AuthRepository()
-    auth = auth_session_service
+
+    auth = identity_subjects
     users, cookies = [], []
     for email in ("branch-owner@example.test", "branch-other@example.test"):
         users.append(
-            await auth.create_user(email=email, password="synthetic-test-password")
+            await auth.create_subject(
+                email=email,
+            )
         )
         cookies.append(
-            (await auth.login(email=email, password="synthetic-test-password"))[
-                "session_id"
-            ]
+            (
+                await auth.issue_session(
+                    email=email,
+                )
+            )["session_id"]
         )
     collections = CollectionRepository()
     await collections.add_collection(
@@ -405,13 +408,14 @@ async def test_pin_migration_upgrades_existing_sessions_without_changing_message
     before = await app.repository.read_messages("original")
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.downgrade(config, "20261008_0086")
-        assert "is_pinned" not in {
-            column["name"]
-            for column in inspect(connection).get_columns("chat_sessions")
-        }
-        command.upgrade(config, "head")
+        migration = ScriptDirectory.from_config(config).get_revision("20261009_0087").module
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.downgrade()
+            assert "is_pinned" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("chat_sessions")
+            }
+            migration.upgrade()
     assert (await app.repository.read_session("original")).is_pinned is False
     assert await app.repository.read_messages("original") == before
 
@@ -701,7 +705,7 @@ async def test_branch_authorization_busy_worker_and_message_boundaries(branch_ap
     payload = {"message_id": "question", "request_id": str(uuid4())}
     app.client.cookies.clear()
     rejection = await app.client.post(f"{BASE}/original/branches", json=payload)
-    assert rejection.status_code == 200
+    assert rejection.status_code == 401
     assert rejection.json()["code"] == 200301
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
     rejection = await app.client.post(f"{BASE}/original/branches", json=payload)

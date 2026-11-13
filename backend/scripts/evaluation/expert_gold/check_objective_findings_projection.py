@@ -142,7 +142,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--api-base-url",
         help=(
-            "Optional Lens origin such as http://localhost:5173. Set "
+            "Optional browser origin serving /api and /user-api, such as http://localhost:5173. Set "
             "LENS_CHECK_EMAIL and LENS_CHECK_PASSWORD when login is required."
         ),
     )
@@ -2665,17 +2665,16 @@ def _api_login_cookie(base_url: str) -> str:
         raise RuntimeError(
             "set both LENS_CHECK_EMAIL and LENS_CHECK_PASSWORD for API checks"
         )
-    response = _api_json_request(
-        base_url,
-        "/api/v1/auth/login",
+    request = request_url.Request(
+        f"{base_url}/user-api/v1/login",
+        data=json.dumps({"email": email, "password": password}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Origin": base_url},
         method="POST",
-        payload={"email": email, "password": password},
-        include_headers=True,
     )
-    headers = response["headers"]
-    cookie = str(headers.get("Set-Cookie") or headers.get("set-cookie") or "")
+    with request_url.urlopen(request, timeout=60) as response:
+        cookie = str(response.headers.get("Set-Cookie") or "")
     if not cookie:
-        raise RuntimeError("POST /api/v1/auth/login did not return Set-Cookie")
+        raise RuntimeError("POST /user-api/v1/login did not return Set-Cookie")
     return cookie.split(";", 1)[0]
 
 
@@ -2686,7 +2685,6 @@ def _api_json_request(
     method: str = "GET",
     payload: dict[str, Any] | None = None,
     cookie: str = "",
-    include_headers: bool = False,
 ) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"}
@@ -2703,11 +2701,7 @@ def _api_json_request(
                     f"Lens API rejected the request: {envelope['code']} {envelope['message']}"
                 )
             data = envelope["data"]
-            return (
-                {"payload": data, "headers": response.headers}
-                if include_headers
-                else data
-            )
+            return data
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Lens API returned HTTP {exc.code}: {detail}") from exc

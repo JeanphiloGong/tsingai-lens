@@ -219,19 +219,10 @@ async def test_collection_agent_default_permission_is_owner_scoped(
     collection_workspace,
 ) -> None:
     service = collection_service
-    from repositories.auth_repository import AuthRepository, AuthUserRecord
 
-    await AuthRepository().add_user(
-        AuthUserRecord(
-            "user-1",
-            "owner@example.com",
-            None,
-            "!",
-            datetime.now(timezone.utc).isoformat(),
-        )
-    )
     collection = await service.create_collection(
-        "Permission defaults", owner_user_id="user-1",
+        "Permission defaults",
+        owner_user_id="user-1",
     )
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 

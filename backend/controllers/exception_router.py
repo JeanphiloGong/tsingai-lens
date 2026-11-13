@@ -42,6 +42,21 @@ async def project_exception_handler(
 async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
+    if isinstance(exc.detail, dict) and exc.detail.get("code") in {
+        "authentication_required",
+        "permission_denied",
+        "identity_unavailable",
+    }:
+        business_code = {401: 200301, 403: 200203, 503: 200205}[exc.status_code]
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "code": business_code,
+                "message": exc.detail["code"],
+                "data": exc.detail,
+                "meta": None,
+            },
+        )
     if exc.status_code == 404:
         error = ResourceNotFoundException()
     elif exc.status_code == 405:

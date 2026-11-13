@@ -67,7 +67,9 @@ export function formatResult(data: unknown) {
 
 export function buildApiUrl(path: string) {
 	const normalized = path.startsWith('/') ? path : `/${path}`;
-	return normalized.startsWith('/api/') ? normalized : `${API_PREFIX}${normalized}`;
+	return normalized.startsWith('/api/') || normalized.startsWith('/user-api/')
+		? normalized
+		: `${API_PREFIX}${normalized}`;
 }
 
 function buildApiError(payload: ApiResponse) {
@@ -82,7 +84,8 @@ function buildApiError(payload: ApiResponse) {
 }
 
 async function readApiResponse(response: Response): Promise<ApiResponse> {
-	if (!response.ok) throw new Error('error.requestFailed');
+	if (!response.ok && ![401, 403, 503].includes(response.status))
+		throw new Error('error.requestFailed');
 	const payload: unknown = await response.json();
 	if (
 		!payload ||
@@ -116,6 +119,21 @@ export async function requestJson(path: string, init: RequestInit = {}) {
 		headers.set('Content-Type', 'application/json');
 	}
 	const response = await fetch(buildApiUrl(path), { ...init, credentials: 'same-origin', headers });
+	if (path.startsWith('/user-api/')) {
+		const payload = await response.json();
+		if (!response.ok) {
+			const reason = payload.code || 'identity_unavailable';
+			const codes: Record<number, number> = {
+				401: 200301,
+				403: 200203,
+				409: 200204,
+				422: 200100,
+				503: 200205
+			};
+			throw new ApiError(codes[response.status] ?? 200000, reason, { code: reason });
+		}
+		return payload;
+	}
 	return readApiData(response);
 }
 

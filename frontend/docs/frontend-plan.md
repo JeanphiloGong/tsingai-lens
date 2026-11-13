@@ -7,12 +7,12 @@
 
 ## 当前合同
 
-- 浏览器公开业务 API 统一走 `/api/v1/*`
+- 浏览器业务 API 走 `/api/v1/*`；身份查询直连同源 `/user-api/v1/*` 用户服务
 - 文档与 OpenAPI 入口统一走 `/api/*`
 - API 文档地址：`/api/docs`
 - 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求，并用
   same-origin cookie 传递登录会话
-- JSON 成功和失败均使用 HTTP 200，响应为 `{code,message,data,meta}`；
+- Lens JSON 保留 `{code,message,data,meta}`；身份拒绝/故障使用 HTTP 401/403/503，其他既有业务错误仍按原合同返回 HTTP 200；
   `requestJson` 返回 `data`，非 200 业务码抛出 `ApiError`。无结果时 `data` 为 `{}`。
 - 使用 `isApiErrorCode` 判断六位业务码，使用 `getApiErrorReason` 读取 `data.code`；
   只有 `200301 + authentication_required` 清空登录状态和用户聊天缓存并跳转登录，不能按 HTTP 状态或错误文案猜测。
@@ -25,7 +25,7 @@
 - 首页集合列表：`GET /api/v1/collections`
   首页列表会结合响应中的当前文档状态显示集合阶段：全部文档为 `ready` 时显示“文档已准备”，
   不会因为历史集合的顶层 `status=uploaded` 而误显示为“待处理”；处理中或失败文档仍优先显示对应风险状态。
-- 登录会话：`POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`
+- 登录会话：`POST /user-api/v1/login`、`GET /user-api/v1/me`、`POST /user-api/v1/logout`。用户服务错误为顶层 `code`，限流时的 429 另有顶层 `retry_after` 与 `Retry-After` header；`api.ts` 在该明确路径按 HTTP 状态解析，业务响应继续解析 Lens envelope。
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文档：`GET|POST /api/v1/collections/{collection_id}/documents`

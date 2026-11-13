@@ -11,11 +11,8 @@ from types import SimpleNamespace
 import pytest
 from alembic import command
 from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
-from alembic.script import ScriptDirectory
-from application.auth import session_service as auth_session_service
-from application.auth.session_service import SESSION_COOKIE_NAME
+from tests.support.identity import subjects as identity_subjects
+from infra.identity.client import SESSION_COOKIE_NAME
 from application.chat import session_service as chat_session_service
 from application.source import collection_service
 from controllers.chat.chat_session_routes import chat_session_router as router
@@ -43,14 +40,11 @@ from httpx import ASGITransport, AsyncClient
 
 
 from infra.persistence.postgres.models import (
-    AuthUserORM,
     ChatMessageFeedbackORM,
     ChatMessageORM,
     ChatSessionORM,
 )
 from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetORM
-from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
     CollectionRepository,
@@ -60,6 +54,7 @@ from sqlalchemy import delete, func, inspect, select, update
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 NOW = "2026-09-09T08:00:00+00:00"
@@ -69,14 +64,18 @@ PATH = "/api/v1/chat-sessions/chat-1/messages/answer/feedback"
 
 @pytest.fixture
 async def feedback_app(postgres_session_factory, tmp_path, monkeypatch):
-    auth_session_service.AuthRepo = AuthRepository()
-    auth = auth_session_service
+
+    auth = identity_subjects
     users, cookies = [], []
     for email in ("feedback-owner@example.test", "feedback-other@example.test"):
         users.append(
-            await auth.create_user(email=email, password="synthetic-test-password")
+            await auth.create_subject(
+                email=email,
+            )
         )
-        result = await auth.login(email=email, password="synthetic-test-password")
+        result = await auth.issue_session(
+            email=email,
+        )
         cookies.append(result["session_id"])
     collections = CollectionRepository()
     await collections.add_collection(
@@ -239,7 +238,7 @@ async def test_feedback_permissions_and_input_boundaries(feedback_app):
     app = feedback_app
     app.client.cookies.clear()
     rejection = await app.client.put(PATH, json={"rating": "helpful"})
-    assert rejection.status_code == 200
+    assert rejection.status_code == 401
     assert rejection.json()["code"] == 200301
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
     rejection = await app.client.put(PATH, json={"rating": "helpful"})
@@ -311,25 +310,12 @@ async def test_concurrent_feedback_upserts_keep_one_identity(feedback_app):
         )
 
 
-@pytest.mark.parametrize(
-    "parent", [ChatMessageORM, ChatSessionORM, AuthUserORM, CollectionORM]
-)
+@pytest.mark.parametrize("parent", [ChatMessageORM, ChatSessionORM, CollectionORM])
 async def test_parent_deletion_cascades_feedback(feedback_app, parent):
     app = feedback_app
     assert (await app.client.put(PATH, json={"rating": "helpful"})).status_code == 200
     async with app.sessions.begin() as database:
-        if parent is AuthUserORM:
-            await database.execute(
-                update(CollectionORM).values(owner_user_id=app.users[1]["user_id"])
-            )
-            await database.execute(
-                update(FeedbackDatasetORM).values(created_by=app.users[1]["user_id"])
-            )
-            await database.execute(
-                delete(AuthUserORM).where(AuthUserORM.user_id == app.users[0]["user_id"])
-            )
-        else:
-            await database.execute(delete(parent))
+        await database.execute(delete(parent))
     async with app.sessions() as database:
         assert (
             await database.scalar(
@@ -341,18 +327,16 @@ async def test_parent_deletion_cascades_feedback(feedback_app, parent):
 
 async def test_feedback_migration_can_be_rolled_back(postgres_sync_engine):
     config = Config("alembic.ini")
+    reset_postgres_schema(postgres_sync_engine)
     with postgres_sync_engine.begin() as connection:
         # Isolate feedback DDL from irreversible and later dataset migrations.
-        migration = (
-            ScriptDirectory.from_config(config).get_revision("20260909_0056").module
-        )
-        with Operations.context(MigrationContext.configure(connection)):
-            migration.downgrade()
-            assert "chat_message_feedback" not in inspect(connection).get_table_names()
-            assert "chat_messages" in inspect(connection).get_table_names()
-            migration.upgrade()
-            assert "chat_message_feedback" in inspect(connection).get_table_names()
         config.attributes["connection"] = connection
+        command.upgrade(config, "20260909_0056")
+        assert "chat_message_feedback" in inspect(connection).get_table_names()
+        command.downgrade(config, "20260908_0055")
+        assert "chat_message_feedback" not in inspect(connection).get_table_names()
+        assert "chat_messages" in inspect(connection).get_table_names()
+        command.upgrade(config, "head")
         command.check(config)
 
 

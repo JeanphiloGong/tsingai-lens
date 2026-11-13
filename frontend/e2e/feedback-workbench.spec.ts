@@ -5,7 +5,16 @@ const datasetId = 'fdset_feedback';
 const caseId = 'case_feedback_private';
 
 function json(body: unknown, status = 200) {
-	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+	return {
+		status,
+		contentType: 'application/json',
+		body: JSON.stringify({
+			code: status >= 400 ? 200205 : 200,
+			message: status >= 400 ? 'Unavailable' : 'success',
+			data: body,
+			meta: null
+		})
+	};
 }
 
 async function mockTaskEntry(page: Page, withExport = false) {
@@ -13,11 +22,12 @@ async function mockTaskEntry(page: Page, withExport = false) {
 	await page.route('**/*', async (route) => {
 		const request = route.request();
 		const path = new URL(request.url()).pathname;
-		if (!path.startsWith('/api/v1/')) return route.continue();
-		if (path === '/api/v1/auth/me') {
-			return route.fulfill(
-				json({ user: { user_id: 'user_feedback', email: 'reviewer@example.com', display_name: 'Reviewer' } })
-			);
+		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
+		if (path === '/user-api/v1/me') {
+			return route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ user_id: 'user_feedback', email: 'reviewer@example.com', display_name: 'Reviewer' })
+			});
 		}
 		if (path === '/api/v1/collections' && request.method() === 'GET') {
 			return route.fulfill(json({ items: [{ collection_id: collectionId, name: 'Feedback fixture', status: 'ready', documents: [] }] }));

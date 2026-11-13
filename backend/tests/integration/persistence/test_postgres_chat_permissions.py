@@ -10,7 +10,6 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.source import Collection
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.chat_repository import ChatRepository, ChatWriteConflict
 from repositories.collection_repository import (
     CollectionRepository,
@@ -23,15 +22,6 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 async def permission_case(postgres_session_factory):
     now = datetime.now(timezone.utc).isoformat()
-    await AuthRepository().add_user(
-        AuthUserRecord(
-            user_id="u",
-            email="permission@example.com",
-            display_name=None,
-            password_hash="test-only",
-            created_at=now,
-        )
-    )
     await CollectionRepository().add_collection(
         StoredCollection(
             collection=Collection(

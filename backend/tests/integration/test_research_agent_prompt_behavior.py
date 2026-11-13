@@ -71,10 +71,8 @@ async def _fixture_collection(
     postgres_session_factory,
     collection_workspace,
 ):
-    from tests.support.postgres import seed_user
 
     user_id = "live-prompt-test-user"
-    await seed_user(postgres_session_factory, user_id)
     collection = await collection_service.create_collection(
         "P002 prompt behavior fixture",
         "Isolated PostgreSQL collection for the opt-in prompt check.",

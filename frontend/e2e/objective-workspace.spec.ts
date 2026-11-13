@@ -6,7 +6,16 @@ const documentId = 'doc_1';
 const tableSourceRef = 'tbl_doc_1_3_table_3';
 
 function json(body: unknown, status = 200) {
-	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+	return {
+		status,
+		contentType: 'application/json',
+		body: JSON.stringify({
+			code: status >= 400 ? 200205 : 200,
+			message: status >= 400 ? 'Unavailable' : 'success',
+			data: body,
+			meta: null
+		})
+	};
 }
 
 const objective = {
@@ -378,11 +387,12 @@ async function mockApis(page: Page) {
 	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
 		const path = url.pathname;
-		if (!path.startsWith('/api/v1/')) return route.continue();
-		if (path === '/api/v1/auth/me') {
-			return route.fulfill(
-				json({ user: { user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' } })
-			);
+		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
+		if (path === '/user-api/v1/me') {
+			return route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({ user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' })
+			});
 		}
 		if (path === '/api/v1/collections') return route.fulfill(json({ items: [] }));
 		if (path === `/api/v1/collections/${collectionId}`) {
@@ -463,7 +473,7 @@ async function mockApis(page: Page) {
 					collection_id: collectionId,
 					objective_id: objectiveId,
 					analysis_version: 1,
-					finding_id: 'finding-1',
+					finding_id: url.searchParams.get('finding_id'),
 					items: [evidence, ...additionalTableEvidence, mechanismEvidence],
 					offset: 0,
 					limit: 100,

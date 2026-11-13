@@ -1,0 +1,28 @@
+// Use Protobuf version 3 syntax to define messages and services.
+syntax = "proto3";
+
+// places the service and messages in the Protocol Buffers package
+package lens.user.v1;
+
+// supplies the Go import path to use when generating Go code from the schema
+option go_package = "github.com/JeanphiloGong/tsingai-lens/user-service/internal/gen/userv1";
+
+// begins the declaration of the `Identigy` RPC service
+service Identity {
+  // declares `Resolve` as an RPC that accepts a `ResolveRequest`
+  rpc Resolve(ResolveRequest) returns (ResolveReply);
+  // declares `Check` as an RPC that accepts a `CheckRequest` and returns a `CheckReply`
+  rpc Check(CheckRequest) returns (CheckReply);
+}
+
+// defines the input message for `Resolve`.
+message ResolveRequest { string session_token = 1; }
+
+// defines the user details returned by `Resolve`
+message ResolveReply { string user_id = 1; string email = 2; string display_name = 3; }
+
+// defines the input to `Check`
+message CheckRequest { string session_token = 1; string permission_code = 2; }
+
+// defines the response from `Check`
+message CheckReply { bool allowed = 1; }

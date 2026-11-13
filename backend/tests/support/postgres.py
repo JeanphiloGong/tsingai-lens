@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from hashlib import sha256
 
 from domain.source import Collection, Document
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
     CollectionRepository,
     StoredCollection,
@@ -58,16 +57,6 @@ async def seed_objective(session_factory, collection_id: str, objective_id: str)
     return objective
 
 
-async def seed_user(session_factory, user_id: str) -> None:
-    users = AuthRepository()
-    if await users.read_user(user_id) is None:
-        await users.add_user(AuthUserRecord(
-            user_id=user_id, email=f"{user_id}@fixture.example.com",
-            display_name="Researcher", password_hash="!",
-            created_at=datetime.now(timezone.utc).isoformat(),
-        ))
-
-
 async def seed_collection(
     session_factory,
     collection_id: str,
@@ -76,31 +65,41 @@ async def seed_collection(
     document_ids: tuple[str, ...] = (),
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
-    await seed_user(session_factory, user_id)
     collections = CollectionRepository()
     stored = await collections.read_collection(collection_id)
     if stored is None:
-        await collections.add_collection(StoredCollection(
-            collection=Collection(
-                collection_id=collection_id, owner_user_id=user_id,
-                name="Research papers", description=None, status="idle",
-            ),
-            created_at=now, updated_at=now,
-        ))
+        await collections.add_collection(
+            StoredCollection(
+                collection=Collection(
+                    collection_id=collection_id,
+                    owner_user_id=user_id,
+                    name="Research papers",
+                    description=None,
+                    status="idle",
+                ),
+                created_at=now,
+                updated_at=now,
+            )
+        )
         existing_ids = set()
     else:
         existing_ids = {item.document.document_id for item in stored.documents}
     documents = tuple(
         StoredDocument(
             document=Document(
-                document_id=document_id, original_filename=f"{document_id}.txt",
-                sha256=sha256(document_id.encode()).hexdigest(), media_type="text/plain",
-                status="stored", size_bytes=1,
+                document_id=document_id,
+                original_filename=f"{document_id}.txt",
+                sha256=sha256(document_id.encode()).hexdigest(),
+                media_type="text/plain",
+                status="stored",
+                size_bytes=1,
             ),
             stored_filename=f"{document_id}.txt",
-            storage_key=f"{collection_id}/input/{document_id}.txt", created_at=now,
+            storage_key=f"{collection_id}/input/{document_id}.txt",
+            created_at=now,
         )
-        for document_id in document_ids if document_id not in existing_ids
+        for document_id in document_ids
+        if document_id not in existing_ids
     )
     if documents:
         await collections.add_documents(collection_id, documents, updated_at=now)

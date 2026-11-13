@@ -435,12 +435,10 @@ async def test_stale_historical_plan_cannot_be_promoted(
 
 @pytest.fixture(autouse=True)
 async def research_records(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_collection, seed_objective, seed_user
+    from tests.support.postgres import seed_collection, seed_objective
 
     await seed_collection(postgres_session_factory, "col_1", user_id="expert-a")
     await seed_objective(postgres_session_factory, "col_1", "objective_1")
-    await seed_user(postgres_session_factory, "expert-a")
-    await seed_user(postgres_session_factory, "expert-b")
     from domain.chat import ChatMessage, ChatSession
     from repositories.chat_repository import ChatRepository
 

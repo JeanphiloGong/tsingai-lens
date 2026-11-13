@@ -28,6 +28,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 @pytest.fixture
 def api(monkeypatch):
     app = FastAPI()
+    from controllers.exception_router import http_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
@@ -145,17 +149,19 @@ def test_optional_summary_errors_are_explicit_and_safe(api, error, status, code)
     "access,code", [("anonymous", 200301), ("other-owner", 200201)]
 )
 def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
-    from application.auth import SessionNotFoundError
+    from infra.identity.client import SessionNotFoundError
     from application.core.objectives import analysis_service
 
     app = FastAPI()
+    from controllers.exception_router import http_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(ProjectException, project_exception_handler)
     resolve_session = AsyncMock(return_value={"user_id": "other-owner"})
     if access == "anonymous":
         resolve_session.side_effect = SessionNotFoundError()
-    monkeypatch.setattr(
-        "application.auth.session_service.resolve_session", resolve_session
-    )
+    monkeypatch.setattr("infra.identity.client.Client.resolve_session", resolve_session)
     authorize = AsyncMock(
         side_effect=ResourceNotFoundException("Collection not found.")
     )
@@ -174,7 +180,7 @@ def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
     app.include_router(router, prefix="/api/v1")
     with TestClient(app) as client:
         response = client.post(URL, json={"analysis_version": 1})
-    assert response.status_code == 200
+    assert response.status_code == (401 if code == 200301 else 200)
     assert response.json()["code"] == code
     repository.read_objective.assert_not_awaited()
     generate.assert_not_called()

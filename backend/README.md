@@ -99,6 +99,8 @@ cd backend
 uv venv .venv && source .venv/bin/activate
 uv sync
 
+# Export USER_RPC_TARGET/CA/CERT/KEY as described in ../user-service/README.md.
+# Use a fresh database for V4; existing data needs verified import before 0099.
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local

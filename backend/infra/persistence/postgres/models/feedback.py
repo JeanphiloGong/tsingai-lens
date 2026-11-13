@@ -290,9 +290,13 @@ class FeedbackAnnotationORM(Base):
             "severity IN ('low', 'medium', 'high', 'critical')",
             name="feedback_annotation_severity_valid",
         ),
-        CheckConstraint("length(annotation_digest) = 64", name="feedback_annotation_digest_length"),
+        CheckConstraint(
+            "length(annotation_digest) = 64", name="feedback_annotation_digest_length"
+        ),
         CheckConstraint("version >= 1", name="feedback_annotation_version_positive"),
-        UniqueConstraint("case_id", "version", name="uq_feedback_annotations_case_version"),
+        UniqueConstraint(
+            "case_id", "version", name="uq_feedback_annotations_case_version"
+        ),
         Index("ix_feedback_annotations_case_created", "case_id", "created_at"),
     )
 
@@ -314,15 +318,20 @@ class FeedbackAnnotationORM(Base):
         _JSON_DOCUMENT, nullable=False, default=list
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    annotation_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    annotation_digest: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
     created_by: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("auth_users.user_id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class FeedbackReviewDecisionORM(Base):
@@ -334,7 +343,9 @@ class FeedbackReviewDecisionORM(Base):
             "decision IN ('accept', 'reject', 'insufficient', 'withdraw')",
             name="feedback_review_decision_valid",
         ),
-        CheckConstraint("length(annotation_digest) = 64", name="feedback_review_digest_length"),
+        CheckConstraint(
+            "length(annotation_digest) = 64", name="feedback_review_digest_length"
+        ),
         CheckConstraint("seq >= 1", name="feedback_review_seq_positive"),
         UniqueConstraint("case_id", "seq", name="uq_feedback_review_case_seq"),
         Index("ix_feedback_review_case_created", "case_id", "created_at"),
@@ -347,17 +358,20 @@ class FeedbackReviewDecisionORM(Base):
         nullable=False,
         index=True,
     )
-    annotation_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    annotation_digest: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
     decision: Mapped[str] = mapped_column(String(16), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("auth_users.user_id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class FeedbackDatasetSnapshotORM(Base):
@@ -381,7 +395,9 @@ class FeedbackDatasetSnapshotORM(Base):
             "length(content_digest) = 64",
             name="feedback_dataset_content_digest_length",
         ),
-        CheckConstraint("row_count >= 0", name="feedback_dataset_row_count_non_negative"),
+        CheckConstraint(
+            "row_count >= 0", name="feedback_dataset_row_count_non_negative"
+        ),
         CheckConstraint(
             "excluded_count >= 0",
             name="feedback_dataset_excluded_count_non_negative",
@@ -397,7 +413,6 @@ class FeedbackDatasetSnapshotORM(Base):
     dataset_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("auth_users.user_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -417,11 +432,15 @@ class FeedbackDatasetSnapshotORM(Base):
     provenance: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     manifest: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provenance_digest: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
     content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     excluded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 __all__ = [

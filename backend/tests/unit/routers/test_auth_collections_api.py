@@ -34,7 +34,7 @@ def _valid_pdf_bytes() -> bytes:
 def _build_client(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -42,11 +42,11 @@ def _build_client(
     from application.pipeline import pipeline_run_service
     from repositories.pipeline_run_repository import PipelineRunRepository
 
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -58,15 +58,8 @@ def _build_client(
         yield client
 
 
-def _login(
-    client: TestClient,
-    email: str = "admin@example.com",
-    password: str = "admin-password",
-):
-    return client.post(
-        "/api/v1/auth/login",
-        json={"email": email, "password": password},
-    )
+def _bind_subject(client: TestClient, email="admin@example.com"):
+    client.cookies.set("lens_session", "fixture:" + email)
 
 
 def test_main_app_import_defers_collection_and_database_initialization() -> None:
@@ -95,24 +88,23 @@ def test_main_app_import_defers_collection_and_database_initialization() -> None
     assert completed.returncode == 0, completed.stderr
 
 
-def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) -> None:
+def test_app_disposes_owned_database_engine_when_identity_start_fails(
+    monkeypatch,
+) -> None:
     from main import create_app
 
     engine = Mock()
     engine.dispose = AsyncMock()
-    service = Mock()
-    service.ensure_bootstrap_user = AsyncMock(
-        side_effect=RuntimeError("bootstrap failed")
-    )
+    service = Mock(side_effect=RuntimeError("identity failed"))
     monkeypatch.setattr("main.DatabaseSettings", lambda: object())
     monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
     monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", Mock())
     monkeypatch.setattr(
-        "application.auth.session_service.ensure_bootstrap_user",
-        service.ensure_bootstrap_user,
+        "infra.identity.client.IdentityClient",
+        service,
     )
 
-    with pytest.raises(RuntimeError, match="bootstrap failed"):
+    with pytest.raises(RuntimeError, match="identity failed"):
         with TestClient(create_app()):
             pass
 
@@ -122,7 +114,7 @@ def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) ->
 def test_app_lifespan_uses_shared_module_dependencies(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -140,7 +132,9 @@ def test_app_lifespan_uses_shared_module_dependencies(
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -163,7 +157,8 @@ def test_app_lifespan_uses_shared_module_dependencies(
             for service in collection_consumers
         )
         capability_names = {
-            spec.name for spec in shared_chat_service.ChatService.runner.capabilities.specs
+            spec.name
+            for spec in shared_chat_service.ChatService.runner.capabilities.specs
         }
         assert {
             "get_collection_context",
@@ -196,7 +191,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
 def test_web_lifespan_does_not_claim_or_interrupt_worker_jobs(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -211,7 +206,9 @@ def test_web_lifespan_does_not_claim_or_interrupt_worker_jobs(
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -222,10 +219,10 @@ def test_web_lifespan_does_not_claim_or_interrupt_worker_jobs(
         assert not hasattr(create_app, "_active_workers")
 
 
-def test_collections_api_requires_login(
+def test_collections_api_requires_authenticated_subject(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -233,52 +230,23 @@ def test_collections_api_requires_login(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
         response = client.get("/api/v1/collections")
 
-        assert response.status_code == 200
+        assert response.status_code == 401
         assert response.json()["code"] == 200301
         assert response.json()["data"]["code"] == "authentication_required"
 
 
-def test_login_me_and_logout_flow(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-    *,
-    postgres_session_factory,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-        postgres_session_factory=postgres_session_factory,
-    ) as client:
-        login = _login(client)
-        assert login.status_code == 200
-        assert login.json()["data"]["user"]["email"] == "admin@example.com"
-
-        me = client.get("/api/v1/auth/me")
-        assert me.status_code == 200
-        assert me.json()["data"]["user"]["email"] == "admin@example.com"
-
-        logout = client.post("/api/v1/auth/logout")
-        assert logout.status_code == 200
-
-        after_logout = client.get("/api/v1/auth/me")
-        assert after_logout.status_code == 200
-        assert after_logout.json()["code"] == 200301
 
 
 def test_collection_list_is_scoped_to_authenticated_owner(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -286,11 +254,11 @@ def test_collection_list_is_scoped_to_authenticated_owner(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
 
         created = client.post("/api/v1/collections", json={"name": "Admin papers"})
         assert created.status_code == 200
@@ -302,15 +270,14 @@ def test_collection_list_is_scoped_to_authenticated_owner(
             item["collection_id"] for item in owner_list.json()["data"]["items"]
         ] == [collection_id]
 
-        auth_service = auth_session_service
+        auth_service = identity_subjects
         asyncio.run(
-            auth_service.create_user(
+            auth_service.create_subject(
                 email="other@example.com",
-                password="other-password",
             )
         )
         client.cookies.clear()
-        assert _login(client, "other@example.com", "other-password").status_code == 200
+        _bind_subject(client, "other@example.com")
 
         other_list = client.get("/api/v1/collections")
         assert other_list.status_code == 200
@@ -325,7 +292,7 @@ def test_collection_list_is_scoped_to_authenticated_owner(
 def test_public_static_data_mount_is_removed(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -333,7 +300,7 @@ def test_public_static_data_mount_is_removed(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
@@ -349,7 +316,7 @@ def test_public_static_data_mount_is_removed(
 def test_collection_source_archive_downloads_selected_original_files(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -357,11 +324,11 @@ def test_collection_source_archive_downloads_selected_original_files(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
         created = client.post(
             "/api/v1/collections",
             json={"name": "Failed paper reproduction"},
@@ -397,7 +364,7 @@ def test_collection_source_archive_downloads_selected_original_files(
 def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -405,11 +372,11 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
         created = client.post(
             "/api/v1/collections",
             json={"name": "Upload validation"},
@@ -441,7 +408,7 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
 def test_collection_source_archive_is_scoped_to_authenticated_owner(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -449,25 +416,24 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
         created = client.post(
             "/api/v1/collections",
             json={"name": "Private failures"},
         )
         collection_id = created.json()["data"]["collection_id"]
-        auth_service = auth_session_service
+        auth_service = identity_subjects
         asyncio.run(
-            auth_service.create_user(
+            auth_service.create_subject(
                 email="other@example.com",
-                password="other-password",
             )
         )
         client.cookies.clear()
-        assert _login(client, "other@example.com", "other-password").status_code == 200
+        _bind_subject(client, "other@example.com")
 
         response = client.post(
             f"/api/v1/collections/{collection_id}/source-archives",
@@ -490,7 +456,7 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
 def test_collection_source_archive_rejects_invalid_file_selection(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     document_ids,
     *,
@@ -499,11 +465,11 @@ def test_collection_source_archive_rejects_invalid_file_selection(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
         created = client.post(
             "/api/v1/collections",
             json={"name": "Invalid selection"},
@@ -521,7 +487,7 @@ def test_collection_source_archive_rejects_invalid_file_selection(
 def test_collection_source_archive_returns_bounded_missing_file_error(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -529,11 +495,11 @@ def test_collection_source_archive_returns_bounded_missing_file_error(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
         created = client.post(
             "/api/v1/collections",
             json={"name": "Missing file"},
@@ -557,7 +523,7 @@ def test_collection_source_archive_returns_bounded_missing_file_error(
 def test_collection_source_archive_returns_413_for_oversized_selection(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
@@ -566,11 +532,11 @@ def test_collection_source_archive_returns_413_for_oversized_selection(
     with _build_client(
         monkeypatch,
         tmp_path,
-        auth_session_service,
+        identity_subjects,
         collection_service,
         postgres_session_factory=postgres_session_factory,
     ) as client:
-        assert _login(client).status_code == 200
+        _bind_subject(client)
         created = client.post(
             "/api/v1/collections",
             json={"name": "Oversized archive"},

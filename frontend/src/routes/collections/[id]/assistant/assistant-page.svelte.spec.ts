@@ -1245,7 +1245,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		let pendingSignal: AbortSignal | null | undefined;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
-			if (path.endsWith('/auth/logout')) return Promise.resolve(jsonResponse({}));
+			if (path.endsWith('/user-api/v1/logout')) return Promise.resolve(jsonResponse({}));
 			if (path.endsWith('/pin') || String(input).includes('offset=10')) {
 				pendingSignal = init?.signal;
 				return new Promise<Response>((resolve) => { finish = resolve; });
@@ -2006,10 +2006,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
-			if (path.endsWith('/auth/logout')) return Promise.resolve(jsonResponse({}));
-			if (path.endsWith('/auth/login'))
+			if (path.endsWith('/user-api/v1/logout')) return Promise.resolve(jsonResponse({}));
+			if (path.endsWith('/user-api/v1/login'))
 				return Promise.resolve(
-					jsonResponse({ user: { user_id: 'researcher_2', email: 'second@example.test' } })
+					new Response(JSON.stringify({ user_id: 'researcher_2', email: 'second@example.test' }), {headers: {'Content-Type': 'application/json'}})
 				);
 			if (path === '/api/v1/chat-sessions')
 				return Promise.resolve(
@@ -2304,7 +2304,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
-			requestPath(input).endsWith('/auth/logout')
+			requestPath(input).endsWith('/user-api/v1/logout')
 				? Promise.resolve(jsonResponse({}))
 				: original(input, init)
 		);
@@ -4500,7 +4500,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi();
 		fetchMock.mockImplementationOnce(() =>
 			Promise.resolve(
-				jsonResponse({ user: { user_id: session.user_id, email: 'researcher@example.test' } })
+				new Response(JSON.stringify({ user_id: session.user_id, email: 'researcher@example.test' }), {headers: {'Content-Type': 'application/json'}})
 			)
 		);
 		await fetchCurrentSession();

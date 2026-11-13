@@ -1512,21 +1512,20 @@ test.describe('page interaction audit', () => {
 			finish = resolve;
 		});
 		let logins = 0;
-		await page.route('**/api/v1/auth/logout', async (route) => {
+		await page.route('**/user-api/v1/logout', async (route) => {
 			await completion;
-			return route.fulfill(json({}));
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
 		});
-		await page.route('**/api/v1/auth/login', (route) => {
+		await page.route('**/user-api/v1/login', (route) => {
 			logins += 1;
-			return route.fulfill(
-				json({
-					user: {
-						user_id: 'user_2',
-						email: 'second@example.test',
-						display_name: 'Second Researcher'
-					}
+			return route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify({
+					user_id: 'user_2',
+					email: 'second@example.test',
+					display_name: 'Second Researcher'
 				})
-			);
+			});
 		});
 		try {
 			await page.goto('/');
@@ -1675,7 +1674,7 @@ test.describe('page interaction audit', () => {
 		});
 		const other = await context.newPage();
 		await mockApis(other);
-		await other.route('**/api/v1/auth/logout', (route) => route.fulfill(json({})));
+		await other.route('**/user-api/v1/logout', (route) => route.fulfill(json({})));
 		try {
 			await page.goto(`/collections/${collectionId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
@@ -1783,7 +1782,7 @@ test.describe('page interaction audit', () => {
 			await expect.poll(() => Boolean(releaseSave)).toBe(true);
 			holdSave = false;
 			releaseSave!();
-			await expect(answer.getByRole('alert')).toHaveText(
+			await expect(page.getByTestId('research-recovery')).toHaveText(
 				'Could not save feedback. Please try again.'
 			);
 			await expect(comment).toHaveValue(
@@ -3078,10 +3077,16 @@ async function mockApis(page: Page) {
 		const referer = route.request().headers().referer;
 		const auditState = readAuditState(url, referer);
 
-		if (!path.startsWith('/api/v1/')) return route.continue();
+		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 
-		if (path === '/api/v1/auth/me') {
-			return route.fulfill(json(authPayload()));
+		if (path === '/user-api/v1/me') {
+			return route.fulfill({
+				status: 200, contentType: 'application/json',
+				body: JSON.stringify(authPayload())
+			});
+		}
+		if (path === '/api/v1/model-connections') {
+			return route.fulfill(json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] }));
 		}
 		if (path === '/api/v1/collections') {
 			if (method === 'POST') return route.fulfill(json(collection(auditState)));
@@ -3209,7 +3214,16 @@ async function mockApis(page: Page) {
 }
 
 function json(body: unknown, status = 200) {
-	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+	return {
+		status,
+		contentType: 'application/json',
+		body: JSON.stringify({
+			code: status >= 400 ? 200205 : 200,
+			message: status >= 400 ? 'Unavailable' : 'success',
+			data: body,
+			meta: null
+		})
+	};
 }
 
 function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
@@ -3460,11 +3474,9 @@ function now() {
 
 function authPayload() {
 	return {
-		user: {
-			user_id: 'user_1',
-			email: 'reader@example.com',
-			display_name: 'Reader'
-		}
+		user_id: 'user_1',
+		email: 'reader@example.com',
+		display_name: 'Reader'
 	};
 }
 

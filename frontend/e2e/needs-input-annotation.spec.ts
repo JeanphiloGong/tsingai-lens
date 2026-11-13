@@ -15,11 +15,16 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 		const sample = () => ({ sample_id: 'sample_input', dataset_id: datasetId, source_case_id: 'case_input', status,
 			current_revision_id: content ? 'revision_human' : null, confirmed_revision_id: status === 'confirmed' ? 'revision_human' : null,
 			generation: 1, missing_reasons: content ? [] : ['readable_evidence_missing'], created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:00:00Z' });
+		await page.route('**/user-api/v1/**', route => {
+			const path = new URL(route.request().url()).pathname;
+			const body = path === '/user-api/v1/me/permissions' ? {permission_codes: []} : {user_id: 'user_input', email: 'input@example.test'};
+			return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)});
+		});
 		await page.route('**/api/v1/**', async route => {
 			const request = route.request();
 			const path = new URL(request.url()).pathname;
 			let body: unknown = {};
-			if (path.endsWith('/auth/me')) body = { user: { user_id: 'user_input', email: 'input@example.test' } };
+			if (path === '/api/v1/collections') body = {items: []};
 			else if (path === `/api/v1/collections/${collectionId}`) body = { collection_id: collectionId, name: '预热文献', documents: [], status: 'ready' };
 			else if (path === `/api/v1/feedback-datasets/${datasetId}`) body = dataset;
 			else if (path.endsWith('/samples')) body = { items: [sample()], total: 1, limit: 200, offset: 0 };
@@ -43,7 +48,7 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 				current_revision: content ? { revision_id: 'revision_human', revision_no: 1, content, provenance: {}, author_kind: 'human' } : null,
 				confirmed_revision: null
 			};
-			await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+			await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({code: 200, message: 'success', data: body, meta: null}) });
 		});
 		await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
 		await expect(page.getByText('待补充', { exact: true }).last()).toBeVisible();

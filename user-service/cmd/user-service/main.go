@@ -5,7 +5,11 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	pb "github.com/JeanphiloGong/tsingai-lens/user-service/internal/gen/userv1"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,8 +17,11 @@ import (
 	"time"
 
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/httpapi"
+	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/rpc"
 	"github.com/JeanphiloGong/tsingai-lens/user-service/internal/service"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func required(key string) string {
@@ -70,6 +77,68 @@ func main() {
 			TLS:      os.Getenv("SMTP_TLS") != "false",
 		}
 	}
+
+	// loads the certificate and matching private key that the gRPC server will present during TLS handshakes
+	serverCert, err := tls.LoadX509KeyPair(required("RPC_CERT"), required("RPC_KEY"))
+
+	// checks whether loading the server certificate and key failed
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// reads the configured client CA file so its certificates can be added to the trust pool
+	caPEM, err := os.ReadFile(required("RPC_CA"))
+
+	// checks whether reading the CA file failed.
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// creates an initially empty certificate pool to hold the CAs used for client-certificate verification
+	clientCAs := x509.NewCertPool()
+
+	// attempts to add certificates from the file bytes to `clientAs` and rejects the configuration if none can be parsed successfully
+	if !clientCAs.AppendCertsFromPEM(caPEM) {
+		log.Fatal("invalid CA")
+	}
+
+	// construts the gRPC server with TLS transport credentials
+	rpcServer := grpc.NewServer(
+		// &tls.Config creates a TLS configuation and passes a pointer to it
+		grpc.Creds(credentials.NewTLS(&tls.Config{
+			// set TLS 1.3 as the minimum accepted protocol version
+			MinVersion: tls.VersionTLS13,
+			// creates a slice containing the certificate and private key loaded earlier
+			Certificates: []tls.Certificate{
+				serverCert,
+			},
+			// supplies the pool used to verify client certificates
+			ClientCAs: clientCAs,
+			// requires clients to present a certificated and requires that certificate
+			ClientAuth: tls.RequireAndVerifyClientCert,
+		})),
+	)
+	// registers an identity-service implementation with the newly created gRPC server
+	pb.RegisterIdentityServer(rpcServer, &rpc.Server{Service: userService})
+
+	// opens the network endpoint on which the gRPC server will accept connections
+	listener, err := net.Listen("tcp", required("RPC_ADDR"))
+
+	// checks whether the TCP listener could be created
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// starts an anonymous function in a new goroutine
+	go func() {
+		if err := rpcServer.Serve(listener); err != nil {
+			log.Print(err)
+			cancel()
+		}
+	}()
+
+	// schedules `rpcServerStop()` to run when `main` returns normally or unwinds through a panic
+	defer rpcServer.Stop()
 
 	// constructs the HTTP server used when bootstrap mode was not selected.
 	server := &http.Server{

@@ -120,8 +120,6 @@ async def test_existing_revision_is_immutable(*, postgres_session_factory) -> No
 
 @pytest.fixture(autouse=True)
 async def research_records(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_objective, seed_user
+    from tests.support.postgres import seed_objective
 
     await seed_objective(postgres_session_factory, "col-1", "objective-1")
-    for user_id in ("researcher-1", "researcher-2", "researcher-3"):
-        await seed_user(postgres_session_factory, user_id)

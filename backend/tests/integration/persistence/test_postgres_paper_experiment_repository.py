@@ -17,7 +17,6 @@ from domain.core.paper_experiment import (
 )
 from domain.source import Collection, Document
 from infra.persistence import database
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
     CollectionRepository,
     StoredCollection,
@@ -40,16 +39,6 @@ NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 @pytest.fixture
 async def paper_experiment_repository(postgres_session_factory):
-    auth = AuthRepository()
-    await auth.add_user(
-        AuthUserRecord(
-            user_id="experiment-owner",
-            email="experiment-owner@example.test",
-            display_name=None,
-            password_hash="synthetic-password-hash",
-            created_at=NOW,
-        )
-    )
     collections = CollectionRepository()
     collection = StoredCollection(
         collection=Collection(

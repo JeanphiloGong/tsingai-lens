@@ -111,10 +111,3 @@ async def test_collection_delete_removes_aggregate(*, postgres_session_factory) 
     assert (
         await repository.delete_collection(collection.collection.collection_id) is False
     )
-
-
-@pytest.fixture(autouse=True)
-async def collection_owner(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_user
-
-    await seed_user(postgres_session_factory, "user_demo")

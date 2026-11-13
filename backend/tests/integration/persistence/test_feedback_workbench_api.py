@@ -5,12 +5,10 @@ from application.feedback import analysis_worker, worker_lease
 
 from application.feedback import analysis_handler
 
-from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-from application.auth import session_service as auth_session_service
-from application.auth.session_service import SESSION_COOKIE_NAME
+from infra.identity.client import SESSION_COOKIE_NAME
 from controllers import feedback_case_routes as feedback_cases
 from controllers.exception_router import (
     general_exception_handler,
@@ -23,7 +21,6 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
 from main import configure_middleware
-from repositories.auth_repository import AuthSessionRecord, AuthUserRecord
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from tests.integration.persistence.test_feedback_workbench import feedback_chain
 
@@ -35,18 +32,6 @@ OTHER_EMAIL = "feedback-api-other@example.test"
 OTHER_TOKEN = "feedback-api-other-token"
 OWNER_TOKEN = "feedback-api-owner-token"
 NOW = "2026-09-25T00:00:00+00:00"
-
-
-async def _create_session(auth_repository, *, token: str, user_id: str) -> None:
-    await auth_repository.add_session(
-        AuthSessionRecord(
-            session_id=f"session_{user_id}",
-            user_id=user_id,
-            created_at=NOW,
-            expires_at="2030-01-01T00:00:00+00:00",
-        ),
-        token_hash=sha256(token.encode("utf-8")).hexdigest(),
-    )
 
 
 async def _prepare_case(chain) -> object:
@@ -79,18 +64,19 @@ async def _prepare_case(chain) -> object:
 @pytest.fixture
 async def feedback_api(feedback_chain):
     chain = feedback_chain
-    auth_repository = chain.auth
-    await auth_repository.add_user(
-        AuthUserRecord(
-            user_id=OTHER_ID,
-            email=OTHER_EMAIL,
-            display_name="Other researcher",
-            password_hash="synthetic-password-hash",
-            created_at=NOW,
-        )
-    )
-    await _create_session(auth_repository, token=OWNER_TOKEN, user_id=OWNER_ID)
-    await _create_session(auth_repository, token=OTHER_TOKEN, user_id=OTHER_ID)
+    from infra.identity import client as identity_client
+    from tests.support.identity import IdentitySubjects
+
+    subjects = IdentitySubjects()
+    subjects.tokens = {
+        OWNER_TOKEN: {
+            "user_id": OWNER_ID,
+            "email": "owner@example.test",
+            "display_name": None,
+        },
+        OTHER_TOKEN: {"user_id": OTHER_ID, "email": OTHER_EMAIL, "display_name": None},
+    }
+    identity_client.Client = subjects
     case = await _prepare_case(chain)
 
     app = FastAPI()
@@ -101,7 +87,6 @@ async def feedback_api(feedback_chain):
     configure_middleware(app)
     app.include_router(feedback_cases.feedback_case_router, prefix="/api/v1")
     feedback_cases.feedback_case_service = chain.case_service
-    auth_session_service.AuthRepo = auth_repository
 
     async with (
         AsyncClient(
@@ -145,7 +130,7 @@ async def test_feedback_api_requires_auth_and_hides_collection_from_other_user(
     fixture = feedback_api
     path = "/api/v1/feedback-cases"
     rejection = await fixture.anonymous.get(path)
-    assert rejection.status_code == 200
+    assert rejection.status_code == 401
     assert rejection.json()["code"] == 200301
 
     listing = await fixture.owner.get(

@@ -78,20 +78,18 @@ class _CandidateCapability:
 
 
 async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
-    auth_session_service,
+    identity_subjects,
     collection_service,
     monkeypatch,
     *,
     postgres_session_factory,
     collection_workspace,
 ) -> None:
-    user = await auth_session_service.create_user(
+    user = await identity_subjects.create_subject(
         email="agent-flow@example.com",
-        password="test-password",
     )
-    login = await auth_session_service.login(
+    login = await identity_subjects.issue_session(
         email=user["email"],
-        password="test-password",
     )
     collection = await collection_service.create_collection(
         "Ti-6Al-4V energy input",
@@ -222,13 +220,19 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         {"question": "How does energy input affect grain morphology?"}
     ]
     assert trajectory.json()["data"]["pending_approval"] is None
-    assert set(model.all_tool_spec_names[0]) == {"get_collection_context", "update_execution_plan", "discover_research_tools"}
+    assert set(model.all_tool_spec_names[0]) == {
+        "get_collection_context",
+        "update_execution_plan",
+        "discover_research_tools",
+    }
     assert any(
         "create_objective_candidate" in names for names in model.all_tool_spec_names
     )
     assert "create_objective_candidate" in model.all_tool_spec_names[-1]
     assert "discover_research_tools" not in model.all_tool_spec_names[-1]
     items = trajectory.json()["data"]["items"]
-    requested_ids = {call["tool_call_id"] for item in items for call in item["tool_calls"]}
+    requested_ids = {
+        call["tool_call_id"] for item in items for call in item["tool_calls"]
+    }
     returned_ids = {item["tool_call_id"] for item in items if item["role"] == "tool"}
     assert requested_ids == returned_ids

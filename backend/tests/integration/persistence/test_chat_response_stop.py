@@ -9,7 +9,7 @@ from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, Resea
 from application.chat import session_service
 from domain.chat import ChatToolResult, ToolResultStatus, ToolRisk
 from repositories.chat_repository import ChatRepository
-from application.auth.session_service import SESSION_COOKIE_NAME
+from infra.identity.client import SESSION_COOKIE_NAME
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401
 from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
 from tests.unit.application.test_research_agent_runner import _Capability, _Model

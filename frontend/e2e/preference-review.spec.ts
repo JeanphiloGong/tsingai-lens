@@ -20,11 +20,16 @@ async function mockPreference(page: Page, choice: string | null = 'b', failure: 
 	const sample = () => ({ sample_id: 'sample_preference', dataset_id: datasetId, source_case_id: 'case_preference',
 		status, current_revision_id: `revision_${revision}`, confirmed_revision_id: status === 'confirmed' ? `revision_${revision}` : null,
 		generation: 1, missing_reasons: [], created_at: '2026-10-04T00:00:00Z', updated_at: '2026-10-04T00:00:00Z' });
+	await page.route('**/user-api/v1/**', route => {
+		const path = new URL(route.request().url()).pathname;
+		const body = path === '/user-api/v1/me/permissions' ? {permission_codes: []} : {user_id: 'reviewer', email: 'reviewer@example.test'};
+		return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)});
+	});
 	await page.route('**/api/v1/**', async route => {
 		const request = route.request();
 		const urlPath = new URL(request.url()).pathname;
 		let body: unknown = {};
-		if (urlPath.endsWith('/auth/me')) body = { user: { user_id: 'reviewer', email: 'reviewer@example.test' } };
+		if (urlPath === '/api/v1/collections') body = {items: []};
 		else if (urlPath === '/api/v1/collections/col_preference_review') body = { collection_id: 'col_preference_review', name: '预热条件核查', documents: [], status: 'ready' };
 		else if (urlPath === `/api/v1/feedback-datasets/${datasetId}`) body = { dataset_id: datasetId, collection_id: 'col_preference_review', task_type: 'preference', construction_spec: {}, spec_version: 1 };
 		else if (urlPath.endsWith('/samples')) body = { items: [sample()], total: 1 };
@@ -58,7 +63,7 @@ async function mockPreference(page: Page, choice: string | null = 'b', failure: 
 			current_revision: { revision_id: `revision_${revision}`, revision_no: revision, author_kind: revision === 1 ? 'worker' : 'human', content, provenance: {} },
 			confirmed_revision: null
 		};
-		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({code: 200, message: 'success', data: body, meta: null}) });
 	});
 	return requests;
 }

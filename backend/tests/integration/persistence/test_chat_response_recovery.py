@@ -21,14 +21,12 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from application.auth import session_service as auth_session_service
-from application.auth.session_service import SESSION_COOKIE_NAME
+from infra.identity.client import SESSION_COOKIE_NAME
 from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
 from application.chat import session_service as chat_session_service
 from controllers.chat.chat_session_routes import chat_session_router as router
 from fastapi import FastAPI
 from httpx import AsyncClient
-from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from sqlalchemy import inspect, text
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401
@@ -63,39 +61,58 @@ class _ProcessPausedModel:
         return ModelTurn(content=self.first + self.second)
 
 
-def _worker(database_url, listener, ready, stop, resume, finish, calls, active_tasks, sources):
+def _worker(
+    database_url, listener, ready, stop, resume, finish, calls, active_tasks, sources
+):
     """Bind a fresh module graph and database factory in each spawned worker."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
-    from repositories import auth_repository, chat_repository, collection_repository, model_connection_repository
+    from repositories import (
+        chat_repository,
+        collection_repository,
+        model_connection_repository,
+    )
     from infra.persistence.postgres.models.model_connection import ModelConnectionORM
     from infra.llm import chat_model
     from sqlalchemy.dialects.postgresql import insert
     from application.source import collection_service
-    from controllers.exception_router import project_exception_handler
+    from infra.identity import client as identity
+    from tests.support.identity import IdentitySubjects
+    from controllers.exception_router import http_exception_handler, project_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
     from exceptions import ProjectException
 
     async def serve():
+        identity.Client = IdentitySubjects()
         engine = create_async_engine(database_url, poolclass=NullPool)
         factory = async_sessionmaker(engine, expire_on_commit=False)
-        auth_repository.AsyncSessionLocal = factory
         chat_repository.AsyncSessionLocal = factory
         collection_repository.AsyncSessionLocal = factory
         model_connection_repository.AsyncSessionLocal = factory
         now = datetime.now(timezone.utc)
         async with factory.begin() as db:
-            await db.execute(insert(ModelConnectionORM).values(
-                connection_id="worker-test", display_name="Worker test model",
-                base_url="https://worker.example.invalid/v1", model="scripted-model",
-                api_key_ref=None, enabled=True, created_at=now, updated_at=now,
-            ).on_conflict_do_nothing(index_elements=["connection_id"]))
-        auth_session_service.AuthRepo = AuthRepository()
+            await db.execute(
+                insert(ModelConnectionORM)
+                .values(
+                    connection_id="worker-test",
+                    display_name="Worker test model",
+                    base_url="https://worker.example.invalid/v1",
+                    model="scripted-model",
+                    api_key_ref=None,
+                    enabled=True,
+                    created_at=now,
+                    updated_at=now,
+                )
+                .on_conflict_do_nothing(index_elements=["connection_id"])
+            )
+
         collection_service.CollectionRepo = collection_repository.CollectionRepository()
         chat_session_service.collection_service = collection_service
         chat_session_service.SourceArtifactRepo = sources
         chat_session_service.ChatRepo = ChatRepository()
         runner = ResearchAgentRunner(
-            model=_ProcessPausedModel(resume, finish, calls), capabilities=CapabilityRegistry(()),
+            model=_ProcessPausedModel(resume, finish, calls),
+            capabilities=CapabilityRegistry(()),
         )
         chat_model.OpenAIChatModel = lambda **options: runner.model
         service = chat_session_service.ChatSessionService(
@@ -104,6 +121,7 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
         app = FastAPI()
         shared_chat_service.ChatService = service
         app.add_exception_handler(ProjectException, project_exception_handler)
+        app.add_exception_handler(StarletteHTTPException, http_exception_handler)
         app.include_router(router, prefix="/api/v1")
         server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
         task = asyncio.create_task(server.serve(sockets=[listener]))
@@ -122,7 +140,8 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
             try:
                 await asyncio.wait_for(task, 10)
                 await asyncio.wait_for(
-                    asyncio.gather(*service._active_stream_tasks), 10,
+                    asyncio.gather(*service._active_stream_tasks),
+                    10,
                 )
                 active_tasks.value = len(service._active_stream_tasks)
             finally:
@@ -253,6 +272,7 @@ async def test_real_http_disconnect_resumes_on_another_worker_without_duplicate_
             assert len({message.message_id for message in persisted}) == 2
             second.cookies.clear()
             unauthorized = await second.get(f"{path}/events", params={"response_id": snapshot["response_id"]})
+            assert unauthorized.status_code == 401
             assert unauthorized.json()["code"] == 200301
             second.cookies.set(SESSION_COOKIE_NAME, fixture.cookies[1])
             forbidden = await second.get(f"{path}/events", params={"response_id": snapshot["response_id"]})

@@ -551,12 +551,9 @@ def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending(mo
 
 
 class _AuthService:
-    async def ensure_bootstrap_user(self) -> None:
-        return None
-
     async def resolve_session(self, session_id: str | None) -> dict:
         if session_id != "browser-session":
-            from application.auth import SessionNotFoundError
+            from infra.identity.client import SessionNotFoundError
 
             raise SessionNotFoundError("authentication required")
         return {"user_id": "user-1", "email": "researcher@example.com"}
@@ -568,10 +565,12 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
     service = _Service()
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     monkeypatch.setattr(
-        "application.auth.session_service.resolve_session",
+        "infra.identity.client.Client.resolve_session",
         _AuthService().resolve_session,
     )
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -581,7 +580,7 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
     with TestClient(app) as client:
         monkeypatch.setattr(shared_chat_service, "ChatService", service)
         response = client.post("/api/v1/chat-sessions", json={"collection_id": "col-1"})
-        assert response.status_code == 200
+        assert response.status_code == 401
         assert response.json()["code"] == 200301
 
         client.cookies.set("lens_session", "browser-session")
@@ -606,10 +605,12 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
     service = _Service()
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     monkeypatch.setattr(
-        "application.auth.session_service.resolve_session",
+        "infra.identity.client.Client.resolve_session",
         _AuthService().resolve_session,
     )
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -654,10 +655,12 @@ def test_title_route_validates_input_and_hides_unowned_sessions(
     )
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     monkeypatch.setattr(
-        "application.auth.session_service.resolve_session",
+        "infra.identity.client.Client.resolve_session",
         _AuthService().resolve_session,
     )
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -666,7 +669,7 @@ def test_title_route_validates_input_and_hides_unowned_sessions(
     path = f"/api/v1/chat-sessions/{session.session_id}/title"
     with TestClient(app) as client:
         response = client.put(path, json={"title": "New title"})
-        assert response.status_code == 200
+        assert response.status_code == 401
         assert response.json()["code"] == 200301
         client.cookies.set("lens_session", "browser-session")
         for title in (

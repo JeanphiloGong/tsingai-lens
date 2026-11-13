@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from time import perf_counter
 
-from application.auth import session_service as auth_session_service
+from infra.identity import client as identity
 from application.chat import AgentRunLimits, CapabilityRegistry, ResearchAgentRunner
 from application.chat import session_service
 from application.chat.capabilities import (
@@ -45,7 +45,6 @@ from infra.persistence import database
 from infra.persistence.file import collection_workspace, object_store
 
 from config import DATA_DIR
-from controllers import auth_routes as auth
 from controllers import feedback_case_routes as feedback_cases
 from controllers import model_connection_routes as model_connections
 from controllers.chat import chat_session_routes as chat_sessions
@@ -144,9 +143,14 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
         cleanup.push_async_callback(database_engine.dispose)
         database.engine = database_engine
         database.AsyncSessionLocal.configure(bind=database_engine)
-        collection_workspace.Workspace = collection_workspace.FileCollectionWorkspace(DATA_DIR / "collections")
-        object_store.Store = object_store.FileObjectStore(collection_workspace.Workspace.root_dir)
-        await auth_session_service.ensure_bootstrap_user()
+        collection_workspace.Workspace = collection_workspace.FileCollectionWorkspace(
+            DATA_DIR / "collections"
+        )
+        object_store.Store = object_store.FileObjectStore(
+            collection_workspace.Workspace.root_dir
+        )
+        identity.Client = identity.IdentityClient()
+        cleanup.push_async_callback(identity.Client.close)
         chat_model = OpenAIChatModel()
         cleanup.push_async_callback(chat_model.client.close)
         runner = ResearchAgentRunner(
@@ -257,7 +261,6 @@ def register_routes(app: FastAPI) -> None:
     """Register the public Lens API routers."""
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    app.include_router(auth.auth_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.collection_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(references.reference_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.goal_router, prefix=PUBLIC_API_V1_PREFIX)
@@ -265,7 +268,9 @@ def register_routes(app: FastAPI) -> None:
         experiment_plans.experiment_plan_router, prefix=PUBLIC_API_V1_PREFIX
     )
     app.include_router(chat_sessions.chat_session_router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(
+        model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX
+    )
     app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX

@@ -48,6 +48,14 @@ async function installApi(page: Page, authenticated = true) {
 		streams: 0,
 		unexpected: [] as string[]
 	};
+	await page.route('**/user-api/v1/**', async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		if (path === '/user-api/v1/login') state.authenticated = true;
+		if (!state.authenticated || state.expired)
+			return route.fulfill({status: 401, contentType: 'application/json', body: JSON.stringify({code: 'authentication_required'})});
+		const body = path === '/user-api/v1/me/permissions' ? {permission_codes: []} : user;
+		return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)});
+	});
 	await page.route('**/api/v1/**', async (route) => {
 		const request = route.request();
 		const path = new URL(request.url()).pathname.slice('/api/v1'.length);
@@ -57,14 +65,9 @@ async function installApi(page: Page, authenticated = true) {
 				contentType: 'application/json',
 				body: JSON.stringify({ code, message, data, meta: null })
 			});
-		if (path === '/auth/login') {
-			state.authenticated = true;
-			return reply({ user });
-		}
 		if (!state.authenticated || state.expired) {
 			return reply({ code: 'authentication_required' }, 200301, 'Authentication is required.');
 		}
-		if (path === '/auth/me') return reply({ user });
 		if (path === '/model-connections')
 			return reply({
 				items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }]
@@ -121,7 +124,7 @@ test('login opens a collection and a rejected download creates no file', async (
 	page.on('pageerror', (error) => errors.push(error.message));
 	page.on('download', (download) => downloads.push(download.suggestedFilename()));
 	const state = await installApi(page, false);
-	await page.goto('/login');
+	await Promise.all([page.waitForResponse(r => r.url().endsWith('/user-api/v1/me')), page.goto('/login')]);
 	await page.locator('#auth-email').fill(user.email);
 	await page.locator('#auth-password').fill('synthetic-test-password');
 	await page.getByRole('button', { name: 'Sign in', exact: true }).click();

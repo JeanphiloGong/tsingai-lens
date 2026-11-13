@@ -4,7 +4,8 @@ This node owns browser-side helpers shared across frontend routes.
 
 ## Responsibilities
 
-- keep requests on the same-origin `/api/*` and `/api/v1/*` contract;
+- keep business requests on same-origin `/api/*` and `/api/v1/*`, and account
+  requests on same-origin `/user-api/v1/*`;
 - centralize authentication expiry and API error handling;
 - expose typed clients for Collection, Document preparation, Source,
   Objective/Finding, and Assistant resources;
@@ -14,7 +15,10 @@ This node owns browser-side helpers shared across frontend routes.
 ## Important Files
 
 - `api.ts`
-  Base request helpers and same-origin downloads. JSON uses HTTP 200 with
+  Base request helpers and same-origin downloads. User-service JSON is parsed
+  directly with HTTP error statuses and a top-level string `code`. Lens identity
+  rejection and outages use HTTP 401/503 with the business envelope. Other Lens
+  JSON uses HTTP 200 with
   `{code,message,data,meta}`; `requestJson` unwraps `data`, and business failures
   raise `ApiError(code, message, data)`. `isApiErrorCode` compares numeric business
   codes and `getApiErrorReason` reads stable `data.code` strings. Authentication

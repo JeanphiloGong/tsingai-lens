@@ -36,7 +36,8 @@ The scientific meaning belongs to the Core services and analysis stages.
 
 [`../../main.py`](../../main.py) configures routes and middleware and owns the
 startup/shutdown lifespan. It binds the database session factory, creates file
-resources in their infrastructure modules, and configures the Chat runner and
+resources in their infrastructure modules, creates and closes the mTLS identity
+client (`infra.identity.client.Client`), and configures the Chat runner and
 model-call observer. Shared instances live with their actual owners:
 `application.chat.session_service.ChatService`,
 `infra.persistence.file.collection_workspace.Workspace`, and

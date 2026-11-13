@@ -607,9 +607,7 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     )
     source = await repository.read_analysis("col-gold", "obj-1", 1)
     assert source is not None
-    from tests.support.postgres import seed_user
 
-    await seed_user(postgres_session_factory, "researcher-1")
     evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
     findings, _ = await repository.list_findings("col-gold", "obj-1", 1)
     contributions = await repository.list_contributions("col-gold", "obj-1", 1)
@@ -663,7 +661,9 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     snapshot_service, _ = _prediction_snapshot_service(repository)
     snapshot_service.experiment_projection = RejectingProjection()
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
-    finding_snapshot_service.FindingReviewRepo = finding_feedback_service.FindingReviewRepo
+    finding_snapshot_service.FindingReviewRepo = (
+        finding_feedback_service.FindingReviewRepo
+    )
     finding_snapshot_service.ObjectiveRepo = repository
     analysis_record_source.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo
     finding_dataset_service.ObjectiveRepo = finding_snapshot_service.ObjectiveRepo

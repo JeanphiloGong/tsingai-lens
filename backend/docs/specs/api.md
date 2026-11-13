@@ -8,8 +8,9 @@ this file owns resource boundaries and cross-endpoint semantics.
 
 - Product APIs use `/api/v1/*`.
 - API documentation uses `/api/docs`, `/api/redoc`, and `/api/openapi.json`.
-- `POST /api/v1/auth/login` establishes an HttpOnly session cookie. Browser
-  requests send that cookie through the same-origin `/api/v1/*` contract.
+- The sibling user-service establishes the HttpOnly `lens_session` cookie.
+  Browser identity requests use same-origin `/user-api/v1/*`; Lens business
+  requests send that cookie through `/api/v1/*` and resolve it over mTLS gRPC.
 - Every business response carries `X-Request-ID`.
 - Internal application logs correlate authenticated work by request ID and the
   stable internal user ID. They do not log email addresses, session values, or
@@ -21,21 +22,33 @@ this file owns resource boundaries and cross-endpoint semantics.
 - Retired payloads and endpoints are not accepted through aliases or fallback
   parsers.
 
-All failure numbers below are business `code` values under HTTP 200. Stable
-reason strings shown beside a number are carried in `data.code`.
+Unless an identity/shared endpoint below specifies an HTTP status, existing
+failure numbers are business `code` values under HTTP 200. Stable reason strings
+are carried in `data.code`.
 
 ## Resource Map
 
 ### Authentication
 
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/auth/me`
+Identity HTTP routes belong to user-service: `POST /user-api/v1/login`,
+`POST /user-api/v1/logout`, `GET /user-api/v1/me`.
+The permissions endpoint is introduced with the later authorization capability. The former Lens `/auth/*` routes are removed.
 
-Invalid credentials return business code `200301` with reason `invalid_credentials`.
-A missing or expired session returns the same code with reason
-`authentication_required`; only this reason sends the browser to
-login after clearing local authentication and user-scoped chat storage.
+User-service HTTP errors return a flat object such as
+`{"code":"invalid_credentials"}` with the corresponding HTTP error status.
+A rate-limited response also includes top-level `retry_after` seconds and the
+`Retry-After` header; other errors omit that field. These are user-service
+responses; the Lens business envelope below keeps its existing shape.
+User-service returns its own JSON contract and HTTP 401/403/409/422/503 errors.
+Lens does not keep a second user/permission table or local-auth fallback.
+
+Lens identity rejection uses HTTP 401 / business code `200301` with
+`data.code=authentication_required`; unavailable identity uses HTTP 503 /
+`200205`; an explicit capability denial uses HTTP 403 / `200203`.
+Successful Lens JSON and unrelated existing business failures retain the
+`{code,message,data,meta}` envelope; resource-hidden errors remain HTTP 200 /
+`200201`. Business clients must read that envelope rather than infer success
+solely from HTTP 200. Stable user IDs remain in business/audit records.
 
 ### Collections, Documents, And Preparation
 

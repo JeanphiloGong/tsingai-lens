@@ -4,7 +4,6 @@ from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 from dataclasses import replace
-from datetime import datetime, timezone
 from hashlib import sha256
 
 import pytest
@@ -23,7 +22,6 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
 )
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
     CollectionRepository,
     StoredCollection,
@@ -41,15 +39,6 @@ COLLECTION_ID = "col_source"
 
 @pytest.fixture
 async def source_repository(postgres_session_factory):
-    await AuthRepository().add_user(
-        AuthUserRecord(
-            user_id="user_source",
-            email="source@example.com",
-            display_name=None,
-            password_hash="synthetic-password-hash",
-            created_at=datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
-        )
-    )
     collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(

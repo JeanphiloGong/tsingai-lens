@@ -45,32 +45,44 @@ def test_stale_plan_update_returns_http_business_conflict_without_another_revisi
     postgres_session_factory,
 ) -> None:
     from controllers.dependencies.auth import get_current_user_id
-    from controllers.exception_router import general_exception_handler, project_exception_handler
+    from controllers.exception_router import (
+        general_exception_handler,
+        project_exception_handler,
+    )
     from exceptions import ProjectException
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from tests.support.postgres import seed_objective, seed_user
+    from tests.support.postgres import seed_objective
 
     asyncio.run(seed_objective(postgres_session_factory, "col_1", "objective_1"))
-    asyncio.run(seed_user(postgres_session_factory, "expert-a"))
     repository = ExperimentPlanRepository()
     experiment_plan_service.ExperimentPlanRepo = repository
     experiment_plan_service.finding_snapshot_service = _FindingFeedbackService()
     _request(experiment_plan_service)
     app = FastAPI()
-    app.include_router(experiment_plans_controller.experiment_plan_router, prefix="/api/v1")
+    app.include_router(
+        experiment_plans_controller.experiment_plan_router, prefix="/api/v1"
+    )
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     app.dependency_overrides[get_current_user_id] = lambda: "expert-a"
     url = "/api/v1/collections/col_1/objectives/objective_1/experiment-plans"
 
     with TestClient(app, raise_server_exceptions=False) as client:
-        created = client.post(url, json={
-            "title": "LPBF porosity follow-up", "content": "Compare laser power with a fixed powder batch.",
-        }).json()["data"]
+        created = client.post(
+            url,
+            json={
+                "title": "LPBF porosity follow-up",
+                "content": "Compare laser power with a fixed powder batch.",
+            },
+        ).json()["data"]
         parent_url = f"{url}/{created['plan_id']}"
-        accepted = client.patch(parent_url, json={"content": "Use independent builds for each power level."})
-        rejected = client.patch(parent_url, json={"content": "Overwrite the earlier version."})
+        accepted = client.patch(
+            parent_url, json={"content": "Use independent builds for each power level."}
+        )
+        rejected = client.patch(
+            parent_url, json={"content": "Overwrite the earlier version."}
+        )
 
     assert accepted.json()["code"] == 200
     assert rejected.status_code == 200
@@ -86,10 +98,9 @@ def test_stale_plan_update_returns_http_business_conflict_without_another_revisi
 def test_experiment_plan_routes_create_list_and_update_manual_plan(
     *, postgres_session_factory
 ) -> None:
-    from tests.support.postgres import seed_objective, seed_user
+    from tests.support.postgres import seed_objective
 
     asyncio.run(seed_objective(postgres_session_factory, "col_1", "objective_1"))
-    asyncio.run(seed_user(postgres_session_factory, "expert-a"))
     experiment_plan_service.ExperimentPlanRepo = ExperimentPlanRepository()
     experiment_plan_service.finding_snapshot_service = _FindingFeedbackService()
     service = experiment_plan_service

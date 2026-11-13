@@ -15,6 +15,13 @@ function apiResponse(code: number, data: unknown, message = 'success') {
 }
 
 describe('API business response contract', () => {
+    it.each([[401, 200301], [403, 200203], [409, 200204], [422, 200100], [503, 200205], [500, 200000]])(
+        'preserves user-service HTTP status %s as the defined business error %s', async (status, code) => {
+            vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({code: 'permission_command_rejected'}), {status, headers: {'Content-Type': 'application/json'}})));
+            await expect(requestJson('/user-api/v1/me/password', {method: 'POST'})).rejects.toMatchObject({code, data: {code: 'permission_command_rejected'}});
+        }
+    );
+
 	afterEach(() => {
 		language.set('en');
 		vi.unstubAllGlobals();
@@ -70,8 +77,8 @@ describe('API business response contract', () => {
 	it('keeps invalid credentials on the login page', async () => {
 		const replace = vi.fn();
 		vi.stubGlobal('window', { location: { pathname: '/login', replace } });
-		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse(200301, { code: 'invalid_credentials' }, 'Invalid email or password.')));
-		await expect(requestJson('/auth/login')).rejects.toMatchObject({ code: 200301 });
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({code:'invalid_credentials'}), {status:401,headers:{'Content-Type':'application/json'}})));
+		await expect(requestJson('/user-api/v1/login')).rejects.toMatchObject({ code: 200301 });
 		expect(replace).not.toHaveBeenCalled();
 	});
 

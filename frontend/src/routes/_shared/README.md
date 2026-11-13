@@ -62,6 +62,15 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
 - `i18n.ts`
   Shared labels for active routes and states. The selected language also updates
   the document language for assistive technology.
+- `permissions.ts`, `PermissionGate.svelte`
+  Account-scoped effective permissions from `/user-api/v1/me/permissions` and
+  the administration content gate. The application layout owns subscription
+  setup/teardown; subject changes invalidate pending responses and clear codes.
+  Permission outages offer retry, missing grants show access denied, and expired
+  sessions clear authentication. Codes stay in memory and are refreshed on
+  administration navigation, window focus and completed management writes.
+  The gate controls SPA presentation; user-service independently authorizes
+  every management API request.
 
 There is one browser contract. Do not add alternate API origins, compatibility
 normalizers, or parallel Objective result types.

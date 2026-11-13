@@ -21,6 +21,9 @@ to code.
   Collection paper, Objective, Finding, Evidence Map, and Source route family
 - `src/routes/_shared/`
   Shared browser-side API clients, i18n, and route support code
+- `src/routes/admin/`
+  Personnel, group and permission catalog administration, gated by
+  `users.manage` and backed by the same-origin user-service APIs
 - `docs/frontend-plan.md`
   Same-origin browser contract and product-flow guide
 - `e2e/`

@@ -1,7 +1,8 @@
 <script lang="ts">
   import './layout.css';
   import { browser, version } from '$app/environment';
-  import { goto } from '$app/navigation';
+  import { afterNavigate, goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { authState, startAuthSynchronization } from './_shared/authState';
@@ -11,6 +12,7 @@ import { fetchCurrentSession, logout } from './_shared/auth';
   import { errorMessage } from './_shared/api';
   import { language, t } from './_shared/i18n';
   import ResearchAgentLauncher from './_shared/ResearchAgentLauncher.svelte';
+  import { permissionState, refreshPermissions, startPermissionSynchronization } from './_shared/permissions';
   import { themePreference } from './_shared/theme';
   import type { ThemePreference } from './_shared/theme';
 
@@ -111,7 +113,13 @@ import { fetchCurrentSession, logout } from './_shared/auth';
 
   onMount(() => {
     const stopAuthSynchronization = startAuthSynchronization();
+    const stopPermissionSynchronization = startPermissionSynchronization();
     void loadSession();
+
+    const recheckPermissions = () => {
+      if ($authState.status === 'authenticated') void refreshPermissions();
+    };
+    window.addEventListener('focus', recheckPermissions);
 
     const handleClick = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -125,8 +133,16 @@ import { fetchCurrentSession, logout } from './_shared/auth';
     window.addEventListener('click', handleClick);
     return () => {
       stopAuthSynchronization();
+      stopPermissionSynchronization();
+      window.removeEventListener('focus', recheckPermissions);
       window.removeEventListener('click', handleClick);
     };
+  });
+
+  afterNavigate(({ from, to }) => {
+    if (from && to?.url.pathname.startsWith('/admin') && $authState.status === 'authenticated') {
+      void refreshPermissions();
+    }
   });
 
   $: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
@@ -175,6 +191,9 @@ import { fetchCurrentSession, logout } from './_shared/auth';
     <div class="header-actions">
       {#if authenticatedUser}
         <a class="header-action" href="/account">{$t('onboarding.account')}</a>
+        {#if $permissionState.status === 'ready' && $permissionState.userId === authenticatedUser.user_id && $permissionState.codes.includes('users.manage')}
+          <a class="header-action" href={resolve('/admin/users')}>{$t('admin.title')}</a>
+        {/if}
         <ResearchAgentLauncher collectionId={headerCollectionId} />
       {/if}
       <div

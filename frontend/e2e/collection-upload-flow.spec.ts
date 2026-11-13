@@ -111,6 +111,9 @@ async function mockCurrentDocumentApis(page: Page) {
 		const method = route.request().method();
 		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 
+		if (path === '/user-api/v1/me/permissions') {
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ permission_codes: [] }) });
+		}
 		if (path === '/user-api/v1/me') {
 			return route.fulfill({
 				status: 200, contentType: 'application/json',

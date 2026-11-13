@@ -5,6 +5,9 @@ import { clearAuthState } from './authState';
 import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {
+	permission_denied: 'admin.denied',
+	operation_conflict: 'admin.conflict',
+	invalid_reference: 'admin.invalidReference',
 	invalid_credentials: 'auth.invalidCredentials',
 	invalid_email_proof: 'onboarding.invalidProof',
 	rate_limited: 'onboarding.rateLimited',

@@ -20,6 +20,7 @@ async function mockAccountApi(page: Page, authenticated = false) {
 						display_name: 'Researcher'
 					})
 				: respond({ code: 'authentication_required' }, 401);
+		if (path.endsWith('/me/permissions')) return respond({ permission_codes: [] });
 		if (path.endsWith('/email-challenges'))
 			return state.challengeStatus === 429
 				? respond({ code: 'rate_limited', retry_after: 1 }, 429)

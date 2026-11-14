@@ -1,0 +1,367 @@
+# Model Connection API
+
+Manage system-wide Research Agent Chat model connections through the model
+catalog and administrator configuration endpoints. The table and credential
+formats are defined in the
+[model connection data model](data-model.md).
+
+## Model Connection Conventions
+
+- Paths include the `/api/v1` prefix and use the same browser origin.
+- The `lens_session` cookie identifies the actor. Administrator endpoints
+  require `models.manage`; requests cannot select an acting `user_id` or
+  `actor_id`.
+- Administrative writes require an Origin that exactly matches the configured
+  `BROWSER_ORIGIN`, using the public HTTPS origin in production.
+- JSON requests use `application/json`. Responses use
+  `{code,message,data,meta}` with `code=200` for success; business errors and
+  HTTP statuses follow the table below. Timestamps use UTC RFC3339.
+- Administrative responses use `Cache-Control: no-store` and never return an
+  API key, ciphertext, or master key.
+
+## User Model Catalog
+
+- **URL:** `/api/v1/model-connections`
+- **Method:** `GET`
+- **Description:** List enabled model connections for the authenticated user,
+  ordered by `priority DESC, display_name ASC, connection_id ASC`.
+
+No JSON request body.
+
+**Response example**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "connection_id": "lab-a",
+        "display_name": "Lab A",
+        "model": "lab-chat-a"
+      }
+    ]
+  },
+  "meta": null
+}
+```
+
+No available connection returns `items=[]`. A new question without an explicit
+selection uses the first catalog entry. Selecting a disabled or nonexistent
+connection returns an unavailable-selection error.
+
+## Administrator Model Connections
+
+Every endpoint in this section requires `models.manage`.
+
+### Administrator Connection Response
+
+The administrator endpoints share the following connection representation.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `connection_id` | string | Stable connection ID |
+| `display_name` | string | Display name |
+| `base_url` | string | API base visible to administrators |
+| `model` | string | Fixed model identifier |
+| `api_key_configured` | boolean | Whether ciphertext is present; does not establish that the credential is valid |
+| `enabled` | boolean | Whether new questions may select this connection |
+| `priority` | integer | Default selection order |
+| `context_window_tokens` | integer / null | Positive limit or inheritance |
+| `max_output_tokens` | integer / null | Positive limit or inheritance |
+| `request_timeout_seconds` | number / null | Finite positive timeout or inheritance |
+| `version` | integer | Concurrency version retained internally by the frontend; no visible field is required |
+| `created_at`, `updated_at` | string | UTC RFC3339 timestamps |
+
+Detail, create, and update operations return this object directly in `data`.
+List responses use it for each item in `data.items`. A connection test returns
+its own result object.
+
+The frontend retains `version` in memory and submits it automatically as
+`expected_version` for updates and tests. Administrators do not view or enter
+it. After a successful write, retain the returned version. On
+`model_connection_version_conflict`, prompt the administrator to reload the
+configuration before saving again; do not overwrite or retry automatically.
+
+### 1. List Model Connections
+
+- **URL:** `/api/v1/admin/model-connections`
+- **Method:** `GET`
+- **Description:** Read a page of enabled and disabled model connections.
+
+| Query parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `limit` | integer | 50 | 1–100 |
+| `offset` | integer | 0 | At least 0 |
+
+Order by `priority DESC, display_name ASC, connection_id ASC`. Read `items` and
+`total` from the same database snapshot.
+
+**Response example**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "connection_id": "lab-a",
+        "display_name": "Lab A",
+        "base_url": "https://model.example.invalid/v1",
+        "model": "lab-chat-a",
+        "api_key_configured": true,
+        "enabled": false,
+        "priority": 0,
+        "context_window_tokens": 65536,
+        "max_output_tokens": 8192,
+        "request_timeout_seconds": 30,
+        "version": 1,
+        "created_at": "2026-11-14T00:00:00Z",
+        "updated_at": "2026-11-14T00:00:00Z"
+      }
+    ],
+    "total": 1,
+    "limit": 50,
+    "offset": 0
+  },
+  "meta": null
+}
+```
+
+An empty result returns `items=[]` and `total=0`.
+
+### 2. Read a Model Connection
+
+- **URL:** `/api/v1/admin/model-connections/{connection_id}`
+- **Method:** `GET`
+- **Description:** Read the complete administrative configuration for one
+  connection.
+
+No JSON request body. `connection_id` is a path parameter. Return the
+administrator connection object; a missing connection returns
+`200201/model_connection_not_found`.
+
+### 3. Create a Model Connection
+
+- **URL:** `/api/v1/admin/model-connections`
+- **Method:** `POST`
+- **Description:** Save a disabled model connection with an optional API key.
+
+| Request field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `display_name` | string | Yes | 1–100 characters after trimming surrounding whitespace |
+| `base_url` | string | Yes | At most 2048 characters; complete http/https API base without userinfo, query, fragment, or whitespace |
+| `model` | string | Yes | 1–200 characters after trimming surrounding whitespace |
+| `api_key` | string / null | No | Omitted or null means no key; a string contains 1–8192 UTF-8 bytes without CR/LF and is not trimmed; empty strings are invalid |
+| `priority` | integer | No | PostgreSQL int32 range; defaults to 0 |
+| `context_window_tokens` | integer / null | No | 1–2147483647; defaults to null |
+| `max_output_tokens` | integer / null | No | 1–2147483647; defaults to null |
+| `request_timeout_seconds` | number / null | No | Finite positive number; defaults to null |
+
+Create with `enabled=false` and `version=1`; generate the ID on the server.
+Requests cannot supply `enabled`. Test the saved connection and enable it
+explicitly. Display names need not be unique.
+
+**Request example**
+
+```json
+{
+  "display_name": "Lab A",
+  "base_url": "https://model.example.invalid/v1",
+  "model": "lab-chat-a",
+  "api_key": "example-only-provider-token",
+  "priority": 100,
+  "context_window_tokens": 65536,
+  "max_output_tokens": 8192,
+  "request_timeout_seconds": 30
+}
+```
+
+Return the administrator connection object. The example supplies a key, so
+`api_key_configured=true`; without a key it is false. Saving does not send a
+model request.
+
+### 4. Update a Model Connection
+
+- **URL:** `/api/v1/admin/model-connections/{connection_id}`
+- **Method:** `PATCH`
+- **Description:** Save connection settings and an optional API key together.
+
+| Request field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `expected_version` | integer | Yes | Frontend submits the version it read; no administrator input or display is required |
+| `display_name` | string | No | New display name; cannot be null |
+| `enabled` | boolean | No | Explicit true/false; omission does not default to false |
+| `priority` | integer | No | Ordering value; cannot be null |
+| `context_window_tokens` | integer / null | No | Null restores inheritance; omission preserves the value |
+| `max_output_tokens` | integer / null | No | Null restores inheritance; omission preserves the value |
+| `request_timeout_seconds` | number / null | No | Null restores inheritance; omission preserves the value |
+| `api_key` | string / null | No | Omit to preserve the key, send a nonempty string to encrypt and replace it, or send explicit null to clear it; empty strings are invalid |
+
+Send ordinary settings and the key in one request. At least one editable field
+is required, using the creation constraints. Connection ID, address, and model
+cannot be changed.
+
+| Submitted `api_key` | Server behavior | Frontend behavior |
+| --- | --- | --- |
+| Field omitted | Preserve the ciphertext | Omit the field when the key input is blank |
+| Nonempty string | Encrypt and replace using a fresh nonce | Submit the new key with the other changes |
+| Explicit null | Clear the ciphertext and return `api_key_configured=false` | Submit only after the administrator explicitly confirms clearing the saved key |
+
+A blank input must not become null automatically. Clearing changes the local
+edit draft and takes effect with the same Save operation as other settings;
+canceling the clear action restores omission. Clearing does not revoke the
+provider-side key or affect requests already dispatched.
+
+**Request example: enable and reorder, preserving the key**
+
+```json
+{
+  "expected_version": 1,
+  "enabled": true,
+  "priority": 100
+}
+```
+
+**Request example: rename and replace the key**
+
+```json
+{
+  "expected_version": 2,
+  "display_name": "Lab A Updated",
+  "api_key": "example-only-replacement-token"
+}
+```
+
+**Request example: clear the key, preserving other fields**
+
+```json
+{
+  "expected_version": 3,
+  "api_key": null
+}
+```
+
+Return the latest administrator connection object, without the old key, new
+key, or ciphertext. All submitted fields and their redacted audit record commit
+in one transaction; a version conflict, encryption failure, or failed write
+rolls back the entire operation.
+
+One effective update increments `version` once and writes one `action=update`
+audit. `changed_fields` names the ordinary fields that changed and uses only
+`api_key` for credential changes, never their values. Submitting the same
+nonempty key still replaces it with a fresh nonce. Clearing an already-empty
+key with no other effective changes returns the original version without an
+audit. Clear the frontend key input after success or failure; do not retry
+failed submissions automatically.
+
+### 5. Test a Saved Connection
+
+- **URL:** `/api/v1/admin/model-connections/{connection_id}/test`
+- **Method:** `POST`
+- **Description:** Make one model call with fixed content using the saved
+  configuration, without changing settings or enabled state.
+
+**Request example**
+
+```json
+{
+  "expected_version": 4
+}
+```
+
+Only saved connections can be tested, including disabled connections. The
+request accepts no draft address, arbitrary messages, custom test text, or
+temporary API key. After authorization and version checks, use the read
+configuration for one Chat Completions request with `Reply with OK.`. Include
+no tools or research data. Cap output at the smaller of 128 tokens and the
+connection output limit, and total probe time at the smaller of 10 seconds and
+the connection timeout. Do not retry or follow redirects; always close the
+client.
+
+The completion must be parseable with at least one valid choice containing
+nonempty text; it need not equal OK exactly. This probe does not establish
+compatibility with every tool, context size, or streaming operation.
+
+**Response example: successful test**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "connection_id": "lab-a",
+    "tested_version": 4,
+    "success": true,
+    "latency_ms": 312,
+    "reason": null
+  },
+  "meta": null
+}
+```
+
+**Response example: provider call failed**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "connection_id": "lab-a",
+    "tested_version": 4,
+    "success": false,
+    "latency_ms": 10002,
+    "reason": "provider_timeout"
+  },
+  "meta": null
+}
+```
+
+Failure `reason` is one of `provider_auth_failed`, `provider_unreachable`,
+`provider_timeout`, `provider_rate_limited`, `provider_response_invalid`, or
+`provider_rejected`. Return no provider message, response text, or request
+headers. Map rate limits, 4xx/5xx, transport, and decoding failures at the probe
+boundary. Master-key and database failures use the business errors below.
+
+Testing changes no configuration or version, writes no configuration-change
+audit, and persists no last-success flag. Concurrent edits do not alter a probe
+already in flight. Its result identifies `tested_version`; the frontend
+ignores results for a different known version. Canceling the browser request
+does not guarantee that a dispatched probe incurs no provider cost.
+
+## Model Connection Errors
+
+| Condition | HTTP | `code` | `data.code` |
+| --- | --- | --- | --- |
+| Invalid session | 401 | 200301 | `authentication_required` |
+| Missing management permission or mismatched write Origin | 403 | 200203 | `permission_denied` |
+| Identity service unavailable | 503 | 200205 | `identity_unavailable` |
+| Invalid JSON, type, field, length, or request size | 200 | 200100 | `invalid_request` |
+| Connection not found | 200 | 200201 | `model_connection_not_found` |
+| Stale configuration version | 200 | 200204 | `model_connection_version_conflict` |
+| Master key unavailable or decryption failed | 200 | 200205 | `model_credentials_unavailable` |
+| Database unavailable | 200 | 200205 | `model_configuration_unavailable` |
+| Unexpected failure | 200 | 200000 | `internal_error` |
+
+Error messages are fixed text without credentials or other submitted values.
+Validation errors may include
+`errors:[{"loc":["body","api_key"],"type":"string_too_long"}]`, describing
+only the field location and error type, with no raw input or exception context.
+
+**Response example: version conflict**
+
+```json
+{
+  "code": 200204,
+  "message": "Configuration changed; reload before saving.",
+  "data": {
+    "code": "model_connection_version_conflict"
+  },
+  "meta": null
+}
+```
+
+Chat response binding and approval continuation follow the
+[Chat connection binding contract](../api.md#chat-connection-binding).

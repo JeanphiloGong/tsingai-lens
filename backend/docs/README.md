@@ -8,13 +8,19 @@ not in a parallel plan-doc tree.
 
 1. [`architecture/overview.md`](architecture/overview.md) for ownership and the
    end-to-end research flow.
-2. [`specs/api.md`](specs/api.md) for browser and Agent contracts.
+2. [`specs/api.md`](specs/api.md) for browser and Agent contract navigation and
+   shared conventions.
 3. [`architecture/persistence-model.md`](architecture/persistence-model.md) for
    identities, document ownership, and deletion behavior.
 4. [`architecture/database.md`](architecture/database.md) for the schema
    catalog grouped by logic flow and module ownership.
 5. [`runbooks/backend-ops.md`](runbooks/backend-ops.md) for local operation and
    verification.
+
+## Module Contracts
+
+- Model connections: [HTTP API](specs/model-connections/api.md) and
+  [data model](specs/model-connections/data-model.md).
 
 ## Code-Owned Neighbors
 

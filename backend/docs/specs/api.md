@@ -2,7 +2,8 @@
 
 This document describes the maintained Lens v1 HTTP contract. The generated
 OpenAPI document at `/api/openapi.json` is the field-level runtime reference;
-this file owns resource boundaries and cross-endpoint semantics.
+this file owns resource boundaries and cross-endpoint semantics. Detailed
+module contracts are maintained in the linked topic directories under `specs/`.
 
 ## Conventions
 
@@ -160,16 +161,12 @@ handoff record or a second research-result identity.
 
 ### Shared Model Connections
 
-`GET /api/v1/model-connections` requires authentication and returns the standard
-`{code,message,data,meta}` envelope. Its `data` is
-`{"items":[{"connection_id":"lab-a","display_name":"Lab A","model":"lab-chat-a"}]}`.
-Only enabled configurations appear, ordered by `priority` descending, then
-`display_name` and `connection_id` ascending for stable ties. The first entry is
-the default selected by the browser and by new Chat requests without an explicit
-choice. Empty configuration returns an empty array.
-The directory never exposes base URLs, key references, secret values, or provider
-payloads. It has no write endpoint; operators maintain the PostgreSQL
-table through their database tools.
+The [model connection API](model-connections/api.md) defines the user catalog
+and administrator configuration endpoints. Its
+[data model](model-connections/data-model.md) defines connection storage,
+encrypted credentials, and administrative audit records.
+
+#### Chat Connection Binding
 
 `POST /api/v1/chat-sessions/{session_id}/messages` accepts an optional
 `model_connection_id` alongside the existing message, Source, permission, and

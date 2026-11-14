@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  user-service:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: lens_users_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["127.0.0.1:5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lens_users_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      # Disposable localhost-only CI data; no production credentials.
+      TEST_USER_DATABASE_URL: postgres://postgres@127.0.0.1:5432/lens_users_test?sslmode=disable
+    defaults:
+      run:
+        working-directory: user-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: user-service/go.mod
+          cache-dependency-path: user-service/go.sum
+      - run: go mod download
+      - name: Install migration CLI
+        run: go install -tags='no_clickhouse no_duckdb no_libsql no_mssql no_mysql no_sqlite3 no_vertica no_ydb' github.com/pressly/goose/v3/cmd/goose@v3.24.3
+      - run: goose -dir migrations postgres "$TEST_USER_DATABASE_URL" up
+      - run: go vet ./...
+      - run: go test -race -p 1 ./... -count=1
+      - run: go build ./cmd/user-service
+
+  backend-identity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: lens_ci_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["127.0.0.1:5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lens_ci_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      LENS_TEST_DATABASE_URL: postgresql+psycopg://postgres@127.0.0.1:5432/lens_ci_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.1'
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync --frozen --python 3.11
+      - name: Verify identity and resource isolation
+        run: >-
+          uv run --frozen pytest -q
+          tests/unit/infra/test_identity_client.py
+          tests/unit/routers/test_auth_collections_api.py
+          tests/integration/persistence/test_identity_import.py
+      - name: Verify PostgreSQL cutover migrations
+        run: >-
+          uv run --frozen pytest -q tests/integration/persistence/test_migrations.py
+          -k 'postgres_migration_head_matches_current_metadata or external_identity_cutover'
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - id: install
+        run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run lint
+      - name: Type check
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run check
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:unit -- --run --maxWorkers=2
+      - name: Browser tests and production build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run test:e2e -- --workers=2
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: frontend-test-results
+          path: frontend/test-results/
+
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Deployment script and Compose contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_deploy*.py' -v
+      - name: Documentation governance
+        run: python3 scripts/check_docs_governance.py

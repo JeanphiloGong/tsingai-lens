@@ -1,0 +1,65 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published stable version (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      VERSION: ${{ inputs.version }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+    steps:
+      - name: Validate operator inputs
+        shell: bash
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ && "$DEPLOY_PATH" != / ]]
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+          persist-credentials: false
+      - name: Require successful three-image publication for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          sha=$(git rev-parse HEAD)
+          count=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release-images.yml --commit "$sha" --status success --json event,headBranch --jq '[.[] | select(.event == "push" and .headBranch == env.VERSION)] | length')
+          test "$count" -gt 0
+      - name: Transfer the verified bundle and upgrade
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          umask 077
+          key="$RUNNER_TEMP/deploy-key"
+          hosts="$RUNNER_TEMP/deploy-known-hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$hosts"
+          test -s "$key" && test -s "$hosts"
+          archive="$RUNNER_TEMP/deploy-bundle.tgz"
+          tar -czf "$archive" -C deploy compose.yml .env.example backend.env.example user-service.env.example README.md install.sh scripts
+          incoming=$(ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" "$DEPLOY_USER@$DEPLOY_HOST" 'mktemp -d /tmp/lens-deploy.XXXXXXXX')
+          [[ "$incoming" =~ ^/tmp/lens-deploy\.[a-zA-Z0-9]+$ ]]
+          ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" "$DEPLOY_USER@$DEPLOY_HOST" "tar -xzf - -C '$incoming'" < "$archive"
+          ssh -i "$key" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" "$DEPLOY_USER@$DEPLOY_HOST" "LENS_DEPLOY_DIR='$DEPLOY_PATH' '$incoming/scripts/upgrade.sh' '$VERSION'; result=\$?; rm -rf '$incoming'; exit \$result"

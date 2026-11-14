@@ -111,10 +111,16 @@ Account routes are `POST /v1/login`, `GET /v1/me`, `POST /v1/logout`, and
 `POST /v1/me/password`. The password endpoint accepts `old_password` and
 `password`, requires the current session, and clears the current cookie after
 success; the database revokes every older session for that account.
-Login throttling applies even when registration is disabled. This checkpoint
-uses the direct TCP peer for IP limits and ignores forwarded IP headers; public
-HTTPS and trusted-proxy setup belong to later versions. SIGINT/SIGTERM starts graceful HTTP shutdown
-with a five-second timeout and stops the gRPC server.
+Login throttling applies even when registration is disabled. IP limits use the
+direct TCP peer by default. When `TRUSTED_PROXY_IP` names that exact peer, a
+single valid `X-Real-IP` value is accepted; the deployment Nginx overwrites this
+header. Never trust arbitrary clients' forwarded headers. SIGINT/SIGTERM starts
+graceful HTTP shutdown with a five-second timeout and stops the gRPC server.
+
+`GET /ready` pings PostgreSQL and returns `{"ok":true}` on success or HTTP 503
+when the database is unavailable. It does not require or create a session.
+The [deployment bundle](../deploy/README.md) owns production HTTPS, certificate
+mounts, the user-service image, explicit migrations, backups and CI/CD setup.
 
 ## V4 mTLS and Lens integration
 

@@ -64,7 +64,7 @@ func newManagementFixture(t *testing.T) *managementFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &managementFixture{users, pool, Router(users, "http://localhost:5173", false), admin.ID, adminToken, user.ID, userToken}
+	return &managementFixture{users, pool, Router(users, "http://localhost:5173", false, ""), admin.ID, adminToken, user.ID, userToken}
 }
 func (f *managementFixture) call(method, path, body, token string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))

@@ -36,7 +36,7 @@ func TestChangePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := Router(userService, "http://localhost:5173", false)
+	handler := Router(userService, "http://localhost:5173", false, "")
 	call := func(body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest("POST", "/v1/me/password", strings.NewReader(body))
 		request.Header.Set("Origin", "http://localhost:5173")

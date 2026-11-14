@@ -17,7 +17,7 @@ func TestDecodeSingleJSON(t *testing.T) {
 	if err = account.Bootstrap(ctx, "review@example.test", "review-only-password"); err != nil {
 		t.Fatal(err)
 	}
-	handler := Router(account, "http://review.test", false)
+	handler := Router(account, "http://review.test", false, "")
 	login := `{"email":"review@example.test","password":"review-only-password"}`
 	for _, item := range []struct {
 		name, body string

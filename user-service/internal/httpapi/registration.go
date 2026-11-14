@@ -36,7 +36,7 @@ func (h *Handler) SendEmailCode(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	challengeID, err := h.Service.IssueEmailChallenge(r.Context(), input.Email, input.Purpose, clientIP(r))
+	challengeID, err := h.Service.IssueEmailChallenge(r.Context(), input.Email, input.Purpose, clientIP(r, h.TrustedProxy))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -50,7 +50,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	user, err := h.Service.CompleteEmailChallenge(r.Context(), input.ChallengeID, input.Email, "register", input.VerificationCode, input.Password, input.DisplayName, clientIP(r))
+	user, err := h.Service.CompleteEmailChallenge(r.Context(), input.ChallengeID, input.Email, "register", input.VerificationCode, input.Password, input.DisplayName, clientIP(r, h.TrustedProxy))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -67,7 +67,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	_, err := h.Service.CompleteEmailChallenge(r.Context(), input.ChallengeID, input.Email, "password_reset", input.VerificationCode, input.Password, "", clientIP(r))
+	_, err := h.Service.CompleteEmailChallenge(r.Context(), input.ChallengeID, input.Email, "password_reset", input.VerificationCode, input.Password, "", clientIP(r, h.TrustedProxy))
 	if err != nil {
 		writeError(w, err)
 		return

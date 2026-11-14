@@ -157,7 +157,7 @@ func main() {
 	// constructs the HTTP server used when bootstrap mode was not selected.
 	server := &http.Server{
 		Addr:              required("HTTP_ADDR"),
-		Handler:           httpapi.Router(userService, required("BROWSER_ORIGIN"), os.Getenv("COOKIE_SECURE") != "false"),
+		Handler:           httpapi.Router(userService, required("BROWSER_ORIGIN"), os.Getenv("COOKIE_SECURE") != "false", os.Getenv("TRUSTED_PROXY_IP")),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

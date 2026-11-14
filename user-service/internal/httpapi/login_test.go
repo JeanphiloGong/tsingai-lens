@@ -26,7 +26,7 @@ func TestLoginLifecycle(t *testing.T) {
 	if err = s.Bootstrap(ctx, "other@example.test", password); err != service.ErrConflict {
 		t.Fatalf("second bootstrap: %v", err)
 	}
-	handler := Router(s, "http://localhost:5173", false)
+	handler := Router(s, "http://localhost:5173", false, "")
 	call := func(method, path, body, cookie string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Origin", "http://localhost:5173")
@@ -106,7 +106,7 @@ func TestOriginAndSessionBoundaries(t *testing.T) {
 	if err := account.Bootstrap(context.Background(), "owner@example.test", "tutorial-only-password"); err != nil {
 		t.Fatal(err)
 	}
-	handler := Router(account, "https://lens.example.test", true)
+	handler := Router(account, "https://lens.example.test", true, "")
 	login := `{"email":"owner@example.test","password":"tutorial-only-password"}`
 	for _, origin := range []string{"", "https://untrusted.example.test"} {
 		request := httptest.NewRequest("POST", "/v1/login", strings.NewReader(login))

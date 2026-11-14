@@ -40,15 +40,20 @@ func decode(w http.ResponseWriter, r *http.Request, destination any) bool {
 	return true
 }
 
-func clientIP(r *http.Request) string {
+func clientIP(r *http.Request, trustedProxy string) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
+	if trustedProxy != "" && host == trustedProxy {
+		if ip := net.ParseIP(r.Header.Get("X-Real-IP")); ip != nil {
+			return ip.String()
+		}
+	}
 	return host
 }
 
-func Router(s *service.Service, origin string, secure bool) http.Handler {
+func Router(s *service.Service, origin string, secure bool, trustedProxy string) http.Handler {
 	router := chi.NewRouter()
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +66,8 @@ func Router(s *service.Service, origin string, secure bool) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	})
-	handler := &Handler{Service: s, SecureCookie: secure}
+	handler := &Handler{Service: s, SecureCookie: secure, TrustedProxy: trustedProxy}
+	router.Get("/ready", handler.Ready)
 	router.Post("/v1/login", handler.Login)
 	router.Post("/v1/logout", handler.Logout)
 	router.Get("/v1/me", handler.CurrentUser)

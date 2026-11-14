@@ -15,7 +15,7 @@ import (
 func TestRegistrationInputAndOrigin(t *testing.T) {
 	pool := testPool(t)
 	identity := &service.Service{Pool: pool, RegistrationEnabled: true}
-	handler := Router(identity, "http://localhost:5173", false)
+	handler := Router(identity, "http://localhost:5173", false, "")
 	cases := []struct{ path, body, code string }{
 		{"/v1/email-challenges", `{"email":"invalid","purpose":"register"}`, "invalid_request"},
 		{"/v1/email-challenges", `{"email":"Person <a@example.test>","purpose":"register"}`, "invalid_request"},
@@ -58,7 +58,7 @@ func TestRegistrationInputAndOrigin(t *testing.T) {
 }
 
 func TestRegistrationSwitch(t *testing.T) {
-	handler := Router(&service.Service{}, "http://localhost:5173", false)
+	handler := Router(&service.Service{}, "http://localhost:5173", false, "")
 	for _, path := range []string{"/v1/email-challenges", "/v1/register", "/v1/password-resets"} {
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		request.Header.Set("Origin", "http://localhost:5173")

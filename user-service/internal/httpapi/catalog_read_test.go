@@ -24,7 +24,7 @@ func TestCatalogReadCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := Router(identity, "http://localhost:5173", false)
+	router := Router(identity, "http://localhost:5173", false, "")
 	get := func(path string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest("GET", path, nil)
 		request.AddCookie(&http.Cookie{Name: CookieName, Value: token})

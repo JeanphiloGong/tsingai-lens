@@ -64,7 +64,7 @@ func TestDatabaseErrorResponses(t *testing.T) {
 	request := httptest.NewRequest("POST", "/v1/login", strings.NewReader(`{"email":"error-test@example.test","password":"tutorial-only-password"}`))
 	request.Header.Set("Origin", "http://localhost:5173")
 	response := httptest.NewRecorder()
-	Router(s, "http://localhost:5173", false).ServeHTTP(response, request)
+	Router(s, "http://localhost:5173", false, "").ServeHTTP(response, request)
 	if response.Code != 500 || strings.TrimSpace(response.Body.String()) != `{"code":"internal_error"}` {
 		t.Fatal(response.Code, response.Body.String())
 	}
@@ -92,7 +92,7 @@ func TestDatabaseErrorResponses(t *testing.T) {
 	request = httptest.NewRequest("GET", "/v1/me", nil)
 	request.Header.Set("Cookie", "lens_session=synthetic-token")
 	response = httptest.NewRecorder()
-	Router(unavailableService, "http://localhost:5173", false).ServeHTTP(response, request)
+	Router(unavailableService, "http://localhost:5173", false, "").ServeHTTP(response, request)
 	if response.Code != 503 || strings.TrimSpace(response.Body.String()) != `{"code":"identity_unavailable"}` {
 		t.Fatal(response.Code, response.Body.String())
 	}

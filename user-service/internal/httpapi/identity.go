@@ -50,7 +50,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	if err := h.Service.LimitLogin(r.Context(), input.Email, clientIP(r)); err != nil {
+	if err := h.Service.LimitLogin(r.Context(), input.Email, clientIP(r, h.TrustedProxy)); err != nil {
 		writeError(w, err)
 		return
 	}

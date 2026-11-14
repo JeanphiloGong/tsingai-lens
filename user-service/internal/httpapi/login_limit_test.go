@@ -27,7 +27,7 @@ func TestLoginLimitIndependentOfRegistration(t *testing.T) {
 			if err = account.Bootstrap(ctx, "rate-review@example.test", "review-only-password"); err != nil {
 				t.Fatal(err)
 			}
-			handler := Router(account, "http://review.test", false)
+			handler := Router(account, "http://review.test", false, "")
 			for attempt := 0; attempt < 11; attempt++ {
 				request := httptest.NewRequest("POST", "/v1/login", strings.NewReader(`{"email":"rate-review@example.test","password":"wrong-password"}`))
 				request.Header.Set("Origin", "http://review.test")
@@ -67,7 +67,7 @@ func TestLoginLimitsCountSuccessfulAndFailedAttempts(t *testing.T) {
 		status   int
 	}{{password, 200}, {"wrong-password", 401}, {password, 200}} {
 		// A new handler/service instance must reuse committed database counters.
-		handler := Router(&service.Service{Pool: pool}, "http://review.test", false)
+		handler := Router(&service.Service{Pool: pool}, "http://review.test", false, "")
 		body := fmt.Sprintf(`{"email":%q,"password":%q}`, email, input.password)
 		request := httptest.NewRequest("POST", "/v1/login", strings.NewReader(body))
 		request.Header.Set("Origin", "http://review.test")

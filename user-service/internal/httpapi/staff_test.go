@@ -32,7 +32,7 @@ func TestStaffCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := Router(identity, "http://localhost:5173", false)
+	router := Router(identity, "http://localhost:5173", false, "")
 	call := func(method, path, body string, status int) {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
 		request.Header.Set("Origin", "http://localhost:5173")

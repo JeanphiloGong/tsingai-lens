@@ -1,221 +1,291 @@
 # TsingAI-Lens Deploy Bundle
 
-This directory is the minimal self-hosted runtime bundle for Lens. It runs the
-published Lens images with one internal PostgreSQL service, three research
-Workers and four feedback analysis Workers.
+This is the repository's Docker Compose entrypoint. One version selects the
+frontend, backend/worker and user-service images. PostgreSQL hosts separate
+`lens` and `lens_users` databases with separate application roles. Only the
+frontend publishes host ports; it terminates HTTPS and routes `/api/` to Lens
+and `/user-api/` to user-service. Lens uses mTLS for identity RPC.
 
-This is the repository's only Docker Compose entrypoint. For source-tree
-development, use the module-local instructions in
-[`backend/README.md`](../backend/README.md) and
-[`frontend/README.md`](../frontend/README.md).
+Use Docker Engine with Compose v2. `scripts/lens` calls `docker compose`.
+Podman users can issue the same Compose commands through a compatible Podman
+API socket. Source development remains in the module READMEs.
 
-## Prerequisites
+## Install the bundle
 
-- Docker Engine with the Docker Compose plugin (`docker compose`) is the
-  default runtime.
-- Podman can be used with `podman compose`; use the
-  [Podman Runtime](#podman-runtime) commands because `./scripts/lens` calls
-  Docker Compose.
-
-## One-Line Install
-
-Install the deploy bundle with:
+Select a stable version whose **three-image release workflow has succeeded**.
+The older v0.13.14 image set does not contain the new user-service. Replace the
+version below with the actual released tag; installation downloads the bundle
+from that same tag.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/deploy/install.sh \
-  | sh -s -- --version v0.13.8 --ref v0.13.8
-```
-
-Use `--ref <git-ref>` when you want the deploy files themselves to come from a
-specific branch or tag.
-
-Before the first start, generate the database password:
-
-```bash
-openssl rand -hex 32
-```
-
-Put the output in `POSTGRES_PASSWORD` in `.env`. Then edit `backend.env` to set
-the bootstrap admin account and any LLM or embedding environment variables.
-See [Manual Configure](#manual-configure).
-
-Then run:
-
-```bash
+version=vX.Y.Z
+curl -fsSL "https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/$version/deploy/install.sh" \
+  | sh -s -- --version "$version" --dir lens-deploy
 cd lens-deploy
-./scripts/lens doctor
-docker compose --env-file .env -f compose.yml up -d postgres
-docker compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
-./scripts/lens up
-./scripts/lens doctor
 ```
 
-Open:
+The installer preserves existing `.env`, `backend.env` and `user-service.env`.
+It creates missing files privately, but does not initialize databases, import
+accounts, grant permissions or start applications.
+
+## Runtime configuration
+
+Set these values in `.env`:
+
+| Setting | Purpose |
+| --- | --- |
+| `LENS_VERSION` | One published stable tag for all three images |
+| `POSTGRES_PASSWORD` | Existing Lens database password, or a new 64-character hexadecimal value for a fresh volume |
+| `LENS_USERS_PASSWORD` | Separate 64-character hexadecimal identity database password |
+| `LENS_PUBLIC_URL` | Exact HTTPS origin, for example `https://lens.example.com` or `https://localhost:8443`; no path or trailing slash |
+| `LENS_HTTP_PORT`, `LENS_HTTPS_PORT` | Host ports mapped to HTTP redirect and HTTPS; default 8080/8443 |
+| `LENS_PROXY_IP`, `LENS_NETWORK_SUBNET` | Fixed frontend address and private subnet; change together if the default network overlaps another deployment |
+
+Generate each new password with `openssl rand -hex 32`. Changing `.env` does
+not rotate an existing PostgreSQL role's password. The preparation script keeps
+existing roles and databases unchanged. Compose injects database URLs, public
+origin and trusted proxy address; do not duplicate them in service env files.
+
+`backend.env` owns LLM/embedding settings and model-connection secret references.
+`user-service.env` owns SMTP, the challenge secret and registration availability.
+Keep registration disabled until an active administrator and actual SMTP
+configuration are verified. Use a stable random `CHALLENGE_SECRET` of at least
+32 bytes. External SMTP uses STARTTLS; the loopback-only development mailbox is
+not part of this production bundle.
+
+Secrets and private keys belong on the host, outside Git and image layers.
+Compose `config` includes environment values: use `config -q` for validation and
+never publish rendered configuration output.
+
+## Certificates and request boundaries
+
+Provision these files before startup:
 
 ```text
-http://localhost:8080
+public-tls/tls.crt              public HTTPS certificate chain
+public-tls/tls.key              matching HTTPS private key
+identity-certs/ca.crt           trusted identity CA certificate
+identity-certs/server.crt       user-service certificate; SAN includes DNS:user-service
+identity-certs/server.key       user-service private key
+identity-certs/client.crt       Lens client certificate with clientAuth usage
+identity-certs/client.key       Lens client private key
 ```
 
-## How The Script Works
+Only the owning service's private key is mounted into it. The CA private key
+stays with the issuer. User-service runs as UID/GID 65532; give that identity
+read access to its mounted certificate/key, for example group 65532 with mode
+0640 for `server.key` and traversable parent directories. Keep the remaining
+private keys readable only by their operators/owning services. SELinux mounts
+use `:z` for the shared CA and `:Z` for private mounts and backend data.
 
-`./scripts/lens` is a small POSIX shell command wrapper, not a Makefile.
+Nginx replaces `X-Real-IP` with its actual TCP peer; user-service trusts that
+header only from `LENS_PROXY_IP`. Direct connections cannot nominate a new IP.
+`COOKIE_SECURE=true` and the exact public origin apply to browser writes.
+`/user-api/ready` checks database connectivity, without sending email or
+creating sessions. `doctor --running` also verifies mTLS from the backend.
+Public certificate issuance/renewal and real SMTP delivery remain operator
+responsibilities.
 
-It keeps the deploy commands short and always calls Docker Compose with the
-same env file and compose file:
+## Fresh installation
+
+Use this path only for an empty Lens database and an empty identity account
+table. Existing accounts require the cutover procedure below.
 
 ```bash
-docker compose --env-file .env -f compose.yml <command>
-```
-
-For example:
-
-```bash
-./scripts/lens up
-```
-
-is the deployment wrapper around:
-
-```bash
-docker compose --env-file .env -f compose.yml up -d
-```
-
-The wrapper also creates missing runtime files and directories when needed:
-
-- `.env`
-- `backend.env`
-- `data/backend/`
-
-Schema migrations remain explicit. `./scripts/lens up` does not run Alembic.
-Also, do not publish the output of `./scripts/lens config`: the rendered backend
-environment contains the database connection URL.
-
-## Podman Runtime
-
-Use this path on machines without Docker. Run the Compose commands directly
-with Podman from the deploy bundle directory:
-
-```bash
-cd lens-deploy
-podman compose --env-file .env -f compose.yml pull
-podman compose --env-file .env -f compose.yml up -d postgres
-podman compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
-podman compose --env-file .env -f compose.yml up -d
-podman compose --env-file .env -f compose.yml ps
-```
-
-Useful Podman equivalents:
-
-```bash
-podman compose --env-file .env -f compose.yml logs -f
-podman compose --env-file .env -f compose.yml restart backend
-podman compose --env-file .env -f compose.yml down
-```
-
-The backend data volume uses the SELinux relabel option `:Z`:
-
-```yaml
-./data/backend:/app/data:Z
-```
-
-This lets Podman write runtime data on SELinux Enforcing hosts such as Fedora,
-RHEL, and CentOS. Without that label the backend can fail with
-`PermissionError` while creating `/app/data/collections`, and the frontend will
-show `502 Bad Gateway` because nginx cannot reach the backend.
-
-When the backend container needs to call a vLLM server running on the host,
-start vLLM so it listens beyond host-local loopback, then point Lens at the
-Podman host gateway:
-
-```bash
-uv run vllm-control start --host 0.0.0.0
-```
-
-```bash
-LLM_BASE_URL=http://host.containers.internal:8008/v1
-LLM_MODEL=<served-model-name>
-LLM_API_KEY=not-needed
-```
-
-Keep `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, and `EMBEDDING_API_KEY` empty
-unless the configured service exposes an OpenAI-compatible embeddings endpoint.
-
-## Manual Configure
-
-```bash
-cp .env.example .env
-cp backend.env.example backend.env
-```
-
-Generate a 64-character hexadecimal database password:
-
-```bash
-openssl rand -hex 32
-```
-
-Edit `.env` to set that generated value, the published image tag, and the host
-port:
-
-```bash
-LENS_VERSION=v0.13.8
-LENS_HTTP_PORT=8080
-POSTGRES_PASSWORD=<generated-64-character-hex-value>
-```
-
-The password initializes the `lens` database user only when the PostgreSQL
-volume is empty. Changing `.env` later does not rotate an existing database
-password. Keep `.env` private and do not commit it.
-
-Edit `backend.env` before the first start to create the initial login
-user:
-
-```bash
-BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-BOOTSTRAP_ADMIN_PASSWORD=change-this-password
-BOOTSTRAP_ADMIN_NAME=Admin
-```
-
-`BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` are read only when the
-backend starts. If the user already exists, the backend keeps the existing
-account.
-
-Also edit `backend.env` when you want Lens to call an OpenAI-compatible LLM or
-embedding endpoint:
-
-```bash
-LLM_BASE_URL=
-LLM_MODEL=
-LLM_API_KEY=
-
-EMBEDDING_BASE_URL=
-EMBEDDING_MODEL=
-EMBEDDING_API_KEY=
-```
-
-`LENS_DATABASE_URL` is injected by `compose.yml`; do not add it to
-`backend.env`.
-
-## Initialize Database
-
-Start PostgreSQL, apply the Alembic migrations explicitly, and then start Lens:
-
-```bash
-./scripts/lens doctor
 docker compose --env-file .env -f compose.yml up -d postgres
-docker compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
-./scripts/lens up
+./scripts/prepare-identity.sh
+
+set -a
+. ./.env
+set +a
+export GOOSE_DRIVER=postgres
+export GOOSE_DBSTRING="postgres://lens_users:$LENS_USERS_PASSWORD@postgres:5432/lens_users"
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  -e GOOSE_DRIVER -e GOOSE_DBSTRING --entrypoint goose user-service -dir /app/migrations up
+docker compose --env-file .env -f compose.yml run --rm --no-deps backend alembic upgrade head
 ```
 
-Application startup never creates or changes database schema.
-
-## Run
+In a Bash terminal, create and authorize the first account without putting its
+password in shell history:
 
 ```bash
+read -r -p 'Initial account email: ' BOOTSTRAP_EMAIL
+read -r -s -p 'Initial password (at least 12 bytes): ' BOOTSTRAP_PASSWORD
+printf '\n'
+export BOOTSTRAP_EMAIL BOOTSTRAP_PASSWORD
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  -e BOOTSTRAP_EMAIL -e BOOTSTRAP_PASSWORD user-service bootstrap
+docker compose --env-file .env -f compose.yml run --rm --no-deps \
+  -e BOOTSTRAP_EMAIL user-service grant-initial-admin
+unset BOOTSTRAP_EMAIL BOOTSTRAP_PASSWORD GOOSE_DBSTRING
 ./scripts/lens up
-./scripts/lens doctor
-./scripts/lens ps
+./scripts/lens doctor --running
 ```
 
-`./scripts/lens up` starts the backend, frontend, PostgreSQL, three research
+`bootstrap` creates an account; `grant-initial-admin` assigns an existing active
+account only when no effective administrator exists. Normal startup never
+restores revoked grants. Enable registration in `user-service.env` only after
+SMTP verification, then recreate user-service to load the configuration. Check
+registration, login, personal resources, administration and logout through the
+actual HTTPS origin before opening access.
+
+## First upgrade from legacy Lens identity
+
+This is a maintenance-window operation performed once, before routine upgrades.
+The CI deployment workflow refuses to run while `auth_users` remains in Lens.
+Do not run migration 0099 on the only old database before verifying import:
+0099 removes its password/session tables and cannot reconstruct them on downgrade.
+
+1. Keep the old code/images and configuration. Stop frontend, Web and **every**
+   worker or other write source. Keep only PostgreSQL available. Registration
+   stays disabled and the new identity account table must be empty.
+2. Save a custom-format archive of the old `lens` database and matching
+   `data/backend`, configuration, and keys in a private backup directory.
+   Restore a copy into an isolated database and verify the original user IDs,
+   hashes and resource ownership before continuing.
+3. Stage this release's bundle, preserve the private runtime files, configure
+   certificates and the new identity password, then run
+   `prepare-identity.sh` and the Goose command from fresh installation.
+   **Do not bootstrap the target identity database.**
+4. Export `OLD_IDENTITY_DATABASE_URL` for the stopped old Lens database and
+   `USER_DATABASE_URL` for `lens_users` in the operator terminal. These are
+   regular PostgreSQL DSNs, held privately; pass them by environment:
+
+   ```bash
+   docker compose --env-file .env -f compose.yml run --rm --no-deps \
+     -e OLD_IDENTITY_DATABASE_URL -e USER_DATABASE_URL backend \
+     python scripts/import_legacy_users.py
+   ```
+
+   The importer reads a consistent old snapshot, locks the empty destination,
+   imports and compares IDs, email/name, password hashes and creation times in
+   one transaction. An invalid row rolls back the entire target import.
+   It copies no old sessions and makes no email-verification claims. It does
+   not assign groups. A non-empty destination is rejected.
+5. After verified import, execute `backend alembic upgrade head`, authorize the
+   intended imported account with `grant-initial-admin`, then start the new
+   stack. Verify original-password login, original `user_id`, original
+   Collection ownership, denial for a second user and rejection of an old
+   session before reopening registration and scientific writes.
+
+The old account's stable hash must use the password format supported by the
+current identity service. Existing unverified accounts retain password login;
+email recovery is available only to accounts with recorded verified email.
+If any cutover check fails, keep maintenance mode and restore the verified old
+database, resources, code and configuration together. New writes in the new
+system are not automatically merged into the old system.
+
+## Routine upgrade
+
+After the first identity cutover, use the manual **Deploy Production** workflow
+or the server command:
+
+```bash
+./scripts/lens upgrade vX.Y.Z
+```
+
+The command fetches the selected tag's bundle into a temporary directory while
+preserving private runtime configuration. The candidate upgrade then:
+
+1. Rejects an unsafe tag or remaining legacy identity tables and pulls the
+   candidate images before interrupting the running stack.
+2. Stops all application/worker write sources. Saves both databases, runtime
+   configuration/keys and file resources in a private `backups/` directory;
+   checks that database archives can be read before starting migrations.
+3. Installs the selected bundle's maintained files, preserves secrets, prepares
+   the identity role if needed, then explicitly runs Goose and Alembic.
+4. Starts the selected image version, waits for health and runs the HTTPS,
+   migration-head, worker and mTLS doctor checks. Only then persists the new
+   `LENS_VERSION`.
+
+A pull failure leaves the old stack running. A backup failure starts no
+migration. A later failure stops candidate application services in maintenance
+mode, retains the old version setting and backup location, and returns failure.
+It never treats an old image tag as a schema rollback. Applications may accept
+new writes during final public smoke checks; preserve the failure state and
+consider those writes before restoring a backup.
+
+Before using this on real data, rehearse it with a restored copy. A readable
+archive is not proof that every scientific resource has been restored correctly.
+
+## CI, image publication and production deployment
+
+- [CI](../.github/workflows/ci.yml) runs on PRs, main pushes and reusable calls.
+  Go uses real PostgreSQL migrations and race tests; Python verifies identity,
+  ownership, import and PostgreSQL cutover; frontend runs lint, types, unit tests
+  and the full browser suite/build. Deployment sequencing and documentation
+  contracts also run. CI test databases use disposable localhost-only data.
+- [Release Docker Images](../.github/workflows/release-images.yml) runs the same
+  CI for a stable tag before publishing backend, frontend and user-service
+  images with that tag. Production uses version tags rather than `latest`.
+- [Deploy Production](../.github/workflows/deploy.yml) is manually dispatched
+  with a stable version. It requires a successful publication run for that exact
+  tag/commit, transfers that tag's deployment bundle over verified SSH, then
+  invokes its upgrade script against private host configuration. Deployments
+  are serialized. The first legacy import remains a separate operator step.
+
+Configure Docker Hub repository secrets:
+
+| Name | Value |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Image publisher account |
+| `DOCKERHUB_TOKEN` | Token allowed to publish the three Lens image repositories |
+
+Create the GitHub `production` environment and configure:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `DEPLOY_HOST` | SSH server hostname |
+| Secret | `DEPLOY_USER` | Operator with access to the deployment directory and Docker |
+| Secret | `DEPLOY_SSH_KEY` | Dedicated SSH private key |
+| Secret | `DEPLOY_KNOWN_HOSTS` | Host key verified independently and pinned in known_hosts format |
+| Variable | `DEPLOY_PATH` | Absolute existing runtime directory, e.g. `/opt/lens-deploy`; use letters, digits, `_`, `.`, `-` and `/` |
+
+SMTP, HMAC/database secrets and certificate private keys remain on the server;
+CI does not need them. Configure required CI status checks in branch protection
+through the GitHub repository settings. The current frontend formatting,
+collection-navigation unit-test and research/chat browser-test failures must
+be resolved before this pipeline can publish a release; checks
+are not skipped or marked non-blocking. Local workflow validation is distinct
+from a successful hosted Actions run.
+
+## Backup and restore
+
+Routine upgrades retain `lens.dump`, `lens_users.dump`, `runtime.tgz` and
+`resources.tgz` together. Move copies to independent protected storage and
+exercise recovery before relying on them. Runtime archives contain credentials
+and keys; do not upload them to Actions artifacts or Git.
+
+For recovery, stop all application and worker containers. Keep PostgreSQL
+running. Restore the matching old bundle/configuration from `runtime.tgz` and
+resource files from `resources.tgz`. Using the old configuration, restore each
+trusted database archive into a fresh replacement database, verify it, and
+switch to those databases, or replace the stopped original databases during
+an explicit maintenance window. Example replacement, after verifying backup
+copies and preserving the failure state:
+
+```bash
+# Destructive: every application/worker must remain stopped.
+docker compose --env-file .env -f compose.yml exec -T postgres \
+  psql -U lens -d postgres -v ON_ERROR_STOP=1 \
+  -c 'DROP DATABASE lens WITH (FORCE)' \
+  -c 'CREATE DATABASE lens OWNER lens TEMPLATE template0' \
+  -c 'DROP DATABASE lens_users WITH (FORCE)' \
+  -c 'CREATE DATABASE lens_users OWNER lens_users TEMPLATE template0'
+docker compose --env-file .env -f compose.yml exec -T postgres \
+  pg_restore --exit-on-error --single-transaction -U lens -d lens < backups/SELECTED/lens.dump
+docker compose --env-file .env -f compose.yml exec -T postgres \
+  pg_restore --exit-on-error --single-transaction -U lens -d lens_users < backups/SELECTED/lens_users.dump
+```
+
+Compare migration versions, account IDs, permission catalogs/associations/audit,
+session revocations, email proof/rate-limit state and Collection ownership.
+Use the matching old images and configuration; do not run `alembic downgrade`
+to recover removed credentials. The PostgreSQL volume and `data/backend`
+survive normal `docker compose down`; `down --volumes` deletes database state.
+
+## Research workers and model configuration
+`./scripts/lens up` starts the backend, frontend, user-service, PostgreSQL, three research
 Workers and four feedback analysis Workers together. The Workers are
 long-running processes built from the backend image; they do not expose HTTP
 ports. HTTP and Agent requests queue work. Research Workers prepare documents,
@@ -226,6 +296,7 @@ The expected service names are:
 
 ```text
 postgres
+user-service
 backend
 frontend
 document-preparation-worker
@@ -256,49 +327,6 @@ Worker container after a process failure. Each claimed job has a database lease
 Worker exits, the next Worker pass returns an expired `running` job to
 `pending`; dataset sample jobs also return from `building` to `pending`.
 
-Open:
-
-```text
-http://localhost:8080
-```
-
-## Stop
-
-```bash
-./scripts/lens down
-```
-
-## Useful Commands
-
-```bash
-./scripts/lens doctor
-./scripts/lens logs
-./scripts/lens ps
-./scripts/lens pull
-./scripts/lens upgrade v0.13.8
-```
-
-Command mapping:
-
-- `doctor` checks Docker, Compose, password shape, PostgreSQL readiness,
-  Alembic head state, the data directory, all seven Workers, and
-  frontend/backend reachability.
-- `up` runs `docker compose up -d`.
-- `down` runs `docker compose down`.
-- `logs` follows `docker compose logs`.
-- `ps` runs `docker compose ps`.
-- `pull` pulls the configured images.
-- `upgrade TAG` writes `LENS_VERSION=TAG`, pulls images, and restarts Lens; use
-  the sequence below for releases with database migrations.
-
-## Upgrade
-
-Back up PostgreSQL and file-backed runtime data before changing versions. See
-[Backup](#backup) for the database command, then copy the file-backed data:
-
-```bash
-cp -a data/backend data/backend.backup.$(date +%Y%m%d%H%M%S)
-```
 
 Research Agent Chat requires an enabled model connection in PostgreSQL; the
 registry is not populated from `LLM_MODEL`. Follow the
@@ -311,83 +339,7 @@ priority higher in PostgreSQL and remove the obsolete
 `LENS_DEFAULT_MODEL_CONNECTION_ID` from `backend.env`. Finish or explicitly
 interrupt old unbound approvals before upgrading.
 
-Edit `LENS_VERSION` in `.env`, stop the application and Workers, pull the new
-images, migrate with the new backend image, and start Lens again:
-
-```bash
-docker compose --env-file .env -f compose.yml stop \
-  frontend backend \
-  document-preparation-worker \
-  objective-discovery-worker \
-  objective-analysis-worker \
-  feedback-analysis-worker \
-  correction-signal-analysis-worker \
-  tool-failure-analysis-worker \
-  dataset-sample-worker
-docker compose --env-file .env -f compose.yml pull
-docker compose --env-file .env -f compose.yml up -d postgres
-docker compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
-docker compose --env-file .env -f compose.yml up -d
-./scripts/lens doctor
-```
-
-## Backup
-
-Write a custom-format PostgreSQL archive outside the deploy bundle:
-
-```bash
-mkdir -p ../lens-backups
-lens_backup_file="../lens-backups/lens-$(date +%Y%m%d%H%M%S).dump"
-docker compose --env-file .env -f compose.yml exec -T postgres \
-  pg_dump --format=custom --no-owner --no-acl --username=lens --dbname=lens \
-  > "$lens_backup_file"
-test -s "$lens_backup_file"
-```
-
-Keep the matching `data/backend/` backup with the database archive when a Lens
-version still owns file-backed structured state.
-
-## Restore
-
-Restore only from a trusted, non-empty archive. This procedure stops the
-backend and Workers, replaces the `lens` database, verifies the Alembic head,
-and then starts the application services again:
-
-```bash
-lens_backup_file=../lens-backups/lens-YYYYMMDDHHMMSS.dump
-test -s "$lens_backup_file"
-docker compose --env-file .env -f compose.yml stop \
-  frontend backend \
-  document-preparation-worker \
-  objective-discovery-worker \
-  objective-analysis-worker \
-  feedback-analysis-worker \
-  correction-signal-analysis-worker \
-  tool-failure-analysis-worker \
-  dataset-sample-worker
-docker compose --env-file .env -f compose.yml exec -T postgres \
-  psql --set=ON_ERROR_STOP=1 --username=lens --dbname=postgres \
-  --command='DROP DATABASE IF EXISTS lens WITH (FORCE)' \
-  --command='CREATE DATABASE lens WITH TEMPLATE template0 OWNER lens'
-docker compose --env-file .env -f compose.yml exec -T postgres \
-  pg_restore --exit-on-error --single-transaction --no-owner --no-acl \
-  --username=lens --dbname=lens < "$lens_backup_file"
-docker compose --env-file .env -f compose.yml run --rm backend \
-  alembic current --check-heads
-docker compose --env-file .env -f compose.yml up -d
-./scripts/lens doctor
-```
-
-## Data
-
-Structured database state is stored in the Compose-managed `postgres-data`
-volume. Remaining file-backed runtime data is stored under:
-
-```text
-data/backend/
-```
-
-`docker compose down` preserves both. `docker compose down --volumes`
-permanently deletes the PostgreSQL volume; use it only when intentionally
-discarding all database state. Back up both authorities before replacing the
-deploy bundle or changing versions.
+Useful commands remain `./scripts/lens logs`, `ps`, `pull`, `down` and `url`.
+`doctor --running` performs strict checks; `doctor` before startup reports missing
+runtime prerequisites. Do not publish `lens config` output because it includes
+connection credentials.

@@ -64,7 +64,9 @@
 
 - 不再允许浏览器手工设置 Base URL
 - 遗留调试入口已从浏览器产品流程中退役
-- `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
+- `frontend/nginx.conf` 终止 HTTPS，将 `/api/` 代理到 `backend:8010`，
+  将 `/user-api/` 去掉此前缀后代理到 `user-service:8097/`；HTTP 重定向到配置的公开 HTTPS 源。
+  证书、运行配置与升级步骤见 [部署说明](../../deploy/README.md)。
 - Collection 只组织当前文档；Source、DocumentProfile、Paper Map 和就绪状态
   都属于单篇 Document。上传新文档或重试失败文档不会重新处理其他文档
 - 同一 Document 同时最多一个准备 Pipeline Run，不同 Document 可以并发准备；上传在准备期间保持可用

@@ -16,19 +16,58 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  user-service:
+    image: ${LENS_USER_IMAGE:-jeanphilo/tsingai-lens-user-service}:${LENS_VERSION:?Set LENS_VERSION in .env}
+    env_file:
+      - ./user-service.env
+    environment:
+      USER_DATABASE_URL: "postgres://lens_users:${LENS_USERS_PASSWORD:?Set LENS_USERS_PASSWORD in .env}@postgres:5432/lens_users"
+      BROWSER_ORIGIN: "${LENS_PUBLIC_URL:?Set the exact public HTTPS origin}"
+      TRUSTED_PROXY_IP: "${LENS_PROXY_IP:-172.30.50.254}"
+    volumes:
+      - ./identity-certs/ca.crt:/run/identity/ca.crt:ro,z
+      - ./identity-certs/server.crt:/run/identity/server.crt:ro,Z
+      - ./identity-certs/server.key:/run/identity/server.key:ro,Z
+    expose: ["8097", "50057"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8097/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   backend:
     image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     env_file:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      USER_RPC_TARGET: user-service:50057
+      USER_RPC_CA: /run/identity/ca.crt
+      USER_RPC_CERT: /run/identity/client.crt
+      USER_RPC_KEY: /run/identity/client.key
     volumes:
       - ./data/backend:/app/data:Z
+      - ./identity-certs/ca.crt:/run/identity/ca.crt:ro,z
+      - ./identity-certs/client.crt:/run/identity/client.crt:ro,Z
+      - ./identity-certs/client.key:/run/identity/client.key:ro,Z
     expose:
       - "8010"
     depends_on:
       postgres:
         condition: service_healthy
+      user-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8010/api/openapi.json', timeout=4).close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
 
   document-preparation-worker:
@@ -133,9 +172,26 @@ services:
     image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     ports:
       - "${LENS_HTTP_PORT:-8080}:80"
+      - "${LENS_HTTPS_PORT:-8443}:443"
+    environment:
+      LENS_PUBLIC_URL: "${LENS_PUBLIC_URL:?Set the exact public HTTPS origin}"
+    volumes:
+      - ./public-tls:/etc/lens-tls:ro,Z
+    networks:
+      default:
+        ipv4_address: "${LENS_PROXY_IP:-172.30.50.254}"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   postgres-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: "${LENS_NETWORK_SUBNET:-172.30.50.0/24}"

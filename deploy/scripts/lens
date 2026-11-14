@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -20,7 +21,7 @@ Commands:
   ps             Show container status.
   config         Render the Docker Compose config.
   doctor         Check local deploy prerequisites and runtime health.
-  upgrade TAG    Set LENS_VERSION, pull images, and restart.
+  upgrade TAG    Back up, migrate, verify, and persist a published version.
   url            Print the local Lens URL.
 USAGE
 }
@@ -38,6 +39,7 @@ ensure_compose() {
 ensure_env_files() {
   [ -f "$ENV_FILE" ] || cp "$ROOT_DIR/.env.example" "$ENV_FILE"
   [ -f "$BACKEND_ENV_FILE" ] || cp "$ROOT_DIR/backend.env.example" "$BACKEND_ENV_FILE"
+  [ -f "$ROOT_DIR/user-service.env" ] || cp "$ROOT_DIR/user-service.env.example" "$ROOT_DIR/user-service.env"
   mkdir -p "$ROOT_DIR/data/backend"
 }
 
@@ -94,11 +96,15 @@ case "$command" in
     "$SCRIPT_DIR/doctor.sh" "$@"
     ;;
   upgrade)
-    "$SCRIPT_DIR/upgrade.sh" "$@"
+    [ "$#" -eq 1 ] || die "upgrade requires one stable version tag"
+    bundle=$(mktemp -d)
+    trap 'rm -rf "$bundle"' EXIT
+    "$ROOT_DIR/install.sh" --version "$1" --ref "$1" --dir "$bundle" >/dev/null
+    LENS_DEPLOY_DIR="$ROOT_DIR" "$bundle/scripts/upgrade.sh" "$1"
     ;;
   url)
     load_env
-    printf 'http://localhost:%s\n' "${LENS_HTTP_PORT:-8080}"
+    printf '%s\n' "${LENS_PUBLIC_URL:-https://localhost:8443}"
     ;;
   -h|--help|help)
     usage

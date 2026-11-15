@@ -89,6 +89,10 @@ const translations: Record<Language, Translations> = {
 		onboarding: {
 			confirmPassword: 'Confirm new password',
 			passwordMismatch: 'The new passwords do not match.',
+			passwordLengthHint: 'Use at least 12 characters; currently {count}.',
+			confirmPasswordHint: 'Enter the same new password again to confirm.',
+			requestCodeHint: 'Request a code on this page. After a refresh, request a new code.',
+			codeHint: 'Enter the 6-digit code from your email.',
 			account: 'Account settings',
 			changePassword: 'Change password',
 			currentPassword: 'Current password',
@@ -3834,6 +3838,10 @@ const translations: Record<Language, Translations> = {
 		onboarding: {
 			confirmPassword: '再次输入新密码',
 			passwordMismatch: '两次输入的新密码不一致。',
+			passwordLengthHint: '至少 12 个字符，当前 {count} 个。',
+			confirmPasswordHint: '请再次输入相同的新密码以确认。',
+			requestCodeHint: '请先在本页发送验证码；刷新页面后需要重新获取。',
+			codeHint: '请输入邮件中的 6 位数字验证码。',
 			account: '账号设置',
 			changePassword: '修改密码',
 			currentPassword: '当前密码',

@@ -71,8 +71,15 @@ for (const route of ['register', 'forgot-password'] as const) {
 			name: route === 'register' ? 'Create account' : 'Reset password',
 			exact: true
 		});
-		await button.click();
-		await expect(page.getByRole('alert')).toHaveText('The new passwords do not match.');
+		if (route === 'register') {
+			await expect(
+				page.getByLabel('Confirm new password', { exact: true })
+			).toHaveAccessibleDescription('The new passwords do not match.');
+			await expect(button).toBeDisabled();
+		} else {
+			await button.click();
+			await expect(page.getByRole('alert')).toHaveText('The new passwords do not match.');
+		}
 		expect(writes).toHaveLength(1);
 		await page.getByLabel('Confirm new password', { exact: true }).fill('replacement-password');
 		await button.click();
@@ -93,6 +100,63 @@ for (const route of ['register', 'forgot-password'] as const) {
 		await expect(page.getByRole('button', { name: 'Log out' })).toHaveCount(0);
 	});
 }
+
+test('register explains short passwords and the remaining fields before submission', async ({
+	page
+}) => {
+	const { writes } = await mockAccountApi(page);
+	await page.goto('/register');
+	await page.getByLabel('Email', { exact: true }).fill('new@example.test');
+	await expect(
+		page.getByText('Request a code on this page. After a refresh, request a new code.')
+	).toBeVisible();
+	await page.getByRole('button', { name: 'Send code', exact: true }).click();
+	await expect(page.getByRole('status')).toContainText('eligible');
+	await expect(page.getByText('Enter the 6-digit code from your email.')).toBeVisible();
+	await page.getByLabel('Email code', { exact: true }).fill('001234');
+	const password = page.getByLabel('New password (12 characters minimum)', { exact: true });
+	const confirmation = page.getByLabel('Confirm new password', { exact: true });
+	const submit = page.getByRole('button', { name: 'Create account', exact: true });
+	await password.fill('12345678901');
+	await confirmation.fill('12345678901');
+	await expect(password).toHaveAttribute('aria-invalid', 'true');
+	await expect(password).toHaveAccessibleDescription('Use at least 12 characters; currently 11.');
+	await expect(submit).toBeDisabled();
+	await password.fill('123456789012');
+	await expect(confirmation).toHaveAccessibleDescription('The new passwords do not match.');
+	await expect(submit).toBeDisabled();
+	await confirmation.fill('123456789012');
+	await expect(password).toHaveAttribute('aria-invalid', 'false');
+	await expect(submit).toBeEnabled();
+	await page.getByLabel('Email code', { exact: true }).fill('abcdef');
+	await expect(page.getByLabel('Email code', { exact: true })).toHaveAccessibleDescription(
+		'Enter the 6-digit code from your email.'
+	);
+	await expect(submit).toBeDisabled();
+	await page.getByLabel('Email code', { exact: true }).fill('001234');
+	await expect(submit).toBeEnabled();
+	expect(writes).toHaveLength(1);
+	await submit.click();
+	await expect(page).toHaveURL(/\/login\?registered=1$/);
+	expect(writes[1].body.password).toBe('123456789012');
+});
+
+test('register explains missing proof after a refresh and localizes password guidance', async ({
+	page
+}) => {
+	await mockAccountApi(page);
+	await page.goto('/register');
+	await page.getByLabel('Email', { exact: true }).fill('new@example.test');
+	await page.getByRole('button', { name: 'Send code', exact: true }).click();
+	await expect(page.getByRole('status')).toContainText('eligible');
+	await page.reload();
+	await page.getByRole('combobox').selectOption('zh');
+	await expect(page.getByText('请先在本页发送验证码；刷新页面后需要重新获取。')).toBeVisible();
+	const password = page.getByLabel('新密码（至少12位）', { exact: true });
+	await password.fill('12345678901');
+	await expect(password).toHaveAccessibleDescription('至少 12 个字符，当前 11 个。');
+	await expect(page.getByRole('button', { name: '创建账号', exact: true })).toBeDisabled();
+});
 
 test('429 disables resend until the server retry period ends', async ({ page }) => {
 	const { state } = await mockAccountApi(page);

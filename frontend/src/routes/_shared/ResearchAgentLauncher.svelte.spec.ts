@@ -1,6 +1,7 @@
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { language } from './i18n';
 
 const { collectionStore, fetchCollectionsMock, setCollections } = vi.hoisted(() => {
 	const subscribers = new Set<(value: unknown[]) => void>();
@@ -31,6 +32,7 @@ const Launcher = (await import('./ResearchAgentLauncher.svelte')).default;
 
 describe('ResearchAgentLauncher', () => {
 	beforeEach(() => {
+		language.set('en');
 		setCollections([]);
 		fetchCollectionsMock.mockReset();
 		fetchCollectionsMock.mockImplementation(async () => {

@@ -16,7 +16,7 @@ type SMTPSettings struct {
 	From     string
 	Username string
 	Password string
-	TLS      bool
+	TLSMode  string
 }
 
 // declares a method of `SMTPSettings` that validates the configured sender address, opens a time-limited TCP connection, optionally starts TLS and authenticates, then submits the sender, recipient, and message
@@ -35,6 +35,17 @@ func (s SMTPSettings) Send(ctx context.Context, email, purpose, verificationCode
 	// checks whether `s.Address` could be split into a host and port
 	if err != nil {
 		return err
+	}
+
+	// Select the configured transport before connecting; plaintext is local-only.
+	switch s.TLSMode {
+	case "tls", "starttls":
+	case "none":
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			return fmt.Errorf("plaintext SMTP requires loopback")
+		}
+	default:
+		return fmt.Errorf("invalid SMTP_TLS_MODE")
 	}
 
 	// prepares a network dialer with a five-second timeout for establishing the connection
@@ -64,6 +75,16 @@ func (s SMTPSettings) Send(ctx context.Context, email, purpose, verificationCode
 		return err
 	}
 
+	tlsConfig := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+	if s.TLSMode == "tls" {
+		// Implicit TLS completes its handshake before reading the SMTP greeting.
+		tlsConn := tls.Client(conn, tlsConfig)
+		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			return err
+		}
+		conn = tlsConn
+	}
+
 	// creates an SMTP client over the established connection, using `host` as the server name
 	client, err := smtp.NewClient(conn, host)
 
@@ -75,19 +96,12 @@ func (s SMTPSettings) Send(ctx context.Context, email, purpose, verificationCode
 	// schedules the SMTP client to be closed when `Send` returns.
 	defer client.Close()
 
-	// chooses whether to upgrade the SMTP connection with STARTTTLS
-	// when `s.TLS` is true, the following block attempts the upgrade
-	// when it is false, the `else if` below checks whether plaintext is permitted
-	if s.TLS {
+	// STARTTLS upgrades an SMTP connection before any credentials are submitted.
+	if s.TLSMode == "starttls" {
 		// requests STARTTLS and checks whether it succeeds
-		if err = client.StartTLS(&tls.Config{
-			ServerName: host,
-			MinVersion: tls.VersionTLS12,
-		}); err != nil {
+		if err = client.StartTLS(tlsConfig); err != nil {
 			return err
 		}
-	} else if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("plaintext SMTP requires loopback")
 	}
 
 	// decides whether to authenticate

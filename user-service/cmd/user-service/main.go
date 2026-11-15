@@ -76,12 +76,16 @@ func main() {
 		if len(userService.ChallengeSecret) < 32 {
 			log.Fatal("CHALLENGE_SECRET needs at least 32 bytes")
 		}
+		smtpTLSMode := os.Getenv("SMTP_TLS_MODE")
+		if smtpTLSMode == "" {
+			smtpTLSMode = "starttls"
+		}
 		userService.SMTP = service.SMTPSettings{
 			Address:  required("SMTP_ADDR"),
 			From:     required("SMTP_FROM"),
 			Username: os.Getenv("SMTP_USER"),
 			Password: os.Getenv("SMTP_PASSWORD"),
-			TLS:      os.Getenv("SMTP_TLS") != "false",
+			TLSMode:  smtpTLSMode,
 		}
 		administrators, err := db.New(pool).CountAdmins(ctx)
 		if err != nil {

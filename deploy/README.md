@@ -50,8 +50,15 @@ origin and trusted proxy address; do not duplicate them in service env files.
 `user-service.env` owns SMTP, the challenge secret and registration availability.
 Keep registration disabled until an active administrator and actual SMTP
 configuration are verified. Use a stable random `CHALLENGE_SECRET` of at least
-32 bytes. External SMTP uses STARTTLS; the loopback-only development mailbox is
-not part of this production bundle.
+32 bytes. Set `SMTP_TLS_MODE=tls` for implicit TLS, such as `smtp.qq.com:465`,
+or `SMTP_TLS_MODE=starttls` for SMTP upgraded to TLS, usually on port 587.
+Both modes verify the server certificate and hostname. Replace the former
+`SMTP_TLS` boolean in existing env files with the appropriate mode. Plaintext
+`none` is limited to literal loopback addresses; the development mailbox is
+not part of this production bundle. For QQ Mail, use the authorized QQ address
+as both `SMTP_USER` and `SMTP_FROM` (optionally with a display name), and its
+mailbox authorization code as `SMTP_PASSWORD`. Keep that code in the private
+`user-service.env`; the website domain needs no mail DNS changes for this sender.
 
 Secrets and private keys belong on the host, outside Git and image layers.
 Compose `config` includes environment values: use `config -q` for validation and

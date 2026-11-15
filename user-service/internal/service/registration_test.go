@@ -14,7 +14,7 @@ func TestRegistration(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	mailbox := newTestMailbox(t)
-	s := Service{Pool: pool, RegistrationEnabled: true, ChallengeSecret: "local-test-secret-at-least-32-bytes", SMTP: SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>"}}
+	s := Service{Pool: pool, RegistrationEnabled: true, ChallengeSecret: "local-test-secret-at-least-32-bytes", SMTP: SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>", TLSMode: "none"}}
 	codeFor := func(email string) string { return mailbox.codeFor(t, email) }
 	var err error
 	issue := func(email, purpose string) (string, string) {
@@ -143,7 +143,7 @@ func TestEmailChallengeTransactionRollback(t *testing.T) {
 	ctx := context.Background()
 	pool := testPool(t)
 	mailbox := newTestMailbox(t)
-	identity := Service{Pool: pool, RegistrationEnabled: true, ChallengeSecret: "local-test-secret-at-least-32-bytes", SMTP: SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>"}}
+	identity := Service{Pool: pool, RegistrationEnabled: true, ChallengeSecret: "local-test-secret-at-least-32-bytes", SMTP: SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>", TLSMode: "none"}}
 	email, password := "atomic@example.test", "tutorial-only-password"
 	challengeID, err := identity.IssueEmailChallenge(ctx, email, "register", "atomic-test")
 	if err != nil {

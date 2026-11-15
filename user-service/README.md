@@ -226,7 +226,7 @@ Registration is disabled by default. For a local SMTP receiver listening on
 export REGISTRATION_ENABLED=true
 export SMTP_ADDR=127.0.0.1:1025
 export SMTP_FROM='Lens <noreply@example.test>'
-export SMTP_TLS=false
+export SMTP_TLS_MODE=none
 read -r -s -p 'Challenge secret (at least 32 bytes): ' CHALLENGE_SECRET
 printf '\n'
 export CHALLENGE_SECRET
@@ -234,10 +234,29 @@ export CHALLENGE_SECRET
 ```
 
 Keep `CHALLENGE_SECRET` stable across restarts and outside Git. Use a private
-local configuration value rather than a committed example secret. Plaintext
-SMTP is allowed only for literal loopback addresses. External SMTP requires
-STARTTLS; `SMTP_USER` and `SMTP_PASSWORD` are optional provider credentials.
+local configuration value rather than a committed example secret. Set
+`SMTP_TLS_MODE=tls` for implicit TLS (usually port 465), `starttls` for an SMTP
+connection upgraded to TLS (usually port 587), or `none` for plaintext on literal
+loopback addresses only. If omitted, the entrypoint defaults to `starttls`;
+unrecognized modes are rejected before connecting. Both encrypted modes verify
+the server certificate and hostname and require TLS 1.2 or later, before sending
+credentials. `SMTP_USER` and `SMTP_PASSWORD` are provider credentials when needed.
+`SMTP_TLS_MODE` replaces the former `SMTP_TLS` boolean; update existing env files.
 Neither the example configuration nor the service starts a mail receiver.
+
+For QQ Mail, enable SMTP in the mailbox settings and use:
+
+```dotenv
+SMTP_ADDR=smtp.qq.com:465
+SMTP_TLS_MODE=tls
+SMTP_FROM='Lens <your-account@qq.com>'
+SMTP_USER=your-account@qq.com
+SMTP_PASSWORD='replace-with-a-new-mailbox-authorization-code'
+```
+
+The sender must use the authorized QQ mailbox. Store the authorization code only
+in private configuration; it is not the QQ login password. This sends from the QQ
+address and does not require DNS changes to the Lens website domain.
 
 The standalone HTTP routes are:
 
@@ -287,6 +306,10 @@ they require no external mail provider or extra test dependency. They exercise
 real PostgreSQL transactions, concurrent one-time consumption, wrong-attempt
 persistence, replacement/expiry, SMTP rejection, recovery revocation, disabled
 registration, login throttling, and rollback when proof consumption fails.
+Transport tests use temporary local certificates and SMTP receivers to verify
+implicit TLS and STARTTLS delivery with authentication, certificate and hostname
+rejection before credentials, lack of STARTTLS support and handshake deadlines.
+They do not contact a provider or use real SMTP credentials.
 
 V6 adds catalog, staff and administration transaction tests, including last
 administrator races, rejected audit writes, immediate permission revocation,

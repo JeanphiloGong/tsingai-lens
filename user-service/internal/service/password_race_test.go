@@ -15,7 +15,7 @@ func TestPasswordChangeRecoveryAndDisable(t *testing.T) {
 	pool := testPool(t)
 	mailbox := newTestMailbox(t)
 	var err error
-	identity := &Service{Pool: pool, RegistrationEnabled: true, ChallengeSecret: "local-test-secret-at-least-32-bytes", SMTP: SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>"}}
+	identity := &Service{Pool: pool, RegistrationEnabled: true, ChallengeSecret: "local-test-secret-at-least-32-bytes", SMTP: SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>", TLSMode: "none"}}
 	password := "tutorial-only-password"
 	if err = identity.Bootstrap(ctx, "operator@example.test", password); err != nil {
 		t.Fatal(err)

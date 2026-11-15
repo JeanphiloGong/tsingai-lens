@@ -111,7 +111,7 @@ func (mailbox *testMailbox) codeFor(t *testing.T, email string) string {
 
 func TestSMTPMessageAndFailure(t *testing.T) {
 	mailbox := newTestMailbox(t)
-	sender := SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>"}
+	sender := SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>", TLSMode: "none"}
 	if err := sender.Send(context.Background(), "recipient@example.test", "register", "001234"); err != nil {
 		t.Fatal(err)
 	}

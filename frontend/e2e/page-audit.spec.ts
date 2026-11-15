@@ -943,16 +943,20 @@ test.describe('page interaction audit', () => {
 			expect(state.branchModes).toEqual(['continue']);
 			await open.click();
 			await expect(dialog.locator('.tree-node')).toHaveCount(3);
-			const rootBox = await dialog.locator('[data-node-id="question"]').boundingBox();
-			const firstBranchBox = await dialog.locator('[data-node-id="later"]').boundingBox();
-			const secondBranchBox = await dialog
-				.locator('[data-node-id="branch_1-question"]')
-				.boundingBox();
-			expect(rootBox).not.toBeNull();
-			expect(firstBranchBox).not.toBeNull();
-			expect(secondBranchBox).not.toBeNull();
-			expect(rootBox!.y + rootBox!.height).toBeLessThan(firstBranchBox!.y);
-			expect(Math.abs(firstBranchBox!.y - secondBranchBox!.y)).toBeLessThan(3);
+			// Sample all nodes in one frame while the dialog enters and auto-fits.
+			await expect
+				.poll(() =>
+					dialog.locator('.tree-node').evaluateAll((nodes) => {
+						const bounds = Object.fromEntries(
+							nodes.map((node) => [node.getAttribute('data-node-id'), node.getBoundingClientRect()])
+						);
+						return {
+							branchesBelowRoot: bounds.question.bottom < bounds.later.top,
+							siblingsAligned: Math.abs(bounds.later.top - bounds['branch_1-question'].top) < 3
+						};
+					})
+				)
+				.toEqual({ branchesBelowRoot: true, siblingsAligned: true });
 			await dialog.getByRole('button', { name: 'Fit tree', exact: true }).click();
 			const zoom = dialog.getByLabel('Tree zoom', { exact: true });
 			await expect(zoom).toHaveText(/^\d+%$/);

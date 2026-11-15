@@ -152,6 +152,11 @@ class ComposeContract(unittest.TestCase):
             services = config['services']
             for name in ['frontend', 'backend', 'user-service']:
                 self.assertTrue(services[name]['image'].endswith(':v9.9.9'))
+            # The API and every worker must keep simultaneous SELinux access.
+            for service in services.values():
+                for volume in service.get('volumes', []):
+                    if volume.get('target') == '/app/data':
+                        self.assertEqual(volume['bind']['selinux'], 'z')
             self.assertNotIn('ports', services['user-service'])
             proxy = services['frontend']['networks']['default']['ipv4_address']
             self.assertEqual(services['user-service']['environment']['TRUSTED_PROXY_IP'], proxy)

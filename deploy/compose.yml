@@ -51,7 +51,7 @@ services:
       USER_RPC_CERT: /run/identity/client.crt
       USER_RPC_KEY: /run/identity/client.key
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
       - ./identity-certs/ca.crt:/run/identity/ca.crt:ro,z
       - ./identity-certs/client.crt:/run/identity/client.crt:ro,Z
       - ./identity-certs/client.key:/run/identity/client.key:ro,Z
@@ -77,7 +77,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/run_document_preparation.py"]
     depends_on:
       postgres:
@@ -91,7 +91,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/run_objective_discovery.py"]
     depends_on:
       postgres:
@@ -105,7 +105,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/run_objective_analysis.py"]
     depends_on:
       postgres:
@@ -119,7 +119,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/feedback_analysis_worker.py"]
     depends_on:
       postgres:
@@ -133,7 +133,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/correction_signal_analysis_worker.py"]
     depends_on:
       postgres:
@@ -147,7 +147,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/tool_failure_analysis_worker.py"]
     depends_on:
       postgres:
@@ -161,7 +161,7 @@ services:
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
     volumes:
-      - ./data/backend:/app/data:Z
+      - ./data/backend:/app/data:z
     command: ["python", "scripts/dataset_sample_worker.py"]
     depends_on:
       postgres:

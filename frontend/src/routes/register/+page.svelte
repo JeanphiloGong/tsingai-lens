@@ -21,6 +21,9 @@
 	let now = Date.now();
 	let retryAt = 0;
 	$: remainingSeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
+	$: validCode = /^[0-9]{6}$/.test(verificationCode);
+	$: shortPassword = password.length > 0 && password.length < 12;
+	$: passwordsMismatch = confirmPassword.length > 0 && password !== confirmPassword;
 	$: if (email !== challengeEmail) {
 		challengeId = '';
 		verificationCode = '';
@@ -116,8 +119,11 @@
 			>
 			{#if sent}<p class="account-notice" role="status">{$t('onboarding.sent')}</p>{/if}
 			<label class="field"
-				><span>{$t('onboarding.code')}</span><input
+				><span id="register-code-label">{$t('onboarding.code')}</span><input
 					class="input"
+					aria-labelledby="register-code-label"
+					aria-describedby="register-code-hint"
+					aria-invalid={verificationCode.length > 0 && !validCode}
 					inputmode="numeric"
 					pattern={'[0-9]{6}'}
 					autocomplete="one-time-code"
@@ -126,7 +132,11 @@
 					maxlength="6"
 					disabled={!ready || busy}
 					required
-				/></label
+				/>
+				<small id="register-code-hint" class="field-hint" aria-live="polite">
+					{#if !challengeId}{$t('onboarding.requestCodeHint')}
+					{:else if !validCode}{$t('onboarding.codeHint')}{/if}
+				</small></label
 			>
 			<label class="field"
 				><span>{$t('onboarding.name')}</span><input
@@ -138,8 +148,11 @@
 				/></label
 			>
 			<label class="field"
-				><span>{$t('onboarding.password')}</span><input
+				><span id="register-password-label">{$t('onboarding.password')}</span><input
 					class="input"
+					aria-labelledby="register-password-label"
+					aria-describedby="register-password-hint"
+					aria-invalid={shortPassword}
 					type="password"
 					autocomplete="new-password"
 					bind:value={password}
@@ -147,18 +160,37 @@
 					maxlength="256"
 					disabled={!ready || busy}
 					required
-				/></label
+				/>
+				<small
+					id="register-password-hint"
+					class="field-hint"
+					class:field-hint--error={shortPassword}
+					aria-live="polite"
+					>{$t('onboarding.passwordLengthHint', { count: password.length })}</small
+				></label
 			>
 			<label class="field">
-				<span>{$t('onboarding.confirmPassword')}</span>
+				<span id="register-confirm-label">{$t('onboarding.confirmPassword')}</span>
 				<input
 					class="input"
+					aria-labelledby="register-confirm-label"
+					aria-describedby="register-confirm-hint"
+					aria-invalid={passwordsMismatch}
 					type="password"
 					autocomplete="new-password"
 					bind:value={confirmPassword}
 					disabled={!ready || busy}
 					required
 				/>
+				<small
+					id="register-confirm-hint"
+					class="field-hint"
+					class:field-hint--error={passwordsMismatch}
+					aria-live="polite"
+				>
+					{#if passwordsMismatch}{$t('onboarding.passwordMismatch')}
+					{:else if password && !confirmPassword}{$t('onboarding.confirmPasswordHint')}{/if}
+				</small>
 			</label>
 			{#if error}<p class="status status--error" role="alert">{error}</p>{/if}
 			<button
@@ -167,9 +199,10 @@
 				disabled={!ready ||
 					busy ||
 					!challengeId ||
-					verificationCode.length !== 6 ||
-					password.length < 12}
-				>{busy ? $t('onboarding.waiting') : $t('onboarding.register')}</button
+					!validCode ||
+					password.length < 12 ||
+					!confirmPassword ||
+					passwordsMismatch}>{busy ? $t('onboarding.waiting') : $t('onboarding.register')}</button
 			>
 		</form>
 		<nav class="account-links" aria-label={$t('onboarding.navigation')}>
@@ -186,3 +219,17 @@
 		>
 	</label>
 </section>
+
+<style>
+	.field-hint {
+		color: #64748b;
+		font-size: 0.85rem;
+		line-height: 20px;
+	}
+	.field-hint:empty {
+		display: none;
+	}
+	.field-hint--error {
+		color: #b91c1c;
+	}
+</style>

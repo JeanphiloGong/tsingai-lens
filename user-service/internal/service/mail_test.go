@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // testMailbox speaks SMTP on a task-owned loopback socket; no external mail is sent.
@@ -125,5 +126,32 @@ func TestSMTPMessageAndFailure(t *testing.T) {
 	mailbox.reject.Store(true)
 	if err := sender.Send(context.Background(), "recipient@example.test", "register", "123456"); err == nil {
 		t.Fatal("SMTP rejection was ignored")
+	}
+}
+
+func TestSMTPMessageHasDeliveryHeaders(t *testing.T) {
+	mailbox := newTestMailbox(t)
+	sender := SMTPSettings{Address: mailbox.address, From: "Lens <noreply@example.test>", TLSMode: "none"}
+	started := time.Now().Truncate(time.Second)
+	var previousID string
+	for range 2 {
+		if err := sender.Send(context.Background(), "recipient@example.test", "register", "001234"); err != nil {
+			t.Fatal(err)
+		}
+		mailbox.mutex.Lock()
+		message := mailbox.messages[len(mailbox.messages)-1]
+		mailbox.mutex.Unlock()
+		sentAt, err := mail.ParseDate(message.Header.Get("Date"))
+		if err != nil || sentAt.Before(started) || sentAt.After(time.Now()) {
+			t.Fatalf("message needs its actual origination date: %q", message.Header.Get("Date"))
+		}
+		messageID := message.Header.Get("Message-ID")
+		if !regexp.MustCompile(`^<[a-zA-Z0-9_-]+@example\.test>$`).MatchString(messageID) || messageID == previousID {
+			t.Fatalf("message needs a unique sender-domain identifier: %q", messageID)
+		}
+		previousID = messageID
+		if message.Header.Get("MIME-Version") != "1.0" {
+			t.Fatal("message needs MIME-Version for its declared UTF-8 content")
+		}
 	}
 }

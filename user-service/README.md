@@ -244,6 +244,13 @@ credentials. `SMTP_USER` and `SMTP_PASSWORD` are provider credentials when neede
 `SMTP_TLS_MODE` replaces the former `SMTP_TLS` boolean; update existing env files.
 Neither the example configuration nor the service starts a mail receiver.
 
+Verification emails include an origination `Date`, a unique `Message-ID` and
+`MIME-Version`. After SMTP accepts DATA, the service logs the message ID and
+purpose without the recipient address, verification code or credentials.
+Acceptance and the challenge's `sent` state mean the provider queued the email;
+they do not confirm delivery to the recipient's inbox. Use the message ID and
+provider delivery reports or bounces when diagnosing missing mail.
+
 For QQ Mail, enable SMTP in the mailbox settings and use:
 
 ```dotenv

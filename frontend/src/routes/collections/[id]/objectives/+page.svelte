@@ -238,10 +238,14 @@
 		if (active?.status === 'running') return translate('objectiveWorkspace.active');
 		if (active?.status === 'failed') return translate('objectiveWorkspace.failed');
 		if (objective.published_analysis_version !== null) {
-			return translate('research.objectives.labels.resultVVersion', { version: objective.published_analysis_version });
+			return translate('research.objectives.labels.resultVVersion', {
+				version: objective.published_analysis_version
+			});
 		}
 		if (objective.active_analysis_version !== null) return translate('objectiveWorkspace.active');
-		return objective.confirmation_status === 'confirmed' ? translate('research.objectives.confirmed') : translate('research.objectives.candidate');
+		return objective.confirmation_status === 'confirmed'
+			? translate('research.objectives.confirmed')
+			: translate('research.objectives.candidate');
 	}
 
 	function canStartAnalysis(objective: ObjectiveSummary) {
@@ -249,8 +253,11 @@
 	}
 
 	function actionLabel(objective: ObjectiveSummary, translate = $t) {
-		if (analysisStatus(objective) === 'failed') return translate('objectiveWorkspace.retryAnalysis');
-		return objective.confirmation_status === 'candidate' ? translate('research.objectives.confirmAndAnalyze') : translate('research.objectives.startAnalysis');
+		if (analysisStatus(objective) === 'failed')
+			return translate('objectiveWorkspace.retryAnalysis');
+		return objective.confirmation_status === 'candidate'
+			? translate('research.objectives.confirmAndAnalyze')
+			: translate('research.objectives.startAnalysis');
 	}
 
 	function isAnalysisProcessing(analysis: ObjectiveAnalysisState | null) {
@@ -267,7 +274,8 @@
 	}
 
 	function analysisPhaseLabel(analysis: ObjectiveAnalysisState, translate = $t) {
-		if (analysis.status === 'queued') return translate('research.objectives.labels.waitingForAnalysisToStart');
+		if (analysis.status === 'queued')
+			return translate('research.objectives.labels.waitingForAnalysisToStart');
 		const phase = analysis.phase.toLocaleLowerCase();
 		if (phase.includes('framing') || phase.includes('routing')) {
 			return translate('research.objectives.labels.locatingPaperContentRelevantToTheResearch');
@@ -276,7 +284,9 @@
 			return translate('research.objectives.labels.extractingEvidenceFromEachPaper');
 		}
 		if (phase.includes('finding') || phase.includes('synthesis')) {
-			return translate('research.objectives.labels.comparingEvidenceAcrossPapersAndFormingFindings');
+			return translate(
+				'research.objectives.labels.comparingEvidenceAcrossPapersAndFormingFindings'
+			);
 		}
 		return translate('research.objectives.labels.analyzingTheConfirmedPaperScope');
 	}
@@ -502,8 +512,10 @@
 	function scopeDecisionLabel(documentId: string, translate = $t) {
 		const decision = scopeDecision(documentId);
 		if (!decision) return translate('research.objectives.labels.scopeAssessmentPending');
-		if (decision.classification === 'likely_relevant') return translate('research.objectives.labels.recommended');
-		if (decision.classification === 'needs_inspection') return translate('research.objectives.labels.needsInspection');
+		if (decision.classification === 'likely_relevant')
+			return translate('research.objectives.labels.recommended');
+		if (decision.classification === 'needs_inspection')
+			return translate('research.objectives.labels.needsInspection');
 		return translate('research.objectives.labels.notCurrentlyRecommended');
 	}
 
@@ -523,7 +535,9 @@
 			<h2>{$t('objectiveWorkspace.list')}</h2>
 			<p>{$t('research.objectives.description')}</p>
 		</div>
-		<button class="btn btn--ghost" type="button" on:click={loadObjectives}>{$t('research.objectives.refresh')}</button>
+		<button class="btn btn--ghost" type="button" on:click={loadObjectives}
+			>{$t('research.objectives.refresh')}</button
+		>
 	</header>
 
 	{#if loading}
@@ -553,15 +567,33 @@
 		</section>
 	{:else}
 		<div class="summary" aria-label={$t('research.objectives.labels.researchObjectiveOverview')}>
-			<div><strong>{objectives.length}</strong><span>{$t('research.objectives.labels.researchObjectives')}</span></div>
-			<div><strong>{confirmedCount}</strong><span>{$t('research.objectives.labels.confirmed')}</span></div>
-			<div><strong>{publishedCount}</strong><span>{$t('research.objectives.labels.resultsAvailable')}</span></div>
+			<div>
+				<strong>{objectives.length}</strong><span
+					>{$t('research.objectives.labels.researchObjectives')}</span
+				>
+			</div>
+			<div>
+				<strong>{confirmedCount}</strong><span>{$t('research.objectives.labels.confirmed')}</span>
+			</div>
+			<div>
+				<strong>{publishedCount}</strong><span
+					>{$t('research.objectives.labels.resultsAvailable')}</span
+				>
+			</div>
 		</div>
 
-		<div class="objective-filters" role="search" aria-label={$t('research.objectives.labels.filterResearchObjectives')}>
+		<div
+			class="objective-filters"
+			role="search"
+			aria-label={$t('research.objectives.labels.filterResearchObjectives')}
+		>
 			<label>
 				<span>{$t('research.objectives.search')}</span>
-				<input type="search" bind:value={objectiveQuery} placeholder={$t('research.objectives.labels.questionMaterialVariableOrOutcome')} />
+				<input
+					type="search"
+					bind:value={objectiveQuery}
+					placeholder={$t('research.objectives.labels.questionMaterialVariableOrOutcome')}
+				/>
 			</label>
 			<label>
 				<span>{$t('research.objectives.status')}</span>
@@ -581,7 +613,11 @@
 		</div>
 
 		{#if objectiveFiltersActive}
-			<p class="filter-count" aria-live="polite">{$t('research.objectives.labels.foundCountResearchObjectives', { count: filteredObjectives.length })}</p>
+			<p class="filter-count" aria-live="polite">
+				{$t('research.objectives.labels.foundCountResearchObjectives', {
+					count: filteredObjectives.length
+				})}
+			</p>
 		{/if}
 
 		{#if !filteredObjectives.length}
@@ -604,7 +640,10 @@
 						<div class="heading">
 							<div>
 								<h3><a href={objectiveHref}>{objective.question}</a></h3>
-								<p>{objective.requested_comparator || $t('research.objectives.labels.noComparisonIntentSpecified')}</p>
+								<p>
+									{objective.requested_comparator ||
+										$t('research.objectives.labels.noComparisonIntentSpecified')}
+								</p>
 							</div>
 							<span
 								class:published={objective.published_analysis_version !== null}
@@ -628,7 +667,11 @@
 							</div>
 							<div>
 								<dt>{$t('research.objectives.labels.questionSources')}</dt>
-								<dd>{$t('research.objectives.labels.countPapers', { count: objective.seed_document_ids.length })}</dd>
+								<dd>
+									{$t('research.objectives.labels.countPapers', {
+										count: objective.seed_document_ids.length
+									})}
+								</dd>
 							</div>
 						</dl>
 						{#if activeAnalysis && isAnalysisProcessing(activeAnalysis)}
@@ -638,7 +681,10 @@
 									<strong>{analysisPhaseLabel(activeAnalysis, $t)}</strong>
 									{#if activeAnalysis.total_document_count > 0}
 										<span
-											>{$t('research.objectives.labels.paperProgressDoneTotal', { done: activeAnalysis.processed_document_count, total: activeAnalysis.total_document_count })}</span
+											>{$t('research.objectives.labels.paperProgressDoneTotal', {
+												done: activeAnalysis.processed_document_count,
+												total: activeAnalysis.total_document_count
+											})}</span
 										>
 									{/if}
 								</div>
@@ -650,7 +696,10 @@
 										aria-valuemin="0"
 										aria-valuemax="100"
 										aria-valuenow={progressPercent}
-										aria-valuetext={$t('research.objectives.labels.paperProgressDoneTotal', { done: activeAnalysis.processed_document_count, total: activeAnalysis.total_document_count })}
+										aria-valuetext={$t('research.objectives.labels.paperProgressDoneTotal', {
+											done: activeAnalysis.processed_document_count,
+											total: activeAnalysis.total_document_count
+										})}
 									>
 										<span style={`width: ${progressPercent}%`}></span>
 									</div>
@@ -685,9 +734,13 @@
 								</button>
 							{/if}
 							{#if objective.published_analysis_version !== null}
-								<a class="btn btn--ghost btn--small" href={objectiveHref}>{$t('research.objectives.labels.viewFindings')}</a>
+								<a class="btn btn--ghost btn--small" href={objectiveHref}
+									>{$t('research.objectives.labels.viewFindings')}</a
+								>
 							{:else if activeAnalysis?.status === 'failed'}
-								<a class="btn btn--ghost btn--small" href={objectiveHref}>{$t('research.objectives.labels.viewFailureDetails')}</a>
+								<a class="btn btn--ghost btn--small" href={objectiveHref}
+									>{$t('research.objectives.labels.viewFailureDetails')}</a
+								>
 							{/if}
 						</div>
 					</article>
@@ -724,7 +777,9 @@
 			<header>
 				<div>
 					<span>{$t('research.objectives.labels.confirmBeforeAnalysis')}</span>
-					<h2 id="scope-dialog-title">{$t('research.objectives.labels.confirmPapersForAnalysis')}</h2>
+					<h2 id="scope-dialog-title">
+						{$t('research.objectives.labels.confirmPapersForAnalysis')}
+					</h2>
 				</div>
 				<button
 					class="close-button"
@@ -739,10 +794,25 @@
 				<p>{$t('research.objectives.labels.onlyThePapersConfirmedHereWillBe')}</p>
 			</div>
 			{#if activeScope}
-				<div class="scope-summary" aria-label={$t('research.objectives.labels.paperScopeAssessmentOverview')}>
-					<span>{$t('research.objectives.labels.countRecommendedPapers', { count: activeScope.counts.likely_relevant })}</span>
-					<span>{$t('research.objectives.labels.countPapersNeedingInspection', { count: activeScope.counts.needs_inspection })}</span>
-					<span>{$t('research.objectives.labels.countQuestionSourcePapers', { count: scopeObjective.seed_document_ids.length })}</span>
+				<div
+					class="scope-summary"
+					aria-label={$t('research.objectives.labels.paperScopeAssessmentOverview')}
+				>
+					<span
+						>{$t('research.objectives.labels.countRecommendedPapers', {
+							count: activeScope.counts.likely_relevant
+						})}</span
+					>
+					<span
+						>{$t('research.objectives.labels.countPapersNeedingInspection', {
+							count: activeScope.counts.needs_inspection
+						})}</span
+					>
+					<span
+						>{$t('research.objectives.labels.countQuestionSourcePapers', {
+							count: scopeObjective.seed_document_ids.length
+						})}</span
+					>
 				</div>
 			{/if}
 
@@ -755,11 +825,17 @@
 						on:input={(event) => updateScopeQuery((event.currentTarget as HTMLInputElement).value)}
 					/>
 				</label>
-				<strong>{$t('research.objectives.labels.selectedCountPapers', { count: selectedScopeIds.length })}</strong>
+				<strong
+					>{$t('research.objectives.labels.selectedCountPapers', {
+						count: selectedScopeIds.length
+					})}</strong
+				>
 			</div>
 
 			{#if scopeLoading}
-				<p class="scope-state" aria-busy="true">{$t('research.objectives.labels.loadingAvailablePapers')}</p>
+				<p class="scope-state" aria-busy="true">
+					{$t('research.objectives.labels.loadingAvailablePapers')}
+				</p>
 			{:else if scopeError}
 				<p class="scope-state scope-state--error" role="alert">{scopeError}</p>
 			{:else if visibleScopeDocuments.length}
@@ -787,7 +863,12 @@
 					<button type="button" disabled={scopePage === 0} on:click={() => (scopePage -= 1)}
 						>{$t('research.objectives.labels.previous')}</button
 					>
-					<span>{$t('research.objectives.labels.pagePageTotal', { page: scopePage + 1, total: scopePageCount })}</span>
+					<span
+						>{$t('research.objectives.labels.pagePageTotal', {
+							page: scopePage + 1,
+							total: scopePageCount
+						})}</span
+					>
 					<button
 						type="button"
 						disabled={scopePage + 1 >= scopePageCount}
@@ -799,7 +880,9 @@
 			{:else if readyDocuments.length}
 				<p class="scope-state">{$t('research.objectives.labels.noMatchingReadyPapers')}</p>
 			{:else}
-				<p class="scope-state">{$t('research.objectives.labels.noReadyPapersAvailableForAnalysis')}</p>
+				<p class="scope-state">
+					{$t('research.objectives.labels.noReadyPapersAvailableForAnalysis')}
+				</p>
 			{/if}
 
 			<footer>
@@ -807,7 +890,9 @@
 					<p>{$t('research.objectives.labels.selectAtLeastOnePaper')}</p>
 				{/if}
 				<div>
-					<button class="btn btn--ghost" type="button" on:click={closeScopeReview}>{$t('research.objectives.labels.cancel')}</button>
+					<button class="btn btn--ghost" type="button" on:click={closeScopeReview}
+						>{$t('research.objectives.labels.cancel')}</button
+					>
 					<button
 						class="btn btn--primary"
 						type="button"
@@ -1208,7 +1293,6 @@
 		color: var(--text-secondary);
 		font-size: 13px;
 	}
-
 
 	.scope-options {
 		display: grid;

@@ -1514,12 +1514,17 @@ test.describe('page interaction audit', () => {
 		let logins = 0;
 		await page.route('**/user-api/v1/logout', async (route) => {
 			await completion;
-			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ ok: true })
+			});
 		});
 		await page.route('**/user-api/v1/login', (route) => {
 			logins += 1;
 			return route.fulfill({
-				status: 200, contentType: 'application/json',
+				status: 200,
+				contentType: 'application/json',
 				body: JSON.stringify({
 					user_id: 'user_2',
 					email: 'second@example.test',
@@ -2605,8 +2610,14 @@ test.describe('page interaction audit', () => {
 		await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
 		await expect(trigger).toBeFocused();
 		await trigger.click();
-		await expect(page.locator('#language-options button').last()).toHaveAttribute('aria-pressed', 'true');
-		await page.locator('#language-options').getByRole('button', { name: 'EN', exact: true }).click();
+		await expect(page.locator('#language-options button').last()).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await page
+			.locator('#language-options')
+			.getByRole('button', { name: 'EN', exact: true })
+			.click();
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 	});
 
@@ -2639,11 +2650,20 @@ test.describe('page interaction audit', () => {
 		expect(await visibleElementsFitViewport(page, '.collection-list-card__actions a')).toBe(true);
 	});
 
-	test('collection navigation identifies the active route and exposes secondary destinations', async ({ page }) => {
+	test('collection navigation identifies the active route and exposes secondary destinations', async ({
+		page
+	}) => {
 		await page.goto(`/collections/${collectionId}/objectives`);
-		await expect(page.getByRole('heading', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })).toBeVisible();
+		await expect(
+			page.getByRole('heading', {
+				name: 'How does heat treatment affect LPBF 316L tensile strength?'
+			})
+		).toBeVisible();
 		const nav = page.getByRole('navigation', { name: 'Collection navigation', exact: true });
-		await expect(nav.getByRole('link', { name: 'Objectives', exact: true })).toHaveAttribute('aria-current', 'page');
+		await expect(nav.getByRole('link', { name: 'Objectives', exact: true })).toHaveAttribute(
+			'aria-current',
+			'page'
+		);
 		const more = nav.locator('summary');
 		await more.click();
 		const graph = nav.getByRole('link', { name: 'Evidence Map', exact: true });
@@ -3080,16 +3100,23 @@ async function mockApis(page: Page) {
 		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 
 		if (path === '/user-api/v1/me/permissions') {
-			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ permission_codes: [] }) });
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ permission_codes: [] })
+			});
 		}
 		if (path === '/user-api/v1/me') {
 			return route.fulfill({
-				status: 200, contentType: 'application/json',
+				status: 200,
+				contentType: 'application/json',
 				body: JSON.stringify(authPayload())
 			});
 		}
 		if (path === '/api/v1/model-connections') {
-			return route.fulfill(json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] }));
+			return route.fulfill(
+				json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] })
+			);
 		}
 		if (path === '/api/v1/collections') {
 			if (method === 'POST') return route.fulfill(json(collection(auditState)));

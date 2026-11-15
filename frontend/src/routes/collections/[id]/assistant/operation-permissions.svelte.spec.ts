@@ -25,10 +25,13 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			});
+			return new Response(
+				JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				}
+			);
 		})
 	);
 	const screen = render(OperationPermissions, { sessionId: 'session-1' });
@@ -39,7 +42,7 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 	select.dispatchEvent(new Event('change', { bubbles: true }));
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]').length)
-	.toBe(11);
+		.toBe(11);
 	await expect
 		.element(screen.getByText('Select at least one action to enable automatic execution.'))
 		.toBeVisible();
@@ -90,10 +93,13 @@ it('restores an existing automatic grant duration and can authorize every write 
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			});
+			return new Response(
+				JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				}
+			);
 		})
 	);
 	const screen = render(OperationPermissions, { sessionId: 'session-1' });
@@ -106,7 +112,7 @@ it('restores an existing automatic grant duration and can authorize every write 
 	all.click();
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]:checked').length)
-	.toBe(11);
+		.toBe(11);
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => writes.length).toBe(1);
 	expect(writes[0].actions).toHaveLength(10);
@@ -135,10 +141,13 @@ it('renews an expired automatic grant instead of resubmitting its past expiry', 
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			});
+			return new Response(
+				JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				}
+			);
 		})
 	);
 	const screen = render(OperationPermissions, { sessionId: 'session-1' });
@@ -174,10 +183,13 @@ it('uses the collection settings endpoint for defaults and sends the server expa
 					revision: permission.revision + 1
 				};
 			}
-			return new Response(JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }), {
-				status: 200,
-				headers: { 'Content-Type': 'application/json' }
-			});
+			return new Response(
+				JSON.stringify({ code: 200, message: 'success', data: permission, meta: null }),
+				{
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				}
+			);
 		})
 	);
 	const screen = render(OperationPermissions, {
@@ -193,11 +205,11 @@ it('uses the collection settings endpoint for defaults and sends the server expa
 	select.dispatchEvent(new Event('change', { bubbles: true }));
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]').length)
-	.toBe(11);
+		.toBe(11);
 	(screen.container.querySelector('input[type=checkbox]') as HTMLInputElement).click();
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]:checked').length)
-	.toBe(11);
+		.toBe(11);
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => calls.some((call) => call.body?.all_actions === true)).toBe(true);
 	expect(calls[0].url).toContain('/collections/collection-1/agent-permissions');

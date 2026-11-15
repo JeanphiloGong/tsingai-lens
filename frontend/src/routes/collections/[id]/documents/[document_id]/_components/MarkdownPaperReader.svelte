@@ -59,7 +59,8 @@
 	export let onShowPdf: () => void = () => {};
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
-	$: title = markdown?.title || markdown?.source_filename || $t('workbench.sourceContentUnavailableTitle');
+	$: title =
+		markdown?.title || markdown?.source_filename || $t('workbench.sourceContentUnavailableTitle');
 	$: metadata = [
 		markdown?.source_filename
 			? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}`

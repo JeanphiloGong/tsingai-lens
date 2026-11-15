@@ -128,8 +128,13 @@ describe('objective Finding API', () => {
 			active_analysis: analysis,
 			published_analysis: analysis,
 			evidence_review: {
-				total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0,
-				gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: []
+				total_evidence_count: 0,
+				result_count: 0,
+				comparable_evidence_count: 0,
+				gap_count: 0,
+				omitted_gap_count: 0,
+				status_counts: {},
+				gaps: []
 			},
 			warnings: []
 		});
@@ -220,13 +225,15 @@ describe('objective Finding API', () => {
 	it('returns the declared Objective list shape without item revalidation', async () => {
 		request.mockResolvedValue({ collection_id: 'col_123', objectives: [null] });
 		await expect(fetchCollectionObjectives('col_123')).resolves.toEqual({
-			collection_id: 'col_123', objectives: [null]
+			collection_id: 'col_123',
+			objectives: [null]
 		});
 	});
 
 	it('rejects a scope response from another objective', async () => {
 		request.mockResolvedValue({
-			collection_id: 'col_123', objective_id: 'obj_2'
+			collection_id: 'col_123',
+			objective_id: 'obj_2'
 		});
 		await expect(fetchObjectiveScope('col_123', 'obj_1')).rejects.toThrow(
 			'Objective scope response does not match'
@@ -235,10 +242,12 @@ describe('objective Finding API', () => {
 
 	it('rejects missing analysis data for both queue and read instead of inventing an Objective', async () => {
 		request.mockResolvedValue({ collection_id: 'col_123' });
-		await expect(runObjectiveAnalysis('col_123', 'obj_1', ['paper-1']))
-			.rejects.toThrow('Objective analysis response does not match');
-		await expect(fetchObjectiveAnalysis('col_123', 'obj_1'))
-			.rejects.toThrow('Objective analysis response does not match');
+		await expect(runObjectiveAnalysis('col_123', 'obj_1', ['paper-1'])).rejects.toThrow(
+			'Objective analysis response does not match'
+		);
+		await expect(fetchObjectiveAnalysis('col_123', 'obj_1')).rejects.toThrow(
+			'Objective analysis response does not match'
+		);
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {
@@ -314,7 +323,9 @@ describe('objective Finding API', () => {
 
 	it('rejects a stale Finding version and missing experiment containers', async () => {
 		request.mockResolvedValueOnce({
-			collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 2,
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			analysis_version: 2,
 			items: [finding]
 		});
 		await expect(fetchObjectiveFindings('col_123', 'obj_1', 1)).rejects.toThrow(
@@ -328,8 +339,13 @@ describe('objective Finding API', () => {
 
 	it('returns an experiment projection without rewriting its values', async () => {
 		const payload = {
-			collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1,
-			selections: [], comparison_groups: [], experiments: [], findings: [finding]
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			analysis_version: 1,
+			selections: [],
+			comparison_groups: [],
+			experiments: [],
+			findings: [finding]
 		};
 		request.mockResolvedValueOnce(payload);
 		expect(await fetchExperimentAnalysis('col_123', 'obj_1', 1)).toBe(payload);

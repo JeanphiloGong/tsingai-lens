@@ -9,14 +9,12 @@ describe('public account HTTP contract', () => {
 		async (withHeader) => {
 			vi.stubGlobal(
 				'fetch',
-				vi
-					.fn()
-					.mockResolvedValue(
-						new Response(JSON.stringify({ code: 'rate_limited', retry_after: 60 }), {
-							status: 429,
-							headers: withHeader ? { 'Retry-After': '60' } : {}
-						})
-					)
+				vi.fn().mockResolvedValue(
+					new Response(JSON.stringify({ code: 'rate_limited', retry_after: 60 }), {
+						status: 429,
+						headers: withHeader ? { 'Retry-After': '60' } : {}
+					})
+				)
 			);
 			await expect(requestJson('/user-api/v1/email-challenges')).rejects.toMatchObject({
 				code: 200206,

@@ -172,7 +172,6 @@
 		}
 	}
 
-
 	async function submitCreate(event: SubmitEvent) {
 		event.preventDefault();
 		createError = '';
@@ -333,7 +332,7 @@
 						? {
 								...item,
 								status: 'running',
-									updated_at: runs[0]?.updated_at || item.updated_at
+								updated_at: runs[0]?.updated_at || item.updated_at
 							}
 						: item
 				)
@@ -367,7 +366,6 @@
 		}
 	}
 </script>
-
 
 <svelte:head>
 	<title>{$t('home.title')}</title>
@@ -505,7 +503,9 @@
 							</td>
 							<td>
 								<div class="row-actions">
-									<a class="enter-link" href={resolve('/collections/[id]', { id: collection.collection_id })}
+									<a
+										class="enter-link"
+										href={resolve('/collections/[id]', { id: collection.collection_id })}
 										>{$t('home.actionEnter')}</a
 									>
 									<div class="row-menu">
@@ -601,7 +601,9 @@
 							{step}
 							<ArrowRight size={16} aria-hidden="true" />
 						</a>
-						<a class="enter-link" href={resolve('/collections/[id]', { id: collection.collection_id })}
+						<a
+							class="enter-link"
+							href={resolve('/collections/[id]', { id: collection.collection_id })}
 							>{$t('home.actionEnter')}</a
 						>
 					</div>
@@ -640,45 +642,53 @@
 </details>
 
 {#if isCreateOpen}
-	<dialog class="modal create-dialog" aria-labelledby="create-collection-title" bind:this={createDialog} use:showCreateDialog on:cancel|preventDefault={closeCreate} on:close={closeCreate} on:click|self={closeCreate}>
-			<div class="modal-header">
-				<h3 id="create-collection-title">{$t('create.title')}</h3>
+	<dialog
+		class="modal create-dialog"
+		aria-labelledby="create-collection-title"
+		bind:this={createDialog}
+		use:showCreateDialog
+		on:cancel|preventDefault={closeCreate}
+		on:close={closeCreate}
+		on:click|self={closeCreate}
+	>
+		<div class="modal-header">
+			<h3 id="create-collection-title">{$t('create.title')}</h3>
+		</div>
+		<form class="modal-form" on:submit={submitCreate}>
+			<div class="field">
+				<label for="collection-name">{$t('create.nameLabel')}</label>
+				<input
+					id="collection-name"
+					class="input"
+					bind:value={name}
+					placeholder={$t('create.namePlaceholder')}
+					required
+				/>
 			</div>
-			<form class="modal-form" on:submit={submitCreate}>
-				<div class="field">
-					<label for="collection-name">{$t('create.nameLabel')}</label>
-					<input
-						id="collection-name"
-						class="input"
-						bind:value={name}
-						placeholder={$t('create.namePlaceholder')}
-						required
-					/>
-				</div>
-				<div class="field">
-					<label for="collection-desc">{$t('create.descLabel')}</label>
-					<textarea
-						id="collection-desc"
-						class="textarea"
-						bind:value={description}
-						placeholder={$t('create.descPlaceholder')}
-						rows="3"
-					></textarea>
-					<span class="meta-text">{$t('create.descHelper')}</span>
-				</div>
-				{#if createError}
-					<div class="status status--error" role="alert">{createError}</div>
-				{/if}
+			<div class="field">
+				<label for="collection-desc">{$t('create.descLabel')}</label>
+				<textarea
+					id="collection-desc"
+					class="textarea"
+					bind:value={description}
+					placeholder={$t('create.descPlaceholder')}
+					rows="3"
+				></textarea>
+				<span class="meta-text">{$t('create.descHelper')}</span>
+			</div>
+			{#if createError}
+				<div class="status status--error" role="alert">{createError}</div>
+			{/if}
 
-				<div class="modal-actions">
-					<button class="btn btn--ghost" type="button" on:click={closeCreate}>
-						{$t('create.cancel')}
-					</button>
-					<button class="btn btn--primary" type="submit" disabled={createLoading}>
-						{createLoading ? $t('create.creating') : $t('create.submit')}
-					</button>
-				</div>
-			</form>
+			<div class="modal-actions">
+				<button class="btn btn--ghost" type="button" on:click={closeCreate}>
+					{$t('create.cancel')}
+				</button>
+				<button class="btn btn--primary" type="submit" disabled={createLoading}>
+					{createLoading ? $t('create.creating') : $t('create.submit')}
+				</button>
+			</div>
+		</form>
 	</dialog>
 {/if}
 
@@ -701,8 +711,13 @@
 		vertical-align: middle;
 		margin-left: 8px;
 	}
-	.future-workspace[open] > summary { list-style-type: disclosure-open; }
-	.future-workspace > summary h2 { font-size: 16px; line-height: 24px; }
+	.future-workspace[open] > summary {
+		list-style-type: disclosure-open;
+	}
+	.future-workspace > summary h2 {
+		font-size: 16px;
+		line-height: 24px;
+	}
 
 	.home-hero {
 		display: flex;
@@ -1169,7 +1184,6 @@
 		gap: 16px;
 		margin-top: -8px;
 	}
-
 
 	.future-grid {
 		display: grid;

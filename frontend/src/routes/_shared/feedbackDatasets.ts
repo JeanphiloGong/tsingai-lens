@@ -45,7 +45,10 @@ export type EvaluationRevisionContent = {
 	evaluation_mode: 'reference' | 'rubric';
 	evidence: SftText[];
 };
-export type RevisionContent = SftRevisionContent | PreferenceRevisionContent | EvaluationRevisionContent;
+export type RevisionContent =
+	| SftRevisionContent
+	| PreferenceRevisionContent
+	| EvaluationRevisionContent;
 
 export type DatasetSample = {
 	sample_id: string;
@@ -184,7 +187,9 @@ export async function fetchDatasetSamples(
 		offset: String(options.offset ?? 0)
 	});
 	if (options.status) params.set('status', options.status);
-	return (await requestJson(`${samplePath(datasetId)}?${params.toString()}`, { method: 'GET' })) as {
+	return (await requestJson(`${samplePath(datasetId)}?${params.toString()}`, {
+		method: 'GET'
+	})) as {
 		items: DatasetSample[];
 		total: number;
 		limit: number;
@@ -201,7 +206,11 @@ export async function fetchDatasetSample(datasetId: string, sampleId: string) {
 export async function updateDatasetSample(
 	datasetId: string,
 	sampleId: string,
-	input: { expected_revision_id: string | null; expected_generation?: number; content: RevisionContent }
+	input: {
+		expected_revision_id: string | null;
+		expected_generation?: number;
+		content: RevisionContent;
+	}
 ) {
 	return (await requestJson(`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}`, {
 		method: 'PATCH',
@@ -215,14 +224,11 @@ export async function confirmDatasetSample(
 	sampleId: string,
 	expectedRevisionId: string
 ) {
-	return (await requestJson(
-		`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}/confirm`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ expected_revision_id: expectedRevisionId })
-		}
-	)) as DatasetSample;
+	return (await requestJson(`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}/confirm`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ expected_revision_id: expectedRevisionId })
+	})) as DatasetSample;
 }
 
 export async function actOnDatasetSample(
@@ -235,14 +241,11 @@ export async function actOnDatasetSample(
 	},
 	idempotencyKey: string
 ) {
-	return (await requestJson(
-		`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}/actions`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-			body: JSON.stringify(input)
-		}
-	)) as DatasetSample;
+	return (await requestJson(`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}/actions`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+		body: JSON.stringify(input)
+	})) as DatasetSample;
 }
 
 export async function previewFeedbackDatasetExport(datasetId: string, sampleIds?: string[]) {
@@ -284,7 +287,8 @@ export async function downloadFeedbackDatasetExport(
 	format: DatasetExportFormat
 ) {
 	const extension = format === 'provenance' ? 'jsonl' : format === 'jsonl' ? 'jsonl' : 'json';
-	const suffix = format === 'provenance' ? 'provenance' : format === 'manifest' ? 'manifest' : 'data';
+	const suffix =
+		format === 'provenance' ? 'provenance' : format === 'manifest' ? 'manifest' : 'data';
 	await downloadBlob(
 		`${datasetPath(datasetId)}/exports/${encodeURIComponent(exportItem.export_id)}/download?format=${format}`,
 		`${datasetId}-v${exportItem.export_no}-${suffix}.${extension}`

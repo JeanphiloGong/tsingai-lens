@@ -134,15 +134,29 @@ describe('self-service password changes', () => {
 		vi.stubGlobal('fetch', fetchMock);
 	});
 
-	it.each([401, 503])('keeps the current account and private drafts after HTTP %s', async (status) => {
-		fetchMock.mockResolvedValueOnce(jsonResponse(user));
-		await login(user.email, 'current-password');
-		sessionStorage.setItem('lens.chatSourceContext.researcher_1:collection', 'private draft');
-		fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ code: status === 401 ? 'authentication_required' : 'identity_unavailable' }), { status }));
-		await expect(changePassword('wrong-password', 'replacement-password')).rejects.toBeInstanceOf(Error);
-		expect(get(authState).user?.user_id).toBe(user.user_id);
-		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:collection')).toBe('private draft');
-	});
+	it.each([401, 503])(
+		'keeps the current account and private drafts after HTTP %s',
+		async (status) => {
+			fetchMock.mockResolvedValueOnce(jsonResponse(user));
+			await login(user.email, 'current-password');
+			sessionStorage.setItem('lens.chatSourceContext.researcher_1:collection', 'private draft');
+			fetchMock.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						code: status === 401 ? 'authentication_required' : 'identity_unavailable'
+					}),
+					{ status }
+				)
+			);
+			await expect(changePassword('wrong-password', 'replacement-password')).rejects.toBeInstanceOf(
+				Error
+			);
+			expect(get(authState).user?.user_id).toBe(user.user_id);
+			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:collection')).toBe(
+				'private draft'
+			);
+		}
+	);
 
 	it('clears account state and private drafts only after confirmed success', async () => {
 		fetchMock.mockResolvedValueOnce(jsonResponse(user));
@@ -150,9 +164,13 @@ describe('self-service password changes', () => {
 		sessionStorage.setItem('lens.chatSourceContext.researcher_1:collection', 'private draft');
 		fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
 		await changePassword('current-password', 'replacement-password');
-		expect(fetchMock).toHaveBeenLastCalledWith('/user-api/v1/me/password', expect.objectContaining({
-			method: 'POST', body: JSON.stringify({ old_password: 'current-password', password: 'replacement-password' })
-		}));
+		expect(fetchMock).toHaveBeenLastCalledWith(
+			'/user-api/v1/me/password',
+			expect.objectContaining({
+				method: 'POST',
+				body: JSON.stringify({ old_password: 'current-password', password: 'replacement-password' })
+			})
+		);
 		expect(get(authState).status).toBe('anonymous');
 		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:collection')).toBeNull();
 	});
@@ -161,8 +179,15 @@ describe('self-service password changes', () => {
 		fetchMock.mockResolvedValueOnce(jsonResponse(user));
 		await login(user.email, 'current-password');
 		let finish!: (response: Response) => void;
-		fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
-		const changing = changePassword('current-password', 'replacement-password').catch(() => undefined);
+		fetchMock.mockImplementationOnce(
+			() =>
+				new Promise<Response>((resolve) => {
+					finish = resolve;
+				})
+		);
+		const changing = changePassword('current-password', 'replacement-password').catch(
+			() => undefined
+		);
 		const secondUser = { user_id: 'second', email: 'second@example.test' };
 		fetchMock.mockResolvedValueOnce(jsonResponse(secondUser));
 		const signingIn = login(secondUser.email, 'another-password');
@@ -174,16 +199,23 @@ describe('self-service password changes', () => {
 	});
 });
 
-
 describe('email recovery while signed in', () => {
-	it.each([true, false])('clears the current account only when recovering its own email: %s', async (ownEmail) => {
-		clearAuthState();
-		fetchMock.mockReset();
-		vi.stubGlobal('fetch', fetchMock);
-		fetchMock.mockResolvedValueOnce(jsonResponse(user));
-		await login(user.email, 'current-password');
-		fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
-		await resetPassword({ email: ownEmail ? user.email : 'other@example.test', challenge_id: 'proof', code: '001234', password: 'replacement-password' });
-		expect(get(authState).status).toBe(ownEmail ? 'anonymous' : 'authenticated');
-	});
+	it.each([true, false])(
+		'clears the current account only when recovering its own email: %s',
+		async (ownEmail) => {
+			clearAuthState();
+			fetchMock.mockReset();
+			vi.stubGlobal('fetch', fetchMock);
+			fetchMock.mockResolvedValueOnce(jsonResponse(user));
+			await login(user.email, 'current-password');
+			fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
+			await resetPassword({
+				email: ownEmail ? user.email : 'other@example.test',
+				challenge_id: 'proof',
+				code: '001234',
+				password: 'replacement-password'
+			});
+			expect(get(authState).status).toBe(ownEmail ? 'anonymous' : 'authenticated');
+		}
+	);
 });

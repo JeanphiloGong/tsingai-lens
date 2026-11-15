@@ -83,9 +83,12 @@
 	export let settledTurn: ChatTurn | null = null;
 	$: currentTurn = responseSnapshot ?? settledTurn;
 	$: turnNotice = getTurnNotice(currentTurn);
-	$: executionPlan = currentTurn && currentTurn.status !== 'running'
-		? ('progress' in currentTurn ? currentTurn.progress.execution_plan : currentTurn.execution_plan)
-		: null;
+	$: executionPlan =
+		currentTurn && currentTurn.status !== 'running'
+			? 'progress' in currentTurn
+				? currentTurn.progress.execution_plan
+				: currentTurn.execution_plan
+			: null;
 	export let requestError = '';
 	export let approvalError = '';
 	export let loadError = '';
@@ -100,8 +103,11 @@
 	export let onRefreshRecovery: () => void = () => {};
 	let now = Date.now();
 	$: recovering =
-		!loading && !sending && !pendingApproval &&
-		!turnNotice && (running || Boolean(recoveringCallId) || Boolean(recoveryError));
+		!loading &&
+		!sending &&
+		!pendingApproval &&
+		!turnNotice &&
+		(running || Boolean(recoveringCallId) || Boolean(recoveryError));
 	$: recoveredProgress = {
 		...getRecoveredChatProgress(messages, now),
 		...(responseSnapshot?.status === 'running'
@@ -129,7 +135,8 @@
 				}
 			: null;
 	$: showRecoveryRow =
-		recovering && !responseMessage &&
+		recovering &&
+		!responseMessage &&
 		!messages.some((message) => message.message_id.startsWith('local-stream-')) &&
 		(!responseSnapshot || responseSnapshot.status === 'running');
 	$: showReadingRow =
@@ -269,7 +276,8 @@
 				<div class="empty-state" role="alert">
 					<h3>{$t('researchAgent.sessionLoadFailed')}</h3>
 					<p>{loadError}</p>
-					<button type="button" on:click={onRetrySession}>{$t('researchAgent.retrySession')}</button>
+					<button type="button" on:click={onRetrySession}>{$t('researchAgent.retrySession')}</button
+					>
 				</div>
 			{:else if messages.length === 0 && !recovering && !responseMessage}
 				<div class="empty-state welcome-state">
@@ -313,17 +321,20 @@
 								onRegenerate={questionsByAnswer.has(item.message.message_id)
 									? () => void onRevise(questionsByAnswer.get(item.message.message_id)!)
 									: undefined}
-								streaming={(item.message.message_id.startsWith('local-stream-') && (sending || recovering)) ||
+								streaming={(item.message.message_id.startsWith('local-stream-') &&
+									(sending || recovering)) ||
 									(item.message.message_id === responseMessage?.message_id &&
 										responseSnapshot?.status === 'running')}
 								incomplete={item.message.message_id === responseMessage?.message_id}
 								feedbackState={feedbackByMessage[item.message.message_id]}
 								{onFeedback}
-								streamingText={sending || !responseSnapshot ? streamingText : responseSnapshot.content}
+								streamingText={sending || !responseSnapshot
+									? streamingText
+									: responseSnapshot.content}
 								progress={sending
 									? progress
 									: (responseMessage && responseSnapshot?.status === 'running') ||
-										(item.message.message_id.startsWith('local-stream-') && recovering)
+										  (item.message.message_id.startsWith('local-stream-') && recovering)
 										? recoveredProgress
 										: null}
 								{progressHistory}
@@ -338,14 +349,19 @@
 			{/if}
 
 			{#if executionPlan && !loading && !sending && !recovering}
-				<ResearchProgress progress={{ phase: 'terminal', execution_plan: executionPlan }} active={false} />
+				<ResearchProgress
+					progress={{ phase: 'terminal', execution_plan: executionPlan }}
+					active={false}
+				/>
 			{/if}
 			{#if pendingApproval}
 				<ApprovalPanel call={pendingApproval} {collectionId} {deciding} onDecide={decide}>
 					{#if approvalError}
 						<div class="turn-notice failed" role="alert">
 							<p>{approvalError}</p>
-							<button type="button" disabled={deciding} on:click={onRetrySession}>{$t('researchAgent.retrySession')}</button>
+							<button type="button" disabled={deciding} on:click={onRetrySession}
+								>{$t('researchAgent.retrySession')}</button
+							>
 						</div>
 					{/if}
 				</ApprovalPanel>
@@ -378,7 +394,9 @@
 							</button>
 						{/if}
 					{:else if recovering}
-						{#if requestError || recoveryError}<p>{requestError || $t('researchAgent.responseDisconnected')}</p>{/if}
+						{#if requestError || recoveryError}<p>
+								{requestError || $t('researchAgent.responseDisconnected')}
+							</p>{/if}
 						<button type="button" disabled={recoveryLoading} on:click={onRefreshRecovery}>
 							<RotateCw size={14} aria-hidden="true" />{$t('researchAgent.checkResult')}
 						</button>
@@ -406,9 +424,14 @@
 	.turn-notice.failed {
 		color: var(--danger-text);
 	}
-	.turn-notice p { margin: 4px 0 8px; }
-	.turn-notice .retained-results { color: var(--text-secondary); }
-	.turn-notice button, .empty-state button {
+	.turn-notice p {
+		margin: 4px 0 8px;
+	}
+	.turn-notice .retained-results {
+		color: var(--text-secondary);
+	}
+	.turn-notice button,
+	.empty-state button {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;

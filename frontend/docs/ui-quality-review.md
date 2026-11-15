@@ -25,19 +25,19 @@ This review changes presentation and keyboard behavior, not that scientific chai
 
 ## Critique and applied polish
 
-| Heuristic (0–4) | Before | After | Evidence |
-|---|---:|---:|---|
-| Status visibility | 3 | 3 | Processing/failure labels and published-version context remain |
-| Match to research work | 3 | 3 | Explicit scope, experiment comparisons, and Source paths remain |
-| User control | 2 | 3 | Native modal blocks background focus; Escape restores focus |
-| Consistency | 2 | 3 | Shared focus, active route treatment, and semantic theme tokens |
-| Error prevention | 3 | 3 | No change to scope approval or write contracts |
-| Recognition | 2 | 3 | Four direct destinations; secondary routes grouped under More |
-| Efficiency | 1 | 2 | Removed inactive shortcut/search; compact Objective context |
-| Visual hierarchy | 2 | 3 | Removed decorative grid, duplicate labels and prominent future cards |
-| Recovery | 3 | 3 | Published Finding survives a failed rerun |
-| Help and guidance | 2 | 2 | Existing guidance; no new onboarding tested |
-| Total | 23/40 | 28/40 | Single-reviewer assessment of the inspected surfaces |
+| Heuristic (0–4)        | Before | After | Evidence                                                             |
+| ---------------------- | -----: | ----: | -------------------------------------------------------------------- |
+| Status visibility      |      3 |     3 | Processing/failure labels and published-version context remain       |
+| Match to research work |      3 |     3 | Explicit scope, experiment comparisons, and Source paths remain      |
+| User control           |      2 |     3 | Native modal blocks background focus; Escape restores focus          |
+| Consistency            |      2 |     3 | Shared focus, active route treatment, and semantic theme tokens      |
+| Error prevention       |      3 |     3 | No change to scope approval or write contracts                       |
+| Recognition            |      2 |     3 | Four direct destinations; secondary routes grouped under More        |
+| Efficiency             |      1 |     2 | Removed inactive shortcut/search; compact Objective context          |
+| Visual hierarchy       |      2 |     3 | Removed decorative grid, duplicate labels and prominent future cards |
+| Recovery               |      3 |     3 | Published Finding survives a failed rerun                            |
+| Help and guidance      |      2 |     2 | Existing guidance; no new onboarding tested                          |
+| Total                  |  23/40 | 28/40 | Single-reviewer assessment of the inspected surfaces                 |
 
 The A2 mark and blue/slate palette remain. Dark mode now makes the monochrome
 mark visible. Primary button text uses the shared `--on-brand` token. Existing
@@ -48,16 +48,16 @@ menu controls were removed; functioning local search and logout remain.
 
 ## Technical audit
 
-| Priority | Finding | Outcome |
-|---|---|---|
-| High | Unnamed custom modal permitted background interaction | Native dialog with heading, inert background and verified focus restoration |
-| High | Faint keyboard focus and color-only route state | Solid outlines, underlined active link and `aria-current` |
-| Medium | Home cards clipped actions at 320px | Cards shrink and wrap actions; regression passes |
-| Medium | Seven equal navigation destinations crowded mobile layouts | Primary four plus More; compact Objective context |
-| Medium | Chinese UI retained English document language | Language subscription now updates `html[lang]` |
-| Medium | Undefined table/scope colors and dark logo visibility | Existing tokens reused; theme-aware foreground and logo treatment |
-| Medium | Large conversation bundle loads in the document workspace | Recorded below; route/lifecycle changes deferred |
-| Medium | Current Collection contract migration leaves type/fixture mismatches | Recorded in verification; no compatibility layer added |
+| Priority | Finding                                                              | Outcome                                                                     |
+| -------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| High     | Unnamed custom modal permitted background interaction                | Native dialog with heading, inert background and verified focus restoration |
+| High     | Faint keyboard focus and color-only route state                      | Solid outlines, underlined active link and `aria-current`                   |
+| Medium   | Home cards clipped actions at 320px                                  | Cards shrink and wrap actions; regression passes                            |
+| Medium   | Seven equal navigation destinations crowded mobile layouts           | Primary four plus More; compact Objective context                           |
+| Medium   | Chinese UI retained English document language                        | Language subscription now updates `html[lang]`                              |
+| Medium   | Undefined table/scope colors and dark logo visibility                | Existing tokens reused; theme-aware foreground and logo treatment           |
+| Medium   | Large conversation bundle loads in the document workspace            | Recorded below; route/lifecycle changes deferred                            |
+| Medium   | Current Collection contract migration leaves type/fixture mismatches | Recorded in verification; no compatibility layer added                      |
 
 The static detector fell from 15 to 13 suggestions: the grid and one progress
 accent were removed. Remaining suggestions concern thick side borders in

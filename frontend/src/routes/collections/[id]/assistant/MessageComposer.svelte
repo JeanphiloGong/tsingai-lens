@@ -504,16 +504,17 @@
 							tooltipAlign="end"
 							label={stopping ? $t('researchAgent.stopping') : $t('researchAgent.stop')}
 							disabled={stopping}
-							onClick={onStop}><Square size={14} fill="currentColor" /></IconButton>
+							onClick={onStop}><Square size={14} fill="currentColor" /></IconButton
+						>
 					{:else}
-					<IconButton
-						className="send-message"
-						type="submit"
-						variant="primary"
-						tooltipAlign="end"
-						label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
-						disabled={disabled || !input.trim()}>&uarr;</IconButton
-					>
+						<IconButton
+							className="send-message"
+							type="submit"
+							variant="primary"
+							tooltipAlign="end"
+							label={sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+							disabled={disabled || !input.trim()}>&uarr;</IconButton
+						>
 					{/if}
 				</div>
 			</div>

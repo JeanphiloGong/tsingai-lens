@@ -389,12 +389,21 @@ async function mockApis(page: Page) {
 		const path = url.pathname;
 		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 		if (path === '/user-api/v1/me/permissions') {
-			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ permission_codes: [] }) });
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ permission_codes: [] })
+			});
 		}
 		if (path === '/user-api/v1/me') {
 			return route.fulfill({
-				status: 200, contentType: 'application/json',
-				body: JSON.stringify({ user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' })
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					user_id: 'user_1',
+					email: 'reader@example.com',
+					display_name: 'Reader'
+				})
 			});
 		}
 		if (path === '/api/v1/collections') return route.fulfill(json({ items: [] }));
@@ -446,8 +455,13 @@ async function mockApis(page: Page) {
 					published_analysis: analysis('succeeded', 1),
 					warnings: [],
 					evidence_review: {
-						total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0,
-						gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: []
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
 					}
 				})
 			);

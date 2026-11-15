@@ -357,18 +357,13 @@
 		if (!active.length) return null;
 
 		const activeDocumentIds = new Set(
-			active
-				.filter((run) => run.scope_type === 'document')
-				.map((run) => run.scope_id)
+			active.filter((run) => run.scope_type === 'document').map((run) => run.scope_id)
 		);
 		const ready = items.filter(
 			(document) => document.status === 'ready' && !activeDocumentIds.has(document.document_id)
 		).length;
 		const total = Math.max(items.length, ready + active.length);
-		const activeProgress = active.reduce(
-			(sum, run) => sum + run.progress_percent / 100,
-			0
-		);
+		const activeProgress = active.reduce((sum, run) => sum + run.progress_percent / 100, 0);
 		const percent = Math.round(((ready + activeProgress) / total) * 100);
 		const message =
 			active.find((run) => run.progress_detail?.message)?.progress_detail?.message ?? '';

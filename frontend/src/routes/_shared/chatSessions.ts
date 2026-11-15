@@ -308,7 +308,11 @@ export async function deleteChatSession(sessionId: string, signal?: AbortSignal)
 	await requestJson(chatSessionPath(sessionId), { signal, method: 'DELETE' });
 }
 
-export async function setChatSessionPin(sessionId: string, isPinned: boolean, signal?: AbortSignal) {
+export async function setChatSessionPin(
+	sessionId: string,
+	isPinned: boolean,
+	signal?: AbortSignal
+) {
 	return (await requestJson(`${chatSessionPath(sessionId)}/pin`, {
 		signal,
 		method: 'PUT',
@@ -396,7 +400,11 @@ export async function fetchChatTrajectory(sessionId: string, signal?: AbortSigna
 	})) as ChatTrajectory;
 }
 
-export async function stopChatResponse(sessionId: string, responseId: string, signal?: AbortSignal) {
+export async function stopChatResponse(
+	sessionId: string,
+	responseId: string,
+	signal?: AbortSignal
+) {
 	return (await requestJson(
 		`${chatSessionPath(sessionId)}/responses/${encodeURIComponent(responseId)}/stop`,
 		{ method: 'POST', signal }
@@ -562,7 +570,10 @@ async function readChatEvents(
 			const { done, value } = await Promise.race([
 				reader.read(),
 				new Promise<never>((_, reject) => {
-					idleTimer = setTimeout(() => reject(new Error('error.researchConnectionInactive')), 30_000);
+					idleTimer = setTimeout(
+						() => reject(new Error('error.researchConnectionInactive')),
+						30_000
+					);
 				})
 			]);
 			clearTimeout(idleTimer);

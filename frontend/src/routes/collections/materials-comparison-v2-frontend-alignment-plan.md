@@ -101,13 +101,13 @@ The frontend should treat each row as:
 
 ```ts
 type ComparisonRow = {
-  row_id: string;
-  collection_id: string;
-  source_document_id: string;
-  display: ComparisonDisplay;
-  evidence_bundle: ComparisonEvidenceBundle;
-  assessment: ComparisonAssessment;
-  uncertainty: ComparisonUncertainty;
+	row_id: string;
+	collection_id: string;
+	source_document_id: string;
+	display: ComparisonDisplay;
+	evidence_bundle: ComparisonEvidenceBundle;
+	assessment: ComparisonAssessment;
+	uncertainty: ComparisonUncertainty;
 };
 ```
 
@@ -116,19 +116,19 @@ it back into a legacy view model.
 
 ## Field Mapping
 
-| Current frontend usage | New backend field | Frontend use after cutover |
-| --- | --- | --- |
-| `row_id` | `row_id` | unchanged |
-| `collection_id` | `collection_id` | unchanged |
-| `source_document_id` | `source_document_id` | unchanged |
-| `supporting_evidence_ids` | `evidence_bundle.supporting_evidence_ids` | evidence count and source jump |
-| `material_system_normalized` | `display.material_system_normalized` | material filter and table column |
-| `process_normalized` | `display.process_normalized` | process column |
-| `property_normalized` | `display.property_normalized` | property filter and table column |
-| `baseline_normalized` | `display.baseline_normalized` | baseline column |
-| `test_condition_normalized` | `display.test_condition_normalized` | test column |
-| `comparability_status` | `assessment.comparability_status` | status filter, summary counts, label |
-| `comparability_warnings` | `assessment.comparability_warnings` | warnings display |
+| Current frontend usage       | New backend field                         | Frontend use after cutover           |
+| ---------------------------- | ----------------------------------------- | ------------------------------------ |
+| `row_id`                     | `row_id`                                  | unchanged                            |
+| `collection_id`              | `collection_id`                           | unchanged                            |
+| `source_document_id`         | `source_document_id`                      | unchanged                            |
+| `supporting_evidence_ids`    | `evidence_bundle.supporting_evidence_ids` | evidence count and source jump       |
+| `material_system_normalized` | `display.material_system_normalized`      | material filter and table column     |
+| `process_normalized`         | `display.process_normalized`              | process column                       |
+| `property_normalized`        | `display.property_normalized`             | property filter and table column     |
+| `baseline_normalized`        | `display.baseline_normalized`             | baseline column                      |
+| `test_condition_normalized`  | `display.test_condition_normalized`       | test column                          |
+| `comparability_status`       | `assessment.comparability_status`         | status filter, summary counts, label |
+| `comparability_warnings`     | `assessment.comparability_warnings`       | warnings display                     |
 
 Important newly available fields that should not stay unused:
 

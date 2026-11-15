@@ -263,10 +263,10 @@ export async function fetchDocumentContent(
 	collectionId: string,
 	documentId: string
 ): Promise<DocumentContentResponse> {
-	const data = await requestJson(
+	const data = (await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/content`,
 		{ method: 'GET' }
-	) as DocumentContentResponse;
+	)) as DocumentContentResponse;
 	if (data.collection_id !== collectionId || data.document_id !== documentId) {
 		throw new Error('Document content response does not match the requested document.');
 	}
@@ -277,10 +277,10 @@ export async function fetchDocumentMarkdown(
 	collectionId: string,
 	documentId: string
 ): Promise<DocumentMarkdownResponse> {
-	const data = await requestJson(
+	const data = (await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/markdown`,
 		{ method: 'GET' }
-	) as DocumentMarkdownResponse;
+	)) as DocumentMarkdownResponse;
 	if (data.collection_id !== collectionId || data.document_id !== documentId) {
 		throw new Error('Document Markdown response does not match the requested document.');
 	}
@@ -291,10 +291,10 @@ export async function fetchDocumentProfile(
 	collectionId: string,
 	documentId: string
 ): Promise<DocumentProfile> {
-	const data = await requestJson(
+	const data = (await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/profile`,
 		{ method: 'GET' }
-	) as DocumentProfile;
+	)) as DocumentProfile;
 	if (data.document_id !== documentId) {
 		throw new Error('Document profile response does not match the requested document.');
 	}

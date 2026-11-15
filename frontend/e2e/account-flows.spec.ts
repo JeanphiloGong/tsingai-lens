@@ -165,7 +165,10 @@ for (const width of [320, 768, 1440]) {
 		for (const path of ['/register', '/forgot-password', '/account']) {
 			await page.goto(path);
 			await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-			if (path === '/account') await expect(page.getByRole('button', { name: 'Change password', exact: true })).toBeEnabled();
+			if (path === '/account')
+				await expect(
+					page.getByRole('button', { name: 'Change password', exact: true })
+				).toBeEnabled();
 			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
 				true
 			);
@@ -181,45 +184,67 @@ for (const width of [320, 768, 1440]) {
 	});
 }
 
-test('a late registration response cannot navigate away from a new account page', async ({ page }) => {
+test('a late registration response cannot navigate away from a new account page', async ({
+	page
+}) => {
 	await mockAccountApi(page);
 	let finish!: () => void;
-	const responseReady = new Promise<void>((resolve) => { finish = resolve; });
+	const responseReady = new Promise<void>((resolve) => {
+		finish = resolve;
+	});
 	await page.route('**/user-api/v1/register', async (route) => {
 		await responseReady;
-		await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ user_id: 'new-researcher', email: 'new@example.test' }) });
+		await route.fulfill({
+			status: 201,
+			contentType: 'application/json',
+			body: JSON.stringify({ user_id: 'new-researcher', email: 'new@example.test' })
+		});
 	});
 	await page.goto('/register');
 	await page.getByLabel('Email', { exact: true }).fill('new@example.test');
 	await page.getByRole('button', { name: 'Send code', exact: true }).click();
 	await expect(page.getByRole('status')).toContainText('eligible');
 	await page.getByLabel('Email code', { exact: true }).fill('001234');
-	await page.getByLabel('New password (12 characters minimum)', { exact: true }).fill('replacement-password');
+	await page
+		.getByLabel('New password (12 characters minimum)', { exact: true })
+		.fill('replacement-password');
 	await page.getByLabel('Confirm new password', { exact: true }).fill('replacement-password');
 	await page.getByRole('button', { name: 'Create account', exact: true }).click();
 	await expect(page.getByRole('button', { name: 'Please wait', exact: true })).toBeDisabled();
 	await page.getByRole('link', { name: 'Back to sign in', exact: true }).click();
 	await page.getByRole('link', { name: 'Reset password', exact: true }).click();
 	await expect(page).toHaveURL(/\/forgot-password$/);
-	const received = page.waitForResponse((response) => response.url().endsWith('/user-api/v1/register'));
+	const received = page.waitForResponse((response) =>
+		response.url().endsWith('/user-api/v1/register')
+	);
 	finish();
 	await (await received).finished();
 	await page.evaluate(() => new Promise(requestAnimationFrame));
 	await expect(page).toHaveURL(/\/forgot-password$/);
 });
 
-test('recovery proof and service errors retain the form and never display success', async ({ page }) => {
+test('recovery proof and service errors retain the form and never display success', async ({
+	page
+}) => {
 	await mockAccountApi(page);
 	let status = 422;
-	await page.route('**/user-api/v1/password-resets', (route) => route.fulfill({
-		status, contentType: 'application/json', body: JSON.stringify({ code: status === 422 ? 'invalid_email_proof' : 'identity_unavailable' })
-	}));
+	await page.route('**/user-api/v1/password-resets', (route) =>
+		route.fulfill({
+			status,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				code: status === 422 ? 'invalid_email_proof' : 'identity_unavailable'
+			})
+		})
+	);
 	await page.goto('/forgot-password');
 	await page.getByLabel('Email', { exact: true }).fill('new@example.test');
 	await page.getByRole('button', { name: 'Send code', exact: true }).click();
 	await expect(page.getByRole('status')).toContainText('eligible');
 	await page.getByLabel('Email code', { exact: true }).fill('001234');
-	await page.getByLabel('New password (12 characters minimum)', { exact: true }).fill('replacement-password');
+	await page
+		.getByLabel('New password (12 characters minimum)', { exact: true })
+		.fill('replacement-password');
 	await page.getByLabel('Confirm new password', { exact: true }).fill('replacement-password');
 	for (const expected of ['The code is invalid', 'unavailable']) {
 		await page.getByRole('button', { name: 'Reset password', exact: true }).click();

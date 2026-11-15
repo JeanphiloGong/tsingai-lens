@@ -54,7 +54,13 @@ let modelDirectoryItems = [
 vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
 	if (requestPath(input) === '/api/v1/model-connections') {
 		modelDirectoryRequests += 1;
-		return Promise.resolve(jsonResponse({ items: modelDirectoryItems }, modelDirectoryStatus, 'Service temporarily unavailable.'));
+		return Promise.resolve(
+			jsonResponse(
+				{ items: modelDirectoryItems },
+				modelDirectoryStatus,
+				'Service temporarily unavailable.'
+			)
+		);
 	}
 	if (requestPath(input).endsWith('/permissions')) {
 		return Promise.resolve(
@@ -193,7 +199,10 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'retryable_decision' | 'response'>;
+	trajectory?: Pick<
+		ChatTrajectory,
+		'items' | 'feedback' | 'pending_approval' | 'retryable_decision' | 'response'
+	>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -214,7 +223,8 @@ function installApi({
 					objectives: [
 						{
 							objective_id: 'obj_energy_1',
-							question: 'How does laser energy affect Ti-6Al-4V strength?', confirmation_status: 'candidate'
+							question: 'How does laser energy affect Ti-6Al-4V strength?',
+							confirmation_status: 'candidate'
 						}
 					]
 				})
@@ -337,127 +347,265 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockReset();
 	});
 
-
-
 	it('stops a response, ignores a late running acknowledgement, and accepts revised instructions', async () => {
 		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 		const question = message('question', 'user', 'Compare the tensile tests.');
 		const snapshot: ChatResponseSnapshot = {
-			response_id: 'response-one', sequence: 1, started_at: createdAt, updated_at: createdAt,
-			status: 'running', message_id: null, message_created_at: null, content: '', progress: { phase: 'model' },
-			checkpoint_message_id: 'question', completion_reason: null, error_code: null, warnings: []
+			response_id: 'response-one',
+			sequence: 1,
+			started_at: createdAt,
+			updated_at: createdAt,
+			status: 'running',
+			message_id: null,
+			message_created_at: null,
+			content: '',
+			progress: { phase: 'model' },
+			checkpoint_message_id: 'question',
+			completion_reason: null,
+			error_code: null,
+			warnings: []
 		};
-		const trajectory = { items: [question], feedback: [], pending_approval: null, response: snapshot };
-		installApi({ trajectory, messageTurn: {
-			status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null, error_code: null,
-			messages: [message('revised', 'user', 'Compare only the 293 K tests.'), message('answer', 'assistant', 'Now comparing only the 293 K tests.')]
-		} });
+		const trajectory = {
+			items: [question],
+			feedback: [],
+			pending_approval: null,
+			response: snapshot
+		};
+		installApi({
+			trajectory,
+			messageTurn: {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				pending_approval: null,
+				error_code: null,
+				messages: [
+					message('revised', 'user', 'Compare only the 293 K tests.'),
+					message('answer', 'assistant', 'Now comparing only the 293 K tests.')
+				]
+			}
+		});
 		const base = fetchMock.getMockImplementation()!;
 		let updates: ReadableStreamDefaultController<Uint8Array>;
 		let acknowledgeStop: (response: Response) => void;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			if (requestPath(input).endsWith('/events')) return Promise.resolve(new Response(new ReadableStream({ start(controller) { updates = controller; } }), { headers: { 'Content-Type': 'text/event-stream' } }));
-			if (requestPath(input).endsWith('/responses/response-one/stop')) return new Promise<Response>((resolve) => { acknowledgeStop = resolve; });
+			if (requestPath(input).endsWith('/events'))
+				return Promise.resolve(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								updates = controller;
+							}
+						}),
+						{ headers: { 'Content-Type': 'text/event-stream' } }
+					)
+				);
+			if (requestPath(input).endsWith('/responses/response-one/stop'))
+				return new Promise<Response>((resolve) => {
+					acknowledgeStop = resolve;
+				});
 			return base(input, init);
 		});
 		render(Conversation);
 		await expect.element(browserPage.getByRole('button', { name: 'Stop response' })).toBeEnabled();
 		await browserPage.getByRole('button', { name: 'Stop response' }).click();
 		await vi.waitFor(() => expect(acknowledgeStop).toBeDefined());
-		trajectory.response = { ...snapshot, status: 'cancelled', error_code: 'user_cancelled', stop_requested: true };
-		updates!.enqueue(new TextEncoder().encode(`event: trajectory\ndata: ${JSON.stringify(trajectory)}\n\n`));
+		trajectory.response = {
+			...snapshot,
+			status: 'cancelled',
+			error_code: 'user_cancelled',
+			stop_requested: true
+		};
+		updates!.enqueue(
+			new TextEncoder().encode(`event: trajectory\ndata: ${JSON.stringify(trajectory)}\n\n`)
+		);
 		updates!.close();
 		await expect.element(browserPage.getByText(/Stopped\. Saved research results/)).toBeVisible();
 		acknowledgeStop!(jsonResponse({ ...snapshot, stop_requested: true }));
 		const composer = browserPage.getByRole('textbox', { name: 'Message', exact: true });
 		await expect.element(composer).toBeEnabled();
 		await send('Compare only the 293 K tests.', composer);
-		await expect.element(browserPage.getByText('Now comparing only the 293 K tests.')).toBeVisible();
-		await expect.element(browserPage.getByRole('log').getByText(question.content, { exact: true })).toBeVisible();
+		await expect
+			.element(browserPage.getByText('Now comparing only the 293 K tests.'))
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByRole('log').getByText(question.content, { exact: true }))
+			.toBeVisible();
 	});
 
 	it.each([
-		[false, 'approved'], [false, 'rejected'], [true, 'approved'], [true, 'rejected']
-	] as const)('recovers embedded=%s saved %s decision after a model failure', async (embedded, decision) => {
-		const call = pendingCall();
-		const request = message('request', 'assistant', '', {
-			tool_calls: [{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }]
-		});
-		const question = message('question', 'user', 'Save the reviewed research objective.');
-		const initial = { feedback: [], items: [question, request], pending_approval: call };
-		const savedCall = { ...call, status: decision, decision_user_id: 'researcher_1',
-			decision_arguments_digest: call.arguments_digest, decided_at: createdAt };
-		const recovery = { feedback: [], items: [question, request], pending_approval: null,
-			retryable_decision: savedCall, running: false, response: {
-				response_id: 'saved-decision', sequence: 1, started_at: createdAt, updated_at: createdAt,
-				status: 'approval_required', message_id: null, message_created_at: null, content: '',
-				progress: { phase: 'terminal' }, checkpoint_message_id: null,
-				completion_reason: null, error_code: null, warnings: [],
-				model_connection_id: 'lab-a', model_connection_name: 'Lab A'
-			}
-		};
-		localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
-		installApi({ trajectory: initial });
-		const original = fetchMock.getMockImplementation()!;
-		let saved = false;
-		let restored = false;
-		const decisions: unknown[] = [];
-		let finishRetry!: (response: Response) => void;
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			if (requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST') {
-				decisions.push(requestBody(input, init));
-				if (!restored) {
-					saved = true;
-					return Promise.resolve(jsonResponse({ code: 'model_connection_key_unavailable' }, 200205, 'The selected model connection is unavailable.'));
+		[false, 'approved'],
+		[false, 'rejected'],
+		[true, 'approved'],
+		[true, 'rejected']
+	] as const)(
+		'recovers embedded=%s saved %s decision after a model failure',
+		async (embedded, decision) => {
+			const call = pendingCall();
+			const request = message('request', 'assistant', '', {
+				tool_calls: [
+					{
+						tool_call_id: call.tool_call_id,
+						name: call.name,
+						arguments: call.arguments,
+						position: 0
+					}
+				]
+			});
+			const question = message('question', 'user', 'Save the reviewed research objective.');
+			const initial = { feedback: [], items: [question, request], pending_approval: call };
+			const savedCall = {
+				...call,
+				status: decision,
+				decision_user_id: 'researcher_1',
+				decision_arguments_digest: call.arguments_digest,
+				decided_at: createdAt
+			};
+			const recovery = {
+				feedback: [],
+				items: [question, request],
+				pending_approval: null,
+				retryable_decision: savedCall,
+				running: false,
+				response: {
+					response_id: 'saved-decision',
+					sequence: 1,
+					started_at: createdAt,
+					updated_at: createdAt,
+					status: 'approval_required',
+					message_id: null,
+					message_created_at: null,
+					content: '',
+					progress: { phase: 'terminal' },
+					checkpoint_message_id: null,
+					completion_reason: null,
+					error_code: null,
+					warnings: [],
+					model_connection_id: 'lab-a',
+					model_connection_name: 'Lab A'
 				}
-				return new Promise<Response>((resolve) => { finishRetry = resolve; });
-			}
-			if (saved && requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'GET')
-				return Promise.resolve(jsonResponse(recovery));
-			return original(input, init);
-		});
-		let view = render(Conversation, { embedded });
-		await browserPage.getByRole('button', { name: decision === 'approved' ? 'Approve and create' : 'Reject', exact: true }).click();
-		const label = decision === 'approved' ? 'Retry approved action' : 'Continue after rejection';
-		await expect.element(browserPage.getByRole('button', { name: label, exact: true })).toBeVisible();
-		await expect.element(browserPage.getByRole('button', { name: 'Approve and create', exact: true })).not.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
-		await view.unmount();
-		view = render(Conversation, { embedded });
-		const retry = browserPage.getByRole('button', { name: label, exact: true });
-		await expect.element(retry).toBeVisible();
-		expect(decisions).toHaveLength(1); // Reload and GET observation never retry.
-		await browserPage.getByTitle('Model', { exact: true }).click();
-		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
-		restored = true;
-		await retry.click();
-		await expect.element(retry).toBeDisabled();
-		expect(decisions).toEqual([
-			{ decision, arguments_digest: call.arguments_digest },
-			{ decision, arguments_digest: call.arguments_digest }
-		]); // No model selection and no new approval on the recovery request.
-		const result: ChatToolResult = decision === 'approved' ? baseToolResult(call.tool_call_id)
-			: { ...baseToolResult(call.tool_call_id), status: 'failed', error_code: 'user_rejected', error_message: 'The action was rejected.' };
-		finishRetry(jsonResponse({ status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null,
-			messages: [message('result', 'tool', '', { tool_call_id: call.tool_call_id, tool_result: result }),
-				message('answer', 'assistant', 'The saved decision has been handled.')]
-		}));
-		await expect.element(browserPage.getByText('The saved decision has been handled.', { exact: true })).toBeVisible();
-		await expect.element(browserPage.getByTestId('decision-recovery')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled(); // Composer is empty, but it is available again.
-		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-	});
+			};
+			localStorage.setItem(
+				`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`,
+				session.session_id
+			);
+			installApi({ trajectory: initial });
+			const original = fetchMock.getMockImplementation()!;
+			let saved = false;
+			let restored = false;
+			const decisions: unknown[] = [];
+			let finishRetry!: (response: Response) => void;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST') {
+					decisions.push(requestBody(input, init));
+					if (!restored) {
+						saved = true;
+						return Promise.resolve(
+							jsonResponse(
+								{ code: 'model_connection_key_unavailable' },
+								200205,
+								'The selected model connection is unavailable.'
+							)
+						);
+					}
+					return new Promise<Response>((resolve) => {
+						finishRetry = resolve;
+					});
+				}
+				if (
+					saved &&
+					requestPath(input).endsWith('/messages') &&
+					requestMethod(input, init) === 'GET'
+				)
+					return Promise.resolve(jsonResponse(recovery));
+				return original(input, init);
+			});
+			let view = render(Conversation, { embedded });
+			await browserPage
+				.getByRole('button', {
+					name: decision === 'approved' ? 'Approve and create' : 'Reject',
+					exact: true
+				})
+				.click();
+			const label = decision === 'approved' ? 'Retry approved action' : 'Continue after rejection';
+			await expect
+				.element(browserPage.getByRole('button', { name: label, exact: true }))
+				.toBeVisible();
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Approve and create', exact: true }))
+				.not.toBeInTheDocument();
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Send', exact: true }))
+				.toBeDisabled();
+			await view.unmount();
+			view = render(Conversation, { embedded });
+			const retry = browserPage.getByRole('button', { name: label, exact: true });
+			await expect.element(retry).toBeVisible();
+			expect(decisions).toHaveLength(1); // Reload and GET observation never retry.
+			await browserPage.getByTitle('Model', { exact: true }).click();
+			await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+			restored = true;
+			await retry.click();
+			await expect.element(retry).toBeDisabled();
+			expect(decisions).toEqual([
+				{ decision, arguments_digest: call.arguments_digest },
+				{ decision, arguments_digest: call.arguments_digest }
+			]); // No model selection and no new approval on the recovery request.
+			const result: ChatToolResult =
+				decision === 'approved'
+					? baseToolResult(call.tool_call_id)
+					: {
+							...baseToolResult(call.tool_call_id),
+							status: 'failed',
+							error_code: 'user_rejected',
+							error_message: 'The action was rejected.'
+						};
+			finishRetry(
+				jsonResponse({
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					pending_approval: null,
+					messages: [
+						message('result', 'tool', '', { tool_call_id: call.tool_call_id, tool_result: result }),
+						message('answer', 'assistant', 'The saved decision has been handled.')
+					]
+				})
+			);
+			await expect
+				.element(browserPage.getByText('The saved decision has been handled.', { exact: true }))
+				.toBeVisible();
+			await expect.element(browserPage.getByTestId('decision-recovery')).not.toBeInTheDocument();
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Send', exact: true }))
+				.toBeDisabled(); // Composer is empty, but it is available again.
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		}
+	);
 
 	it.each([false, true])('model selection in embedded=%s sends one chosen ID', async (embedded) => {
-		installApi({ messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [], pending_approval: null, error_code: null } });
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				messages: [],
+				pending_approval: null,
+				error_code: null
+			}
+		});
 		render(Conversation, { embedded });
 		const picker = browserPage.getByTitle('Model', { exact: true });
 		await expect.element(picker).toHaveTextContent('Lab A');
 		const actions = document.querySelector('.composer-actions')!;
 		expect(actions.firstElementChild).toBe(document.querySelector('.model-picker'));
-		expect(actions.lastElementChild).toContainElement(browserPage.getByRole('button', { name: 'Send', exact: true }).element());
+		expect(actions.lastElementChild).toContainElement(
+			browserPage.getByRole('button', { name: 'Send', exact: true }).element()
+		);
 		await picker.click();
-		await expect.element(browserPage.getByRole('button', { name: 'Lab A', exact: true })).toHaveAttribute('aria-pressed', 'true');
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Lab A', exact: true }))
+			.toHaveAttribute('aria-pressed', 'true');
 		expect(document.querySelector('.model-picker')?.textContent).not.toMatch(/model-a|model-b/);
 		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
 		await expect.element(picker).toHaveTextContent('Lab B');
@@ -466,8 +614,19 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const composer = browserPage.getByLabelText('Message', { exact: true });
 		await expect.element(composer).toBeEnabled();
 		await send('Compare the supplied evidence.', composer);
-		await expect.poll(() => fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST').length).toBe(1);
-		const sent = fetchMock.mock.calls.find(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		await expect
+			.poll(
+				() =>
+					fetchMock.mock.calls.filter(
+						([input, init]) =>
+							requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+					).length
+			)
+			.toBe(1);
+		const sent = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+		);
 		expect(JSON.parse(String(sent?.[1]?.body)).model_connection_id).toBe('lab-b');
 	});
 
@@ -477,44 +636,72 @@ describe('collections/[id]/assistant Research Agent', () => {
 		render(Conversation);
 		const picker = browserPage.getByTitle('Model', { exact: true });
 		await picker.click();
-		await expect.element(browserPage.getByRole('group', { name: 'Model' })).toHaveTextContent('No models configured.');
-		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
-		expect(fetchMock.mock.calls.some(([input, init]) => requestMethod(input, init) === 'POST' && requestPath(input).endsWith('/messages'))).toBe(false);
+		await expect
+			.element(browserPage.getByRole('group', { name: 'Model' }))
+			.toHaveTextContent('No models configured.');
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Send', exact: true }))
+			.toBeDisabled();
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestMethod(input, init) === 'POST' && requestPath(input).endsWith('/messages')
+			)
+		).toBe(false);
 	});
 
 	it('uses the existing error area if the directory request fails', async () => {
 		modelDirectoryStatus = 200205;
 		installApi();
 		render(Conversation);
-		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('Service temporarily unavailable.');
-		await expect.element(browserPage.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+		await expect
+			.element(browserPage.getByRole('alert'))
+			.toHaveTextContent('Service temporarily unavailable.');
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Send', exact: true }))
+			.toBeDisabled();
 		expect(document.querySelector('.model-picker-refresh')).toBeNull();
 	});
 
-	it.each([false, true])('reports a failed selected model at send time in embedded=%s', async (embedded) => {
-		installApi();
-		const fallback = fetchMock.getMockImplementation()!;
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
-				return Promise.resolve(new Response('event: error\ndata: {"code":"model_unavailable","message":"The model service is temporarily unavailable. Please try again later."}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
-			}
-			return fallback(input, init);
-		});
-		render(Conversation, { embedded });
-		const picker = browserPage.getByTitle('Model', { exact: true });
-		await expect.element(picker).toHaveTextContent('Lab A');
-		await picker.click();
-		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
-		const composer = browserPage.getByLabelText('Message', { exact: true });
-		await send('Compare the supplied evidence.', composer);
-		await expect.element(browserPage.getByRole('alert')).toHaveTextContent('The model service is temporarily unavailable. Contact an administrator or try again later.');
-		await expect.element(picker).toHaveTextContent('Lab B');
-		await expect.element(composer).toHaveValue('Compare the supplied evidence.');
-		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
-		expect(posts).toHaveLength(1);
-		expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-b');
-		expect(modelDirectoryRequests).toBe(1);
-	});
+	it.each([false, true])(
+		'reports a failed selected model at send time in embedded=%s',
+		async (embedded) => {
+			installApi();
+			const fallback = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+					return Promise.resolve(
+						new Response(
+							'event: error\ndata: {"code":"model_unavailable","message":"The model service is temporarily unavailable. Please try again later."}\n\n',
+							{ headers: { 'Content-Type': 'text/event-stream' } }
+						)
+					);
+				}
+				return fallback(input, init);
+			});
+			render(Conversation, { embedded });
+			const picker = browserPage.getByTitle('Model', { exact: true });
+			await expect.element(picker).toHaveTextContent('Lab A');
+			await picker.click();
+			await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
+			const composer = browserPage.getByLabelText('Message', { exact: true });
+			await send('Compare the supplied evidence.', composer);
+			await expect
+				.element(browserPage.getByRole('alert'))
+				.toHaveTextContent(
+					'The model service is temporarily unavailable. Contact an administrator or try again later.'
+				);
+			await expect.element(picker).toHaveTextContent('Lab B');
+			await expect.element(composer).toHaveValue('Compare the supplied evidence.');
+			const posts = fetchMock.mock.calls.filter(
+				([input, init]) =>
+					requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+			);
+			expect(posts).toHaveLength(1);
+			expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-b');
+			expect(modelDirectoryRequests).toBe(1);
+		}
+	);
 
 	it('supports keyboard selection, Escape and outside dismissal', async () => {
 		installApi();
@@ -533,57 +720,93 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(document.querySelector('.model-picker')).not.toHaveAttribute('open');
 	});
 
-	it.each([false, true])('fits long names above a narrow composer in embedded=%s', async (embedded) => {
-		const longName = 'Research comparison service with a long configured name';
-		modelDirectoryItems[0].display_name = longName;
-		await browserPage.viewport(390, 844);
-		try {
-			installApi();
-			render(Conversation, { embedded });
-			const picker = browserPage.getByTitle('Model', { exact: true });
-			await expect.element(picker).toHaveTextContent(longName);
-			await picker.click();
-			const shell = document.querySelector('.composer-shell')!.getBoundingClientRect();
-			const menu = document.querySelector('.model-picker-menu')!.getBoundingClientRect();
-			expect(menu.left).toBeGreaterThanOrEqual(shell.left);
-			expect(menu.right).toBeLessThanOrEqual(shell.right);
-			expect(menu.bottom).toBeLessThan(shell.top);
-			expect(document.querySelector('.composer-toolbar')!.scrollWidth).toBeLessThanOrEqual(Math.ceil(shell.width));
-		} finally {
-			await browserPage.viewport(1280, 720);
+	it.each([false, true])(
+		'fits long names above a narrow composer in embedded=%s',
+		async (embedded) => {
+			const longName = 'Research comparison service with a long configured name';
+			modelDirectoryItems[0].display_name = longName;
+			await browserPage.viewport(390, 844);
+			try {
+				installApi();
+				render(Conversation, { embedded });
+				const picker = browserPage.getByTitle('Model', { exact: true });
+				await expect.element(picker).toHaveTextContent(longName);
+				await picker.click();
+				const shell = document.querySelector('.composer-shell')!.getBoundingClientRect();
+				const menu = document.querySelector('.model-picker-menu')!.getBoundingClientRect();
+				expect(menu.left).toBeGreaterThanOrEqual(shell.left);
+				expect(menu.right).toBeLessThanOrEqual(shell.right);
+				expect(menu.bottom).toBeLessThan(shell.top);
+				expect(document.querySelector('.composer-toolbar')!.scrollWidth).toBeLessThanOrEqual(
+					Math.ceil(shell.width)
+				);
+			} finally {
+				await browserPage.viewport(1280, 720);
+			}
 		}
-	});
+	);
 
 	it('changing the selection during generation preserves the active request', async () => {
 		installApi();
 		const fallback = fetchMock.getMockImplementation()!;
 		const snapshot: ChatResponseSnapshot = {
-			response_id: 'active-answer', sequence: 1, started_at: createdAt, updated_at: createdAt,
-			status: 'running', message_id: 'active-message', message_created_at: createdAt, content: '',
-			progress: { phase: 'responding' }, checkpoint_message_id: null,
-			completion_reason: null, error_code: null, warnings: [],
-			model_connection_id: 'lab-a', model_connection_name: 'Lab A'
+			response_id: 'active-answer',
+			sequence: 1,
+			started_at: createdAt,
+			updated_at: createdAt,
+			status: 'running',
+			message_id: 'active-message',
+			message_created_at: createdAt,
+			content: '',
+			progress: { phase: 'responding' },
+			checkpoint_message_id: null,
+			completion_reason: null,
+			error_code: null,
+			warnings: [],
+			model_connection_id: 'lab-a',
+			model_connection_name: 'Lab A'
 		};
 		let output!: ReadableStreamDefaultController<Uint8Array>;
-		const event = (name: string, data: unknown) => new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+		const event = (name: string, data: unknown) =>
+			new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
-				return Promise.resolve(new Response(new ReadableStream({ start(controller) {
-					output = controller;
-					controller.enqueue(event('snapshot', snapshot));
-				} }), { headers: { 'Content-Type': 'text/event-stream' } }));
+				return Promise.resolve(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								output = controller;
+								controller.enqueue(event('snapshot', snapshot));
+							}
+						}),
+						{ headers: { 'Content-Type': 'text/event-stream' } }
+					)
+				);
 			}
 			return fallback(input, init);
 		});
 		await send('Compare the supplied evidence.');
 		await browserPage.getByTitle('Model', { exact: true }).click();
 		await browserPage.getByRole('button', { name: 'Lab B', exact: true }).click();
-		await expect.element(browserPage.getByTitle('Model', { exact: true })).toHaveTextContent('Lab B');
-		const posts = fetchMock.mock.calls.filter(([input, init]) => requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST');
+		await expect
+			.element(browserPage.getByTitle('Model', { exact: true }))
+			.toHaveTextContent('Lab B');
+		const posts = fetchMock.mock.calls.filter(
+			([input, init]) =>
+				requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+		);
 		expect(posts).toHaveLength(1);
 		expect(requestBody(posts[0][0], posts[0][1]).model_connection_id).toBe('lab-a');
 		expect(posts[0][1]?.signal?.aborted).toBe(false);
-		output.enqueue(event('turn', { status: 'completed', completion_reason: 'model_answer', warnings: [], pending_approval: null, messages: [] }));
+		output.enqueue(
+			event('turn', {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				warnings: [],
+				pending_approval: null,
+				messages: []
+			})
+		);
 		output.close();
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 		expect(document.querySelector('.model-connection-next')).toBeNull();
@@ -598,14 +821,34 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toHaveAttribute('href', '/collections/col_123');
 		expect(document.querySelector('.conversation-header')).toBeNull();
 		collections.set([
-			{ collection_id: 'col_other', name: 'Other research', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] },
-			{ collection_id: 'col_123', name: '316L LPBF comparison', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] }
+			{
+				collection_id: 'col_other',
+				name: 'Other research',
+				description: null,
+				status: 'uploaded',
+				paper_count: 0,
+				created_at: '2026-10-01T00:00:00Z',
+				updated_at: '2026-10-01T00:00:00Z',
+				documents: []
+			},
+			{
+				collection_id: 'col_123',
+				name: '316L LPBF comparison',
+				description: null,
+				status: 'uploaded',
+				paper_count: 0,
+				created_at: '2026-10-01T00:00:00Z',
+				updated_at: '2026-10-01T00:00:00Z',
+				documents: []
+			}
 		]);
 		await expect
 			.element(browserPage.getByRole('link', { name: '316L LPBF comparison', exact: true }))
 			.toHaveAttribute('href', '/collections/col_123');
 		collections.update((items) =>
-			items.map((item) => (item.collection_id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
+			items.map((item) =>
+				item.collection_id === 'col_123' ? { ...item, name: 'Renamed study' } : item
+			)
 		);
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
@@ -651,111 +894,128 @@ describe('collections/[id]/assistant Research Agent', () => {
 		).toBe(false);
 		await composer.fill('Please only check the test conditions first.');
 		collections.set([
-			{ collection_id: 'col_123', name: 'Updated title', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] }
+			{
+				collection_id: 'col_123',
+				name: 'Updated title',
+				description: null,
+				status: 'uploaded',
+				paper_count: 0,
+				created_at: '2026-10-01T00:00:00Z',
+				updated_at: '2026-10-01T00:00:00Z',
+				documents: []
+			}
 		]);
 		await expect.element(composer).toHaveValue('Please only check the test conditions first.');
 	});
 
-	it.each([true, false])('keeps received text through a failed stream and failed recovery read, then resumes once (snapshot=%s)', async (withSnapshot) => {
-		installApi();
-		const fallback = fetchMock.getMockImplementation()!;
-		const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
-		const partial = 'Match test temperature, specimen orientation, and heat treatment.';
-		const snapshot: ChatResponseSnapshot = {
-			response_id: 'response-1',
-			sequence: 1,
-			started_at: createdAt,
-			updated_at: createdAt,
-			status: 'running',
-			message_id: 'answer-1',
-			message_created_at: createdAt,
-			content: '',
-			progress: { phase: 'responding' },
-			checkpoint_message_id: question.message_id,
-			completion_reason: null,
-			error_code: null,
-			warnings: []
-		};
-		const trajectory: ChatTrajectory = {
-			items: [question],
-			feedback: [],
-			pending_approval: null,
-			branches: [],
-			branch_draft: null,
-			running: true,
-			response: withSnapshot ? snapshot : undefined
-		};
-		let offline = false;
-		let recovering = false;
-		let posts = 0;
-		let output!: ReadableStreamDefaultController<Uint8Array>;
-		const event = (name: string, data: unknown) =>
-			new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			if (path.endsWith('/messages') && requestMethod(input, init) === 'POST') {
-				posts++;
-				return Promise.resolve(
-					new Response(
-						new ReadableStream({
-							start(controller) {
-								output = controller;
-								controller.enqueue(event('trajectory', trajectory));
-								controller.enqueue(event('text_delta', { content: partial }));
-							}
-						}),
-						{ headers: { 'Content-Type': 'text/event-stream' } }
-					)
-				);
-			}
-			if (offline) return Promise.reject(new TypeError('Network unavailable'));
-			if (recovering && path.endsWith('/messages')) {
-				return Promise.resolve(
-					jsonResponse({ ...trajectory, response: { ...snapshot, sequence: 2, content: partial } })
-				);
-			}
-			if (path.endsWith('/events')) {
-				return Promise.resolve(
-					new Response(
-						event('trajectory', {
+	it.each([true, false])(
+		'keeps received text through a failed stream and failed recovery read, then resumes once (snapshot=%s)',
+		async (withSnapshot) => {
+			installApi();
+			const fallback = fetchMock.getMockImplementation()!;
+			const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
+			const partial = 'Match test temperature, specimen orientation, and heat treatment.';
+			const snapshot: ChatResponseSnapshot = {
+				response_id: 'response-1',
+				sequence: 1,
+				started_at: createdAt,
+				updated_at: createdAt,
+				status: 'running',
+				message_id: 'answer-1',
+				message_created_at: createdAt,
+				content: '',
+				progress: { phase: 'responding' },
+				checkpoint_message_id: question.message_id,
+				completion_reason: null,
+				error_code: null,
+				warnings: []
+			};
+			const trajectory: ChatTrajectory = {
+				items: [question],
+				feedback: [],
+				pending_approval: null,
+				branches: [],
+				branch_draft: null,
+				running: true,
+				response: withSnapshot ? snapshot : undefined
+			};
+			let offline = false;
+			let recovering = false;
+			let posts = 0;
+			let output!: ReadableStreamDefaultController<Uint8Array>;
+			const event = (name: string, data: unknown) =>
+				new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path.endsWith('/messages') && requestMethod(input, init) === 'POST') {
+					posts++;
+					return Promise.resolve(
+						new Response(
+							new ReadableStream({
+								start(controller) {
+									output = controller;
+									controller.enqueue(event('trajectory', trajectory));
+									controller.enqueue(event('text_delta', { content: partial }));
+								}
+							}),
+							{ headers: { 'Content-Type': 'text/event-stream' } }
+						)
+					);
+				}
+				if (offline) return Promise.reject(new TypeError('Network unavailable'));
+				if (recovering && path.endsWith('/messages')) {
+					return Promise.resolve(
+						jsonResponse({
 							...trajectory,
-							running: false,
-							items: [
-								question,
-								message('answer-1', 'assistant', partial + ' Keep mismatches explicit.')
-							],
-							response: {
-								...snapshot,
-								sequence: 3,
-								status: 'completed',
-								message_id: null,
-								content: ''
-							}
-						}),
-						{ headers: { 'Content-Type': 'text/event-stream' } }
-					)
-				);
-			}
-			return fallback(input, init);
-		});
-		await send(question.content);
-		const answer = browserPage.getByTestId('assistant-message');
-		await expect.element(answer).toHaveTextContent(partial);
-		offline = true;
-		output.error(new TypeError('Connection lost'));
-		await expect.element(browserPage.getByTestId('research-recovery')).toHaveTextContent('Connection lost.');
-		expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
-		expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(1);
-		await expect.element(answer).toHaveTextContent(partial);
-		offline = false;
-		recovering = true;
-		await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
-		await expect.element(answer).toHaveTextContent('Keep mismatches explicit.');
-		await expect.element(answer).toHaveAttribute('data-message-id', 'answer-1');
-		await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-		expect(posts).toBe(1);
-	});
+							response: { ...snapshot, sequence: 2, content: partial }
+						})
+					);
+				}
+				if (path.endsWith('/events')) {
+					return Promise.resolve(
+						new Response(
+							event('trajectory', {
+								...trajectory,
+								running: false,
+								items: [
+									question,
+									message('answer-1', 'assistant', partial + ' Keep mismatches explicit.')
+								],
+								response: {
+									...snapshot,
+									sequence: 3,
+									status: 'completed',
+									message_id: null,
+									content: ''
+								}
+							}),
+							{ headers: { 'Content-Type': 'text/event-stream' } }
+						)
+					);
+				}
+				return fallback(input, init);
+			});
+			await send(question.content);
+			const answer = browserPage.getByTestId('assistant-message');
+			await expect.element(answer).toHaveTextContent(partial);
+			offline = true;
+			output.error(new TypeError('Connection lost'));
+			await expect
+				.element(browserPage.getByTestId('research-recovery'))
+				.toHaveTextContent('Connection lost.');
+			expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+			expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(1);
+			await expect.element(answer).toHaveTextContent(partial);
+			offline = false;
+			recovering = true;
+			await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
+			await expect.element(answer).toHaveTextContent('Keep mismatches explicit.');
+			await expect.element(answer).toHaveAttribute('data-message-id', 'answer-1');
+			await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(posts).toBe(1);
+		}
+	);
 
 	for (const embedded of [false, true]) {
 		it(`starts another session during generation and recovers the original (embedded=${embedded})`, async () => {
@@ -802,7 +1062,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
-					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 200, 'Request failed.');
+					return jsonResponse(
+						{ ...session, session_id: `chat_${++created}` },
+						200,
+						'Request failed.'
+					);
 				}
 				const id = path.split('/')[4];
 				if (!path.endsWith('/messages')) return jsonResponse({ ...session, session_id: id });
@@ -1001,187 +1265,343 @@ describe('collections/[id]/assistant Research Agent', () => {
 		}
 	);
 
-	it.each([false, true])('shows the generated title after the first answer and reload (embedded=%s)', async (embedded) => {
-		let title: string | null = null;
-		const generatedTitle = 'IN718 process and ductility';
-		let completed = false;
-		let titleReads = 0;
-		const question = message('title-question', 'user', 'How should we compare IN718 process parameters and elongation?');
-		const answer = message('title-answer', 'assistant', 'Check density and tensile conditions separately.');
-		installApi({
-			trajectory: { items: [question, answer], feedback: [], pending_approval: null },
-			messageTurn: { status: 'completed', completion_reason: 'model_answer', warnings: [], messages: [question, answer], pending_approval: null, error_code: null }
-		});
-		const original = fetchMock.getMockImplementation()!;
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/chat-sessions' && method === 'GET')
-				return Promise.resolve(jsonResponse({ items: [{ ...session, title }], limit: 10, offset: 0 }));
-			if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET') {
-				if (completed && ++titleReads >= 2) title = generatedTitle;
-				return Promise.resolve(jsonResponse({ ...session, title }));
-			}
-			if (path.endsWith('/messages') && method === 'POST') completed = true;
-			return original(input, init);
-		});
-		let view = render(Conversation, { embedded });
-		const composer = browserPage.getByLabelText('Message', { exact: true });
-		await expect.element(composer).toBeEnabled();
-		await send(question.content, composer);
-		await vi.waitFor(() => expect(document.querySelector(embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2')?.textContent).toContain(generatedTitle), { timeout: 5000 });
-		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
-		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
-		await expect.element(browserPage.getByRole('button', { name: /IN718 process and ductility/ }).first()).toBeVisible();
-		await view.unmount();
-		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
-		view = render(Conversation, { embedded });
-		await expect.element(composer).toBeEnabled();
-		await vi.waitFor(() => expect(document.querySelector(embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2')?.textContent).toContain(generatedTitle));
-	});
-
-	it.each([false, true])('renames, reloads and continues a conversation without losing its title (embedded=%s)', async (embedded) => {
-		const saved = { ...session, title: null as string | null, is_pinned: false };
-		const question = { message_id: 'msg_title', session_id: session.session_id, role: 'user' as const, content: 'Original research question', created_at: createdAt, tool_call_id: null, tool_calls: [], tool_result: null, source_contexts: [] };
-		installApi({ trajectory: {items: [question], feedback: [], pending_approval: null}, messageTurn: {status: 'completed', completion_reason:'model_answer', warnings:[], messages:[question], pending_approval:null, error_code:null} });
-		const original = fetchMock.getMockImplementation()!;
-		let fail = true;
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if(path.endsWith('/chat_1/title')) {
-				expect(method).toBe('PUT');
-				if(fail) return Promise.resolve(jsonResponse({}, 200000, 'Save unavailable'));
-				saved.title = JSON.parse(String(init?.body)).title;
-				return Promise.resolve(jsonResponse(saved));
-			}
-			if(path === '/api/v1/chat-sessions' && method==='GET') return Promise.resolve(jsonResponse({items:[{...saved, title:saved.title || question.content}],limit:10,offset:0}));
-			if(path === '/api/v1/chat-sessions/chat_1' && method==='GET') return Promise.resolve(jsonResponse(saved));
-			return original(input,init);
-		});
-		let view = render(Conversation, {embedded});
-		const openHistory = async () => {
-			await expect.element(browserPage.getByLabelText('Message',{exact:true})).toBeEnabled();
-			if(embedded) await browserPage.getByRole('button',{name:'Conversation history',exact:true}).click();
-			else if(window.innerWidth <= 820) await browserPage.getByRole('button',{name:'Show history',exact:true}).click();
-		};
-		await openHistory();
-		await browserPage.getByRole('button',{name:'Rename conversation',exact:true}).click();
-		const input = browserPage.getByLabelText('Conversation title',{exact:true});
-		await input.fill(' ');
-		await expect.element(browserPage.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
-		await input.fill('x'.repeat(161));
-		await expect.element(browserPage.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
-		await input.fill('Cancelled title');
-		await browserPage.getByRole('button',{name:'Cancel',exact:true}).click();
-		expect(saved.title).toBeNull();
-		await browserPage.getByRole('button',{name:'Rename conversation',exact:true}).click();
-		await input.fill('IN718 ductility comparison');
-		await browserPage.getByRole('button',{name:'Save',exact:true}).click();
-		await expect.element(browserPage.getByRole('alert').filter({hasText:'The request could not be completed'})).toBeInTheDocument();
-		await expect.element(input).toHaveValue('IN718 ductility comparison');
-		fail = false;
-		await browserPage.getByRole('button',{name:'Save',exact:true}).click();
-		await vi.waitFor(() => expect(document.querySelector('dialog')?.hasAttribute('open')).toBe(false));
-		expect(saved.title).toBe('IN718 ductility comparison');
-		await view.unmount();
-		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
-		view = render(Conversation, {embedded});
-		await openHistory();
-		await expect.element(browserPage.getByRole('button',{name:/IN718 ductility comparison/}).first()).toBeInTheDocument();
-		await browserPage.getByLabelText('Message',{exact:true}).fill('Continue comparison');
-		await browserPage.getByRole('button',{name:'Send',exact:true}).click();
-		await expect.element(browserPage.getByLabelText('Message',{exact:true})).toBeEnabled();
-		await vi.waitFor(()=>expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].title).toBe('IN718 ductility comparison'));
-	});
-
-	it.each([false, true])('pins and unpins history without switching the conversation (embedded=%s)', async (embedded) => {
-		const old = { ...session, session_id: 'chat_old', title: 'Compare LPBF conditions',
-			updated_at: '2026-08-19T07:00:00+00:00', is_pinned: false };
-		installApi();
-		const original = fetchMock.getMockImplementation()!;
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
-				return Promise.resolve(jsonResponse({ items: old.is_pinned ? [old, session] : [session, old], limit: 12, offset: 0 }));
-			}
-			if (path === '/api/v1/chat-sessions/chat_old/pin') {
-				expect(requestMethod(input, init)).toBe('PUT');
-				old.is_pinned = JSON.parse(String(init?.body)).is_pinned;
-				return Promise.resolve(jsonResponse(old));
-			}
-			return original(input, init);
-		});
-		const view = render(Conversation, { embedded });
-		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
-		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
-		const row = () => Array.from(document.querySelectorAll(embedded ? '.embedded-history-item' : '.history-item'))
-			.find((element) => element.textContent?.includes(old.title))!;
-		await vi.waitFor(() => expect(row()).toBeDefined());
-		await userEvent.click(row().querySelector('button[aria-label="Pin conversation"]')!);
-		await vi.waitFor(() => expect(row().querySelector('button[aria-label="Unpin conversation"]')).not.toBeNull());
-		const readCache = () => JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!);
-		expect(readCache()[0]).toMatchObject({ session_id: 'chat_old', is_pinned: true });
-		expect(localStorage.getItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`)).toBe('chat_1');
-		// Reload from the server with an empty presentation cache, as on a second browser.
-		await view.unmount();
-		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
-		render(Conversation, { embedded });
-		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
-		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
-		await vi.waitFor(() => expect(row().querySelector('button[aria-label="Unpin conversation"]')).not.toBeNull());
-		await userEvent.click(row().querySelector('button[aria-label="Unpin conversation"]')!);
-		await vi.waitFor(() => expect(readCache().at(-1)).toMatchObject({ session_id: 'chat_old', is_pinned: false }));
-		expect(fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_old/messages'))).toBe(false);
-	});
-
-	it.each([false, true])('loads only the next ten history entries when scrolling (embedded=%s)', async (embedded) => {
-		const items = [session, ...Array.from({ length: 24 }, (_, index) => ({
-			...session, session_id: `chat_older_${index}`, title: `Comparison ${index}`,
-			updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString()
-		}))];
-		const offsets: number[] = [];
-		let failNextPage = true;
-		installApi();
-		const original = fetchMock.getMockImplementation()!;
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
-				const url = new URL(String(input), 'http://localhost');
-				const limit = Number(url.searchParams.get('limit'));
-				const offset = Number(url.searchParams.get('offset') ?? 0);
-				expect(limit).toBe(10);
-				offsets.push(offset);
-				if (offset === 10 && failNextPage) {
-					failNextPage = false;
-					return Promise.resolve(jsonResponse({}, 200205, 'History temporarily unavailable'));
+	it.each([false, true])(
+		'shows the generated title after the first answer and reload (embedded=%s)',
+		async (embedded) => {
+			let title: string | null = null;
+			const generatedTitle = 'IN718 process and ductility';
+			let completed = false;
+			let titleReads = 0;
+			const question = message(
+				'title-question',
+				'user',
+				'How should we compare IN718 process parameters and elongation?'
+			);
+			const answer = message(
+				'title-answer',
+				'assistant',
+				'Check density and tensile conditions separately.'
+			);
+			installApi({
+				trajectory: { items: [question, answer], feedback: [], pending_approval: null },
+				messageTurn: {
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [question, answer],
+					pending_approval: null,
+					error_code: null
 				}
-				return Promise.resolve(jsonResponse({ items: items.slice(offset, offset + limit), limit, offset }));
-			}
-			return original(input, init);
-		});
-		render(Conversation, { embedded });
-		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
-		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
-		const container = document.querySelector(embedded ? '.embedded-history' : '.history-list') as HTMLElement;
-		const rowCount = () => container.querySelectorAll(embedded ? '.embedded-history-item' : '.history-item').length;
-		await vi.waitFor(() => expect(rowCount()).toBe(10));
-		container.scrollTop = container.scrollHeight;
-		container.dispatchEvent(new Event('scroll'));
-		await expect.element(browserPage.getByText('History temporarily unavailable', { exact: true })).toBeVisible();
-		expect(rowCount()).toBe(10);
-		await browserPage.getByRole('button', { name: 'Load more conversations', exact: true }).click();
-		await vi.waitFor(() => expect(rowCount()).toBe(20));
-		container.scrollTop = container.scrollHeight;
-		container.dispatchEvent(new Event('scroll'));
-		await vi.waitFor(() => expect(rowCount()).toBe(25));
-		expect(new Set(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).map((item: { session_id: string }) => item.session_id)).size).toBe(25);
-		expect(offsets).toContain(10);
-		expect(offsets).toContain(20);
-		expect(container.querySelector('button[aria-label="Load more conversations"]')).toBeNull();
-	});
+			});
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				const method = requestMethod(input, init);
+				if (path === '/api/v1/chat-sessions' && method === 'GET')
+					return Promise.resolve(
+						jsonResponse({ items: [{ ...session, title }], limit: 10, offset: 0 })
+					);
+				if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET') {
+					if (completed && ++titleReads >= 2) title = generatedTitle;
+					return Promise.resolve(jsonResponse({ ...session, title }));
+				}
+				if (path.endsWith('/messages') && method === 'POST') completed = true;
+				return original(input, init);
+			});
+			let view = render(Conversation, { embedded });
+			const composer = browserPage.getByLabelText('Message', { exact: true });
+			await expect.element(composer).toBeEnabled();
+			await send(question.content, composer);
+			await vi.waitFor(
+				() =>
+					expect(
+						document.querySelector(
+							embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2'
+						)?.textContent
+					).toContain(generatedTitle),
+				{ timeout: 5000 }
+			);
+			if (embedded)
+				await browserPage
+					.getByRole('button', { name: 'Conversation history', exact: true })
+					.click();
+			else if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			await expect
+				.element(browserPage.getByRole('button', { name: /IN718 process and ductility/ }).first())
+				.toBeVisible();
+			await view.unmount();
+			localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+			view = render(Conversation, { embedded });
+			await expect.element(composer).toBeEnabled();
+			await vi.waitFor(() =>
+				expect(
+					document.querySelector(
+						embedded ? '.embedded-toolbar > span[title]' : '.conversation-header h2'
+					)?.textContent
+				).toContain(generatedTitle)
+			);
+		}
+	);
+
+	it.each([false, true])(
+		'renames, reloads and continues a conversation without losing its title (embedded=%s)',
+		async (embedded) => {
+			const saved = { ...session, title: null as string | null, is_pinned: false };
+			const question = {
+				message_id: 'msg_title',
+				session_id: session.session_id,
+				role: 'user' as const,
+				content: 'Original research question',
+				created_at: createdAt,
+				tool_call_id: null,
+				tool_calls: [],
+				tool_result: null,
+				source_contexts: []
+			};
+			installApi({
+				trajectory: { items: [question], feedback: [], pending_approval: null },
+				messageTurn: {
+					status: 'completed',
+					completion_reason: 'model_answer',
+					warnings: [],
+					messages: [question],
+					pending_approval: null,
+					error_code: null
+				}
+			});
+			const original = fetchMock.getMockImplementation()!;
+			let fail = true;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				const method = requestMethod(input, init);
+				if (path.endsWith('/chat_1/title')) {
+					expect(method).toBe('PUT');
+					if (fail) return Promise.resolve(jsonResponse({}, 200000, 'Save unavailable'));
+					saved.title = JSON.parse(String(init?.body)).title;
+					return Promise.resolve(jsonResponse(saved));
+				}
+				if (path === '/api/v1/chat-sessions' && method === 'GET')
+					return Promise.resolve(
+						jsonResponse({
+							items: [{ ...saved, title: saved.title || question.content }],
+							limit: 10,
+							offset: 0
+						})
+					);
+				if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET')
+					return Promise.resolve(jsonResponse(saved));
+				return original(input, init);
+			});
+			let view = render(Conversation, { embedded });
+			const openHistory = async () => {
+				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+				if (embedded)
+					await browserPage
+						.getByRole('button', { name: 'Conversation history', exact: true })
+						.click();
+				else if (window.innerWidth <= 820)
+					await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			};
+			await openHistory();
+			await browserPage.getByRole('button', { name: 'Rename conversation', exact: true }).click();
+			const input = browserPage.getByLabelText('Conversation title', { exact: true });
+			await input.fill(' ');
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Save', exact: true }))
+				.toBeDisabled();
+			await input.fill('x'.repeat(161));
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Save', exact: true }))
+				.toBeDisabled();
+			await input.fill('Cancelled title');
+			await browserPage.getByRole('button', { name: 'Cancel', exact: true }).click();
+			expect(saved.title).toBeNull();
+			await browserPage.getByRole('button', { name: 'Rename conversation', exact: true }).click();
+			await input.fill('IN718 ductility comparison');
+			await browserPage.getByRole('button', { name: 'Save', exact: true }).click();
+			await expect
+				.element(
+					browserPage.getByRole('alert').filter({ hasText: 'The request could not be completed' })
+				)
+				.toBeInTheDocument();
+			await expect.element(input).toHaveValue('IN718 ductility comparison');
+			fail = false;
+			await browserPage.getByRole('button', { name: 'Save', exact: true }).click();
+			await vi.waitFor(() =>
+				expect(document.querySelector('dialog')?.hasAttribute('open')).toBe(false)
+			);
+			expect(saved.title).toBe('IN718 ductility comparison');
+			await view.unmount();
+			localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+			view = render(Conversation, { embedded });
+			await openHistory();
+			await expect
+				.element(browserPage.getByRole('button', { name: /IN718 ductility comparison/ }).first())
+				.toBeInTheDocument();
+			await browserPage.getByLabelText('Message', { exact: true }).fill('Continue comparison');
+			await browserPage.getByRole('button', { name: 'Send', exact: true }).click();
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].title
+				).toBe('IN718 ductility comparison')
+			);
+		}
+	);
+
+	it.each([false, true])(
+		'pins and unpins history without switching the conversation (embedded=%s)',
+		async (embedded) => {
+			const old = {
+				...session,
+				session_id: 'chat_old',
+				title: 'Compare LPBF conditions',
+				updated_at: '2026-08-19T07:00:00+00:00',
+				is_pinned: false
+			};
+			installApi();
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+					return Promise.resolve(
+						jsonResponse({
+							items: old.is_pinned ? [old, session] : [session, old],
+							limit: 12,
+							offset: 0
+						})
+					);
+				}
+				if (path === '/api/v1/chat-sessions/chat_old/pin') {
+					expect(requestMethod(input, init)).toBe('PUT');
+					old.is_pinned = JSON.parse(String(init?.body)).is_pinned;
+					return Promise.resolve(jsonResponse(old));
+				}
+				return original(input, init);
+			});
+			const view = render(Conversation, { embedded });
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			if (embedded)
+				await browserPage
+					.getByRole('button', { name: 'Conversation history', exact: true })
+					.click();
+			else if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			const row = () =>
+				Array.from(
+					document.querySelectorAll(embedded ? '.embedded-history-item' : '.history-item')
+				).find((element) => element.textContent?.includes(old.title))!;
+			await vi.waitFor(() => expect(row()).toBeDefined());
+			await userEvent.click(row().querySelector('button[aria-label="Pin conversation"]')!);
+			await vi.waitFor(() =>
+				expect(row().querySelector('button[aria-label="Unpin conversation"]')).not.toBeNull()
+			);
+			const readCache = () =>
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!);
+			expect(readCache()[0]).toMatchObject({ session_id: 'chat_old', is_pinned: true });
+			expect(
+				localStorage.getItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`)
+			).toBe('chat_1');
+			// Reload from the server with an empty presentation cache, as on a second browser.
+			await view.unmount();
+			localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+			render(Conversation, { embedded });
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			if (embedded)
+				await browserPage
+					.getByRole('button', { name: 'Conversation history', exact: true })
+					.click();
+			else if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			await vi.waitFor(() =>
+				expect(row().querySelector('button[aria-label="Unpin conversation"]')).not.toBeNull()
+			);
+			await userEvent.click(row().querySelector('button[aria-label="Unpin conversation"]')!);
+			await vi.waitFor(() =>
+				expect(readCache().at(-1)).toMatchObject({ session_id: 'chat_old', is_pinned: false })
+			);
+			expect(
+				fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_old/messages'))
+			).toBe(false);
+		}
+	);
+
+	it.each([false, true])(
+		'loads only the next ten history entries when scrolling (embedded=%s)',
+		async (embedded) => {
+			const items = [
+				session,
+				...Array.from({ length: 24 }, (_, index) => ({
+					...session,
+					session_id: `chat_older_${index}`,
+					title: `Comparison ${index}`,
+					updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString()
+				}))
+			];
+			const offsets: number[] = [];
+			let failNextPage = true;
+			installApi();
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (
+					requestPath(input) === '/api/v1/chat-sessions' &&
+					requestMethod(input, init) === 'GET'
+				) {
+					const url = new URL(String(input), 'http://localhost');
+					const limit = Number(url.searchParams.get('limit'));
+					const offset = Number(url.searchParams.get('offset') ?? 0);
+					expect(limit).toBe(10);
+					offsets.push(offset);
+					if (offset === 10 && failNextPage) {
+						failNextPage = false;
+						return Promise.resolve(jsonResponse({}, 200205, 'History temporarily unavailable'));
+					}
+					return Promise.resolve(
+						jsonResponse({ items: items.slice(offset, offset + limit), limit, offset })
+					);
+				}
+				return original(input, init);
+			});
+			render(Conversation, { embedded });
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			if (embedded)
+				await browserPage
+					.getByRole('button', { name: 'Conversation history', exact: true })
+					.click();
+			else if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			const container = document.querySelector(
+				embedded ? '.embedded-history' : '.history-list'
+			) as HTMLElement;
+			const rowCount = () =>
+				container.querySelectorAll(embedded ? '.embedded-history-item' : '.history-item').length;
+			await vi.waitFor(() => expect(rowCount()).toBe(10));
+			container.scrollTop = container.scrollHeight;
+			container.dispatchEvent(new Event('scroll'));
+			await expect
+				.element(browserPage.getByText('History temporarily unavailable', { exact: true }))
+				.toBeVisible();
+			expect(rowCount()).toBe(10);
+			await browserPage
+				.getByRole('button', { name: 'Load more conversations', exact: true })
+				.click();
+			await vi.waitFor(() => expect(rowCount()).toBe(20));
+			container.scrollTop = container.scrollHeight;
+			container.dispatchEvent(new Event('scroll'));
+			await vi.waitFor(() => expect(rowCount()).toBe(25));
+			expect(
+				new Set(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).map(
+						(item: { session_id: string }) => item.session_id
+					)
+				).size
+			).toBe(25);
+			expect(offsets).toContain(10);
+			expect(offsets).toContain(20);
+			expect(container.querySelector('button[aria-label="Load more conversations"]')).toBeNull();
+		}
+	);
 
 	it('keeps history unchanged and permits retry after a pin request fails', async () => {
 		installApi();
@@ -1189,21 +1609,41 @@ describe('collections/[id]/assistant Research Agent', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
 			requestPath(input).endsWith('/pin')
 				? Promise.resolve(jsonResponse({}, 200000, 'Pin could not be saved'))
-				: original(input, init));
+				: original(input, init)
+		);
 		await renderReady();
-		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		if (window.innerWidth <= 820)
+			await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
 		await browserPage.getByRole('button', { name: 'Pin conversation', exact: true }).click();
-		await expect.element(browserPage.getByText('The request could not be completed. Please try again.', { exact: true })).toBeVisible();
-		await expect.element(browserPage.getByRole('button', { name: 'Pin conversation', exact: true })).toBeEnabled();
-		expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].is_pinned).toBe(false);
+		await expect
+			.element(
+				browserPage.getByText('The request could not be completed. Please try again.', {
+					exact: true
+				})
+			)
+			.toBeVisible();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Pin conversation', exact: true }))
+			.toBeEnabled();
+		expect(
+			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].is_pinned
+		).toBe(false);
 	});
 
 	it('rechecks page boundaries after unpinning when the first refresh fails', async () => {
-		const old = { ...session, session_id: 'chat_old', title: 'Pinned old comparison',
-			is_pinned: true, updated_at: '2026-08-18T08:00:00+00:00' };
-		const others = Array.from({ length: 20 }, (_, index) => ({ ...session,
-			session_id: `comparison_${index}`, title: `Comparison ${index}`,
-			updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString() }));
+		const old = {
+			...session,
+			session_id: 'chat_old',
+			title: 'Pinned old comparison',
+			is_pinned: true,
+			updated_at: '2026-08-18T08:00:00+00:00'
+		};
+		const others = Array.from({ length: 20 }, (_, index) => ({
+			...session,
+			session_id: `comparison_${index}`,
+			title: `Comparison ${index}`,
+			updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString()
+		}));
 		let failRefresh = false;
 		installApi();
 		const original = fetchMock.getMockImplementation()!;
@@ -1219,26 +1659,44 @@ describe('collections/[id]/assistant Research Agent', () => {
 					failRefresh = false;
 					return Promise.resolve(jsonResponse({}, 200205, 'Request failed.'));
 				}
-				const offset = Number(new URL(String(input), 'http://localhost').searchParams.get('offset') ?? 0);
+				const offset = Number(
+					new URL(String(input), 'http://localhost').searchParams.get('offset') ?? 0
+				);
 				const ordered = old.is_pinned ? [old, session, ...others] : [session, ...others, old];
-				return Promise.resolve(jsonResponse({ items: ordered.slice(offset, offset + 10), limit: 10, offset }));
+				return Promise.resolve(
+					jsonResponse({ items: ordered.slice(offset, offset + 10), limit: 10, offset })
+				);
 			}
 			return original(input, init);
 		});
 		await renderReady();
-		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		if (window.innerWidth <= 820)
+			await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
 		await browserPage.getByRole('button', { name: 'Unpin conversation', exact: true }).click();
-		await expect.element(browserPage.getByRole('button', { name: 'Load more conversations', exact: true })).toBeEnabled();
-		(document.querySelector('button[aria-label="Load more conversations"]') as HTMLButtonElement).click();
-		const readIds = () => JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
-			.map((item: { session_id: string }) => item.session_id);
-		await vi.waitFor(() => expect(readIds()).toEqual([session, ...others].slice(0, 20).map((item) => item.session_id)));
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Load more conversations', exact: true }))
+			.toBeEnabled();
+		(
+			document.querySelector('button[aria-label="Load more conversations"]') as HTMLButtonElement
+		).click();
+		const readIds = () =>
+			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).map(
+				(item: { session_id: string }) => item.session_id
+			);
+		await vi.waitFor(() =>
+			expect(readIds()).toEqual([session, ...others].slice(0, 20).map((item) => item.session_id))
+		);
 	});
 
 	it.each(['pin', 'page'])('ignores a late history %s response after logout', async (operation) => {
-		const items = [session, ...Array.from({ length: 9 }, (_, index) => ({
-			...session, session_id: `chat_${index + 2}`, title: `Comparison ${index}`
-		}))];
+		const items = [
+			session,
+			...Array.from({ length: 9 }, (_, index) => ({
+				...session,
+				session_id: `chat_${index + 2}`,
+				title: `Comparison ${index}`
+			}))
+		];
 		installApi();
 		const original = fetchMock.getMockImplementation()!;
 		let finish!: (response: Response) => void;
@@ -1248,7 +1706,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 			if (path.endsWith('/user-api/v1/logout')) return Promise.resolve(jsonResponse({}));
 			if (path.endsWith('/pin') || String(input).includes('offset=10')) {
 				pendingSignal = init?.signal;
-				return new Promise<Response>((resolve) => { finish = resolve; });
+				return new Promise<Response>((resolve) => {
+					finish = resolve;
+				});
 			}
 			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
 				return Promise.resolve(jsonResponse({ items, limit: 10, offset: 0 }));
@@ -1256,18 +1716,32 @@ describe('collections/[id]/assistant Research Agent', () => {
 			return original(input, init);
 		});
 		await renderReady();
-		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		if (window.innerWidth <= 820)
+			await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
 		if (operation === 'pin') {
-			const firstPin = document.querySelector('.history-item button[aria-label="Pin conversation"]')!;
+			const firstPin = document.querySelector(
+				'.history-item button[aria-label="Pin conversation"]'
+			)!;
 			await userEvent.click(firstPin);
 		} else {
-			(document.querySelector('button[aria-label="Load more conversations"]') as HTMLButtonElement).click();
+			(
+				document.querySelector('button[aria-label="Load more conversations"]') as HTMLButtonElement
+			).click();
 		}
 		await vi.waitFor(() => expect(finish).toBeDefined());
 		await logout();
 		expect(pendingSignal?.aborted).toBe(true);
-		finish(jsonResponse(operation === 'pin' ? { ...session, is_pinned: true }
-			: { items: [{ ...session, session_id: 'private_late', title: 'Private late comparison' }], limit: 10, offset: 10 }));
+		finish(
+			jsonResponse(
+				operation === 'pin'
+					? { ...session, is_pinned: true }
+					: {
+							items: [{ ...session, session_id: 'private_late', title: 'Private late comparison' }],
+							limit: 10,
+							offset: 10
+						}
+			)
+		);
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 		expect(document.querySelectorAll('.history-item')).toHaveLength(0);
 		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBeNull();
@@ -1287,7 +1761,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 						return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
 					}
 					if (requestMethod(input, init) === 'POST') {
-						return new Promise<Response>((resolve) => { finishCreation = resolve; });
+						return new Promise<Response>((resolve) => {
+							finishCreation = resolve;
+						});
 					}
 				}
 				return original(input, init);
@@ -1297,8 +1773,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 			expect(historyRequested).toBe(true);
 			finishCreation!(jsonResponse(session, 200, 'Request failed.'));
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
-			expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!))
-				.toEqual([expect.objectContaining({ session_id: session.session_id })]);
+			expect(
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+			).toEqual([expect.objectContaining({ session_id: session.session_id })]);
 		}
 	);
 
@@ -1367,8 +1844,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 			await refresh();
 			await vi.waitFor(() =>
 				expect(
-					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
-						.find((item: { session_id: string }) => item.session_id === remote.session_id).status
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).find(
+						(item: { session_id: string }) => item.session_id === remote.session_id
+					).status
 				).toBe('running')
 			);
 			if (trigger === 'embedded history') await refresh();
@@ -1404,10 +1882,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await renderReady();
 		expect(
 			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
-		).toEqual(expect.arrayContaining([
-			expect.objectContaining({ session_id: session.session_id }),
-			expect.objectContaining({ session_id: cached.session_id, title: cached.title })
-		]));
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ session_id: session.session_id }),
+				expect.objectContaining({ session_id: cached.session_id, title: cached.title })
+			])
+		);
 	});
 
 	it('explains why a conversation with saved versions cannot be deleted', async () => {
@@ -1502,7 +1982,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 				readFails = true;
 				await browserPage.getByRole('button', { name: 'Check result', exact: true }).click();
 				await expect
-					.element(browserPage.getByText('Connection lost. The background task may still be running. Check the saved result before sending again.', { exact: true }))
+					.element(
+						browserPage.getByText(
+							'Connection lost. The background task may still be running. Check the saved result before sending again.',
+							{ exact: true }
+						)
+					)
 					.toBeVisible();
 				await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 				readFails = false;
@@ -1674,7 +2159,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 		async (available) => {
 			const file = new File(['%PDF-1.7'], 'LPBF-study.pdf', { type: 'application/pdf' });
 			let stored = false;
-			const preparation = vi.fn((id: string) => jsonResponse(queuedPreparation(id), 200, 'Request failed.'));
+			const preparation = vi.fn((id: string) =>
+				jsonResponse(queuedPreparation(id), 200, 'Request failed.')
+			);
 			installApi({
 				uploadDocument: () => {
 					if (!stored) {
@@ -1755,7 +2242,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 					requestBody(input, init)?.collection_id === 'col_456'
 				)
 					return Promise.resolve(
-						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' }, 200, 'Request failed.')
+						jsonResponse(
+							{ ...session, session_id: 'chat_2', collection_id: 'col_456' },
+							200,
+							'Request failed.'
+						)
 					);
 				if (path.endsWith('/messages') && requestMethod(input, init) === 'POST')
 					return Promise.resolve(
@@ -1944,7 +2435,13 @@ describe('collections/[id]/assistant Research Agent', () => {
 				if (requestPath(input) === '/api/v1/chat-sessions/chat_1' && unavailable)
 					return failure === 'offline'
 						? Promise.reject(new TypeError('Failed to fetch'))
-						: Promise.resolve(jsonResponse({}, ({ 403: 200203, 503: 200205 } as const)[failure], 'Temporarily unavailable'));
+						: Promise.resolve(
+								jsonResponse(
+									{},
+									({ 403: 200203, 503: 200205 } as const)[failure],
+									'Temporarily unavailable'
+								)
+							);
 				return original(input, init);
 			});
 			render(Page);
@@ -2009,11 +2506,17 @@ describe('collections/[id]/assistant Research Agent', () => {
 			if (path.endsWith('/user-api/v1/logout')) return Promise.resolve(jsonResponse({}));
 			if (path.endsWith('/user-api/v1/login'))
 				return Promise.resolve(
-					new Response(JSON.stringify({ user_id: 'researcher_2', email: 'second@example.test' }), {headers: {'Content-Type': 'application/json'}})
+					new Response(JSON.stringify({ user_id: 'researcher_2', email: 'second@example.test' }), {
+						headers: { 'Content-Type': 'application/json' }
+					})
 				);
 			if (path === '/api/v1/chat-sessions')
 				return Promise.resolve(
-					jsonResponse({ ...session, user_id: 'researcher_2', session_id: 'chat_2' }, 200, 'Request failed.')
+					jsonResponse(
+						{ ...session, user_id: 'researcher_2', session_id: 'chat_2' },
+						200,
+						'Request failed.'
+					)
 				);
 			return original(input, init);
 		});
@@ -2328,7 +2831,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('uploads PDF papers into the current collection and queues preparation outside Chat', async () => {
 		installApi({
 			uploadDocument: (file) => jsonResponse(uploadedDocument(file), 200, 'Request failed.'),
-			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
+			prepareDocument: (documentId) =>
+				jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
 		});
 		await renderReady();
 
@@ -2376,7 +2880,8 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			uploadDocument: () => uploadPending,
-			prepareDocument: (documentId) => jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
+			prepareDocument: (documentId) =>
+				jsonResponse(queuedPreparation(documentId), 200, 'Request failed.')
 		});
 		await renderReady();
 
@@ -2412,7 +2917,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 	it('marks a paper already in the collection without presenting it as a retryable failure', async () => {
 		installApi({
 			uploadDocument: () =>
-				jsonResponse({ code: 'document_content_already_exists' }, 200204, 'Document content already exists in this collection.')
+				jsonResponse(
+					{ code: 'document_content_already_exists' },
+					200204,
+					'Document content already exists in this collection.'
+				)
 		});
 		await renderReady();
 
@@ -2662,67 +3171,126 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 		expect(document.querySelector('[role="alert"]')).toBeNull();
 		await browserPage.getByRole('button', { name: 'Continue research', exact: true }).click();
-		expect(fetchMock.mock.calls.some(([input, init]) =>
-			requestMethod(input, init) === 'POST' &&
-			requestBody(input, init)?.message === 'Continue the unfinished research from the saved results, keeping my earlier constraints and deferred actions.'
-		)).toBe(true);
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestMethod(input, init) === 'POST' &&
+					requestBody(input, init)?.message ===
+						'Continue the unfinished research from the saved results, keeping my earlier constraints and deferred actions.'
+			)
+		).toBe(true);
 	});
 
 	it.each([
 		['completed', 'resource_budget', null, 'Run resource limit reached'],
-		['failed', null, 'model_unavailable', 'The model service is temporarily unavailable. Contact an administrator or try again later.']
-	] as const)('restores %s recovery without an execution plan or warnings', async (status, reason, errorCode, title) => {
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
-		installApi({ trajectory: {
-			items: [message('saved-question', 'user', 'Compare the papers')],
-			pending_approval: null, feedback: [],
-			response: {
-				response_id: 'saved-response', sequence: 2, started_at: createdAt, updated_at: createdAt,
-				status, completion_reason: reason, error_code: errorCode, warnings: [],
-				message_id: null, message_created_at: null, content: '', progress: { phase: 'waiting' }, checkpoint_message_id: 'saved-question'
-			}
-		} });
-		await renderReady();
-		await expect.element(browserPage.getByText(title, { exact: true })).toBeVisible();
-		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).toBeEnabled();
-	});
+		[
+			'failed',
+			null,
+			'model_unavailable',
+			'The model service is temporarily unavailable. Contact an administrator or try again later.'
+		]
+	] as const)(
+		'restores %s recovery without an execution plan or warnings',
+		async (status, reason, errorCode, title) => {
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			installApi({
+				trajectory: {
+					items: [message('saved-question', 'user', 'Compare the papers')],
+					pending_approval: null,
+					feedback: [],
+					response: {
+						response_id: 'saved-response',
+						sequence: 2,
+						started_at: createdAt,
+						updated_at: createdAt,
+						status,
+						completion_reason: reason,
+						error_code: errorCode,
+						warnings: [],
+						message_id: null,
+						message_created_at: null,
+						content: '',
+						progress: { phase: 'waiting' },
+						checkpoint_message_id: 'saved-question'
+					}
+				}
+			});
+			await renderReady();
+			await expect.element(browserPage.getByText(title, { exact: true })).toBeVisible();
+			await expect
+				.element(browserPage.getByRole('button', { name: 'Continue research' }))
+				.toBeEnabled();
+		}
+	);
 
 	it('does not label an ordinary answer with an auxiliary warning as resource exhaustion', async () => {
-		installApi({ messageTurn: {
-			status: 'completed', completion_reason: 'model_answer', error_code: null,
-			warnings: ['correction_signal_enqueue_failed'], pending_approval: null,
-			messages: [message('ordinary-answer', 'assistant', 'The comparison is complete.')]
-		} });
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				completion_reason: 'model_answer',
+				error_code: null,
+				warnings: ['correction_signal_enqueue_failed'],
+				pending_approval: null,
+				messages: [message('ordinary-answer', 'assistant', 'The comparison is complete.')]
+			}
+		});
 		await send('Compare the papers');
 		await expect.element(browserPage.getByText('The comparison is complete.')).toBeVisible();
-		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Run resource limit reached', { exact: true })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Continue research' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Run resource limit reached', { exact: true }))
+			.not.toBeInTheDocument();
 	});
 
 	for (const embedded of [false, true]) {
-		it.each([320, 768, 1024, 1440])(`keeps a failure and its action inside the conversation at %spx (embedded=${embedded})`, async (width) => {
-			await browserPage.viewport(width, 900);
-			try {
-				localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
-				installApi({ trajectory: {
-					items: [message('question', 'user', 'Compare the tensile conditions.')], feedback: [], pending_approval: null,
-					response: {
-						response_id: 'failed-response', sequence: 1, status: 'failed', error_code: 'provider_timeout',
-						started_at: createdAt, updated_at: createdAt, completion_reason: null, warnings: [],
-						content: 'The reported test temperatures differ.', message_id: 'partial', message_created_at: createdAt,
-						progress: { phase: 'terminal' }, checkpoint_message_id: 'question'
-					}
-				} });
-				render(Conversation, { embedded });
-				const notice = browserPage.getByTestId('turn-notice');
-				await expect.element(notice).toBeVisible();
-				await expect.element(notice.getByRole('button', { name: 'Continue research' })).toBeEnabled();
-				const bounds = notice.element().getBoundingClientRect();
-				expect(bounds.left).toBeGreaterThanOrEqual(0);
-				expect(bounds.right).toBeLessThanOrEqual(width);
-				expect(notice.element().scrollWidth).toBeLessThanOrEqual(Math.ceil(bounds.width));
-			} finally { await browserPage.viewport(1280, 720); }
-		});
+		it.each([320, 768, 1024, 1440])(
+			`keeps a failure and its action inside the conversation at %spx (embedded=${embedded})`,
+			async (width) => {
+				await browserPage.viewport(width, 900);
+				try {
+					localStorage.setItem(
+						`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`,
+						session.session_id
+					);
+					installApi({
+						trajectory: {
+							items: [message('question', 'user', 'Compare the tensile conditions.')],
+							feedback: [],
+							pending_approval: null,
+							response: {
+								response_id: 'failed-response',
+								sequence: 1,
+								status: 'failed',
+								error_code: 'provider_timeout',
+								started_at: createdAt,
+								updated_at: createdAt,
+								completion_reason: null,
+								warnings: [],
+								content: 'The reported test temperatures differ.',
+								message_id: 'partial',
+								message_created_at: createdAt,
+								progress: { phase: 'terminal' },
+								checkpoint_message_id: 'question'
+							}
+						}
+					});
+					render(Conversation, { embedded });
+					const notice = browserPage.getByTestId('turn-notice');
+					await expect.element(notice).toBeVisible();
+					await expect
+						.element(notice.getByRole('button', { name: 'Continue research' }))
+						.toBeEnabled();
+					const bounds = notice.element().getBoundingClientRect();
+					expect(bounds.left).toBeGreaterThanOrEqual(0);
+					expect(bounds.right).toBeLessThanOrEqual(width);
+					expect(notice.element().scrollWidth).toBeLessThanOrEqual(Math.ceil(bounds.width));
+				} finally {
+					await browserPage.viewport(1280, 720);
+				}
+			}
+		);
 
 		for (const locale of ['en', 'zh'] as const) {
 			it(`keeps session load failures in the conversation area (embedded=${embedded}, locale=${locale})`, async () => {
@@ -2731,96 +3299,170 @@ describe('collections/[id]/assistant Research Agent', () => {
 				const fallback = fetchMock.getMockImplementation()!;
 				let failed = true;
 				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-					if (failed && requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'POST')
+					if (
+						failed &&
+						requestPath(input) === '/api/v1/chat-sessions' &&
+						requestMethod(input, init) === 'POST'
+					)
 						return Promise.reject(new TypeError('Offline'));
 					return fallback(input, init);
 				});
 				render(Conversation, { embedded });
-				await expect.element(browserPage.getByRole('alert')).toHaveTextContent(locale === 'en' ? 'Conversation could not be loaded' : '对话加载失败');
+				await expect
+					.element(browserPage.getByRole('alert'))
+					.toHaveTextContent(locale === 'en' ? 'Conversation could not be loaded' : '对话加载失败');
 				expect(document.querySelector('.message-list [role="alert"]')).not.toBeNull();
 				expect(document.querySelector('.welcome-state')).toBeNull();
 				failed = false;
-				await browserPage.getByRole('button', { name: locale === 'en' ? 'Retry conversation' : '重试加载会话' }).click();
-				await expect.element(browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true })).toBeEnabled();
+				await browserPage
+					.getByRole('button', { name: locale === 'en' ? 'Retry conversation' : '重试加载会话' })
+					.click();
+				await expect
+					.element(
+						browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true })
+					)
+					.toBeEnabled();
 				await expect.element(browserPage.getByRole('alert')).not.toBeInTheDocument();
 			});
 
-			it.each([false, true])(`localizes a service failure before a snapshot exists (embedded=${embedded}, locale=${locale}, recovery unavailable=%s)`, async (unavailable) => {
-				language.set(locale);
-				installApi();
-				const fallback = fetchMock.getMockImplementation()!;
-				let submitted = false;
-				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-					if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
-						submitted = true;
-						return Promise.resolve(new Response('event: error\ndata: {"code":"provider_timeout","message":"Provider timeout details"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }));
-					}
-					if (submitted && unavailable && requestPath(input).endsWith('/messages'))
-						return Promise.reject(new TypeError('Offline'));
-					return fallback(input, init);
-				});
-				render(Conversation, { embedded });
-				const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true });
-				await expect.element(composer).toBeEnabled();
-				await composer.fill('Compare the tensile conditions.');
-				await browserPage.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true }).click();
-				await expect.element(browserPage.getByTestId(unavailable ? 'research-recovery' : 'turn-notice')).toHaveTextContent(locale === 'en' ? 'The model service timed out.' : '模型服务响应超时');
-				expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
-			});
+			it.each([false, true])(
+				`localizes a service failure before a snapshot exists (embedded=${embedded}, locale=${locale}, recovery unavailable=%s)`,
+				async (unavailable) => {
+					language.set(locale);
+					installApi();
+					const fallback = fetchMock.getMockImplementation()!;
+					let submitted = false;
+					fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+						if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST') {
+							submitted = true;
+							return Promise.resolve(
+								new Response(
+									'event: error\ndata: {"code":"provider_timeout","message":"Provider timeout details"}\n\n',
+									{ headers: { 'Content-Type': 'text/event-stream' } }
+								)
+							);
+						}
+						if (submitted && unavailable && requestPath(input).endsWith('/messages'))
+							return Promise.reject(new TypeError('Offline'));
+						return fallback(input, init);
+					});
+					render(Conversation, { embedded });
+					const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', {
+						exact: true
+					});
+					await expect.element(composer).toBeEnabled();
+					await composer.fill('Compare the tensile conditions.');
+					await browserPage
+						.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true })
+						.click();
+					await expect
+						.element(browserPage.getByTestId(unavailable ? 'research-recovery' : 'turn-notice'))
+						.toHaveTextContent(
+							locale === 'en' ? 'The model service timed out.' : '模型服务响应超时'
+						);
+					expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+				}
+			);
 
 			for (const restored of [false, true]) {
 				it.each([
 					['failed', 'provider_timeout', 'The model service timed out.', '模型服务响应超时'],
-					['failed', 'model_unavailable', 'The model service is temporarily unavailable.', '模型服务暂时不可用'],
+					[
+						'failed',
+						'model_unavailable',
+						'The model service is temporarily unavailable.',
+						'模型服务暂时不可用'
+					],
 					['interrupted', null, 'Generation was interrupted.', '回复生成已中断']
-				] as const)(`preserves the specific %s / %s reason (embedded=${embedded}, locale=${locale}, restored=${restored})`, async (status, errorCode, english, chinese) => {
-					language.set(locale);
-					if (restored) localStorage.setItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`, session.session_id);
-					const items = [
-						message('saved-question', 'user', 'Compare the tensile conditions.'),
-						message('unfinished-read', 'assistant', '', {
-							tool_calls: [{ tool_call_id: 'read-1', name: 'read_source', arguments: {}, position: 0 }]
-						})
-					];
-					const partial = 'The test temperatures have not yet been checked.';
-					const response: ChatResponseSnapshot = {
-						response_id: 'failed-response', sequence: 3, started_at: createdAt, updated_at: createdAt,
-						status, completion_reason: null, error_code: errorCode, warnings: [],
-						message_id: 'partial-answer', message_created_at: createdAt, content: partial,
-						progress: { phase: 'terminal' }, checkpoint_message_id: 'saved-question'
-					};
-					installApi({
-						trajectory: { items, pending_approval: null, feedback: [], response },
-						messageTurn: status === 'failed' ? {
-							status, completion_reason: null, error_code: errorCode, warnings: [],
-							pending_approval: null, messages: [...items, message('partial-answer', 'assistant', partial)]
-						} : undefined
-					});
-					if (!restored && status === 'interrupted') {
-						const fallback = fetchMock.getMockImplementation()!;
-						fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-							if (requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST')
-								return Promise.resolve(new Response(`event: snapshot\ndata: ${JSON.stringify(response)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } }));
-							return fallback(input, init);
+				] as const)(
+					`preserves the specific %s / %s reason (embedded=${embedded}, locale=${locale}, restored=${restored})`,
+					async (status, errorCode, english, chinese) => {
+						language.set(locale);
+						if (restored)
+							localStorage.setItem(
+								`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`,
+								session.session_id
+							);
+						const items = [
+							message('saved-question', 'user', 'Compare the tensile conditions.'),
+							message('unfinished-read', 'assistant', '', {
+								tool_calls: [
+									{ tool_call_id: 'read-1', name: 'read_source', arguments: {}, position: 0 }
+								]
+							})
+						];
+						const partial = 'The test temperatures have not yet been checked.';
+						const response: ChatResponseSnapshot = {
+							response_id: 'failed-response',
+							sequence: 3,
+							started_at: createdAt,
+							updated_at: createdAt,
+							status,
+							completion_reason: null,
+							error_code: errorCode,
+							warnings: [],
+							message_id: 'partial-answer',
+							message_created_at: createdAt,
+							content: partial,
+							progress: { phase: 'terminal' },
+							checkpoint_message_id: 'saved-question'
+						};
+						installApi({
+							trajectory: { items, pending_approval: null, feedback: [], response },
+							messageTurn:
+								status === 'failed'
+									? {
+											status,
+											completion_reason: null,
+											error_code: errorCode,
+											warnings: [],
+											pending_approval: null,
+											messages: [...items, message('partial-answer', 'assistant', partial)]
+										}
+									: undefined
 						});
+						if (!restored && status === 'interrupted') {
+							const fallback = fetchMock.getMockImplementation()!;
+							fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+								if (
+									requestPath(input).endsWith('/messages') &&
+									requestMethod(input, init) === 'POST'
+								)
+									return Promise.resolve(
+										new Response(`event: snapshot\ndata: ${JSON.stringify(response)}\n\n`, {
+											headers: { 'Content-Type': 'text/event-stream' }
+										})
+									);
+								return fallback(input, init);
+							});
+						}
+						render(Conversation, { embedded });
+						const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', {
+							exact: true
+						});
+						await expect.element(composer).toBeEnabled();
+						if (!restored) {
+							await composer.fill('Compare the tensile conditions.');
+							await browserPage
+								.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true })
+								.click();
+						}
+						const notice = browserPage.getByTestId('turn-notice');
+						await expect.element(notice).toHaveTextContent(locale === 'en' ? english : chinese);
+						await expect.element(browserPage.getByText(partial)).toBeVisible();
+						await expect
+							.element(
+								notice.getByRole('button', {
+									name: locale === 'en' ? 'Continue research' : '继续研究'
+								})
+							)
+							.toBeEnabled();
+						expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+						expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(0);
+						expect(notice.element().textContent).not.toContain('researchAgent.');
+						expect(document.querySelectorAll('.retained-results')).toHaveLength(1);
+						expect(document.querySelector('.message-list')!.contains(notice.element())).toBe(true);
 					}
-					render(Conversation, { embedded });
-					const composer = browserPage.getByLabelText(locale === 'en' ? 'Message' : '消息', { exact: true });
-					await expect.element(composer).toBeEnabled();
-					if (!restored) {
-						await composer.fill('Compare the tensile conditions.');
-						await browserPage.getByRole('button', { name: locale === 'en' ? 'Send' : '发送', exact: true }).click();
-					}
-					const notice = browserPage.getByTestId('turn-notice');
-					await expect.element(notice).toHaveTextContent(locale === 'en' ? english : chinese);
-					await expect.element(browserPage.getByText(partial)).toBeVisible();
-					await expect.element(notice.getByRole('button', { name: locale === 'en' ? 'Continue research' : '继续研究' })).toBeEnabled();
-					expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
-					expect(document.querySelectorAll('[data-testid="research-recovery"]')).toHaveLength(0);
-					expect(notice.element().textContent).not.toContain('researchAgent.');
-					expect(document.querySelectorAll('.retained-results')).toHaveLength(1);
-					expect(document.querySelector('.message-list')!.contains(notice.element())).toBe(true);
-				}
 				);
 			}
 		}
@@ -2862,52 +3504,93 @@ describe('collections/[id]/assistant Research Agent', () => {
 		['completed', 'waiting_for_clarification', 'Needs clarification'],
 		['completed', 'scientific_refusal', 'Insufficient support'],
 		['failed', 'technical_failure', 'Technical failure']
-	] as const)('keeps the %s / %s plan visible after the turn and after reopening', async (status, planStatus, label) => {
-		const pending = status === 'approval_required' ? pendingCall() : null;
-		const items = [message('plan-question', 'user', 'Compare the tensile conditions.')];
-		if (pending) {
-			items.push(message(pending.assistant_message_id, 'assistant', '', {
-				tool_calls: [{ tool_call_id: pending.tool_call_id, name: pending.name, arguments: pending.arguments, position: 0 }]
-			}));
-		} else {
-			items.push(message('plan-answer', 'assistant', 'The temperature must be specified for this comparison.'));
-		}
-		const executionPlan = {
-			plan_id: 'plan-1', plan_version: 4, status: planStatus,
-			steps: [{ step_id: 'temperature', action: 'Check the reported tensile temperature', status: 'blocked' as const }]
-		};
-		const turn: ChatTurn = {
-			status, completion_reason: status === 'completed' ? 'model_answer' : null,
-			warnings: [], messages: items, pending_approval: pending,
-			error_code: status === 'failed' ? 'permission_write_denied' : null,
-			execution_plan: executionPlan
-		};
-		installApi({ messageTurn: turn });
-		const screen = render(Page);
-		const composer = browserPage.getByLabelText('Message', { exact: true });
-		await expect.element(composer).toBeEnabled();
-		await send('Compare the tensile conditions.', composer);
-		const plan = browserPage.getByTestId('progress-plan');
-		await expect.element(plan).toHaveTextContent(label);
-		await expect.element(plan).toHaveTextContent('Check the reported tensile temperature');
-		expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
-		expect(document.querySelector('.progress-current')).toBeNull();
-		await screen.unmount();
-		installApi({ trajectory: {
-			items, pending_approval: pending, feedback: [],
-			response: {
-				response_id: 'response-plan', sequence: 5, started_at: createdAt, updated_at: createdAt,
-				status, message_id: null, message_created_at: null, content: '',
-				progress: { phase: 'terminal', execution_plan: executionPlan },
-				checkpoint_message_id: items.at(-1)!.message_id,
-				completion_reason: turn.completion_reason, error_code: turn.error_code, warnings: []
+	] as const)(
+		'keeps the %s / %s plan visible after the turn and after reopening',
+		async (status, planStatus, label) => {
+			const pending = status === 'approval_required' ? pendingCall() : null;
+			const items = [message('plan-question', 'user', 'Compare the tensile conditions.')];
+			if (pending) {
+				items.push(
+					message(pending.assistant_message_id, 'assistant', '', {
+						tool_calls: [
+							{
+								tool_call_id: pending.tool_call_id,
+								name: pending.name,
+								arguments: pending.arguments,
+								position: 0
+							}
+						]
+					})
+				);
+			} else {
+				items.push(
+					message(
+						'plan-answer',
+						'assistant',
+						'The temperature must be specified for this comparison.'
+					)
+				);
 			}
-		} });
-		render(Page);
-		await expect.element(plan).toHaveTextContent(label);
-		expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
-		expect(document.querySelector('.progress-current')).toBeNull();
-	});
+			const executionPlan = {
+				plan_id: 'plan-1',
+				plan_version: 4,
+				status: planStatus,
+				steps: [
+					{
+						step_id: 'temperature',
+						action: 'Check the reported tensile temperature',
+						status: 'blocked' as const
+					}
+				]
+			};
+			const turn: ChatTurn = {
+				status,
+				completion_reason: status === 'completed' ? 'model_answer' : null,
+				warnings: [],
+				messages: items,
+				pending_approval: pending,
+				error_code: status === 'failed' ? 'permission_write_denied' : null,
+				execution_plan: executionPlan
+			};
+			installApi({ messageTurn: turn });
+			const screen = render(Page);
+			const composer = browserPage.getByLabelText('Message', { exact: true });
+			await expect.element(composer).toBeEnabled();
+			await send('Compare the tensile conditions.', composer);
+			const plan = browserPage.getByTestId('progress-plan');
+			await expect.element(plan).toHaveTextContent(label);
+			await expect.element(plan).toHaveTextContent('Check the reported tensile temperature');
+			expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
+			expect(document.querySelector('.progress-current')).toBeNull();
+			await screen.unmount();
+			installApi({
+				trajectory: {
+					items,
+					pending_approval: pending,
+					feedback: [],
+					response: {
+						response_id: 'response-plan',
+						sequence: 5,
+						started_at: createdAt,
+						updated_at: createdAt,
+						status,
+						message_id: null,
+						message_created_at: null,
+						content: '',
+						progress: { phase: 'terminal', execution_plan: executionPlan },
+						checkpoint_message_id: items.at(-1)!.message_id,
+						completion_reason: turn.completion_reason,
+						error_code: turn.error_code,
+						warnings: []
+					}
+				}
+			});
+			render(Page);
+			await expect.element(plan).toHaveTextContent(label);
+			expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
+			expect(document.querySelector('.progress-current')).toBeNull();
+		}
+	);
 
 	it('shows assistant text before the persisted turn finishes streaming', async () => {
 		installApi({
@@ -3623,24 +4306,33 @@ describe('collections/[id]/assistant Research Agent', () => {
 								published: false,
 								requires_user_approval: true,
 								draft: {
-									experiments: [{
-										label: 'P150 tensile result',
-										scope_description: 'Reported elongation for the P150 condition.',
-										measurements: [{
-											measurement_key: 'elongation-p150', outcome: 'elongation',
-											value: 82, unit: '%', source_labels: ['S001']
-										}],
-										source_labels: ['S001']
-									}],
+									experiments: [
+										{
+											label: 'P150 tensile result',
+											scope_description: 'Reported elongation for the P150 condition.',
+											measurements: [
+												{
+													measurement_key: 'elongation-p150',
+													outcome: 'elongation',
+													value: 82,
+													unit: '%',
+													source_labels: ['S001']
+												}
+											],
+											source_labels: ['S001']
+										}
+									],
 									source_labels: ['S001'],
 									unresolved_issues: []
 								}
 							},
-							resource_refs: [{
-								resource_type: 'paper_experiment_draft',
-								resource_id: 'experiment_draft_1',
-								href: '/collections/col_123/documents/doc_1?view=paper-experiment-draft'
-							}]
+							resource_refs: [
+								{
+									resource_type: 'paper_experiment_draft',
+									resource_id: 'experiment_draft_1',
+									href: '/collections/col_123/documents/doc_1?view=paper-experiment-draft'
+								}
+							]
 						}
 					})
 				],
@@ -3672,7 +4364,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'PaperExperiment draft completed' }))
 			.toBeInTheDocument();
-		expect(document.querySelector('a[href="/collections/col_123/documents/doc_1?view=paper-experiment-draft"]')).not.toBeNull();
+		expect(
+			document.querySelector(
+				'a[href="/collections/col_123/documents/doc_1?view=paper-experiment-draft"]'
+			)
+		).not.toBeNull();
 	});
 
 	it('uses the research-plan approval boundary and wording', async () => {
@@ -3928,7 +4624,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('Finding authoring', { exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByText('evidence_1', { exact: true })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('evidence_1', { exact: true }))
+			.not.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -3949,85 +4647,131 @@ describe('collections/[id]/assistant Research Agent', () => {
 		});
 		installApi({
 			messageTurn: {
-				status: 'approval_required', completion_reason: null, warnings: [],
+				status: 'approval_required',
+				completion_reason: null,
+				warnings: [],
 				messages: [
 					message('msg_user_1', 'user', 'Save the reviewed paper experiment'),
 					message('msg_call_write', 'assistant', '', {
-						tool_calls: [{
-							tool_call_id: call.tool_call_id, name: call.name,
-							arguments: call.arguments, position: 0
-						}]
+						tool_calls: [
+							{
+								tool_call_id: call.tool_call_id,
+								name: call.name,
+								arguments: call.arguments,
+								position: 0
+							}
+						]
 					})
 				],
-				pending_approval: call, error_code: null
+				pending_approval: call,
+				error_code: null
 			}
 		});
 
 		await send('Save the reviewed paper experiment');
 
-		await expect.element(browserPage.getByText('PaperExperiment revision', { exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByText(
-			'Save the reviewed PaperExperiment revision and its Objective Selection. This creates no Finding.'
-		)).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Approve and save PaperExperiment revision' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('PaperExperiment revision', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Save the reviewed PaperExperiment revision and its Objective Selection. This creates no Finding.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByRole('button', { name: 'Approve and save PaperExperiment revision' })
+			)
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
-	it.each(['approved', 'rejected'] as const)('records the %s decision for an experiment revision', async (decision) => {
-		const call = pendingCall({
-			name: 'create_paper_experiment_revision',
-			arguments: { draft_id: 'experiment_draft_1', draft_digest: 'a'.repeat(64) }
-		});
-		installApi({
-			trajectory: {
-				feedback: [],
-				items: [message('msg_call_write', 'assistant', '', {
-					tool_calls: [{
-						tool_call_id: call.tool_call_id, name: call.name,
-						arguments: call.arguments, position: 0
-					}]
-				})],
-				pending_approval: call
-			},
-			decisionTurn: {
-				status: decision === 'approved' ? 'completed' : 'rejected',
-				completion_reason: decision === 'approved' ? 'model_answer' : null,
-				warnings: [], pending_approval: null, error_code: null,
-				messages: decision === 'approved' ? [
-					message('msg_result_write', 'tool', '', {
-						tool_call_id: call.tool_call_id,
-						tool_result: {
-							...baseToolResult(call.tool_call_id),
-							data: { selection_ids: ['selection_1'] },
-							resource_refs: [{
-								resource_type: 'document', resource_id: 'doc_1',
-								href: '/collections/col_123/documents/doc_1'
-							}]
-						}
-					}),
-					message('msg_final_write', 'assistant', 'The reviewed experiment revision was saved.')
-				] : []
-			}
-		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
-		render(Page);
+	it.each(['approved', 'rejected'] as const)(
+		'records the %s decision for an experiment revision',
+		async (decision) => {
+			const call = pendingCall({
+				name: 'create_paper_experiment_revision',
+				arguments: { draft_id: 'experiment_draft_1', draft_digest: 'a'.repeat(64) }
+			});
+			installApi({
+				trajectory: {
+					feedback: [],
+					items: [
+						message('msg_call_write', 'assistant', '', {
+							tool_calls: [
+								{
+									tool_call_id: call.tool_call_id,
+									name: call.name,
+									arguments: call.arguments,
+									position: 0
+								}
+							]
+						})
+					],
+					pending_approval: call
+				},
+				decisionTurn: {
+					status: decision === 'approved' ? 'completed' : 'rejected',
+					completion_reason: decision === 'approved' ? 'model_answer' : null,
+					warnings: [],
+					pending_approval: null,
+					error_code: null,
+					messages:
+						decision === 'approved'
+							? [
+									message('msg_result_write', 'tool', '', {
+										tool_call_id: call.tool_call_id,
+										tool_result: {
+											...baseToolResult(call.tool_call_id),
+											data: { selection_ids: ['selection_1'] },
+											resource_refs: [
+												{
+													resource_type: 'document',
+													resource_id: 'doc_1',
+													href: '/collections/col_123/documents/doc_1'
+												}
+											]
+										}
+									}),
+									message(
+										'msg_final_write',
+										'assistant',
+										'The reviewed experiment revision was saved.'
+									)
+								]
+							: []
+				}
+			});
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			render(Page);
 
-		await browserPage.getByRole('button', {
-			name: decision === 'approved' ? 'Approve and save PaperExperiment revision' : 'Reject'
-		}).click();
+			await browserPage
+				.getByRole('button', {
+					name: decision === 'approved' ? 'Approve and save PaperExperiment revision' : 'Reject'
+				})
+				.click();
 
-		await expect.element(browserPage.getByText(
-			decision === 'approved'
-				? 'The reviewed experiment revision was saved.'
-				: 'The PaperExperiment revision was not saved.'
-		)).toBeInTheDocument();
-		const decisionRequest = fetchMock.mock.calls.find(
-			([input, init]) => requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST'
-		);
-		expect(requestBody(decisionRequest![0], decisionRequest![1])).toEqual({
-			decision, arguments_digest: call.arguments_digest
-		});
-	});
+			await expect
+				.element(
+					browserPage.getByText(
+						decision === 'approved'
+							? 'The reviewed experiment revision was saved.'
+							: 'The PaperExperiment revision was not saved.'
+					)
+				)
+				.toBeInTheDocument();
+			const decisionRequest = fetchMock.mock.calls.find(
+				([input, init]) =>
+					requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST'
+			);
+			expect(requestBody(decisionRequest![0], decisionRequest![1])).toEqual({
+				decision,
+				arguments_digest: call.arguments_digest
+			});
+		}
+	);
 
 	it('presents evidence abstention without implying that a Finding will be created', async () => {
 		const call = pendingCall({
@@ -4500,7 +5244,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi();
 		fetchMock.mockImplementationOnce(() =>
 			Promise.resolve(
-				new Response(JSON.stringify({ user_id: session.user_id, email: 'researcher@example.test' }), {headers: {'Content-Type': 'application/json'}})
+				new Response(
+					JSON.stringify({ user_id: session.user_id, email: 'researcher@example.test' }),
+					{ headers: { 'Content-Type': 'application/json' } }
+				)
 			)
 		);
 		await fetchCurrentSession();

@@ -11,9 +11,16 @@ export type Collection = {
 	paper_count: number;
 	created_at: string;
 	updated_at: string;
-	documents: Pick<CollectionDocument,
-		'document_id' | 'original_filename' | 'media_type' | 'status' |
-		'size_bytes' | 'created_at' | 'updated_at'>[];
+	documents: Pick<
+		CollectionDocument,
+		| 'document_id'
+		| 'original_filename'
+		| 'media_type'
+		| 'status'
+		| 'size_bytes'
+		| 'created_at'
+		| 'updated_at'
+	>[];
 };
 
 export type CollectionStatusGroup = 'complete' | 'ready' | 'processing' | 'attention' | 'neutral';
@@ -75,16 +82,16 @@ export function getCollectionStatusGroup(
 export const collections = writable<Collection[]>([]);
 
 export async function fetchCollections() {
-	const data = await requestJson('/collections', { method: 'GET' }) as { items: Collection[] };
+	const data = (await requestJson('/collections', { method: 'GET' })) as { items: Collection[] };
 	const items = data.items;
 	collections.set(items);
 	return items;
 }
 
 export async function fetchCollection(collectionId: string) {
-	const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}`, {
+	const data = (await requestJson(`/collections/${encodeURIComponent(collectionId)}`, {
 		method: 'GET'
-	}) as Collection;
+	})) as Collection;
 	const collection = data;
 	if (collection.collection_id !== collectionId) {
 		throw new Error('Collection response is missing collection_id.');
@@ -108,14 +115,17 @@ export async function createCollection(payload: { name: string; description?: st
 		description: payload.description?.trim() || null
 	};
 
-	const data = await requestJson('/collections', {
+	const data = (await requestJson('/collections', {
 		method: 'POST',
 		body: JSON.stringify(body)
-	}) as Collection;
+	})) as Collection;
 
 	const collection = data;
 
-	collections.update((items) => [collection, ...items.filter((item) => item.collection_id !== collection.collection_id)]);
+	collections.update((items) => [
+		collection,
+		...items.filter((item) => item.collection_id !== collection.collection_id)
+	]);
 
 	return collection;
 }
@@ -129,7 +139,9 @@ export async function deleteCollection(collectionId: string) {
 	if (record.collection_id !== collectionId) {
 		throw new Error('Collection deletion response does not match collection_id.');
 	}
-	collections.update((items) => items.filter((item) => item.collection_id !== record.collection_id));
+	collections.update((items) =>
+		items.filter((item) => item.collection_id !== record.collection_id)
+	);
 	return record;
 }
 

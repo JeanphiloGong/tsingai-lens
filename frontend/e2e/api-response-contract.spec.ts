@@ -52,9 +52,17 @@ async function installApi(page: Page, authenticated = true) {
 		const path = new URL(route.request().url()).pathname;
 		if (path === '/user-api/v1/login') state.authenticated = true;
 		if (!state.authenticated || state.expired)
-			return route.fulfill({status: 401, contentType: 'application/json', body: JSON.stringify({code: 'authentication_required'})});
-		const body = path === '/user-api/v1/me/permissions' ? {permission_codes: []} : user;
-		return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(body)});
+			return route.fulfill({
+				status: 401,
+				contentType: 'application/json',
+				body: JSON.stringify({ code: 'authentication_required' })
+			});
+		const body = path === '/user-api/v1/me/permissions' ? { permission_codes: [] } : user;
+		return route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify(body)
+		});
 	});
 	await page.route('**/api/v1/**', async (route) => {
 		const request = route.request();
@@ -124,7 +132,10 @@ test('login opens a collection and a rejected download creates no file', async (
 	page.on('pageerror', (error) => errors.push(error.message));
 	page.on('download', (download) => downloads.push(download.suggestedFilename()));
 	const state = await installApi(page, false);
-	await Promise.all([page.waitForResponse(r => r.url().endsWith('/user-api/v1/me')), page.goto('/login')]);
+	await Promise.all([
+		page.waitForResponse((r) => r.url().endsWith('/user-api/v1/me')),
+		page.goto('/login')
+	]);
 	await page.locator('#auth-email').fill(user.email);
 	await page.locator('#auth-password').fill('synthetic-test-password');
 	await page.getByRole('button', { name: 'Sign in', exact: true }).click();

@@ -114,7 +114,7 @@ describe('document preparation API', () => {
 			progress_percent: 45,
 			progress_detail: {
 				phase: 'document_profile',
-				message: 'Classifying the paper.',
+				message: 'Classifying the paper.'
 			},
 			errors: [],
 			warnings: [],

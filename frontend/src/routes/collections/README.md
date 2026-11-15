@@ -392,7 +392,6 @@ reader.
 Route components use helpers from `../_shared/`; they do not implement a second
 API client or normalize retired payloads.
 
-
 Conversation history supports renaming in both the Assistant sidebar and the
 embedded paper conversation. The shared dialog validates a nonblank, single-line
 name of at most 160 characters, preserves edits on request failure, and saves to

@@ -14,14 +14,14 @@ Every usable anchor has one stable Source reference:
 
 ```json
 {
-  "anchor_id": "anchor_xxx",
-  "document_id": "doc_xxx",
-  "source_kind": "block",
-  "source_ref": "blk_xxx",
-  "source_type": "text",
-  "page": 4,
-  "quote": "source evidence snippet",
-  "deep_link": "/collections/col_xxx/documents/doc_xxx?anchor_id=anchor_xxx"
+	"anchor_id": "anchor_xxx",
+	"document_id": "doc_xxx",
+	"source_kind": "block",
+	"source_ref": "blk_xxx",
+	"source_type": "text",
+	"page": 4,
+	"quote": "source evidence snippet",
+	"deep_link": "/collections/col_xxx/documents/doc_xxx?anchor_id=anchor_xxx"
 }
 ```
 

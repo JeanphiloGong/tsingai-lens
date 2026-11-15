@@ -32,12 +32,16 @@ async function capture(page, name, viewport, options = {}) {
 	});
 	let readinessTimeout = false;
 	try {
-		await page.waitForFunction(() =>
-			window.location.pathname === '/login' ||
-			Boolean(document.querySelector('.evidence-map-page .state--error')) ||
-			(!document.querySelector('.evidence-map-page [aria-busy="true"]') &&
-				Boolean(document.querySelector('.evidence-map-page .map, .evidence-map-page .state--empty'))),
-			undefined, { timeout: 20_000 }
+		await page.waitForFunction(
+			() =>
+				window.location.pathname === '/login' ||
+				Boolean(document.querySelector('.evidence-map-page .state--error')) ||
+				(!document.querySelector('.evidence-map-page [aria-busy="true"]') &&
+					Boolean(
+						document.querySelector('.evidence-map-page .map, .evidence-map-page .state--empty')
+					)),
+			undefined,
+			{ timeout: 20_000 }
 		);
 	} catch (error) {
 		if (error.name !== 'TimeoutError') throw error;
@@ -50,8 +54,8 @@ async function capture(page, name, viewport, options = {}) {
 		if ((await findingButtons.count()) > 0) {
 			selectionExpected = true;
 			await findingButtons.first().click();
-			await page.waitForFunction(() =>
-				!document.querySelector('.evidence-map-page [aria-busy="true"]')
+			await page.waitForFunction(
+				() => !document.querySelector('.evidence-map-page [aria-busy="true"]')
 			);
 		}
 	}
@@ -73,10 +77,19 @@ async function capture(page, name, viewport, options = {}) {
 		const second = columns?.[1]?.getBoundingClientRect();
 		return {
 			ready: !loading && !failed && (hasMap || hasEmpty),
-			state: loading ? 'loading' : failed ? 'error' : hasMap ? 'graph' : hasEmpty ? 'empty' : 'unrecognized',
+			state: loading
+				? 'loading'
+				: failed
+					? 'error'
+					: hasMap
+						? 'graph'
+						: hasEmpty
+							? 'empty'
+							: 'unrecognized',
 			hasNaN: /\bNaN\b/.test(bodyText),
 			horizontalOverflow,
-			mobileFlowNotStacked: window.innerWidth < 640 && Boolean(first && second && second.top <= first.top),
+			mobileFlowNotStacked:
+				window.innerWidth < 640 && Boolean(first && second && second.top <= first.top),
 			scrollWidth: documentElement.scrollWidth,
 			viewportWidth: window.innerWidth,
 			hasGraph: hasMap,
@@ -104,7 +117,12 @@ async function main() {
 
 	const captures = [
 		await capture(page, 'desktop', { width: 1440, height: 1000 }),
-		await capture(page, 'selected-desktop', { width: 1440, height: 1000 }, { selectOverviewNode: true }),
+		await capture(
+			page,
+			'selected-desktop',
+			{ width: 1440, height: 1000 },
+			{ selectOverviewNode: true }
+		),
 		await capture(page, 'mobile', { width: 390, height: 844 })
 	];
 
@@ -112,7 +130,9 @@ async function main() {
 
 	const checks = {
 		hasNaN: captures.some((entry) => entry.metrics.hasNaN),
-		selectionFailed: captures.some((entry) => entry.selectionExpected && !entry.metrics.selectedFinding),
+		selectionFailed: captures.some(
+			(entry) => entry.selectionExpected && !entry.metrics.selectedFinding
+		),
 		notReady: captures.some((entry) => entry.readinessTimeout || !entry.metrics.ready),
 		mobileHorizontalOverflow: captures.some(
 			(entry) => entry.name === 'mobile' && entry.metrics.horizontalOverflow

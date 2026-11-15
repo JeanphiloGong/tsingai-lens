@@ -39,16 +39,27 @@ async function mockPaperReaderApis(
 		const path = new URL(route.request().url()).pathname;
 		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 		if (path === '/user-api/v1/me/permissions') {
-			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ permission_codes: [] }) });
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ permission_codes: [] })
+			});
 		}
 		if (path === '/user-api/v1/me') {
 			return route.fulfill({
-				status: 200, contentType: 'application/json',
-				body: JSON.stringify({ user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' })
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					user_id: 'user_1',
+					email: 'reader@example.com',
+					display_name: 'Reader'
+				})
 			});
 		}
 		if (path === '/api/v1/model-connections') {
-			return route.fulfill(json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] }));
+			return route.fulfill(
+				json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] })
+			);
 		}
 		if (path === '/api/v1/collections') {
 			return route.fulfill(

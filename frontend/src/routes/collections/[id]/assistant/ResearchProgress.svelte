@@ -38,33 +38,37 @@
 
 <div class="assistant-progress" data-testid="research-progress">
 	{#if active}
-	<button
-		class="progress-current"
-		type="button"
-		aria-expanded={progressHistoryExpanded}
-		aria-label={$t('researchAgent.progress.toggleHistory')}
-		on:click={() => (progressHistoryExpanded = !progressHistoryExpanded)}
-	>
-		<span class="progress-main"
-			><span class="progress-dot" aria-hidden="true"></span><span role="status"
-				>{progressLabel(progress)}</span
-			></span
+		<button
+			class="progress-current"
+			type="button"
+			aria-expanded={progressHistoryExpanded}
+			aria-label={$t('researchAgent.progress.toggleHistory')}
+			on:click={() => (progressHistoryExpanded = !progressHistoryExpanded)}
 		>
-		<span class="progress-meta"
-			>{formatChatElapsed(progress.elapsed_ms)}<ChevronDown size={14} /></span
-		>
-	</button>
-	{#if actionSummary || actionCounts}
-		<div class="progress-details" aria-label={$t('researchAgent.progress.detailsLabel')}>
-			{#if actionSummary}<span class="progress-action"
-					>{$t('researchAgent.progress.currentAction', { action: actionSummary })}</span
-				>{/if}
-			{#if actionCounts}<span>{$t('researchAgent.progress.actions', actionCounts)}</span>{/if}
-		</div>
-	{/if}
+			<span class="progress-main"
+				><span class="progress-dot" aria-hidden="true"></span><span role="status"
+					>{progressLabel(progress)}</span
+				></span
+			>
+			<span class="progress-meta"
+				>{formatChatElapsed(progress.elapsed_ms)}<ChevronDown size={14} /></span
+			>
+		</button>
+		{#if actionSummary || actionCounts}
+			<div class="progress-details" aria-label={$t('researchAgent.progress.detailsLabel')}>
+				{#if actionSummary}<span class="progress-action"
+						>{$t('researchAgent.progress.currentAction', { action: actionSummary })}</span
+					>{/if}
+				{#if actionCounts}<span>{$t('researchAgent.progress.actions', actionCounts)}</span>{/if}
+			</div>
+		{/if}
 	{/if}
 	{#if executionPlan}
-		<div class="progress-plan" data-testid="progress-plan" aria-label="{$t('researchAgent.progress.planLabel')}">
+		<div
+			class="progress-plan"
+			data-testid="progress-plan"
+			aria-label={$t('researchAgent.progress.planLabel')}
+		>
 			<div class="progress-plan__header">
 				<strong>{$t('researchAgent.progress.planTitle')}</strong>
 				<span>{$t(`researchAgent.progress.planStatus.${executionPlan.status}`)}</span>
@@ -72,7 +76,10 @@
 			<ol>
 				{#each executionPlan.steps as step (step.step_id)}
 					<li class:complete={step.status === 'completed'}>
-						{#if step.status === 'completed'}<Check size={12} />{:else}<span class="plan-step-dot" aria-hidden="true"></span>{/if}
+						{#if step.status === 'completed'}<Check size={12} />{:else}<span
+								class="plan-step-dot"
+								aria-hidden="true"
+							></span>{/if}
 						<span>{step.action}</span>
 					</li>
 				{/each}
@@ -80,48 +87,52 @@
 		</div>
 	{/if}
 	{#if active}
-	{#each readings as reading (reading.toolCallId)}
-		<div
-			class="reading-current"
-			class:failed={reading.status === 'failed'}
-			data-testid="current-reading"
-		>
-			<div class="reading-location">
-				{#if reading.status === 'failed'}<CircleAlert size={15} />{:else}<BookOpen size={15} />{/if}
-				<span>{$t(`researchAgent.progress.sourceState.${reading.status}`)}</span>
-				{#if reading.page}<span
-						>{$t('researchAgent.progress.sourcePage', { page: reading.page })}</span
+		{#each readings as reading (reading.toolCallId)}
+			<div
+				class="reading-current"
+				class:failed={reading.status === 'failed'}
+				data-testid="current-reading"
+			>
+				<div class="reading-location">
+					{#if reading.status === 'failed'}<CircleAlert size={15} />{:else}<BookOpen
+							size={15}
+						/>{/if}
+					<span>{$t(`researchAgent.progress.sourceState.${reading.status}`)}</span>
+					{#if reading.page}<span
+							>{$t('researchAgent.progress.sourcePage', { page: reading.page })}</span
+						>{/if}
+					{#if reading.heading}<span class="reading-heading">{reading.heading}</span>{/if}
+				</div>
+				<p class="reading-title">{reading.title || $t('researchAgent.progress.currentPaper')}</p>
+				{#if reading.query}<p class="reading-query">
+						{$t('researchAgent.progress.searchQuery', { query: reading.query })}
+					</p>{/if}
+				{#if reading.href}<a
+						class="reading-link"
+						href={resolve(reading.href as `/collections/${string}`)}
+						>{$t('researchAgent.progress.openSource')}</a
 					>{/if}
-				{#if reading.heading}<span class="reading-heading">{reading.heading}</span>{/if}
+				{#if reading.excerpt}
+					<details class="passage">
+						<summary>{$t('agentReview.passage')}</summary>
+						<blockquote>{reading.excerpt}</blockquote>
+					</details>
+				{/if}
 			</div>
-			<p class="reading-title">{reading.title || $t('researchAgent.progress.currentPaper')}</p>
-			{#if reading.query}<p class="reading-query">
-					{$t('researchAgent.progress.searchQuery', { query: reading.query })}
-				</p>{/if}
-			{#if reading.href}<a
-					class="reading-link"
-					href={resolve(reading.href as `/collections/${string}`)}
-					>{$t('researchAgent.progress.openSource')}</a
-				>{/if}
-			{#if reading.excerpt}
-				<details class="passage">
-					<summary>{$t('agentReview.passage')}</summary>
-					<blockquote>{reading.excerpt}</blockquote>
-				</details>
-			{/if}
-		</div>
-	{/each}
-	{#if progressHistoryExpanded}
-		<ol class="progress-trail" aria-label={$t('researchAgent.progress.historyLabel')}>
-			{#each historyEntries as entry, index (index)}
-				{@const current = index === historyEntries.length - 1}
-				<li class:current aria-current={current ? 'step' : undefined}>
-					{#if current}<LoaderCircle size={12} />{:else}<Check size={12} />{/if}
-					<span>{progressLabel(entry, true)}</span><small>{formatChatElapsed(entry.elapsed_ms)}</small>
-				</li>
-			{/each}
-		</ol>
-	{/if}
+		{/each}
+		{#if progressHistoryExpanded}
+			<ol class="progress-trail" aria-label={$t('researchAgent.progress.historyLabel')}>
+				{#each historyEntries as entry, index (index)}
+					{@const current = index === historyEntries.length - 1}
+					<li class:current aria-current={current ? 'step' : undefined}>
+						{#if current}<LoaderCircle size={12} />{:else}<Check size={12} />{/if}
+						<span>{progressLabel(entry, true)}</span><small
+							>{formatChatElapsed(entry.elapsed_ms)}</small
+						>
+					</li>
+				{/each}
+			</ol>
+		{/if}
 	{/if}
 </div>
 

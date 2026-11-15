@@ -107,7 +107,10 @@ describe('documents shared helpers', () => {
 
 	it('rejects Markdown from a different document', async () => {
 		requestJson.mockResolvedValue({
-			collection_id: 'col_123', document_id: 'doc_2', markdown: '# Paper', source_map: []
+			collection_id: 'col_123',
+			document_id: 'doc_2',
+			markdown: '# Paper',
+			source_map: []
 		});
 		await expect(fetchDocumentMarkdown('col_123', 'doc_1')).rejects.toThrow(
 			'Document Markdown response does not match'

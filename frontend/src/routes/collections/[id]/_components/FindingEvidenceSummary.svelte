@@ -125,7 +125,8 @@
 		{#if summary}
 			<p class="summary-text">
 				{summary.text}
-				{#each summary.references as reference, index}
+				{#each summary.references as reference, index (index)}
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 					<a href={citationHref(reference)} title={reference.label}>[{index + 1}]</a>
 				{/each}
 			</p>

@@ -34,7 +34,7 @@
 		.toUpperCase();
 	$: if (browser && $authState.status === 'anonymous' && !isAuthRoute) {
 		collections.set([]);
-		void goto('/login', { replaceState: true });
+		void goto(resolve('/login'), { replaceState: true });
 	}
 
 	function decodeRoutePart(value: string) {
@@ -96,12 +96,12 @@
 		try {
 			const user = await fetchCurrentSession();
 			if (!user && !isAuthRoute) {
-				await goto('/login', { replaceState: true });
+				await goto(resolve('/login'), { replaceState: true });
 			}
 		} catch (error) {
 			authError = errorMessage(error);
 			if (!isAuthRoute) {
-				await goto('/login', { replaceState: true });
+				await goto(resolve('/login'), { replaceState: true });
 			}
 		}
 	}
@@ -164,7 +164,7 @@
 >
 	<header class="site-header" class:site-header--collection={isCollectionRoute}>
 		<div class="header-left">
-			<a class="brand" href="/">
+			<a class="brand" href={resolve('/')}>
 				<img class="brand-logo" src="/lens-mark-a2.svg" alt="" />
 				<div class="brand-text">
 					<div class="brand-heading">
@@ -183,7 +183,7 @@
 
 			{#if isCollectionRoute}
 				<nav class="header-breadcrumb" aria-label={$t('header.breadcrumbLabel')}>
-					<a href="/">{$t('header.breadcrumbCollection')}</a>
+					<a href={resolve('/')}>{$t('header.breadcrumbCollection')}</a>
 					<span aria-hidden="true">/</span>
 					<span class="header-breadcrumb__current">{headerCollectionName}</span>
 				</nav>
@@ -192,7 +192,7 @@
 
 		<div class="header-actions">
 			{#if authenticatedUser}
-				<a class="header-action" href="/account">{$t('onboarding.account')}</a>
+				<a class="header-action" href={resolve('/account')}>{$t('onboarding.account')}</a>
 				{#if $permissionState.status === 'ready' && $permissionState.userId === authenticatedUser.user_id && $permissionState.codes.includes('users.manage')}
 					<a class="header-action" href={resolve('/admin/users')}>{$t('admin.title')}</a>
 				{/if}
@@ -328,6 +328,7 @@
 	</main>
 
 	<footer class="site-footer">
+		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- This is a backend API URL, outside the Svelte page router. -->
 		<a href={API_DOCS_PATH}>{$t('nav.docs')}</a>
 		<span>·</span>
 		<span>{$t('footer.pdfNote')}</span>

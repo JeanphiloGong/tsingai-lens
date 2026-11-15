@@ -105,6 +105,7 @@
 		else url.searchParams.delete('finding_id');
 		if (unlinkedOnly) url.searchParams.set('evidence', 'unlinked');
 		else url.searchParams.delete('evidence');
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters.
 		await goto(`${resolve('/collections/[id]/graph', { id: collectionId })}${url.search}`, {
 			replaceState: true,
 			noScroll: true,

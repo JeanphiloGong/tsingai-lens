@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { issueEmailChallenge, registerAccount } from '../_shared/auth';
@@ -78,7 +79,8 @@
 			password = confirmPassword = '';
 			verificationCode = '';
 			challengeId = '';
-			await goto('/login?registered=1');
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters.
+			await goto(`${resolve('/login')}?registered=1`);
 		} catch (caughtError) {
 			if (active) showError(caughtError);
 		} finally {
@@ -171,7 +173,7 @@
 			>
 		</form>
 		<nav class="account-links" aria-label={$t('onboarding.navigation')}>
-			<a href="/login">{$t('onboarding.back')}</a>
+			<a href={resolve('/login')}>{$t('onboarding.back')}</a>
 		</nav>
 	</div>
 	<label class="login-language">

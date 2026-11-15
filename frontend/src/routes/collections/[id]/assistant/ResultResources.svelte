@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import { ChevronDown, ExternalLink } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import { resolve } from '$app/paths';
@@ -87,7 +88,7 @@
 
 	function visibleResources(message: ChatMessage): VisibleResource[] {
 		const records = sourceRecords(message);
-		const seen = new Set<string>();
+		const seen = new SvelteSet<string>();
 		return (message.tool_result?.resource_refs ?? []).flatMap((resource) => {
 			if (typeof resource.href !== 'string' || !resource.href.startsWith('/collections/'))
 				return [];

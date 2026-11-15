@@ -132,21 +132,23 @@
 	class:collection-tabs--compact={isFindingRoute}
 	aria-label={$t('collection.tabsLabel')}
 >
-	{#each [['', 'overview'], ['/documents', 'papers'], ['/objectives', 'objectives'], ['/assistant', 'assistant']] as [suffix, label]}
+	{#each [['', 'overview'], ['/documents', 'papers'], ['/objectives', 'objectives'], ['/assistant', 'assistant']] as [suffix, label] (suffix)}
 		{@const href = `/collections/${collectionId}${suffix}`}
 		{@const active = suffix ? currentPath.startsWith(href) : currentPath === href}
-		<a {href} class:active aria-current={active ? 'page' : undefined}
-			>{$t(`collection.tabs.${label}`)}</a
+		<a
+			href={resolve(href as `/collections/${string}`)}
+			class:active
+			aria-current={active ? 'page' : undefined}>{$t(`collection.tabs.${label}`)}</a
 		>
 	{/each}
 	<details class="collection-tabs__more" class:active={isMoreRoute} bind:this={moreMenu}>
 		<summary on:keydown={closeMoreOnEscape}>{$t('collection.moreLabel')}</summary>
 		<div class="collection-tabs__menu">
-			{#each ['graph', 'feedback', 'settings'] as route}
+			{#each ['graph', 'feedback', 'settings'] as route (route)}
 				{@const href = `/collections/${collectionId}/${route}`}
 				{@const active = currentPath.startsWith(href)}
 				<a
-					{href}
+					href={resolve(href as `/collections/${string}`)}
 					class:active
 					aria-current={active ? 'page' : undefined}
 					on:keydown={closeMoreOnEscape}

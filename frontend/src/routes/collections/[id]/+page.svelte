@@ -167,9 +167,10 @@
 		} catch (err) {
 			if (requestedCollectionId === collectionId) error = errorMessage(err);
 		} finally {
-			if (requestedCollectionId !== collectionId) return;
-			loading = false;
-			schedulePoll();
+			if (requestedCollectionId === collectionId) {
+				loading = false;
+				schedulePoll();
+			}
 		}
 	}
 

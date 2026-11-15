@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteMap } from 'svelte/reactivity';
 	import { onMount, tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import {
@@ -51,7 +52,7 @@
 	$: children = groupChildren(nodes);
 
 	function groupChildren(items: ChatTreeNode[]) {
-		const children = new Map<string | null, ChatTreeNode[]>();
+		const children = new SvelteMap<string | null, ChatTreeNode[]>();
 		for (const node of items) {
 			const siblings = children.get(node.parent_message_id) ?? [];
 			siblings.push(node);
@@ -329,11 +330,14 @@
 											}
 										)}</summary
 									>
-									{#each selected.message.source_contexts as source}<p>
+									{#each selected.message.source_contexts as source (source)}<p>
+											<!-- eslint-disable svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 											<a
 												href={`${resolve('/collections/[id]/documents/[document_id]', { id: source.collection_id, document_id: source.document_id })}?source_ref=${encodeURIComponent(source.source_ref)}`}
 												on:click={onClose}>{source.document_title}</a
-											><br />{source.quote}
+											>
+											<!-- eslint-enable svelte/no-navigation-without-resolve --><br
+											/>{source.quote}
 										</p>{/each}
 								</details>
 							{/if}

@@ -164,7 +164,7 @@
 	</div>
 	<aside>
 		<dl>
-			{#each [['material', analysis.objective.material_scope], ['variables', analysis.objective.variables], ['outcome', analysis.objective.outcomes], ['limits', analysis.objective.constraints]] as [key, values]}<div
+			{#each [['material', analysis.objective.material_scope], ['variables', analysis.objective.variables], ['outcome', analysis.objective.outcomes], ['limits', analysis.objective.constraints]] as [key, values] (key)}<div
 				>
 					<dt>{$t(`objectiveWorkspace.${key}`)}</dt>
 					<dd>{(values as string[]).join(' · ') || $t('objectiveWorkspace.notReported')}</dd>

@@ -10,7 +10,7 @@
 	export let onClose: (id: string) => void;
 	let tablist: HTMLDivElement;
 	$: if (activeId && tablist) {
-		tabs;
+		void tabs;
 		void revealActiveTab();
 	}
 

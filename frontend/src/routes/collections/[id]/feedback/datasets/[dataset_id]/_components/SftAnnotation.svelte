@@ -286,7 +286,7 @@
 			<h2 id="evidence-title">{$t('taskDatasets.labels.originalEvidence')}</h2>
 			<p class="aside-note">{$t('taskDatasets.optionalEvidence')}</p>
 			<div class="evidence-list">
-				{#each evidence as item, index}
+				{#each evidence as item, index (index)}
 					<article class="evidence-card">
 						<label for={`evidence-title-${index}`}>{$t('taskDatasets.labels.paperTitle')}</label>
 						<input
@@ -326,7 +326,7 @@
 				<div class="missing-box">
 					<strong>{$t('taskDatasets.labels.additionalInputNeeded')}</strong>
 					<ul>
-						{#each missingReasons as reason}<li>{reason}</li>{/each}
+						{#each missingReasons as reason (reason)}<li>{reason}</li>{/each}
 					</ul>
 				</div>
 			{/if}
@@ -337,7 +337,7 @@
 							count: sample.source_case.omitted_candidates.length
 						})}</summary
 					>
-					{#each sample.source_case.omitted_candidates as source}
+					{#each sample.source_case.omitted_candidates as source (source)}
 						<p>
 							{formatSource(source)}：{String(source.reason ?? $t('taskDatasets.labels.notRead'))}
 						</p>

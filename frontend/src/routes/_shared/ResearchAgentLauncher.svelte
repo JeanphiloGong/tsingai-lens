@@ -42,6 +42,7 @@
 </script>
 
 {#if collectionId}
+	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 	<a class="agent-launcher" href={currentAgentHref} aria-label={$t('researchAgent.title')}>
 		<span class="agent-launcher__mark" aria-hidden="true">AI</span>
 		<span class="agent-launcher__label">{$t('researchAgent.title')}</span>
@@ -96,7 +97,7 @@
 				{:else if !$collections.length}
 					<div class="workspace-picker__state">
 						<p>{$t('researchAgent.launcher.empty')}</p>
-						<a href="/" on:click={closeWorkspacePicker}>
+						<a href={resolve('/')} on:click={closeWorkspacePicker}>
 							{$t('researchAgent.launcher.manageCollections')}
 						</a>
 					</div>

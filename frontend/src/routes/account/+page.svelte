@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
 	import { changePassword } from '../_shared/auth';
@@ -33,7 +34,8 @@
 			await changePassword(oldPassword, password);
 			if (!active) return;
 			oldPassword = password = confirmPassword = '';
-			await goto('/login?passwordChanged=1', { replaceState: true });
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters.
+			await goto(`${resolve('/login')}?passwordChanged=1`, { replaceState: true });
 		} catch (caughtError) {
 			if (!active) return;
 			error = isApiErrorCode(caughtError, 200301)

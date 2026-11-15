@@ -141,7 +141,7 @@
 				<label for="feedback-reason-{messageId}">{$t('researchAgent.feedback.reason')}</label>
 				<select id="feedback-reason-{messageId}" bind:value={reason} disabled={saving}>
 					<option value="">{$t('researchAgent.feedback.optional')}</option>
-					{#each reasons as value}<option {value}
+					{#each reasons as value (value)}<option {value}
 							>{$t(`researchAgent.feedback.reasons.${value}`)}</option
 						>{/each}
 				</select>

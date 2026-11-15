@@ -239,7 +239,7 @@
 				<fieldset class="choice-field">
 					<legend>{$t('taskDatasets.labels.whichAnswerIsBetter')}</legend>
 					<div class="choice-grid">
-						{#each preferenceOptions as option}
+						{#each preferenceOptions as option (option[0])}
 							<label class:selected={humanPreference === option[0]}
 								><input
 									type="radio"
@@ -336,7 +336,7 @@
 				{$t('taskDatasets.labels.paperExcerptsCount', { count: evidence.length })}
 			</p>
 			<div class="evidence-list">
-				{#each evidence as item, index}<article class="evidence-card">
+				{#each evidence as item, index (index)}<article class="evidence-card">
 						<label for={`preference-evidence-title-${index}`}
 							>{$t('taskDatasets.labels.paperTitle')}</label
 						><input
@@ -373,7 +373,7 @@
 			{#if missingReasons.length}<div class="missing-box">
 					<strong>{$t('taskDatasets.labels.additionalInputNeeded')}</strong>
 					<ul>
-						{#each missingReasons as reason}<li>{reason}</li>{/each}
+						{#each missingReasons as reason (reason)}<li>{reason}</li>{/each}
 					</ul>
 				</div>{/if}
 		</aside>

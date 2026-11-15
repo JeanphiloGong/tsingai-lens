@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { authState } from '../_shared/authState';
@@ -18,7 +19,7 @@
 	}
 
 	$: if ($authState.status === 'authenticated') {
-		void goto('/', { replaceState: true });
+		void goto(resolve('/'), { replaceState: true });
 	}
 
 	async function submitLogin(event: SubmitEvent) {
@@ -33,7 +34,7 @@
 		loading = true;
 		try {
 			await login(email.trim(), password);
-			await goto('/', { replaceState: true });
+			await goto(resolve('/'), { replaceState: true });
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -94,8 +95,8 @@
 			</button>
 		</form>
 		<nav class="account-links" aria-label={$t('onboarding.navigation')}>
-			<a href="/register">{$t('onboarding.register')}</a> ·
-			<a href="/forgot-password">{$t('onboarding.recover')}</a>
+			<a href={resolve('/register')}>{$t('onboarding.register')}</a> ·
+			<a href={resolve('/forgot-password')}>{$t('onboarding.recover')}</a>
 		</nav>
 	</div>
 

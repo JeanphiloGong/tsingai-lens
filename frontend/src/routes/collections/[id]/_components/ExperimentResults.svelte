@@ -139,7 +139,7 @@
 	</header>
 	{#if outcomes.length}<label class="outcome"
 			>{$t('objectiveWorkspace.outcome')}<select bind:value={outcome}
-				>{#each outcomes as item}<option value={item}>{item}</option>{/each}</select
+				>{#each outcomes as item (item)}<option value={item}>{item}</option>{/each}</select
 			></label
 		>{/if}
 	{#if missingSelections.length}<p class="warning" role="alert">
@@ -149,6 +149,7 @@
 			{$t(findingId ? 'objectiveWorkspace.noFindingData' : 'objectiveWorkspace.noComparisons')}
 		</p>
 	{:else if mode === 'table'}
+		<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The Svelte compiler still requires this documented keyboard accessibility exception. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the named comparison region.) -->
 		<div
 			class="table-scroll"
@@ -159,7 +160,7 @@
 			<table>
 				<thead
 					><tr>
-						{#each ['paper', 'factors', 'firstGroup', 'secondGroup', 'difference', 'conditions', 'sources'] as key}<th
+						{#each ['paper', 'factors', 'firstGroup', 'secondGroup', 'difference', 'conditions', 'sources'] as key (key)}<th
 								scope="col">{$t(`objectiveWorkspace.${key}`)}</th
 							>{/each}
 					</tr></thead
@@ -174,7 +175,9 @@
 								><small>{row.experiment.label}</small></td
 							>
 							<td
-								>{#each row.comparison?.changed_variables ?? [] as variable}<div class="variable">
+								>{#each row.comparison?.changed_variables ?? [] as variable (variable)}<div
+										class="variable"
+									>
 										<strong>{variable.name}</strong><small
 											>{experimentValue(variable.baseline_value) ||
 												$t('objectiveWorkspace.notReported')} → {experimentValue(
@@ -185,10 +188,10 @@
 									</div>{:else}<span class="muted">{$t('objectiveWorkspace.measurement')}</span
 									>{/each}</td
 							>
-							{#each ['before', 'after'] as side}
+							{#each ['before', 'after'] as side (side)}
 								<td
 									><span>{label(row, side as 'before' | 'after')}</span
-									>{#each row[side as 'before' | 'after'] as item}<strong class="value"
+									>{#each row[side as 'before' | 'after'] as item (item)}<strong class="value"
 											>{measurement(item)}</strong
 										><small>{item.result_kind !== 'measured' ? item.result_kind : ''}</small
 										>{:else}<small>{$t('objectiveWorkspace.notReported')}</small>{/each}</td
@@ -208,19 +211,21 @@
 								>
 								<details>
 									<summary>{$t('objectiveWorkspace.conditions')}</summary>
-									{#each tests(row) as test}<p>{test.test_type}</p>
-										{#each test.parameters as parameter}<small
+									{#each tests(row) as test (test)}<p>{test.test_type}</p>
+										{#each test.parameters as parameter (parameter)}<small
 												>{parameter.name}: {parameter.value} {parameter.unit ?? ''}</small
-											>{/each}{#each test.missing_parameters as missing}<small
+											>{/each}{#each test.missing_parameters as missing (missing)}<small
 												>{$t('objectiveWorkspace.missing')}: {missing}</small
 											>{/each}{/each}
-									{#each row.comparison?.matched_conditions ?? [] as condition}<small
+									{#each row.comparison?.matched_conditions ?? [] as condition (condition)}<small
 											>{condition.name}: {condition.value} {condition.unit ?? ''}</small
 										>{/each}
-									{#each [...row.missing, ...(row.comparison?.reasons ?? [])] as reason}<p>
+									{#each [...row.missing, ...(row.comparison?.reasons ?? [])] as reason, index (index)}<p
+										>
 											{reason}
 										</p>{/each}
-									{#each [...row.before, ...row.after] as item}<small>{measurement(item)}</small
+									{#each [...row.before, ...row.after] as item, index (index)}<small
+											>{measurement(item)}</small
 										><small
 											>{Object.keys(item.statistics).length
 												? JSON.stringify(item.statistics)
@@ -228,11 +233,10 @@
 										>{/each}
 								</details>
 							</td>
-							<td
-								>{#each row.sources as source, index}<a
-										class="source"
-										href={sourceHref(source)}
-										title={source.quote}
+							<td>
+								{#each row.sources as source, index (index)}
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
+									<a class="source" href={sourceHref(source)} title={source.quote}
 										><ExternalLink size={14} />{$t('objectiveWorkspace.sources')} {index + 1}</a
 									>{:else}<span class="muted">{$t('objectiveWorkspace.notReported')}</span
 									>{/each}</td
@@ -286,7 +290,8 @@
 						{pair.unit} · {label(row, 'after')}: {number(pair.after)}
 						{pair.unit}
 					</p>
-					{#each row.sources as source, index}<a href={sourceHref(source)}
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
+					{#each row.sources as source, index (index)}<a href={sourceHref(source)}
 							>{$t('objectiveWorkspace.sources')} {index + 1}<ExternalLink size={14} /></a
 						>{/each}
 				</figure>
@@ -312,14 +317,15 @@
 			>
 		</nav>{/if}
 	{#if groups.length}<details class="comparability">
-			<summary>{$t('objectiveWorkspace.groupComparability')}</summary>{#each groups as group}<p>
+			<summary>{$t('objectiveWorkspace.groupComparability')}</summary
+			>{#each groups as group (group)}<p>
 					<strong>{$t(`objectiveWorkspace.${group.status}`)}</strong> · {group.comparison_basis.join(
 						' · '
 					)}
 				</p>
-				{#each group.limitations as limitation}<p>
+				{#each group.limitations as limitation (limitation)}<p>
 						{limitation}
-					</p>{/each}{#each group.members as member}<small
+					</p>{/each}{#each group.members as member (member)}<small
 						>{member.comparability}: {member.reason}</small
 					>{/each}{/each}
 		</details>{/if}

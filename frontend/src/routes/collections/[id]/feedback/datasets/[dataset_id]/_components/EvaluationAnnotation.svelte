@@ -245,7 +245,7 @@
 						>{/if}
 				</div>
 				<div class="criteria-list" aria-label={$t('taskDatasets.criteria')}>
-					{#each criterionValues as criterion, index}
+					{#each criterionValues as criterion, index (index)}
 						<div class="criterion-row">
 							<span class="criterion-index">{index + 1}</span><textarea
 								id={index === 0 ? 'evaluation-criteria' : `evaluation-criteria-${index + 1}`}
@@ -361,7 +361,7 @@
 				{$t('taskDatasets.labels.paperExcerptsCount', { count: evidence.length })}
 			</p>
 			<div class="evidence-list">
-				{#each evidence as item, index}<article class="evidence-card">
+				{#each evidence as item, index (index)}<article class="evidence-card">
 						<label for={`evaluation-evidence-title-${index}`}
 							>{$t('taskDatasets.labels.paperTitle')}</label
 						><input
@@ -398,7 +398,7 @@
 			{#if missingReasons.length}<div class="missing-box">
 					<strong>{$t('taskDatasets.labels.additionalInputNeeded')}</strong>
 					<ul>
-						{#each missingReasons as reason}<li>{reason}</li>{/each}
+						{#each missingReasons as reason (reason)}<li>{reason}</li>{/each}
 					</ul>
 				</div>{/if}
 		</aside>

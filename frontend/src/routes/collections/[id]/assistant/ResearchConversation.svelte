@@ -147,7 +147,8 @@
 	$: renameInvalid =
 		!renameDraft.trim() ||
 		Array.from(renameDraft.trim()).length > 160 ||
-		/[\r\n\x00]/.test(renameDraft);
+		/[\r\n]/.test(renameDraft) ||
+		renameDraft.includes(String.fromCharCode(0));
 	let loading = false;
 	let sending = false;
 	let stopping = false;
@@ -230,6 +231,7 @@
 		selectedModelConnectionId = '';
 		modelConnectionsLoading = false;
 		modelConnectionsError = '';
+		// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 		if (userId) void loadModelConnections();
 	}
 	$: if (sourceContextVersion && userId && collectionId) {
@@ -647,13 +649,17 @@
 		try {
 			const result = await fetchModelConnections(controller.signal);
 			if (destroyed || owner !== userId || controller.signal.aborted) return;
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 			modelConnections = result.items;
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 			selectedModelConnectionId = result.items[0]?.connection_id ?? '';
 		} catch (err) {
 			if (!controller.signal.aborted && owner === userId && !destroyed) {
+				// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 				modelConnectionsError = errorMessage(err);
 			}
 		} finally {
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 			if (modelConnectionsController === controller) modelConnectionsLoading = false;
 		}
 	}

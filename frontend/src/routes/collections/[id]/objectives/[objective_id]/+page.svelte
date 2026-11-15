@@ -195,8 +195,8 @@
 		await selectFinding('');
 		const url = new URL($page.url);
 		url.searchParams.delete('finding_id');
-		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route is resolved before preserving query state
 		await goto(
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- Resolve the pathname before appending search parameters.
 			resolve('/collections/[id]/objectives/[objective_id]', {
 				id: collectionId,
 				objective_id: objectiveId
@@ -213,8 +213,8 @@
 		else url.searchParams.delete('finding_id');
 		navigationPending = true;
 		try {
-			// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route is resolved before preserving query state
 			await goto(
+				// eslint-disable-next-line svelte/no-navigation-without-resolve -- Resolve the pathname before appending search parameters.
 				resolve('/collections/[id]/objectives/[objective_id]', {
 					id: collectionId,
 					objective_id: objectiveId

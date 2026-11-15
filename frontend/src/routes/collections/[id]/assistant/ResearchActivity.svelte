@@ -199,7 +199,7 @@
 							</details>
 						{/if}
 						{#if operation.toolName === 'browse_collection_papers'}
-							{#each [true, false] as failed}
+							{#each [true, false] as failed (failed)}
 								{@const issues = paperSourceIssues(operation.resultMessage).filter(
 									(issue) => issue.failed === failed
 								)}

@@ -84,7 +84,8 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				total: 2,
 				count: 2,
 				summary: {
-					technical_failure_count: 0, total_documents: 2,
+					technical_failure_count: 0,
+					total_documents: 2,
 					by_doc_type: { experimental: 1, review: 1 },
 					warnings: []
 				},
@@ -109,7 +110,10 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			})
 		);
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
@@ -143,7 +147,10 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			})
 		);
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 
 		await expect.element(browserPage.getByText('Paper 1')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('ID: abcdef123456')).not.toBeInTheDocument();
@@ -158,12 +165,20 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: 131,
 				count: 25,
-				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: { experimental: 131 }, warnings: [] },
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: { experimental: 131 },
+					warnings: []
+				},
 				items: Array.from({ length: 25 }, (_, index) => profile(index + 1))
 			})
 		);
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 
 		await expect.element(browserPage.getByText('131 paper(s)')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Papers 1–25 of 131').first()).toBeInTheDocument();
@@ -181,12 +196,20 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: 131,
 				count: 25,
-				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: {}, warnings: [] },
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: {},
+					warnings: []
+				},
 				items: Array.from({ length: 25 }, (_, index) => profile(offset + index + 1))
 			});
 		});
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 		await browserPage.getByRole('button', { name: 'Next' }).click();
 
 		await vi.waitFor(() => {
@@ -205,12 +228,20 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: query ? 1 : 131,
 				count: query ? 1 : 25,
-				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: {}, warnings: [] },
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: {},
+					warnings: []
+				},
 				items: query ? [{ ...profile(88), title: 'Laser porosity study' }] : [profile(1)]
 			});
 		});
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 		await browserPage.getByLabelText('Search papers').fill('  laser porosity  ');
 
 		await vi.waitFor(() => {
@@ -233,7 +264,8 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				total: filtered ? 1 : 131,
 				count: filtered ? 1 : 25,
 				summary: {
-					technical_failure_count: 0, total_documents: 131,
+					technical_failure_count: 0,
+					total_documents: 131,
 					by_doc_type: { experimental: 100, review: 25, mixed: 4, uncertain: 2 },
 					warnings: []
 				},
@@ -250,15 +282,17 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			});
 		});
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 		await browserPage.getByLabelText('Paper type').selectOptions('review');
 		await vi.waitFor(() => {
 			expect(
 				fetchMock.mock.calls.some(([input]) => {
 					const url = new URL(String(input), 'http://localhost');
 					return (
-						url.searchParams.get('offset') === '0' &&
-						url.searchParams.get('doc_type') === 'review'
+						url.searchParams.get('offset') === '0' && url.searchParams.get('doc_type') === 'review'
 					);
 				})
 			).toBe(true);
@@ -276,7 +310,12 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: isFiltered ? 26 : 131,
 				count: 25,
-				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: {}, warnings: [] },
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: {},
+					warnings: []
+				},
 				items: Array.from({ length: 25 }, (_, index) => ({
 					...profile(offset + index + 1),
 					title: isFiltered
@@ -286,7 +325,10 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			});
 		});
 
-		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
 		await browserPage.getByLabelText('Paper type').selectOptions('review');
 		await vi.waitFor(() => {
 			expect(

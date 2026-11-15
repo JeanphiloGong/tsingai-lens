@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260924_0075`. The identity and fingerprint rules are
+and the Alembic head `20261104_0099`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 41 application tables and 447 mapped fields. A
+The current ORM metadata contains 50 application tables and 603 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -85,7 +85,7 @@ class is in `infra/persistence/postgres/models`.
 
 | Logic flow | Owning backend modules | Tables | What the rows mean |
 | --- | --- | --- | --- |
-| Authenticate and authorize | `application/auth`, `controllers/auth_routes.py` | `auth_users`, `auth_sessions` | Normalized user identity and revocable browser sessions. |
+| Authenticate requests | `controllers/dependencies/auth.py`, `infra/identity/client.py` | No local identity tables | Resolve the session through user-service over mTLS gRPC; Lens retains resource ownership checks. |
 | Create a collection and add papers | `application/source`, `controllers/source/collection_routes.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
 | Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_run_routes.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
 | Parse and analyze a paper | `infra/source`, `application/source`, `application/core/document_profiles` | `document_preparations` | One document-keyed preparation aggregate containing Source, Profile, Paper Map, and the provenance for each generated section. |
@@ -103,7 +103,6 @@ count. The remaining tables are separate for these concrete reasons:
 
 | Group | Why it remains relationally separate |
 | --- | --- |
-| `auth_users`, `auth_sessions` | One user has many independently revocable sessions; session expiry and revocation are not user metadata. |
 | `chat_sessions`, `chat_messages`, `chat_tool_calls` | A session contains ordered messages, and each assistant turn can contain ordered capability calls with approval and execution state. These are different cardinalities and audit events. Tool results are already embedded in their call. |
 | `chat_message_feedback` | A user can revise or withdraw an assessment without rewriting the append-only answer or its tool trajectory. |
 | `collections`, `documents`, `document_preparations` | Collection ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
@@ -121,15 +120,16 @@ without weakening identity, versioning, or audit boundaries.
 
 ### 1. Authentication
 
-`application.auth.session_service` owns the access boundary.
+The sibling user-service owns accounts and sessions in its separate PostgreSQL
+database. Lens resolves the HttpOnly `lens_session` cookie through mTLS gRPC,
+then checks the returned stable user ID against business resource ownership.
+The identity contract is defined in
+[`user-service/docs/grpc-api.md`](../../../user-service/docs/grpc-api.md).
 
-| Table | Primary identity | Important columns and constraints |
-| --- | --- | --- |
-| `auth_users` | `user_id` | Lowercase unique `email`, display name, password hash, creation time. A check constraint enforces normalized email. |
-| `auth_sessions` | `session_id` | `user_id` cascades from the user; unique lowercase SHA-256 `token_hash`; creation, expiry, and optional revocation timestamps. Expiry must be after creation. |
-
-Session tokens are hashed before persistence. Raw credentials and session
-tokens are not database fields and must not appear in logs or documentation.
+Migration `20261104_0099` removes local `auth_users` and `auth_sessions` and their
+foreign keys; business owner and actor IDs remain unchanged. Existing databases
+require stopped writes, a verified account import and a recoverable backup before
+this migration. A downgrade cannot reconstruct removed credentials.
 
 ### 2. Collection Intake and Current Documents
 
@@ -473,7 +473,6 @@ identity used by the Evidence or Finding.
 
 | Repository | Tables owned |
 | --- | --- |
-| `AuthRepository` | `auth_users`, `auth_sessions` |
 | `CollectionRepository` | `collections`, `documents` (document count derived from current rows) |
 | `PipelineRunRepository` | `pipeline_runs` |
 | `SourceArtifactRepository` | `document_preparations.source_*`, `document_preparations.artifact_json` |
@@ -549,26 +548,9 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 
 ### Authentication and access
 
-#### `auth_users` — User accounts
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `user_id` | `VARCHAR(64)` | No | PK | Stable identifier for the authenticated user. |
-| `email` | `VARCHAR(320)` | No | UQ; `email = lower(email)` | Login email address; stored normalized to lowercase. |
-| `display_name` | `TEXT` | Yes | — | Optional name shown in the browser and Agent interface. |
-| `password_hash` | `TEXT` | No | — | Password hash; plaintext passwords are never stored. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-
-#### `auth_sessions` — Browser sessions
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `session_id` | `VARCHAR(64)` | No | PK | Stable identifier of the browser session. |
-| `user_id` | `VARCHAR(64)` | No | FK -> `auth_users.user_id`; IDX; `ON DELETE CASCADE` | Stable identifier for the authenticated user. |
-| `token_hash` | `VARCHAR(64)` | No | UQ; length 64; lowercase | SHA-256 hash of the browser session token; the raw token is not stored. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-| `expires_at` | `TIMESTAMP WITH TIME ZONE` | No | `expires_at > created_at` | Expires timestamp. |
-| `revoked_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Revoked timestamp. |
+Accounts and sessions are owned by the sibling user-service. See its
+[data model](../../../user-service/docs/data-model.md). Lens stores stable user IDs
+in business and audit rows without cross-database foreign keys.
 
 ### Collections, documents, and pipeline runs
 
@@ -577,7 +559,7 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `collection_id` | `VARCHAR(64)` | No | PK | Identifier of the owning research collection. |
-| `owner_user_id` | `VARCHAR(64)` | No | FK -> `auth_users.user_id`; IDX; `ON DELETE RESTRICT` | User who owns the collection; the user cannot be deleted while the collection remains. |
+| `owner_user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identity-service user ID of the collection owner; Lens enforces ownership on each request. |
 | `name` | `TEXT` | No | — | Human-readable collection name. |
 | `description` | `TEXT` | Yes | — | Optional research purpose or background for the collection. |
 | `status` | `VARCHAR(64)` | No | — | Current collection lifecycle state, maintained by `collection_service`. |
@@ -784,7 +766,7 @@ paper-fact model.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `session_id` | `VARCHAR(128)` | No | PK | Stable identifier of the Chat session. |
-| `user_id` | `VARCHAR(64)` | No | FK -> `auth_users.user_id`; IDX; `ON DELETE CASCADE` | Stable identifier for the authenticated user. |
+| `user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identifier for the authenticated user. |
 | `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Collection bound to the session; capability calls cannot cross this boundary. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
@@ -809,7 +791,7 @@ paper-fact model.
 | `feedback_id` | `VARCHAR(64)` | No | PK | Stable assessment identity until withdrawal. |
 | `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions`; IDX; CASCADE | Owned session, validated against the target message. |
 | `message_id` | `VARCHAR(128)` | No | FK -> `chat_messages`; IDX; CASCADE | Saved Assistant text answer without tool requests. |
-| `user_id` | `VARCHAR(64)` | No | FK -> `auth_users`; CASCADE; UQ with `message_id` | Authenticated assessor. |
+| `user_id` | `VARCHAR(64)` | No | External user ID; UQ with `message_id` | Authenticated assessor. |
 | `rating` | `VARCHAR(16)` | No | `helpful` / `not_helpful` | Current usefulness assessment. Withdrawal deletes the row. |
 | `reason` | `VARCHAR(16)` | Yes | `incorrect` / `incomplete` / `unclear` / `other`; negative rating only | Optional improvement category. |
 | `comment` | `TEXT` | Yes | At most 2000 characters | Optional plain text, trimmed before persistence. |
@@ -837,7 +819,7 @@ content, session recency, approvals, Findings, Evidence, or model prompts.
 | `started_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Started timestamp. |
 | `finished_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Finished timestamp. |
 | `error_code` | `VARCHAR(128)` | Yes | — | Machine-readable technical failure or rejection code. |
-| `decision_user_id` | `VARCHAR(64)` | Yes | FK -> `auth_users.user_id`; `ON DELETE RESTRICT` | Authenticated user who approved or rejected the call. |
+| `decision_user_id` | `VARCHAR(64)` | Yes | External user ID | Authenticated user who approved or rejected the call. |
 | `decision_arguments_digest` | `VARCHAR(64)` | Yes | — | Digest confirmed at approval; must match `arguments_digest`. |
 | `decided_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Decided timestamp. |
 | `result_status` | `VARCHAR(32)` | Yes | `succeeded` / `queued` / `failed` | Lifecycle status of the result returned by this call. |
@@ -872,8 +854,8 @@ an immutable row; new revisions form a one-way chain through `parent_plan_id`.
 | `plan_version` | `INTEGER` | No | default 1; positive integer | Revision number within the plan chain. |
 | `parent_plan_id` | `VARCHAR(128)` | Yes | self FK; version 1 must be NULL; UQ | Identifier of the immediately preceding plan revision; each parent has at most one successor. |
 | `structured_plan` | `JSONB` | Yes | — | Optional structured design containing variables, levels, controls, measurements, and risks. |
-| `created_by` | `VARCHAR(64)` | Yes | FK -> `auth_users.user_id`; `ON DELETE SET NULL` | User who created the plan chain. |
-| `updated_by` | `VARCHAR(64)` | Yes | FK -> `auth_users.user_id`; `ON DELETE SET NULL` | User who created the current successor revision. |
+| `created_by` | `VARCHAR(64)` | Yes | External user ID | User who created the plan chain. |
+| `updated_by` | `VARCHAR(64)` | Yes | External user ID | User who created the current successor revision. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 

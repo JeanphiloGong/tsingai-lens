@@ -6,7 +6,12 @@ import type {
 	ChatResponseSnapshot
 } from '../../../_shared/chatSessions';
 
-type RecoveryState = 'resourceLimited' | 'technicalFailure' | 'noProgress' | 'permissionDenied' | null;
+type RecoveryState =
+	| 'resourceLimited'
+	| 'technicalFailure'
+	| 'noProgress'
+	| 'permissionDenied'
+	| null;
 
 export function getTurnRecoveryState(
 	turn: Pick<ChatTurn | ChatResponseSnapshot, 'status' | 'completion_reason'> & {
@@ -14,7 +19,11 @@ export function getTurnRecoveryState(
 		progress?: Pick<ChatProgress, 'execution_plan'>;
 	}
 ): RecoveryState {
-	if (turn.status === 'running' || turn.status === 'approval_required' || turn.status === 'rejected')
+	if (
+		turn.status === 'running' ||
+		turn.status === 'approval_required' ||
+		turn.status === 'rejected'
+	)
 		return null;
 	const plan = turn.execution_plan ?? turn.progress?.execution_plan ?? null;
 	if (plan?.status === 'permission_denied') return 'permissionDenied';
@@ -23,7 +32,10 @@ export function getTurnRecoveryState(
 	if (plan?.status === 'resource_limited') return 'resourceLimited';
 	if (turn.status === 'failed' || turn.status === 'interrupted') return 'technicalFailure';
 	if (turn.status !== 'completed') return null;
-	if (turn.completion_reason === 'resource_budget' || turn.completion_reason === 'emergency_ceiling')
+	if (
+		turn.completion_reason === 'resource_budget' ||
+		turn.completion_reason === 'emergency_ceiling'
+	)
 		return 'resourceLimited';
 	return turn.completion_reason === 'no_progress' ? 'noProgress' : null;
 }
@@ -55,14 +67,18 @@ export function getModelServiceErrorKey(errorCode: string | null | undefined): s
 /** Derive one terminal notice from the current turn, including restored snapshots. */
 export function getTurnNotice(turn: ChatTurn | ChatResponseSnapshot | null) {
 	if (!turn) return null;
-	if (turn.status === 'cancelled') return {
-		messageKey: 'researchAgent.responseStopped', titleKey: null,
-		isError: false, canContinue: false
-	};
+	if (turn.status === 'cancelled')
+		return {
+			messageKey: 'researchAgent.responseStopped',
+			titleKey: null,
+			isError: false,
+			canContinue: false
+		};
 	const recovery = getTurnRecoveryState(turn);
 	if (!recovery) return null;
 	const specificReason = getModelServiceErrorKey(turn.error_code);
-	const messageKey = specificReason ??
+	const messageKey =
+		specificReason ??
 		(turn.status === 'interrupted'
 			? 'researchAgent.responseInterrupted'
 			: recovery === 'technicalFailure'
@@ -70,9 +86,12 @@ export function getTurnNotice(turn: ChatTurn | ChatResponseSnapshot | null) {
 				: `researchAgent.${recovery}Description`);
 	return {
 		messageKey,
-		titleKey: recovery === 'technicalFailure' || specificReason || turn.status === 'interrupted'
-			? null : `researchAgent.${recovery}`,
-		isError: Boolean(specificReason) || recovery === 'technicalFailure' || recovery === 'permissionDenied',
+		titleKey:
+			recovery === 'technicalFailure' || specificReason || turn.status === 'interrupted'
+				? null
+				: `researchAgent.${recovery}`,
+		isError:
+			Boolean(specificReason) || recovery === 'technicalFailure' || recovery === 'permissionDenied',
 		canContinue: recovery !== 'permissionDenied'
 	};
 }
@@ -80,11 +99,9 @@ export function getTurnNotice(turn: ChatTurn | ChatResponseSnapshot | null) {
 const completeCitationMarker = /\[\[cite:[^\]\r\n]+\]\]/g;
 const completeInternalSourceId =
 	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+(?![A-Za-z0-9_-])/g;
-const quotedInternalSourceId =
-	/`(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+`/g;
+const quotedInternalSourceId = /`(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+`/g;
 const partialCitationMarker = /\[\[cite:[^\]\r\n]*$/;
-const partialInternalSourceId =
-	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9_-]*$/;
+const partialInternalSourceId = /(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9_-]*$/;
 
 /** Keep transient model markers and source identities out of the live answer. */
 export function sanitizeStreamingCitationText(content: string): string {
@@ -202,7 +219,7 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 						(!sourceRef || (item.source_ref ?? item.table_ref) === sourceRef) &&
 						(!sourceKind || !item.source_kind || text(item.source_kind) === sourceKind) &&
 						(!sourceDigest || text(item.source_digest) === sourceDigest)
-					)
+				)
 			: [];
 		const internalHref = (value: unknown) => {
 			const href = text(value);
@@ -242,11 +259,11 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 			.slice(questionIndex)
 			.flatMap((message) => message.source_contexts)
 			.find(
-					(item) =>
-						item.document_id === documentId &&
-						(!sourceRef || item.source_ref === sourceRef) &&
-						(!sourceKind || !item.source_kind || item.source_kind === sourceKind) &&
-						(!sourceDigest || item.source_digest === sourceDigest)
+				(item) =>
+					item.document_id === documentId &&
+					(!sourceRef || item.source_ref === sourceRef) &&
+					(!sourceKind || !item.source_kind || item.source_kind === sourceKind) &&
+					(!sourceDigest || item.source_digest === sourceDigest)
 			);
 		const resultHref = result?.resource_refs
 			.map((resource) => internalHref(resource.href))

@@ -59,7 +59,8 @@
 	export let onShowPdf: () => void = () => {};
 
 	$: nodes = parseMarkdown(markdown?.markdown ?? '');
-	$: title = markdown?.title || markdown?.source_filename || $t('workbench.sourceContentUnavailableTitle');
+	$: title =
+		markdown?.title || markdown?.source_filename || $t('workbench.sourceContentUnavailableTitle');
 	$: metadata = [
 		markdown?.source_filename
 			? `${$t('traceback.sourceFileLabel')}: ${markdown.source_filename}`
@@ -89,11 +90,11 @@
 				} satisfies DocumentSourceSelection)
 			: null;
 	$: if (activeNodeKey) {
-		sourceJumpToken;
+		void sourceJumpToken;
 		void scrollActiveNodeIntoView(activeNodeKey);
 	}
 	$: if (activeFallback) {
-		sourceJumpToken;
+		void sourceJumpToken;
 		void scrollActiveElementIntoView('[data-testid="markdown-active-source-fallback"]');
 	}
 
@@ -569,7 +570,7 @@
 				</h1>{/if}
 			{#if metadata.length}
 				<div class="markdown-reader__meta">
-					{#each metadata as item, index}
+					{#each metadata as item, index (index)}
 						<span>{item}</span>
 						{#if index < metadata.length - 1}
 							<span aria-hidden="true">|</span>
@@ -580,11 +581,13 @@
 		</div>
 		<div class="markdown-reader__actions">
 			{#if sourceFileUrl}
+				<!-- eslint-disable svelte/no-navigation-without-resolve -- This is a backend API URL, outside the Svelte page router. -->
 				<a
 					href={sourceFileUrl}
 					aria-label={$t('workbench.downloadSource')}
 					title={$t('workbench.downloadSource')}><Download size={17} /></a
 				>
+				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 			{/if}
 		</div>
 	</header>
@@ -795,15 +798,15 @@
 						<table>
 							<thead>
 								<tr>
-									{#each node.headers as header}
+									{#each node.headers as header, index (index)}
 										<th>{header}</th>
 									{/each}
 								</tr>
 							</thead>
 							<tbody>
-								{#each node.rows as row}
+								{#each node.rows as row, index (index)}
 									<tr>
-										{#each node.headers as _header, index}
+										{#each node.headers as header, index (`${index}:${header}`)}
 											<td>{row[index] ?? ''}</td>
 										{/each}
 									</tr>

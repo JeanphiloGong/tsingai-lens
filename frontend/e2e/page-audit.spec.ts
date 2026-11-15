@@ -21,7 +21,7 @@ const routes = [
 	[`/collections/${collectionId}`, 'Research questions are ready to review'],
 	[`/collections/${collectionId}/documents`, 'Papers'],
 	[`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`, 'Paper A'],
-	[`/collections/${collectionId}/objectives`, '研究目标'],
+	[`/collections/${collectionId}/objectives`, 'Research objectives'],
 	[
 		`/collections/${collectionId}/objectives/${objectiveId}`,
 		'How does heat treatment affect LPBF 316L tensile strength?'
@@ -240,9 +240,11 @@ test.describe('page interaction audit', () => {
 				await expect(answer).toContainText('specimen orientation, and heat treatment.');
 				await expect(answer.locator('.katex')).toHaveCount(1);
 				await expect(page.getByTestId('research-progress')).toHaveCount(1);
-				await expect(answer.getByRole('alert')).toBeVisible();
+				await expect(page.locator('[data-testid="research-recovery"][role="alert"]')).toBeVisible();
 				await page.getByRole('button', { name: 'Check result', exact: true }).click();
-				await expect(answer.getByRole('alert')).toHaveCount(0);
+				await expect(page.locator('[data-testid="research-recovery"][role="alert"]')).toHaveCount(
+					0
+				);
 				if (screenshotDir)
 					await page.screenshot({ path: join(screenshotDir, `response-resumed-${width}.png`) });
 				stage = 2;
@@ -381,7 +383,29 @@ test.describe('page interaction audit', () => {
 					);
 				return route.fulfill(json({ items, feedback: [], pending_approval: null, running }));
 			});
-			const history = () => page.locator('.history-item').filter({ hasText: question });
+			await page.route('**/api/v1/chat-sessions?*', (route) =>
+				route.fulfill(
+					json({
+						items: [
+							{
+								...chatSession(),
+								session_id: 'chat_work',
+								title: question,
+								status: running ? 'running' : 'idle'
+							},
+							{
+								...chatSession(),
+								session_id: 'chat_done',
+								title: 'Earlier comparison',
+								status: 'idle'
+							}
+						],
+						limit: 12,
+						offset: 0
+					})
+				)
+			);
+			const history = () => page.locator('.history-select').filter({ hasText: question });
 			const openHistory = async () => {
 				if (width < 820)
 					await page.getByRole('button', { name: 'Show history', exact: true }).click();
@@ -400,12 +424,12 @@ test.describe('page interaction audit', () => {
 			await expect(page.locator('.assistant-message').filter({ has: progress })).toHaveCount(1);
 			await expect(progress).toContainText('Research in progress');
 			await expect(page.locator('.welcome-state')).toHaveCount(0);
-			await expect(progress.locator('.progress-time')).toHaveCount(0);
+			await expect(progress.locator('.progress-meta')).toHaveText('');
 			checkpoint = true;
 			await page.getByRole('button', { name: 'Check result', exact: true }).click();
 			await expect(page.getByTestId('user-message')).toContainText(question);
-			const elapsed = await progress.locator('.progress-time').innerText();
-			await expect(progress.locator('.progress-time')).not.toHaveText(elapsed);
+			const elapsed = await progress.locator('.progress-meta').innerText();
+			await expect(progress.locator('.progress-meta')).not.toHaveText(elapsed);
 			await page.locator('.back-workspace').click();
 			await page.goto(`/collections/${collectionId}/assistant`);
 			await expect(progress).toBeVisible();
@@ -422,14 +446,17 @@ test.describe('page interaction audit', () => {
 				await page.screenshot({ path: join(screenshotDir, `research-reentry-${width}.png`) });
 			unavailable = true;
 			await page.getByRole('button', { name: 'Check result', exact: true }).click();
-			await expect(page.getByTestId('research-recovery').getByRole('alert')).toBeVisible();
-			await expect(progress).toContainText('Reconnecting to research');
+			await expect(page.locator('[data-testid="research-recovery"][role="alert"]')).toBeVisible();
+			await expect(page.locator('[data-testid="research-recovery"][role="alert"]')).toContainText(
+				'Connection lost'
+			);
+			await expect(progress).toContainText('1 / 2 research actions');
 			await expect(progress).toBeVisible();
 			unavailable = false;
 			await page.getByRole('button', { name: 'Check result', exact: true }).click();
-			await expect(page.getByTestId('research-recovery').getByRole('alert')).toHaveCount(0);
+			await expect(page.locator('[data-testid="research-recovery"][role="alert"]')).toHaveCount(0);
 			await openHistory();
-			await page.locator('.history-item').filter({ hasText: 'Earlier comparison' }).click();
+			await page.locator('.history-select').filter({ hasText: 'Earlier comparison' }).click();
 			await expect(page.getByTestId('assistant-message')).toContainText(
 				'Earlier comparison completed'
 			);
@@ -552,7 +579,7 @@ test.describe('page interaction audit', () => {
 				.locator('.embedded-toolbar')
 				.getByRole('button', { name: 'Conversation history' })
 				.click();
-			await expect(page.locator('.embedded-history button')).toHaveCount(4);
+			await expect(page.locator('.embedded-history-select')).toHaveCount(4);
 			await page
 				.locator('.embedded-history')
 				.getByRole('button', { name: 'Compare the heat treatments' })
@@ -563,7 +590,7 @@ test.describe('page interaction audit', () => {
 			await expect(answers).toHaveCount(0);
 			if (width < 820) await page.getByRole('button', { name: 'Show history' }).click();
 			await page
-				.locator('.history-item')
+				.locator('.history-select')
 				.filter({ hasText: 'Inspect the specimen preparation' })
 				.click();
 			await expect(answers).toHaveCount(2);
@@ -1512,21 +1539,25 @@ test.describe('page interaction audit', () => {
 			finish = resolve;
 		});
 		let logins = 0;
-		await page.route('**/api/v1/auth/logout', async (route) => {
+		await page.route('**/user-api/v1/logout', async (route) => {
 			await completion;
-			return route.fulfill(json({}));
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ ok: true })
+			});
 		});
-		await page.route('**/api/v1/auth/login', (route) => {
+		await page.route('**/user-api/v1/login', (route) => {
 			logins += 1;
-			return route.fulfill(
-				json({
-					user: {
-						user_id: 'user_2',
-						email: 'second@example.test',
-						display_name: 'Second Researcher'
-					}
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					user_id: 'user_2',
+					email: 'second@example.test',
+					display_name: 'Second Researcher'
 				})
-			);
+			});
 		});
 		try {
 			await page.goto('/');
@@ -1551,7 +1582,8 @@ test.describe('page interaction audit', () => {
 		let preparations = 0;
 		await page.route('http://review.lens.test/**', async (route) => {
 			const url = new URL(route.request().url());
-			if (url.pathname.startsWith('/api/')) return route.fallback();
+			if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/user-api/'))
+				return route.fallback();
 			const response = await route.fetch({
 				url: new URL(`${url.pathname}${url.search}`, baseURL).toString()
 			});
@@ -1567,7 +1599,7 @@ test.describe('page interaction audit', () => {
 		await page.route('**/api/v1/collections/col_123/documents/doc_1/preparation', (route) => {
 			preparations += 1;
 			return route.fulfill(
-				json({ run_id: 'run_1', collection_id: collectionId, status: 'queued' })
+				json({ ...processingRun(), run_id: 'run_1', scope_id: documentId, status: 'queued' })
 			);
 		});
 		await page.goto('http://review.lens.test/collections/col_123/assistant');
@@ -1675,7 +1707,7 @@ test.describe('page interaction audit', () => {
 		});
 		const other = await context.newPage();
 		await mockApis(other);
-		await other.route('**/api/v1/auth/logout', (route) => route.fulfill(json({})));
+		await other.route('**/user-api/v1/logout', (route) => route.fulfill(json({})));
 		try {
 			await page.goto(`/collections/${collectionId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
@@ -2268,13 +2300,13 @@ test.describe('page interaction audit', () => {
 
 		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
 
-		await expect(page.getByRole('heading', { name: '研究目标' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Research objectives' })).toBeVisible();
 		await expect(
 			page.getByRole('heading', {
 				name: 'How does heat treatment affect LPBF 316L tensile strength?'
 			})
 		).toBeVisible();
-		await expect(page.getByRole('link', { name: '查看 Findings' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'View findings' })).toBeVisible();
 		expect(objectiveRequests).toEqual([`/api/v1/collections/${collectionId}/objectives`]);
 	});
 
@@ -2366,7 +2398,9 @@ test.describe('page interaction audit', () => {
 			const brandChannels = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(brandHex);
 			return {
 				buttonBottom: buttonRect.bottom,
-				addRight: addRect.right,
+				addTop: addRect.top,
+				inputBottom: inputRect.bottom,
+				addCenter: addRect.top + addRect.height / 2,
 				inputLeft: inputRect.left,
 				buttonColor: getComputedStyle(buttonElement).backgroundColor,
 				brandColor: brandChannels
@@ -2379,8 +2413,8 @@ test.describe('page interaction audit', () => {
 		});
 		expect(mobileLayout).not.toBeNull();
 		expect(mobileLayout!.buttonBottom).toBeLessThanOrEqual(mobileLayout!.viewportHeight + 1);
-		expect(mobileLayout!.addRight).toBeLessThanOrEqual(mobileLayout!.inputLeft + 1);
-		expect(Math.abs(mobileLayout!.inputCenter - mobileLayout!.buttonCenter)).toBeLessThan(4);
+		expect(mobileLayout!.addTop).toBeGreaterThanOrEqual(mobileLayout!.inputBottom);
+		expect(Math.abs(mobileLayout!.addCenter - mobileLayout!.buttonCenter)).toBeLessThan(4);
 		expect(mobileLayout!.buttonColor).not.toBe('rgba(0, 0, 0, 0)');
 
 		await input.fill('First question');
@@ -2405,7 +2439,7 @@ test.describe('page interaction audit', () => {
 
 		await page.setViewportSize({ width: 390, height: 520 });
 		await page.getByRole('button', { name: 'Show history' }).click();
-		await expect(page.locator('.history-item')).toHaveCount(12);
+		await expect(page.locator('.history-select')).toHaveCount(13);
 		await expect(sendButton).toBeInViewport();
 		await page.getByRole('button', { name: 'Hide history' }).click();
 		await input.focus();
@@ -2606,8 +2640,14 @@ test.describe('page interaction audit', () => {
 		await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
 		await expect(trigger).toBeFocused();
 		await trigger.click();
-		await expect(page.locator('#language-options button').last()).toHaveAttribute('aria-pressed', 'true');
-		await page.locator('#language-options').getByRole('button', { name: 'EN', exact: true }).click();
+		await expect(page.locator('#language-options button').last()).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await page
+			.locator('#language-options')
+			.getByRole('button', { name: 'EN', exact: true })
+			.click();
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 	});
 
@@ -2640,11 +2680,20 @@ test.describe('page interaction audit', () => {
 		expect(await visibleElementsFitViewport(page, '.collection-list-card__actions a')).toBe(true);
 	});
 
-	test('collection navigation identifies the active route and exposes secondary destinations', async ({ page }) => {
+	test('collection navigation identifies the active route and exposes secondary destinations', async ({
+		page
+	}) => {
 		await page.goto(`/collections/${collectionId}/objectives`);
-		await expect(page.getByRole('heading', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })).toBeVisible();
+		await expect(
+			page.getByRole('heading', {
+				name: 'How does heat treatment affect LPBF 316L tensile strength?'
+			})
+		).toBeVisible();
 		const nav = page.getByRole('navigation', { name: 'Collection navigation', exact: true });
-		await expect(nav.getByRole('link', { name: 'Objectives', exact: true })).toHaveAttribute('aria-current', 'page');
+		await expect(nav.getByRole('link', { name: 'Objectives', exact: true })).toHaveAttribute(
+			'aria-current',
+			'page'
+		);
 		const more = nav.locator('summary');
 		await more.click();
 		const graph = nav.getByRole('link', { name: 'Evidence Map', exact: true });
@@ -2680,9 +2729,9 @@ test.describe('page interaction audit', () => {
 			.locator(`a[href="/collections/${collectionId}/objectives/${objectiveId}"]`)
 			.first()
 			.click();
-		await expect(page.locator('.finding-list')).toContainText(
-			'Annealing was associated with higher tensile strength.'
-		);
+		await expect(
+			page.getByRole('button', { name: /Annealing was associated with higher tensile strength/ })
+		).toContainText('Annealing was associated with higher tensile strength.');
 	});
 
 	test('shows aggregate preparation progress for active paper runs', async ({ page }) => {
@@ -2723,12 +2772,11 @@ test.describe('page interaction audit', () => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto(`/collections/${collectionId}/objectives?audit_state=objective-running`);
 
-		await expect(page.getByRole('progressbar', { name: '研究目标分析进度' })).toHaveAttribute(
-			'aria-valuenow',
-			'33'
-		);
-		await expect(page.getByText('论文进度 2 / 6')).toBeVisible();
-		await expect(page.getByText('正在逐篇提取相关证据')).toBeVisible();
+		await expect(
+			page.getByRole('progressbar', { name: 'Research objective analysis progress' })
+		).toHaveAttribute('aria-valuenow', '33');
+		await expect(page.getByText('Paper progress 2 / 6')).toBeVisible();
+		await expect(page.getByText('Extracting evidence from each paper')).toBeVisible();
 		await expect(page.getByRole('link', { name: '查看状态' })).toHaveCount(0);
 		await expect(
 			page.getByRole('link', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })
@@ -2742,7 +2790,9 @@ test.describe('page interaction audit', () => {
 		}
 
 		await page.setViewportSize({ width: 390, height: 844 });
-		await expect(page.getByRole('progressbar', { name: '研究目标分析进度' })).toBeVisible();
+		await expect(
+			page.getByRole('progressbar', { name: 'Research objective analysis progress' })
+		).toBeVisible();
 		expect(await visibleElementsFitViewport(page, '.analysis-progress')).toBe(true);
 		expect(consoleErrors).toEqual([]);
 
@@ -2932,6 +2982,9 @@ async function mockMessageBranches(
 		const method = route.request().method();
 		const parts = path.split('/');
 		const id = parts[4] || sessionId;
+		if (parts[5] === 'permissions') return route.fallback();
+		if (!parts[4])
+			return route.fulfill(json({ items: [...sessions.values()], limit: 12, offset: 0 }));
 		if (parts[5] === 'tree') {
 			const nodes = [...trajectories.entries()].flatMap(([owner, items]) => {
 				const start = owner === sessionId ? 0 : Number(sessions.get(owner)!.fork_position);
@@ -3044,10 +3097,10 @@ async function mockMessageBranches(
 					pending_approval: pending,
 					running: options.condition === 'running',
 					branches:
-						messages.length && sessions.size > 1
+						sessions.size > 1
 							? [
 									{
-										message_id: messages[0].message_id,
+										message_id: messages[0]?.message_id ?? original[0].message_id,
 										session_ids: [...sessions.keys()],
 										active_session_id: id
 									}
@@ -3078,10 +3131,26 @@ async function mockApis(page: Page) {
 		const referer = route.request().headers().referer;
 		const auditState = readAuditState(url, referer);
 
-		if (!path.startsWith('/api/v1/')) return route.continue();
+		if (!path.startsWith('/api/v1/') && !path.startsWith('/user-api/v1/')) return route.continue();
 
-		if (path === '/api/v1/auth/me') {
-			return route.fulfill(json(authPayload()));
+		if (path === '/user-api/v1/me/permissions') {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ permission_codes: [] })
+			});
+		}
+		if (path === '/user-api/v1/me') {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(authPayload())
+			});
+		}
+		if (path === '/api/v1/model-connections') {
+			return route.fulfill(
+				json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] })
+			);
 		}
 		if (path === '/api/v1/collections') {
 			if (method === 'POST') return route.fulfill(json(collection(auditState)));
@@ -3178,6 +3247,21 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
+		if (
+			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-analysis`
+		) {
+			return route.fulfill(
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					selections: [],
+					comparison_groups: [],
+					experiments: [],
+					findings: [objectiveFinding()]
+				})
+			);
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence-map`) {
 			return route.fulfill(json(objectiveEvidenceMap()));
 		}
@@ -3209,7 +3293,16 @@ async function mockApis(page: Page) {
 }
 
 function json(body: unknown, status = 200) {
-	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+	return {
+		status,
+		contentType: 'application/json',
+		body: JSON.stringify({
+			code: status >= 400 ? 200205 : 200,
+			message: status >= 400 ? 'Unavailable' : 'success',
+			data: body ?? {},
+			meta: null
+		})
+	};
 }
 
 function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
@@ -3460,11 +3553,9 @@ function now() {
 
 function authPayload() {
 	return {
-		user: {
-			user_id: 'user_1',
-			email: 'reader@example.com',
-			display_name: 'Reader'
-		}
+		user_id: 'user_1',
+		email: 'reader@example.com',
+		display_name: 'Reader'
 	};
 }
 
@@ -3698,6 +3789,15 @@ function objectiveView(auditState?: string | null) {
 		objective,
 		active_analysis: objectiveAnalysis(isRunning),
 		published_analysis: isRunning ? null : objectiveAnalysis(),
+		evidence_review: {
+			total_evidence_count: 1,
+			result_count: 1,
+			comparable_evidence_count: 1,
+			gap_count: 0,
+			omitted_gap_count: 0,
+			status_counts: {},
+			gaps: []
+		},
 		warnings: []
 	};
 }

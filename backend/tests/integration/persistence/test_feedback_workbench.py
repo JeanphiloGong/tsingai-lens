@@ -50,7 +50,6 @@ from repositories.analysis_job_repository import (
     correction_signal_idempotency_key,
     tool_failure_idempotency_key,
 )
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
     CollectionRepository,
@@ -80,16 +79,6 @@ def _current_iso() -> str:
 
 @pytest.fixture
 async def feedback_chain(postgres_session_factory, tmp_path):
-    auth = AuthRepository()
-    await auth.add_user(
-        AuthUserRecord(
-            user_id=USER_ID,
-            email="feedback-chain@example.test",
-            display_name="Feedback chain researcher",
-            password_hash="synthetic-password-hash",
-            created_at=NOW,
-        )
-    )
 
     collections = CollectionRepository()
     await collections.add_collection(
@@ -192,7 +181,6 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     dataset_snapshot_service.collection_service = collection_service
     snapshot_service = dataset_snapshot_service
     return SimpleNamespace(
-        auth=auth,
         chat=chat,
         chat_service=chat_service,
         cases=cases,

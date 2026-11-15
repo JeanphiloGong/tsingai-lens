@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { authState } from '../../../../_shared/authState';
 
 	import { browser } from '$app/environment';
@@ -35,7 +36,7 @@
 	let selectedSources: ChatSourceContext[] = [];
 	let selectionError = '';
 	$: {
-		$agent.sourceVersion;
+		void $agent.sourceVersion;
 		selectedSources = readPendingChatSourceContexts($authState.user?.user_id ?? '', collectionId);
 	}
 	$: selectedSourceKeys = selectedSources
@@ -117,6 +118,7 @@
 	$: if (browser && collectionId && documentId && documentKey !== loadedDocumentKey) {
 		loadedDocumentKey = documentKey;
 		appliedRequestKey = '';
+		// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 		void loadSource();
 	}
 	$: if (model && documentKey === loadedDocumentKey && requestKey !== appliedRequestKey) {
@@ -125,7 +127,9 @@
 	}
 
 	function backHref() {
-		return requestedReturnTo || `/collections/${collectionId}/documents`;
+		return resolve(
+			(requestedReturnTo || `/collections/${collectionId}/documents`) as `/collections/${string}`
+		);
 	}
 	onDestroy(() => {
 		loadGeneration += 1;
@@ -158,6 +162,7 @@
 			loadError = $t('workbench.sourceContentUnavailableBody');
 		}
 		applyRequestedSource();
+		// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 		appliedRequestKey = requestKey;
 		loading = false;
 	}
@@ -324,12 +329,14 @@
 
 <div class="document-reader-root">
 	<header class="reader-header">
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 		<a
 			class="reader-back"
 			href={backHref()}
 			aria-label={$t('workbench.documents')}
 			title={$t('workbench.documents')}><ArrowLeft size={17} /></a
 		>
+		<!-- eslint-enable svelte/no-navigation-without-resolve -->
 		<div class="reader-mode-tabs" role="tablist" aria-label={$t('workbench.readerModeLabel')}>
 			<button
 				type="button"
@@ -402,6 +409,7 @@
 			<button class="btn btn--ghost btn--small" type="button" on:click={loadSource}
 				>{$t('researchAgent.workspace.retryPaper')}</button
 			>
+			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 			<a href={backHref()}>{$t('workbench.documents')}</a>
 		</main>
 	{/if}

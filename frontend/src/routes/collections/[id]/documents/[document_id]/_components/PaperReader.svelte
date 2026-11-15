@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
@@ -70,11 +71,11 @@
 	let pageObserver: IntersectionObserver | null = null;
 
 	const zoomLevels = ['Fit', '90%', '100%', '125%'];
-	const canvasNodes = new Map<number, HTMLCanvasElement>();
-	const pageShellNodes = new Map<number, HTMLElement>();
-	const renderTasks = new Map<number, RenderTask>();
-	const renderedPageNumbers = new Set<number>();
-	const queuedPageNumbers = new Set<number>();
+	const canvasNodes = new SvelteMap<number, HTMLCanvasElement>();
+	const pageShellNodes = new SvelteMap<number, HTMLElement>();
+	const renderTasks = new SvelteMap<number, RenderTask>();
+	const renderedPageNumbers = new SvelteSet<number>();
+	const queuedPageNumbers = new SvelteSet<number>();
 
 	$: hasPdfSource = Boolean(
 		sourceFileUrl && (!sourceFilename || sourceFilename.toLowerCase().endsWith('.pdf'))
@@ -107,6 +108,7 @@
 		void jumpToSource(activeSourceAnchor);
 	}
 	$: if (mounted && pendingSourceJump && pendingSourceJumpReady) {
+		// eslint-disable-next-line svelte/infinite-reactive-loop -- The source request is guarded and consumed after rendering; these writes do not retrigger it.
 		void flushPendingSourceJump();
 	}
 	$: if (mounted && !hasPdfSource) {
@@ -197,7 +199,7 @@
 			pdfDocument = document;
 			currentPage = 1;
 			renderedZoom = '';
-		} catch (error) {
+		} catch {
 			if (generation !== loadGeneration) return;
 			pdfDocument = null;
 			pdfError = $t('workbench.pdfLoadFailed');
@@ -253,14 +255,14 @@
 			await tick();
 			observePageShells();
 			await renderInitialPages(renderId);
-		} catch (error) {
+		} catch {
 			if (generation !== loadGeneration || renderId !== renderGeneration) return;
 			pdfError = $t('workbench.pdfLoadFailed');
 		}
 	}
 
 	function initialPageNumbers() {
-		const pageNumbers = new Set<number>();
+		const pageNumbers = new SvelteSet<number>();
 		pageNumbers.add(currentPage);
 		pageNumbers.add(currentPage + 1);
 		if (activeSourceAnchor) pageNumbers.add(activeSourceAnchor.pageIndex + 1);
@@ -430,9 +432,11 @@
 			`[data-page-number="${pageNumber}"]`
 		);
 		if (target) {
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The source request is guarded and consumed after rendering; these writes do not retrigger it.
 			pendingSourceJump = null;
 			scrollPageIntoView(target, 'center');
 		} else {
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The source request is guarded and consumed after rendering; these writes do not retrigger it.
 			pendingSourceJump = anchor;
 		}
 	}
@@ -453,6 +457,7 @@
 	async function flushPendingSourceJump() {
 		const anchor = pendingSourceJump;
 		if (!anchor) return;
+		// eslint-disable-next-line svelte/infinite-reactive-loop -- The source request is guarded and consumed after rendering; these writes do not retrigger it.
 		await jumpToSource(anchor);
 	}
 
@@ -539,7 +544,7 @@
 	}
 
 	function outlineSections() {
-		const seen = new Set<string>();
+		const seen = new SvelteSet<string>();
 		const sections: { label: string; sourceSpanId: string | null }[] = [];
 		for (const page of pages) {
 			for (const paragraph of page.paragraphs) {
@@ -626,7 +631,7 @@
 
 		{#if thumbnailTab === 'source'}
 			<div class="page-thumbnails">
-				{#each thumbnailPageNumbers as pageNumber}
+				{#each thumbnailPageNumbers as pageNumber (pageNumber)}
 					<button
 						type="button"
 						class:active={currentPage === pageNumber}
@@ -646,7 +651,7 @@
 			</div>
 		{:else}
 			<div class="outline-list">
-				{#each outlineSections() as section}
+				{#each outlineSections() as section, index (index)}
 					<button
 						type="button"
 						on:click={() => selectOutlineSource(section.sourceSpanId)}
@@ -666,7 +671,7 @@
 			<div>
 				<h1>{title}</h1>
 				<div class="paper-meta">
-					{#each metadata as item, index}
+					{#each metadata as item, index (index)}
 						<span>{item}</span>
 						{#if index < metadata.length - 1}
 							<span aria-hidden="true">|</span>
@@ -717,7 +722,7 @@
 				<span class="toolbar-icon toolbar-icon--plus" aria-hidden="true"></span>
 			</button>
 			<select bind:value={zoom} aria-label={$t('workbench.zoomLabel')}>
-				{#each zoomLevels as level}
+				{#each zoomLevels as level (level)}
 					<option value={level}>{level}</option>
 				{/each}
 			</select>
@@ -738,6 +743,7 @@
 				<span class="toolbar-icon toolbar-icon--search" aria-hidden="true"></span>
 			</button>
 			{#if sourceFileUrl}
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- This is a backend API URL, outside the Svelte page router. -->
 				<a class="icon-button" href={sourceFileUrl} aria-label={$t('workbench.downloadSource')}>
 					<span class="toolbar-icon toolbar-icon--download" aria-hidden="true"></span>
 				</a>
@@ -794,7 +800,7 @@
 			{/if}
 
 			{#if showPdfView && pdfPageStates.length}
-				{#each pdfPageStates as page}
+				{#each pdfPageStates as page (page.pageNumber)}
 					<section
 						class="pdf-page-shell"
 						data-testid="pdf-page-shell"
@@ -839,14 +845,14 @@
 							{/if}
 						</p>
 					</header>
-					{#each pages as page}
+					{#each pages as page (page.page_number)}
 						<section
 							class="parsed-source-page"
 							data-page-number={page.page_number}
 							aria-label={page.label}
 						>
 							<div class="parsed-source-page__label">{page.label}</div>
-							{#each page.paragraphs as paragraph}
+							{#each page.paragraphs as paragraph (paragraph)}
 								{@const selection = parsedSourceSelection(page.page_number, paragraph)}
 								<div
 									class="parsed-source-entry"

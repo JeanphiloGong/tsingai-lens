@@ -11,6 +11,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from infra.persistence.postgres.base import Base
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 from sqlalchemy import (
     JSON,
     Column,
@@ -28,21 +29,25 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261101_0092"
+HEAD_REVISION = "20261104_0099"
+# Keep historical rollback cases before the irreversible PostgreSQL identity cutover.
+PRE_IDENTITY_REVISION = "20261102_0098"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 
 def test_model_connection_migration_creates_schema_and_protects_records(
     postgres_sync_engine,
 ) -> None:
+    reset_postgres_schema(postgres_sync_engine)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
         # The bootstrap migration imports current ORM metadata. Remove the new,
         # empty table to exercise upgrading an actual pre-registry database.
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         command.downgrade(config, "20261020_0088")
         assert not inspect(connection).has_table("model_connections")
-        command.upgrade(config, "head")
+        command.upgrade(config, "20261101_0092")
 
         inspector = inspect(connection)
         assert inspector.get_pk_constraint("model_connections")[
@@ -57,7 +62,7 @@ def test_model_connection_migration_creates_schema_and_protects_records(
         }
         assert set(indexes) == {"ix_model_connections_enabled"}
 
-        connections = Base.metadata.tables["model_connections"]
+        connections = Table("model_connections", MetaData(), autoload_with=connection)
         now = datetime.now(timezone.utc)
         connection.execute(
             connections.insert().values(
@@ -82,16 +87,18 @@ def test_model_connection_migration_creates_schema_and_protects_records(
         assert row["request_timeout_seconds"] is None
         assert (
             MigrationContext.configure(connection).get_current_revision()
-            == HEAD_REVISION
+            == "20261101_0092"
         )
 
 
 def test_model_connection_revision_removal_preserves_configuration(
     postgres_sync_engine,
 ) -> None:
+    reset_postgres_schema(postgres_sync_engine)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         command.downgrade(config, "20261031_0090")
         old_connections = Table("model_connections", MetaData(), autoload_with=connection)
         now = datetime.now(timezone.utc)
@@ -111,7 +118,7 @@ def test_model_connection_revision_removal_preserves_configuration(
         }
         connection.execute(old_connections.insert().values(record))
 
-        command.upgrade(config, "head")
+        command.upgrade(config, "20261101_0092")
         connections = Table("model_connections", MetaData(), autoload_with=connection)
         expected = {key: value for key, value in record.items() if key != "revision"}
         assert dict(connection.execute(select(connections)).mappings().one()) == expected
@@ -120,16 +127,18 @@ def test_model_connection_revision_removal_preserves_configuration(
         command.downgrade(config, "20261031_0090")
         restored = connection.execute(select(old_connections)).mappings().one()
         assert dict(restored) == {**expected, "revision": 1}
-        command.upgrade(config, "head")
+        command.upgrade(config, "20261101_0092")
         assert dict(connection.execute(select(connections)).mappings().one()) == expected
 
 
 def test_model_connection_revision_removal_refuses_duplicate_ids_without_data_loss(
     postgres_sync_engine,
 ) -> None:
+    reset_postgres_schema(postgres_sync_engine)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         command.downgrade(config, "20261020_0088")
         command.upgrade(config, "20261031_0090")
         connections = Table("model_connections", MetaData(), autoload_with=connection)
@@ -156,7 +165,7 @@ def test_model_connection_revision_removal_refuses_duplicate_ids_without_data_lo
 
         with pytest.raises(RuntimeError, match="Assign distinct connection IDs"):
             with connection.begin_nested():
-                command.upgrade(config, "head")
+                command.upgrade(config, "20261101_0092")
 
         assert connection.execute(
             select(connections).order_by(connections.c.revision)
@@ -227,7 +236,7 @@ def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
         assert retired <= after_downgrade
         assert "chat_model_calls" in after_downgrade
         command.upgrade(config, "20260924_0074")
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         final = set(inspect(connection).get_table_names())
         assert retired.isdisjoint(final)
         assert "chat_model_calls" in final
@@ -337,12 +346,12 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         assert MigrationContext.configure(connection).get_current_revision() == (
-            HEAD_REVISION
+            PRE_IDENTITY_REVISION
         )
-        expected = sorted({*Base.metadata.tables, "alembic_version"})
+        expected = sorted({*Base.metadata.tables, "auth_users", "auth_sessions", "alembic_version"})
         assert inspect(connection).get_table_names() == expected
         assert "collection_builds" not in expected
         assert "document_versions" not in expected
@@ -529,7 +538,7 @@ def test_existing_paper_experiment_database_adds_binding_metadata(tmp_path) -> N
             "protocol_evidence_json",
         }.isdisjoint(test_columns)
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         variant_columns = {
             column["name"]
             for column in inspect(connection).get_columns("experimental_variant")
@@ -585,7 +594,7 @@ def test_existing_paper_experiment_database_adds_binding_metadata(tmp_path) -> N
         # matters because the historical 0038 cutover can physically create
         # them early from the current ORM metadata, while 0078 still owns the
         # migration boundary for their persisted behavior.
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         variant_columns = {
             column["name"]
             for column in inspect(connection).get_columns("experimental_variant")
@@ -632,7 +641,7 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(
         # The historical 0038 cutover creates the then-current ORM metadata
         # while rebuilding an empty database.  Round-trip from the real head
         # so 0076's own downgrade removes those objects before replaying them.
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         initial = inspect(connection)
         old_result_columns = {
             column["name"]: column["nullable"]
@@ -669,10 +678,10 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(
         }
         assert downgraded_result_columns == old_result_columns
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         assert (
             MigrationContext.configure(connection).get_current_revision()
-            == HEAD_REVISION
+            == PRE_IDENTITY_REVISION
         )
         replayed = inspect(connection)
         assert "feedback_signal_analysis_results" in replayed.get_table_names()
@@ -730,7 +739,7 @@ def test_legacy_objective_checkpoints_are_classified_with_sqlite_autoincrement(
             )
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         legacy = Table(
             "objective_analysis_legacy_checkpoints",
@@ -821,7 +830,7 @@ def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(
             ],
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         empty = (
             connection.execute(
                 select(analyses).where(analyses.c.objective_id == "empty-checkpoint")
@@ -962,7 +971,7 @@ def test_redundant_source_and_collection_fields_are_removed_without_data_loss(
             )
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         preparations = Table(
             "document_preparations", MetaData(), autoload_with=connection
         )
@@ -1135,7 +1144,7 @@ def test_evaluation_children_are_embedded_before_tables_are_removed(tmp_path) ->
             )
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
         merged_gold = Table(
             "evaluation_gold_sets", MetaData(), autoload_with=connection
         )
@@ -1279,7 +1288,7 @@ def test_existing_profile_and_paper_map_rows_are_simplified(tmp_path) -> None:
             )
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         upgraded_preparations = Table(
             "document_preparations", MetaData(), autoload_with=connection
@@ -1313,10 +1322,10 @@ def test_existing_0040_database_replaces_retired_task_tables(tmp_path) -> None:
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, "20260831_0040")
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         assert MigrationContext.configure(connection).get_current_revision() == (
-            HEAD_REVISION
+            PRE_IDENTITY_REVISION
         )
         assert "pipeline_runs" in inspect(connection).get_table_names()
         assert "tasks" not in inspect(connection).get_table_names()
@@ -1420,7 +1429,7 @@ def test_existing_0044_task_history_is_backfilled_as_one_pipeline_run(tmp_path) 
             )
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         pipeline_runs = Table("pipeline_runs", MetaData(), autoload_with=connection)
         row = (
@@ -1567,7 +1576,7 @@ def test_existing_0041_plan_becomes_an_unstructured_first_revision(tmp_path) -> 
             )
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         upgraded_plans = Table(
             "objective_experiment_plans", MetaData(), autoload_with=connection
@@ -1607,10 +1616,10 @@ def test_existing_0039_database_adds_chat_source_context(tmp_path) -> None:
             for column in inspect(connection).get_columns("chat_messages")
         }
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         assert MigrationContext.configure(connection).get_current_revision() == (
-            HEAD_REVISION
+            PRE_IDENTITY_REVISION
         )
         assert "source_contexts" in {
             column["name"]
@@ -1636,13 +1645,13 @@ def test_v01211_database_upgrades_to_current_document_schema(tmp_path) -> None:
             "20260825_0036"
         )
 
-        command.upgrade(config, "head")
+        command.upgrade(config, PRE_IDENTITY_REVISION)
 
         assert MigrationContext.configure(connection).get_current_revision() == (
-            HEAD_REVISION
+            PRE_IDENTITY_REVISION
         )
         assert sorted(inspect(connection).get_table_names()) == sorted(
-            {*Base.metadata.tables, "alembic_version"}
+            {*Base.metadata.tables, "auth_users", "auth_sessions", "alembic_version"}
         )
 
     engine.dispose()
@@ -1656,3 +1665,40 @@ def test_postgres_migration_head_matches_current_metadata(postgres_sync_engine) 
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
         command.check(config)
+
+
+def test_external_identity_cutover_preserves_collection_owner_and_requires_restore(
+    postgres_sync_engine,
+) -> None:
+    reset_postgres_schema(postgres_sync_engine)
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, PRE_IDENTITY_REVISION)
+        users = Table("auth_users", MetaData(), autoload_with=connection)
+        collections = Table("collections", MetaData(), autoload_with=connection)
+        now = datetime.now(timezone.utc)
+        connection.execute(users.insert().values(
+            user_id="cutover-owner", email="cutover@example.test",
+            display_name="Researcher", password_hash="synthetic-hash", created_at=now,
+        ))
+        connection.execute(collections.insert().values(
+            collection_id="cutover-collection", owner_user_id="cutover-owner",
+            name="Existing research", status="idle", created_at=now, updated_at=now,
+        ))
+        before = dict(connection.execute(select(collections)).mappings().one())
+
+        command.upgrade(config, "head")
+
+        inspector = inspect(connection)
+        assert "auth_users" not in inspector.get_table_names()
+        assert "auth_sessions" not in inspector.get_table_names()
+        assert dict(connection.execute(select(collections)).mappings().one()) == before
+        assert all(
+            foreign_key["referred_table"] != "auth_users"
+            for table in inspector.get_table_names()
+            for foreign_key in inspector.get_foreign_keys(table)
+        )
+        assert MigrationContext.configure(connection).get_current_revision() == HEAD_REVISION
+        with pytest.raises(RuntimeError, match="restore the pre-cutover database backup"):
+            command.downgrade(config, PRE_IDENTITY_REVISION)

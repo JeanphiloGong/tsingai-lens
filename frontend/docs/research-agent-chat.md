@@ -144,7 +144,6 @@ reloading or reconnecting restores it without executing anything. Automatic
 recovery polling excludes this explicitly retryable call, and new questions wait
 until its continuation finishes. A repeated completed decision cannot run twice.
 
-
 The composer also exposes an explicit PDF-paper upload action for the current
 Collection. It calls the same `POST /collections/{collection_id}/documents`
 and per-document preparation endpoint used by the Collection workspace. The
@@ -726,14 +725,14 @@ inspected Sources, unread scope, technical failures, and scientific uncertainty.
 Each problem has one primary presentation location, shared by the independent
 Assistant route and the embedded paper-reader conversation:
 
-| Situation | Location | Information and action |
-| --- | --- | --- |
-| Conversation cannot be loaded | Conversation area, replacing the welcome state | Load failure and retry the selected conversation |
-| Generation or Source reading | Current answer's progress area | Brief current activity; expand for stage history, cycles, and retry counts |
-| Connection lost, background outcome unconfirmed | After the current answer | Keep received text and offer Check result |
-| Write awaiting approval | Existing approval panel | Exact operation, Approve, and Reject |
-| Turn failed or stopped early | After the current answer | Specific reason and Continue research when permitted |
-| Upload, feedback, or rename fails | The affected operation | Its local error and retry/edit controls |
+| Situation                                       | Location                                       | Information and action                                                     |
+| ----------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| Conversation cannot be loaded                   | Conversation area, replacing the welcome state | Load failure and retry the selected conversation                           |
+| Generation or Source reading                    | Current answer's progress area                 | Brief current activity; expand for stage history, cycles, and retry counts |
+| Connection lost, background outcome unconfirmed | After the current answer                       | Keep received text and offer Check result                                  |
+| Write awaiting approval                         | Existing approval panel                        | Exact operation, Approve, and Reject                                       |
+| Turn failed or stopped early                    | After the current answer                       | Specific reason and Continue research when permitted                       |
+| Upload, feedback, or rename fails               | The affected operation                         | Its local error and retry/edit controls                                    |
 
 `ResearchConversation.svelte` owns requests, response snapshots, and operation
 execution. It retains the final turn when it arrives directly; reopening uses

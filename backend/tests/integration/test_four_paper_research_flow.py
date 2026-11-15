@@ -498,8 +498,6 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
 ) -> None:
     test_database_url = os.environ["LENS_TEST_DATABASE_URL"]
     monkeypatch.setenv("LENS_DATABASE_URL", test_database_url)
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "four-paper@example.com")
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "test-password")
     monkeypatch.setattr(
         "infra.persistence.file.collection_workspace.DATA_DIR", tmp_path
     )
@@ -507,7 +505,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -527,15 +527,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         "once": True,
     }
     with TestClient(create_app()) as client:
-        login = client.post(
-            f"{API_PREFIX}/auth/login",
-            json={
-                "email": "four-paper@example.com",
-                "password": "test-password",
-            },
-        )
-        assert login.status_code == 200
-        assert login.json()["code"] == 200, login.text
+        client.cookies.set("lens_session", "fixture:admin@example.com")
 
         created = client.post(
             f"{API_PREFIX}/collections",
@@ -662,9 +654,9 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             for item in evidence.json()["data"]["items"]
             if item["reported_result"] is not None
         ]
-        assert all(item["scientific_context"]["process"] for item in direct_evidence), (
-            direct_evidence
-        )
+        assert all(
+            item["scientific_context"]["process"] for item in direct_evidence
+        ), direct_evidence
         assert {item["document_id"] for item in direct_evidence} == {
             paper_a_id,
             paper_b_id,

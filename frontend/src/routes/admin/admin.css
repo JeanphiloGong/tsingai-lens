@@ -1,0 +1,184 @@
+.admin-workspace {
+	max-width: 1120px;
+	width: 100%;
+	margin: 0 auto;
+	min-width: 0;
+}
+.admin-workspace h1 {
+	font-size: 1.6rem;
+	margin: 1.5rem 0 1rem;
+}
+.admin-workspace h2 {
+	font-size: 1.1rem;
+	margin: 0 0 1rem;
+	overflow-wrap: anywhere;
+}
+.admin-workspace h3 {
+	font-size: 1rem;
+	margin: 1.5rem 0 0.75rem;
+}
+.admin-heading p {
+	color: var(--text-secondary);
+	margin: 0 0 1rem;
+}
+.admin-heading nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	border-bottom: 1px solid var(--border-default);
+	padding-bottom: 0.75rem;
+}
+.admin-heading a {
+	padding: 0.5rem 1rem;
+	border-radius: var(--radius-sm);
+	color: var(--text-secondary);
+}
+.admin-heading a[aria-current='page'] {
+	background: var(--brand-soft);
+	color: var(--brand-primary);
+	font-weight: 600;
+}
+.admin-workspace .toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: 0.75rem;
+	margin: 1rem 0;
+}
+.admin-workspace label {
+	display: grid;
+	gap: 0.4rem;
+	font-size: 0.85rem;
+	color: var(--text-secondary);
+	min-width: 0;
+}
+.admin-workspace .toolbar select {
+	width: 6rem;
+}
+.admin-workspace .btn--ghost {
+	background: var(--surface-card);
+	border-color: var(--border-strong);
+	color: var(--text-primary);
+}
+.admin-workspace .btn--ghost:not(:disabled):hover {
+	background: var(--brand-soft);
+}
+.admin-workspace .btn--primary {
+	background: var(--brand-primary);
+	border-color: var(--brand-primary);
+	color: var(--on-brand);
+}
+.admin-workspace .table-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--border-default);
+	border-radius: var(--radius-md);
+	background: var(--surface-card);
+}
+.admin-workspace table {
+	width: 100%;
+	border-collapse: collapse;
+	text-align: left;
+}
+.admin-workspace td,
+.admin-workspace th {
+	padding: 0.75rem 1rem;
+	border-bottom: 1px solid var(--border-default);
+}
+.admin-workspace th {
+	color: var(--text-secondary);
+	font-size: 0.8rem;
+	background: var(--bg-subtle);
+	font-weight: 500;
+}
+.admin-workspace tr:last-child td {
+	border-bottom: 0;
+}
+.admin-workspace tr.selected {
+	background: var(--brand-soft);
+}
+.admin-workspace td:first-child .btn {
+	border: 0;
+	padding: 0.25rem 0;
+	background: transparent;
+	color: var(--brand-primary);
+	text-align: left;
+}
+.admin-workspace section {
+	padding: 1.25rem;
+	margin-top: 1.25rem;
+	border: 1px solid var(--border-default);
+	border-radius: var(--radius-md);
+	background: var(--surface-card);
+}
+.admin-form {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: 0.75rem;
+	margin: 1rem 0;
+}
+.admin-form label {
+	flex: 1 1 12rem;
+}
+.admin-form .input {
+	width: 100%;
+	min-width: 0;
+}
+.admin-workspace ul {
+	list-style: none;
+	padding: 0;
+}
+.admin-workspace li {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.75rem 0;
+	border-bottom: 1px solid var(--border-default);
+	overflow-wrap: anywhere;
+}
+.admin-workspace li .btn {
+	max-width: 100%;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.admin-workspace .status {
+	margin: 1rem 0;
+	background: var(--info-bg);
+	border-color: var(--info-border);
+	color: var(--info-text);
+}
+.admin-workspace .admin-success {
+	background: var(--success-bg);
+	border-color: var(--success-border);
+	color: var(--success-text);
+}
+.admin-workspace .status--error {
+	background: var(--danger-bg);
+	border-color: var(--danger-border);
+	color: var(--danger-text);
+}
+.admin-workspace .muted {
+	color: var(--text-secondary);
+	font-size: 0.85rem;
+}
+.admin-workspace a:focus-visible {
+	outline: 2px solid var(--brand-primary);
+	outline-offset: 3px;
+}
+@media (max-width: 600px) {
+	.admin-workspace section {
+		padding: 1rem;
+	}
+	.admin-form label {
+		flex-basis: 100%;
+	}
+	.admin-workspace td,
+	.admin-workspace th {
+		padding: 0.5rem 0.75rem;
+	}
+	.admin-workspace .toolbar {
+		gap: 0.5rem;
+	}
+}

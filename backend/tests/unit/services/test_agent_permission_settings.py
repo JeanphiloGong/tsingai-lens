@@ -11,13 +11,6 @@ from repositories.collection_repository import CollectionRepository
 pytestmark = pytest.mark.anyio
 
 
-@pytest.fixture(autouse=True)
-async def collection_owner(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_user
-
-    await seed_user(postgres_session_factory, "owner")
-
-
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"

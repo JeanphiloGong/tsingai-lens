@@ -15,7 +15,7 @@ identity model is [`../../docs/architecture/persistence-model.md`](../../docs/ar
 
 `database.py` exposes the native `AsyncSessionLocal` factory with
 `expire_on_commit=False`. `main.py` creates one SQLAlchemy `AsyncEngine` during
-startup and calls `AsyncSessionLocal.configure(bind=engine)` before bootstrap.
+startup and calls `AsyncSessionLocal.configure(bind=engine)` before handling requests.
 Imports do not create engines; startup failure and normal shutdown dispose the
 owned engine. The engine is available as `database.engine`; file resources are
 initialized as `collection_workspace.Workspace` and `object_store.Store` in
@@ -30,6 +30,11 @@ records open one transaction and pass a required `db: AsyncSession` to all
 participants. No optional transaction scope or transaction factory wrapper is
 maintained. Test fixtures replace the factory at each consumer with an isolated
 native test factory, without rebinding a running application's factory.
+
+Accounts and browser sessions belong to the sibling user-service. Lens stores
+stable owner/actor IDs, resolves the current identity through mTLS gRPC and
+keeps resource ownership rules. There are no local identity tables or user
+foreign keys across the service databases.
 
 ## Current Aggregate Ownership
 

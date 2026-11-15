@@ -1,273 +1,336 @@
 <script lang="ts">
-  import './layout.css';
-  import { browser, version } from '$app/environment';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
-  import { onMount } from 'svelte';
-  import { authState, startAuthSynchronization } from './_shared/authState';
-import { fetchCurrentSession, logout } from './_shared/auth';
-  import { API_DOCS_PATH } from './_shared/base';
-  import { collections } from './_shared/collections';
-  import { errorMessage } from './_shared/api';
-  import { language, t } from './_shared/i18n';
-  import ResearchAgentLauncher from './_shared/ResearchAgentLauncher.svelte';
-  import { themePreference } from './_shared/theme';
-  import type { ThemePreference } from './_shared/theme';
+	import './layout.css';
+	import { browser, version } from '$app/environment';
+	import { afterNavigate, goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import { authState, startAuthSynchronization } from './_shared/authState';
+	import { fetchCurrentSession, logout } from './_shared/auth';
+	import { API_DOCS_PATH } from './_shared/base';
+	import { collections } from './_shared/collections';
+	import { errorMessage } from './_shared/api';
+	import { language, t } from './_shared/i18n';
+	import ResearchAgentLauncher from './_shared/ResearchAgentLauncher.svelte';
+	import {
+		permissionState,
+		refreshPermissions,
+		startPermissionSynchronization
+	} from './_shared/permissions';
+	import { themePreference } from './_shared/theme';
+	import type { ThemePreference } from './_shared/theme';
 
-  let isLangOpen = false;
-  let langMenu: HTMLDivElement | null = null;
-  let isThemeOpen = false;
-  let themeMenu: HTMLDivElement | null = null;
-  let authError = '';
-  const appVersion = `v${version}`;
+	let isLangOpen = false;
+	let langMenu: HTMLDivElement | null = null;
+	let isThemeOpen = false;
+	let themeMenu: HTMLDivElement | null = null;
+	let authError = '';
+	const appVersion = `v${version}`;
 
-  $: isLoginRoute = $page.url.pathname === '/login';
-  $: authenticatedUser = $authState.user;
-  $: userInitial = (authenticatedUser?.display_name || authenticatedUser?.email || 'U')
-    .slice(0, 1)
-    .toUpperCase();
-  $: if (browser && $authState.status === 'anonymous' && !isLoginRoute) {
-    collections.set([]);
-    void goto('/login', { replaceState: true });
-  }
+	$: isAuthRoute = ['/login', '/register', '/forgot-password'].includes($page.url.pathname);
+	$: authenticatedUser = $authState.user;
+	$: userInitial = (authenticatedUser?.display_name || authenticatedUser?.email || 'U')
+		.slice(0, 1)
+		.toUpperCase();
+	$: if (browser && $authState.status === 'anonymous' && !isAuthRoute) {
+		collections.set([]);
+		void goto(resolve('/login'), { replaceState: true });
+	}
 
-  function decodeRoutePart(value: string) {
-    try {
-      return decodeURIComponent(value);
-    } catch {
-      return value;
-    }
-  }
+	function decodeRoutePart(value: string) {
+		try {
+			return decodeURIComponent(value);
+		} catch {
+			return value;
+		}
+	}
 
-  function toggleLangMenu() {
-    isLangOpen = !isLangOpen;
-    if (isLangOpen) {
-      isThemeOpen = false;
-    }
-  }
+	function toggleLangMenu() {
+		isLangOpen = !isLangOpen;
+		if (isLangOpen) {
+			isThemeOpen = false;
+		}
+	}
 
-  function closeLangMenu() {
-    isLangOpen = false;
-    langMenu?.querySelector('button')?.focus();
-  }
+	function closeLangMenu() {
+		isLangOpen = false;
+		langMenu?.querySelector('button')?.focus();
+	}
 
-  function setLanguage(value: 'en' | 'zh') {
-    language.set(value);
-    closeLangMenu();
-  }
+	function setLanguage(value: 'en' | 'zh') {
+		language.set(value);
+		closeLangMenu();
+	}
 
-  function handleLangKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      closeLangMenu();
-    }
-  }
+	function handleLangKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			closeLangMenu();
+		}
+	}
 
-  function toggleThemeMenu() {
-    isThemeOpen = !isThemeOpen;
-    if (isThemeOpen) {
-      isLangOpen = false;
-    }
-  }
+	function toggleThemeMenu() {
+		isThemeOpen = !isThemeOpen;
+		if (isThemeOpen) {
+			isLangOpen = false;
+		}
+	}
 
-  function closeThemeMenu() {
-    isThemeOpen = false;
-    themeMenu?.querySelector('button')?.focus();
-  }
+	function closeThemeMenu() {
+		isThemeOpen = false;
+		themeMenu?.querySelector('button')?.focus();
+	}
 
-  function setTheme(value: ThemePreference) {
-    themePreference.set(value);
-    closeThemeMenu();
-  }
+	function setTheme(value: ThemePreference) {
+		themePreference.set(value);
+		closeThemeMenu();
+	}
 
-  function handleThemeKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      closeThemeMenu();
-    }
-  }
+	function handleThemeKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			closeThemeMenu();
+		}
+	}
 
-  async function loadSession() {
-    authError = '';
-    try {
-      const user = await fetchCurrentSession();
-      if (!user && !isLoginRoute) {
-        await goto('/login', { replaceState: true });
-      }
-    } catch (error) {
-      authError = errorMessage(error);
-      if (!isLoginRoute) {
-        await goto('/login', { replaceState: true });
-      }
-    }
-  }
+	async function loadSession() {
+		authError = '';
+		try {
+			const user = await fetchCurrentSession();
+			if (!user && !isAuthRoute) {
+				await goto(resolve('/login'), { replaceState: true });
+			}
+		} catch (error) {
+			authError = errorMessage(error);
+			if (!isAuthRoute) {
+				await goto(resolve('/login'), { replaceState: true });
+			}
+		}
+	}
 
-  async function submitLogout() {
-    authError = '';
-    try {
-      await logout();
-    } catch (error) {
-      authError = errorMessage(error);
-    }
-  }
+	async function submitLogout() {
+		authError = '';
+		try {
+			await logout();
+		} catch (error) {
+			authError = errorMessage(error);
+		}
+	}
 
-  onMount(() => {
-    const stopAuthSynchronization = startAuthSynchronization();
-    void loadSession();
+	onMount(() => {
+		const stopAuthSynchronization = startAuthSynchronization();
+		const stopPermissionSynchronization = startPermissionSynchronization();
+		void loadSession();
 
-    const handleClick = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (isLangOpen && langMenu && !langMenu.contains(target)) {
-        isLangOpen = false;
-      }
-      if (isThemeOpen && themeMenu && !themeMenu.contains(target)) {
-        isThemeOpen = false;
-      }
-    };
-    window.addEventListener('click', handleClick);
-    return () => {
-      stopAuthSynchronization();
-      window.removeEventListener('click', handleClick);
-    };
-  });
+		const recheckPermissions = () => {
+			if ($authState.status === 'authenticated') void refreshPermissions();
+		};
+		window.addEventListener('focus', recheckPermissions);
 
-  $: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
-  $: isCollectionRoute = Boolean(collectionRouteMatch);
-  $: isFeedbackRoute = /^\/collections\/[^/]+\/feedback(?:\/|$)/.test($page.url.pathname);
-  $: headerCollectionId = collectionRouteMatch?.[1]
-    ? decodeRoutePart(collectionRouteMatch[1])
-    : '';
-  $: headerCollection = $collections.find((item) => item.collection_id === headerCollectionId);
-  $: headerCollectionName = headerCollection?.name || headerCollectionId;
+		const handleClick = (event: MouseEvent) => {
+			const target = event.target as Node;
+			if (isLangOpen && langMenu && !langMenu.contains(target)) {
+				isLangOpen = false;
+			}
+			if (isThemeOpen && themeMenu && !themeMenu.contains(target)) {
+				isThemeOpen = false;
+			}
+		};
+		window.addEventListener('click', handleClick);
+		return () => {
+			stopAuthSynchronization();
+			stopPermissionSynchronization();
+			window.removeEventListener('focus', recheckPermissions);
+			window.removeEventListener('click', handleClick);
+		};
+	});
+
+	afterNavigate(({ from, to }) => {
+		if (from && to?.url.pathname.startsWith('/admin') && $authState.status === 'authenticated') {
+			void refreshPermissions();
+		}
+	});
+
+	$: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
+	$: isCollectionRoute = Boolean(collectionRouteMatch);
+	$: isFeedbackRoute = /^\/collections\/[^/]+\/feedback(?:\/|$)/.test($page.url.pathname);
+	$: headerCollectionId = collectionRouteMatch?.[1] ? decodeRoutePart(collectionRouteMatch[1]) : '';
+	$: headerCollection = $collections.find((item) => item.collection_id === headerCollectionId);
+	$: headerCollectionName = headerCollection?.name || headerCollectionId;
 </script>
 
 <div
-  class="app-shell"
-  class:app-shell--feedback={isFeedbackRoute}
-  class:app-shell--login={isLoginRoute}
+	class="app-shell"
+	class:app-shell--feedback={isFeedbackRoute}
+	class:app-shell--login={isAuthRoute}
 >
-  <header class="site-header" class:site-header--collection={isCollectionRoute}>
-    <div class="header-left">
-      <a class="brand" href="/">
-        <img class="brand-logo" src="/lens-mark-a2.svg" alt="" />
-        <div class="brand-text">
-          <div class="brand-heading">
-            <div class="brand-title">{$t('brand.title')}</div>
-            <span
-              class="brand-version"
-              aria-label={`${$t('brand.version')}: ${appVersion}`}
-              title={`${$t('brand.version')}: ${appVersion}`}
-            >{appVersion}</span>
-          </div>
-          {#if $t('brand.sub')}
-            <div class="brand-sub">{$t('brand.sub')}</div>
-          {/if}
-        </div>
-      </a>
+	<header class="site-header" class:site-header--collection={isCollectionRoute}>
+		<div class="header-left">
+			<a class="brand" href={resolve('/')}>
+				<img class="brand-logo" src="/lens-mark-a2.svg" alt="" />
+				<div class="brand-text">
+					<div class="brand-heading">
+						<div class="brand-title">{$t('brand.title')}</div>
+						<span
+							class="brand-version"
+							aria-label={`${$t('brand.version')}: ${appVersion}`}
+							title={`${$t('brand.version')}: ${appVersion}`}>{appVersion}</span
+						>
+					</div>
+					{#if $t('brand.sub')}
+						<div class="brand-sub">{$t('brand.sub')}</div>
+					{/if}
+				</div>
+			</a>
 
-      {#if isCollectionRoute}
-        <nav class="header-breadcrumb" aria-label={$t('header.breadcrumbLabel')}>
-          <a href="/">{ $t('header.breadcrumbCollection') }</a>
-          <span aria-hidden="true">/</span>
-          <span class="header-breadcrumb__current">{headerCollectionName}</span>
-        </nav>
-      {/if}
-    </div>
+			{#if isCollectionRoute}
+				<nav class="header-breadcrumb" aria-label={$t('header.breadcrumbLabel')}>
+					<a href={resolve('/')}>{$t('header.breadcrumbCollection')}</a>
+					<span aria-hidden="true">/</span>
+					<span class="header-breadcrumb__current">{headerCollectionName}</span>
+				</nav>
+			{/if}
+		</div>
 
-    <div class="header-actions">
-      {#if authenticatedUser}
-        <ResearchAgentLauncher collectionId={headerCollectionId} />
-      {/if}
-      <div
-        class="theme-menu"
-        bind:this={themeMenu}
-        role="group"
-        aria-label={$t('header.themeLabel')}
-      >
-        <button
-          type="button"
-          class="header-action"
-          aria-controls="theme-options"
-          aria-expanded={isThemeOpen}
-          on:click|stopPropagation={toggleThemeMenu}
-          on:keydown={handleThemeKeydown}
-        >
-          {$t('header.themeLabel')}
-          <span class="theme-state">
-            {#if $themePreference === 'system'}
-              {$t('header.themeSystem')}
-            {:else if $themePreference === 'light'}
-              {$t('header.themeLight')}
-            {:else}
-              {$t('header.themeDark')}
-            {/if}
-          </span>
-          <span class="chevron" aria-hidden="true">▾</span>
-        </button>
-        {#if isThemeOpen}
-          <div id="theme-options" class="lang-dropdown" role="group" aria-label={$t('header.themeLabel')}>
-            <button type="button" on:keydown={handleThemeKeydown} aria-pressed={$themePreference === 'system'} class:active={$themePreference === 'system'} on:click={() => setTheme('system')}>
-              {$t('header.themeSystem')}
-            </button>
-            <button type="button" on:keydown={handleThemeKeydown} aria-pressed={$themePreference === 'light'} class:active={$themePreference === 'light'} on:click={() => setTheme('light')}>
-              {$t('header.themeLight')}
-            </button>
-            <button type="button" on:keydown={handleThemeKeydown} aria-pressed={$themePreference === 'dark'} class:active={$themePreference === 'dark'} on:click={() => setTheme('dark')}>
-              {$t('header.themeDark')}
-            </button>
-          </div>
-        {/if}
-      </div>
-      <div
-        class="lang-menu"
-        bind:this={langMenu}
-        role="group"
-        aria-label={$t('header.languageLabel')}
-      >
-        <button
-          type="button"
-          class="header-action"
-          aria-controls="language-options"
-          aria-expanded={isLangOpen}
-          on:click|stopPropagation={toggleLangMenu}
-          on:keydown={handleLangKeydown}
-        >
-          {$t('header.languageLabel')}
-          <span class="chevron" aria-hidden="true">▾</span>
-        </button>
-        {#if isLangOpen}
-          <div id="language-options" class="lang-dropdown" role="group" aria-label={$t('header.languageLabel')}>
-            <button type="button" on:keydown={handleLangKeydown} aria-pressed={$language === 'en'} class:active={$language === 'en'} on:click={() => setLanguage('en')}>
-              EN
-            </button>
-            <button type="button" on:keydown={handleLangKeydown} aria-pressed={$language === 'zh'} class:active={$language === 'zh'} on:click={() => setLanguage('zh')}>
-              中文
-            </button>
-          </div>
-        {/if}
-      </div>
-      {#if authenticatedUser}
-        <div class="session-summary" title={authenticatedUser.email}>
-          <span class="avatar-placeholder" aria-hidden="true">{userInitial}</span>
-          <span class="session-summary__name">
-            {authenticatedUser.display_name || authenticatedUser.email}
-          </span>
-          <button class="header-action" type="button" on:click={submitLogout}>
-            {$t('auth.logout')}
-          </button>
-        </div>
-      {/if}
-    </div>
-  </header>
+		<div class="header-actions">
+			{#if authenticatedUser}
+				<a class="header-action" href={resolve('/account')}>{$t('onboarding.account')}</a>
+				{#if $permissionState.status === 'ready' && $permissionState.userId === authenticatedUser.user_id && $permissionState.codes.includes('users.manage')}
+					<a class="header-action" href={resolve('/admin/users')}>{$t('admin.title')}</a>
+				{/if}
+				<ResearchAgentLauncher collectionId={headerCollectionId} />
+			{/if}
+			<div
+				class="theme-menu"
+				bind:this={themeMenu}
+				role="group"
+				aria-label={$t('header.themeLabel')}
+			>
+				<button
+					type="button"
+					class="header-action"
+					aria-controls="theme-options"
+					aria-expanded={isThemeOpen}
+					on:click|stopPropagation={toggleThemeMenu}
+					on:keydown={handleThemeKeydown}
+				>
+					{$t('header.themeLabel')}
+					<span class="theme-state">
+						{#if $themePreference === 'system'}
+							{$t('header.themeSystem')}
+						{:else if $themePreference === 'light'}
+							{$t('header.themeLight')}
+						{:else}
+							{$t('header.themeDark')}
+						{/if}
+					</span>
+					<span class="chevron" aria-hidden="true">▾</span>
+				</button>
+				{#if isThemeOpen}
+					<div
+						id="theme-options"
+						class="lang-dropdown"
+						role="group"
+						aria-label={$t('header.themeLabel')}
+					>
+						<button
+							type="button"
+							on:keydown={handleThemeKeydown}
+							aria-pressed={$themePreference === 'system'}
+							class:active={$themePreference === 'system'}
+							on:click={() => setTheme('system')}
+						>
+							{$t('header.themeSystem')}
+						</button>
+						<button
+							type="button"
+							on:keydown={handleThemeKeydown}
+							aria-pressed={$themePreference === 'light'}
+							class:active={$themePreference === 'light'}
+							on:click={() => setTheme('light')}
+						>
+							{$t('header.themeLight')}
+						</button>
+						<button
+							type="button"
+							on:keydown={handleThemeKeydown}
+							aria-pressed={$themePreference === 'dark'}
+							class:active={$themePreference === 'dark'}
+							on:click={() => setTheme('dark')}
+						>
+							{$t('header.themeDark')}
+						</button>
+					</div>
+				{/if}
+			</div>
+			<div
+				class="lang-menu"
+				bind:this={langMenu}
+				role="group"
+				aria-label={$t('header.languageLabel')}
+			>
+				<button
+					type="button"
+					class="header-action"
+					aria-controls="language-options"
+					aria-expanded={isLangOpen}
+					on:click|stopPropagation={toggleLangMenu}
+					on:keydown={handleLangKeydown}
+				>
+					{$t('header.languageLabel')}
+					<span class="chevron" aria-hidden="true">▾</span>
+				</button>
+				{#if isLangOpen}
+					<div
+						id="language-options"
+						class="lang-dropdown"
+						role="group"
+						aria-label={$t('header.languageLabel')}
+					>
+						<button
+							type="button"
+							on:keydown={handleLangKeydown}
+							aria-pressed={$language === 'en'}
+							class:active={$language === 'en'}
+							on:click={() => setLanguage('en')}
+						>
+							EN
+						</button>
+						<button
+							type="button"
+							on:keydown={handleLangKeydown}
+							aria-pressed={$language === 'zh'}
+							class:active={$language === 'zh'}
+							on:click={() => setLanguage('zh')}
+						>
+							中文
+						</button>
+					</div>
+				{/if}
+			</div>
+			{#if authenticatedUser}
+				<div class="session-summary" title={authenticatedUser.email}>
+					<span class="avatar-placeholder" aria-hidden="true">{userInitial}</span>
+					<span class="session-summary__name">
+						{authenticatedUser.display_name || authenticatedUser.email}
+					</span>
+					<button class="header-action" type="button" on:click={submitLogout}>
+						{$t('auth.logout')}
+					</button>
+				</div>
+			{/if}
+		</div>
+	</header>
 
-  <main class="page">
-    {#if authError}
-      <div class="status status--error" role="status">{authError}</div>
-    {/if}
-    <slot />
-  </main>
+	<main class="page">
+		{#if authError}
+			<div class="status status--error" role="status">{authError}</div>
+		{/if}
+		<slot />
+	</main>
 
-  <footer class="site-footer">
-    <a href={API_DOCS_PATH}>{$t('nav.docs')}</a>
-    <span>·</span>
-    <span>{$t('footer.pdfNote')}</span>
-  </footer>
+	<footer class="site-footer">
+		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- This is a backend API URL, outside the Svelte page router. -->
+		<a href={API_DOCS_PATH}>{$t('nav.docs')}</a>
+		<span>·</span>
+		<span>{$t('footer.pdfNote')}</span>
+	</footer>
 </div>

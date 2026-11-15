@@ -6,14 +6,12 @@ from hashlib import sha256
 
 import pytest
 from sqlalchemy import event
-from sqlalchemy.exc import IntegrityError
 
 from domain.source import Collection, Document
 from infra.persistence.postgres.models.document import DocumentORM
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationORM,
 )
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
     CollectionRepository,
     StoredCollection,
@@ -25,18 +23,6 @@ pytestmark = pytest.mark.anyio
 
 @pytest.fixture
 async def collection_repository(postgres_session_factory):
-    auth_repository = AuthRepository()
-    now = datetime(2026, 8, 27, tzinfo=timezone.utc)
-    for user_id in ("user_a", "user_b"):
-        await auth_repository.add_user(
-            AuthUserRecord(
-                user_id=user_id,
-                email=f"{user_id}@example.com",
-                display_name=None,
-                password_hash="synthetic-password-hash",
-                created_at=now.isoformat(),
-            )
-        )
     return CollectionRepository()
 
 
@@ -250,11 +236,14 @@ async def test_collection_delete_removes_its_current_documents(
         assert await session.get(DocumentORM, document.document.document_id) is None
 
 
-async def test_collection_repository_rejects_unknown_owner(collection_repository) -> None:
-    with pytest.raises(IntegrityError):
-        await collection_repository.add_collection(
-            _collection("col_unknown_owner", "missing_user")
-        )
+async def test_collection_repository_retains_external_owner_id(
+    collection_repository,
+) -> None:
+    await collection_repository.add_collection(
+        _collection("col_external_owner", "external_subject")
+    )
+    stored = await collection_repository.read_collection("col_external_owner")
+    assert stored.collection.owner_user_id == "external_subject"
 
 
 async def test_collection_list_reads_only_summaries_in_two_queries(

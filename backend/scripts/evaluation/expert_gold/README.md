@@ -114,7 +114,8 @@ manifest:
 ```
 
 Local reads require `--user-id` to enforce Collection ownership. The authenticated
-API variant uses the account from its login cookie instead:
+API variant uses the account from its login cookie instead. The base URL must
+serve both `/api` and `/user-api`, such as the frontend development origin:
 
 ```bash
 LENS_CHECK_EMAIL=<acceptance-user-email> \
@@ -122,7 +123,7 @@ LENS_CHECK_PASSWORD=<acceptance-user-password> \
 LENS_DATABASE_URL=<isolated-current-schema-database-url> \
 ./.venv/bin/python \
   scripts/evaluation/expert_gold/check_objective_findings_projection.py \
-  --api-base-url http://localhost:8011 \
+  --api-base-url http://localhost:5196 \
   --collection-id col_xxx \
   --objective-id obj_preheating_xxx \
   --objective-id obj_corrosion_xxx \

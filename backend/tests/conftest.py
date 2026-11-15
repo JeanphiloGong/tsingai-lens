@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
 from infra.persistence.file.object_store import FileObjectStore
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -18,7 +17,6 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from infra.persistence.postgres.models.auth import AuthUserORM
 from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
@@ -52,20 +50,14 @@ def postgres_sync_engine():
 def postgres_session_factory(postgres_sync_engine, monkeypatch):
     # TestClient and asyncio.run may use different loops within the same test.
     engine = create_async_engine(postgres_sync_engine.url, poolclass=NullPool)
-    with postgres_sync_engine.begin() as connection:
-        connection.execute(
-            insert(AuthUserORM).values(
-                user_id="local-user",
-                email="local-fixture@example.com",
-                password_hash="!",
-                created_at=datetime.now(timezone.utc),
-            )
-        )
     try:
         factory = async_sessionmaker(engine, expire_on_commit=False)
         # Web startup configures the same native factory as the repositories.
         # Keep its engine inside this test's isolated PostgreSQL database.
-        monkeypatch.setenv("LENS_DATABASE_URL", postgres_sync_engine.url.render_as_string(hide_password=False))
+        monkeypatch.setenv(
+            "LENS_DATABASE_URL",
+            postgres_sync_engine.url.render_as_string(hide_password=False),
+        )
         monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
         monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", factory)
         monkeypatch.setattr(
@@ -147,7 +139,6 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         monkeypatch.setattr(
             "repositories.collection_repository.AsyncSessionLocal", factory
         )
-        monkeypatch.setattr("repositories.auth_repository.AsyncSessionLocal", factory)
         yield factory
     finally:
         engine.sync_engine.dispose()
@@ -169,10 +160,10 @@ def _patch_domain_model_extractors(monkeypatch):
 
 
 @pytest.fixture
-def auth_session_service(postgres_session_factory):
-    from application.auth import session_service
+def identity_subjects(postgres_session_factory):
+    from tests.support.identity import subjects
 
-    return session_service
+    return subjects
 
 
 @pytest.fixture
@@ -208,7 +199,11 @@ def collection_service(postgres_session_factory):
 def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
     import application.chat.session_service as _test_chat_session_service
-    from application.chat.capabilities import collection_context, research_scope, document_sources
+    from application.chat.capabilities import (
+        collection_context,
+        research_scope,
+        document_sources,
+    )
     import application.core.objectives.analysis.analysis_record_source as _test_analysis_record_source
     import application.core.document_profiles.service as _test_document_profile_service
     import application.core.objectives.analysis.experiment_analysis_writer as _test_experiment_analysis_writer
@@ -239,8 +234,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.source.reference_extraction_service as _test_source_reference_extraction_service
     import application.source.reference_workflow_service as _test_reference_workflow_service
     import application.source.source_import_service as _test_source_import_service
-    from application.auth import session_service as _test_auth_session_service
-    from controllers import auth_routes, feedback_case_routes
+    from controllers import feedback_case_routes
     from controllers.chat import chat_session_routes
     from controllers.core import (
         document_routes,
@@ -256,37 +250,100 @@ def _isolate_application_module_dependencies(monkeypatch):
         reference_routes,
     )
 
-    from application.chat.capabilities import objective_candidate, objective_proposal, objective_analysis, objective_derivation
+    from application.chat.capabilities import (
+        objective_candidate,
+        objective_proposal,
+        objective_analysis,
+        objective_derivation,
+    )
 
-    from application.chat.capabilities import finding_authoring, finding_review, paper_experiment_authoring
+    from application.chat.capabilities import (
+        finding_authoring,
+        finding_review,
+        paper_experiment_authoring,
+    )
 
     from application.chat.capabilities import published_findings, research_planning
 
-    from application.feedback import analysis_handler, correction_signal_handler, tool_failure_handler, conversation_context
+    from application.feedback import (
+        analysis_handler,
+        correction_signal_handler,
+        tool_failure_handler,
+        conversation_context,
+    )
 
-    from application.feedback import analysis_worker, correction_signal_worker, tool_failure_worker, sample_build_worker, worker_lease
+    from application.feedback import (
+        analysis_worker,
+        correction_signal_worker,
+        tool_failure_worker,
+        sample_build_worker,
+        worker_lease,
+    )
 
     dependencies = (
         (analysis_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
         (correction_signal_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
         (tool_failure_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
-        (sample_build_worker, ["AnalysisJobRepo", "FeedbackCaseRepo", "FeedbackDatasetRepo", "FeedbackDatasetSampleRepo"]),
+        (
+            sample_build_worker,
+            [
+                "AnalysisJobRepo",
+                "FeedbackCaseRepo",
+                "FeedbackDatasetRepo",
+                "FeedbackDatasetSampleRepo",
+            ],
+        ),
         (worker_lease, ["AnalysisJobRepo"]),
         (analysis_handler, ["ChatRepo"]),
         (conversation_context, ["ChatRepo"]),
         (correction_signal_handler, ["ChatRepo"]),
         (tool_failure_handler, ["ChatRepo"]),
-        (published_findings, ["collection_service", "ObjectiveRepo", "objective_analysis_service", "finding_feedback_service"]),
-        (research_planning, ["collection_service", "finding_dataset_service", "experiment_plan_service"]),
+        (
+            published_findings,
+            [
+                "collection_service",
+                "ObjectiveRepo",
+                "objective_analysis_service",
+                "finding_feedback_service",
+            ],
+        ),
+        (
+            research_planning,
+            [
+                "collection_service",
+                "finding_dataset_service",
+                "experiment_plan_service",
+            ],
+        ),
         (finding_authoring, ["finding_authoring_service"]),
         (finding_review, ["collection_service", "finding_feedback_service"]),
-        (paper_experiment_authoring, ["paper_experiment_authoring_service", "ChatRepo"]),
+        (
+            paper_experiment_authoring,
+            ["paper_experiment_authoring_service", "ChatRepo"],
+        ),
         (objective_candidate, ["objective_authoring_service"]),
         (objective_proposal, ["collection_service", "ObjectiveRepo", "PaperMapRepo"]),
-        (objective_analysis, ["collection_service", "ObjectiveRepo", "objective_authoring_service", "objective_analysis_service"]),
+        (
+            objective_analysis,
+            [
+                "collection_service",
+                "ObjectiveRepo",
+                "objective_authoring_service",
+                "objective_analysis_service",
+            ],
+        ),
         (objective_derivation, ["collection_service", "objective_analysis_service"]),
         (document_sources, ["collection_service", "SourceArtifactRepo"]),
-        (collection_context, ["collection_service", "ObjectiveRepo", "DocumentProfileRepo", "PaperMapRepo", "SourceArtifactRepo"]),
+        (
+            collection_context,
+            [
+                "collection_service",
+                "ObjectiveRepo",
+                "DocumentProfileRepo",
+                "PaperMapRepo",
+                "SourceArtifactRepo",
+            ],
+        ),
         (research_scope, ["collection_service", "PaperMapRepo"]),
         (_test_analysis_record_source, ["ObjectiveRepo"]),
         (
@@ -397,7 +454,10 @@ def _isolate_application_module_dependencies(monkeypatch):
         ),
         (_test_finding_feedback_service, ["collection_service", "FindingReviewRepo"]),
         (_test_finding_dataset_service, ["collection_service", "ObjectiveRepo"]),
-        (_test_finding_snapshot_service, ["ObjectiveRepo", "FindingReviewRepo", "experiment_projection"]),
+        (
+            _test_finding_snapshot_service,
+            ["ObjectiveRepo", "FindingReviewRepo", "experiment_projection"],
+        ),
         (
             _test_dataset_export_service,
             [
@@ -455,8 +515,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             ["SourceArtifactRepo", "collection_service"],
         ),
         (_test_source_import_service, ["CollectionRepo"]),
-        (_test_auth_session_service, ["AuthRepo", "SESSION_TTL"]),
-        (auth_routes, ["session_service"]),
         (chat_session_routes, ["chat_session_service"]),
         (
             document_routes,
@@ -468,7 +526,11 @@ def _isolate_application_module_dependencies(monkeypatch):
         ),
         (
             finding_review_routes,
-            ["finding_feedback_service", "finding_dataset_service", "finding_authoring_service"],
+            [
+                "finding_feedback_service",
+                "finding_dataset_service",
+                "finding_authoring_service",
+            ],
         ),
         (paper_experiment_routes, ["experiment_query_service"]),
         (
@@ -503,3 +565,14 @@ def _isolate_application_module_dependencies(monkeypatch):
             if isinstance(value, set):
                 value = set(value)
             monkeypatch.setattr(module, name, value, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _external_identity_transport(monkeypatch):
+    from infra.identity import client
+    from tests.support.identity import subjects
+
+    subjects.users.clear()
+    subjects.tokens.clear()
+    monkeypatch.setattr(client, "Client", subjects, raising=False)
+    monkeypatch.setattr(client, "IdentityClient", lambda: subjects)

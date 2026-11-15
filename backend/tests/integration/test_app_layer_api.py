@@ -8,7 +8,7 @@ import asyncio
 from hashlib import sha256
 
 import pytest
-from application.auth import session_service as auth_service
+from tests.support.identity import subjects as auth_service
 from application.pipeline import pipeline_run_service
 from domain.core import DocumentProfile
 from domain.source import SourceDocument
@@ -111,19 +111,19 @@ class _ImmediateDocumentPreparationService:
 def app_client(
     monkeypatch,
     tmp_path,
-    auth_session_service,
+    identity_subjects,
     collection_service,
     *,
     postgres_session_factory,
 ):
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
-    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
 
     from main import create_app
 
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "infra.persistence.database.AsyncSessionLocal", postgres_session_factory
+    )
     monkeypatch.setattr(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
@@ -138,11 +138,8 @@ def app_client(
                 store_module.Store,
             ).queue_document_preparation,
         )
-        login = client.post(
-            f"{API_V1_PREFIX}/auth/login",
-            json={"email": "admin@example.com", "password": "admin-password"},
-        )
-        assert login.status_code == 200
+        client.cookies.set("lens_session", "fixture:" + "admin@example.com")
+
         yield client
 
 
@@ -203,22 +200,12 @@ def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> No
     collection_id = _create_collection(app_client)
     _upload(app_client, collection_id, "private.txt", b"Private LPBF treatment")
     asyncio.run(
-        auth_service.create_user(
+        auth_service.create_subject(
             email="other@example.test",
-            password="other-test-password",
         )
     )
     app_client.cookies.clear()
-    assert (
-        app_client.post(
-            f"{API_V1_PREFIX}/auth/login",
-            json={
-                "email": "other@example.test",
-                "password": "other-test-password",
-            },
-        ).status_code
-        == 200
-    )
+    app_client.cookies.set("lens_session", "fixture:" + "other@example.test")
     response = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/documents",
         params={"reuse_existing": "true"},
@@ -335,12 +322,12 @@ def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
     assert prepared.status_code == 200
 
     auth = auth_service
-    asyncio.run(auth.create_user(email="other@example.com", password="other-password"))
-    login = app_client.post(
-        f"{API_V1_PREFIX}/auth/login",
-        json={"email": "other@example.com", "password": "other-password"},
+    asyncio.run(
+        auth.create_subject(
+            email="other@example.com",
+        )
     )
-    assert login.status_code == 200
+    app_client.cookies.set("lens_session", "fixture:" + "other@example.com")
 
     response = app_client.get(
         f"{API_V1_PREFIX}/pipeline-runs/{prepared.json()['data']['run_id']}"
@@ -361,12 +348,12 @@ def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(
     assert prepared.status_code == 200
 
     auth = auth_service
-    asyncio.run(auth.create_user(email="other@example.com", password="other-password"))
-    login = app_client.post(
-        f"{API_V1_PREFIX}/auth/login",
-        json={"email": "other@example.com", "password": "other-password"},
+    asyncio.run(
+        auth.create_subject(
+            email="other@example.com",
+        )
     )
-    assert login.status_code == 200
+    app_client.cookies.set("lens_session", "fixture:" + "other@example.com")
 
     listed = app_client.get(
         f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"

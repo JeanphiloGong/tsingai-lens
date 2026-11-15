@@ -32,14 +32,16 @@ class ChatSessionORM(Base):
         CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
         Index(
             "ix_chat_sessions_user_collection_updated",
-            "user_id", "collection_id", "updated_at", "session_id",
+            "user_id",
+            "collection_id",
+            "updated_at",
+            "session_id",
         ),
     )
 
     session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     user_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("auth_users.user_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -49,19 +51,32 @@ class ChatSessionORM(Base):
         nullable=False,
         index=True,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     is_pinned: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="false",
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
     )
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    root_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    root_session_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
     parent_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     fork_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     fork_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fork_content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    response_snapshot: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
-    operation_permission: Mapped[dict[str, Any] | None] = mapped_column(_JSON_DOCUMENT, nullable=True)
+    response_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
+    operation_permission: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
 
 
 class ChatMessageORM(Base):
@@ -99,36 +114,49 @@ class ChatMessageORM(Base):
 class ChatMessageFeedbackORM(Base):
     __tablename__ = "chat_message_feedback"
     __table_args__ = (
-        UniqueConstraint("user_id", "message_id", name="uq_chat_message_feedback_user_message"),
+        UniqueConstraint(
+            "user_id", "message_id", name="uq_chat_message_feedback_user_message"
+        ),
         CheckConstraint("rating IN ('helpful', 'not_helpful')", name="rating_valid"),
         CheckConstraint(
             "reason IS NULL OR (rating = 'not_helpful' AND "
             "reason IN ('incorrect', 'incomplete', 'unclear', 'other'))",
             name="reason_valid",
         ),
-        CheckConstraint("comment IS NULL OR length(comment) <= 2000", name="comment_length"),
+        CheckConstraint(
+            "comment IS NULL OR length(comment) <= 2000", name="comment_length"
+        ),
         CheckConstraint("length(response_digest) = 64", name="digest_length"),
         CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
     )
 
     feedback_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        String(128),
+        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     message_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
-        nullable=False, index=True,
+        String(128),
+        ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     user_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("auth_users.user_id", ondelete="CASCADE"), nullable=False,
+        String(64),
+        nullable=False,
     )
     rating: Mapped[str] = mapped_column(String(16), nullable=False)
     reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class ChatToolCallORM(Base):
@@ -178,7 +206,6 @@ class ChatToolCallORM(Base):
     error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     decision_user_id: Mapped[str | None] = mapped_column(
         String(64),
-        ForeignKey("auth_users.user_id", ondelete="RESTRICT"),
         nullable=True,
     )
     decision_arguments_digest: Mapped[str | None] = mapped_column(
@@ -188,9 +215,13 @@ class ChatToolCallORM(Base):
         DateTime(timezone=True), nullable=True
     )
     result_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    decision_basis: Mapped[str] = mapped_column(String(32), nullable=False, server_default="explicit")
+    decision_basis: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="explicit"
+    )
     authorization_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    proposed_permission_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    proposed_permission_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     result_data: Mapped[dict[str, Any] | None] = mapped_column(
         _JSON_DOCUMENT, nullable=True
     )

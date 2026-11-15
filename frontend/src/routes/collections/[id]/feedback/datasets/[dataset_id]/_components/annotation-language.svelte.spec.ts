@@ -6,15 +6,20 @@ import Sft from './SftAnnotation.svelte';
 import Preference from './PreferenceAnnotation.svelte';
 import Evaluation from './EvaluationAnnotation.svelte';
 afterEach(cleanup);
-it.each(['sft', 'preference', 'evaluation'])('switches editor guidance in place', async (component) => {
- language.set('zh');
- if(component === 'sft') render(Sft);
- else if(component === 'preference') render(Preference);
- else render(Evaluation);
- await expect.element(page.getByRole('heading',{name:'选择一个样本'})).toBeInTheDocument();
- language.set('en');
- await expect.element(page.getByRole('heading',{name:'Select a sample'})).toBeInTheDocument();
- expect(document.querySelector('section.empty')!.textContent).not.toMatch(/[\u3400-\u9fff]/);
- language.set('zh');
- await expect.element(page.getByRole('heading',{name:'选择一个样本'})).toBeInTheDocument();
-});
+it.each(['sft', 'preference', 'evaluation'])(
+	'switches editor guidance in place',
+	async (component) => {
+		language.set('zh');
+		if (component === 'sft') render(Sft);
+		else if (component === 'preference') render(Preference);
+		else render(Evaluation);
+		await expect.element(page.getByRole('heading', { name: '选择一个样本' })).toBeInTheDocument();
+		language.set('en');
+		await expect
+			.element(page.getByRole('heading', { name: 'Select a sample' }))
+			.toBeInTheDocument();
+		expect(document.querySelector('section.empty')!.textContent).not.toMatch(/[\u3400-\u9fff]/);
+		language.set('zh');
+		await expect.element(page.getByRole('heading', { name: '选择一个样本' })).toBeInTheDocument();
+	}
+);

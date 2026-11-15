@@ -86,7 +86,8 @@ export function paperSourceIssues(message: ChatMessage | null) {
 		const paper = value as Record<string, unknown>;
 		const status = paper.source_status;
 		if (
-			typeof status !== 'string' || !['preparing', 'not_prepared', 'preparation_failed', 'unavailable', 'read_failed'].includes(
+			typeof status !== 'string' ||
+			!['preparing', 'not_prepared', 'preparation_failed', 'unavailable', 'read_failed'].includes(
 				status
 			)
 		) {
@@ -148,8 +149,10 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 				: 'researchAgent.capability.paperBrowseCount',
 			{
 				count,
-				remaining: typeof result.data.paper_total === 'number' && typeof result.data.next_offset === 'number'
-					? result.data.paper_total - result.data.next_offset : '--'
+				remaining:
+					typeof result.data.paper_total === 'number' && typeof result.data.next_offset === 'number'
+						? result.data.paper_total - result.data.next_offset
+						: '--'
 			}
 		);
 	}
@@ -318,8 +321,10 @@ function objectiveAnalysisSummary(data: Record<string, unknown>, translate: Tran
 		case 'queued':
 			return translate('researchAgent.capability.analysisQueued');
 		case 'running': {
-			const progress = 'document_progress' in analysis
-				? analysis.document_progress as Record<string, unknown> | null : null;
+			const progress =
+				'document_progress' in analysis
+					? (analysis.document_progress as Record<string, unknown> | null)
+					: null;
 			return translate('researchAgent.capability.analysisRunning', {
 				current: progress ? numberValue(progress, 'current') : '--',
 				total: progress ? numberValue(progress, 'total') : '--'

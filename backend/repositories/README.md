@@ -57,7 +57,6 @@ the persistence path.
 | [experiment_analysis_repository.py](experiment_analysis_repository.py) | Atomic experiment graph publication |
 | [model_connection_repository.py](model_connection_repository.py) | Read-only operator-managed model connections |
 | [chat_repository.py](chat_repository.py) | Sessions, messages, approvals, response snapshots and model-call audit |
-| [auth_repository.py](auth_repository.py) | Users and browser sessions |
 | [pipeline_run_repository.py](pipeline_run_repository.py) | Pipeline execution records, nodes, telemetry and history projections |
 | [analysis_job_repository.py](analysis_job_repository.py) | Analysis jobs, leases, retries and shared sample-job identities |
 | [feedback_case_repository.py](feedback_case_repository.py) | Feedback cases, signals, analysis results, annotations and reviews |
@@ -68,6 +67,9 @@ the persistence path.
 | [experiment_plan_repository.py](experiment_plan_repository.py) | Experiment plan revisions and their record mappings |
 | [finding_review_repository.py](finding_review_repository.py) | Expert Finding feedback, curation and their record mappings |
 | [evaluation_repository.py](evaluation_repository.py) | Gold sets, prediction snapshots, scores and evaluation record mappings |
+
+Identity users and sessions belong to the sibling user-service; Lens persists
+stable actor IDs and uses the external identity transport.
 
 ## Runtime and Test Boundaries
 

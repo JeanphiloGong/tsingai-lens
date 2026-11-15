@@ -1,0 +1,9 @@
+.env
+.env.*
+*.key
+*.pem
+*.crt
+*.dump
+**/*_test.go
+docs
+README.md

@@ -60,7 +60,9 @@ class ObjectiveExperimentPlanORM(Base):
     source_links: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
     plan_version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -80,20 +82,17 @@ class ObjectiveExperimentPlanORM(Base):
         _JSON_DOCUMENT,
         nullable=True,
     )
-    created_by: Mapped[str | None] = mapped_column(
-        String(64), ForeignKey("auth_users.user_id", ondelete="SET NULL"), nullable=True
-    )
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(
         String(64),
-        ForeignKey(
-            "auth_users.user_id",
-            name="fk_objective_experiment_plans_updated_by_auth_users",
-            ondelete="SET NULL",
-        ),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 __all__ = ["ObjectiveExperimentPlanORM"]

@@ -1,6 +1,3 @@
-# Copyright (c) 2024 Microsoft Corporation.
-# Licensed under the MIT License
-
 """Configuration models for Source document parsing."""
 
 from __future__ import annotations

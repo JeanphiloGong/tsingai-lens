@@ -189,26 +189,26 @@ Minimum target artifact model:
 
 ```ts
 type WorkspaceArtifactStatus = {
-  output_path: string;
-  documents_generated: boolean;
-  documents_ready: boolean;
-  document_profiles_generated: boolean;
-  document_profiles_ready: boolean;
-  evidence_cards_generated: boolean;
-  evidence_cards_ready: boolean;
-  comparable_results_generated: boolean;
-  comparable_results_ready: boolean;
-  collection_comparable_results_generated: boolean;
-  collection_comparable_results_ready: boolean;
-  comparison_rows_generated: boolean;
-  comparison_rows_ready: boolean;
-  graph_generated: boolean;
-  graph_ready: boolean;
-  procedure_blocks_generated: boolean;
-  procedure_blocks_ready: boolean;
-  protocol_steps_generated: boolean;
-  protocol_steps_ready: boolean;
-  updated_at: string;
+	output_path: string;
+	documents_generated: boolean;
+	documents_ready: boolean;
+	document_profiles_generated: boolean;
+	document_profiles_ready: boolean;
+	evidence_cards_generated: boolean;
+	evidence_cards_ready: boolean;
+	comparable_results_generated: boolean;
+	comparable_results_ready: boolean;
+	collection_comparable_results_generated: boolean;
+	collection_comparable_results_ready: boolean;
+	comparison_rows_generated: boolean;
+	comparison_rows_ready: boolean;
+	graph_generated: boolean;
+	graph_ready: boolean;
+	procedure_blocks_generated: boolean;
+	procedure_blocks_ready: boolean;
+	protocol_steps_generated: boolean;
+	protocol_steps_ready: boolean;
+	updated_at: string;
 };
 ```
 

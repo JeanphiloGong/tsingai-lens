@@ -45,6 +45,28 @@ def _load_module():
     return module
 
 
+def test_api_login_uses_same_origin_user_service_and_returns_cookie(monkeypatch):
+    from io import BytesIO
+
+    module = _load_module()
+    monkeypatch.setenv("LENS_CHECK_EMAIL", "researcher@example.test")
+    monkeypatch.setenv("LENS_CHECK_PASSWORD", "synthetic-password")
+
+    def login(request, timeout):
+        assert request.full_url == "https://lens.example.test/user-api/v1/login"
+        assert request.get_header("Origin") == "https://lens.example.test"
+        assert json.loads(request.data) == {
+            "email": "researcher@example.test", "password": "synthetic-password",
+        }
+        assert timeout == 60
+        response = BytesIO(b'{"user_id":"researcher"}')
+        response.headers = {"Set-Cookie": "lens_session=synthetic-token; HttpOnly; Path=/"}
+        return response
+
+    monkeypatch.setattr(module.request_url, "urlopen", login)
+    assert module._api_login_cookie("https://lens.example.test") == "lens_session=synthetic-token"
+
+
 def _failure_modes() -> dict:
     fixture = (
         Path(__file__).resolve().parents[2]

@@ -7,12 +7,12 @@
 
 ## 当前合同
 
-- 浏览器公开业务 API 统一走 `/api/v1/*`
+- 浏览器业务 API 走 `/api/v1/*`；身份查询直连同源 `/user-api/v1/*` 用户服务
 - 文档与 OpenAPI 入口统一走 `/api/*`
 - API 文档地址：`/api/docs`
 - 前端共享请求封装统一从 `frontend/src/routes/_shared/api.ts` 发起请求，并用
   same-origin cookie 传递登录会话
-- JSON 成功和失败均使用 HTTP 200，响应为 `{code,message,data,meta}`；
+- Lens JSON 保留 `{code,message,data,meta}`；身份拒绝/故障使用 HTTP 401/403/503，其他既有业务错误仍按原合同返回 HTTP 200；
   `requestJson` 返回 `data`，非 200 业务码抛出 `ApiError`。无结果时 `data` 为 `{}`。
 - 使用 `isApiErrorCode` 判断六位业务码，使用 `getApiErrorReason` 读取 `data.code`；
   只有 `200301 + authentication_required` 清空登录状态和用户聊天缓存并跳转登录，不能按 HTTP 状态或错误文案猜测。
@@ -25,7 +25,7 @@
 - 首页集合列表：`GET /api/v1/collections`
   首页列表会结合响应中的当前文档状态显示集合阶段：全部文档为 `ready` 时显示“文档已准备”，
   不会因为历史集合的顶层 `status=uploaded` 而误显示为“待处理”；处理中或失败文档仍优先显示对应风险状态。
-- 登录会话：`POST /api/v1/auth/login`、`GET /api/v1/auth/me`、`POST /api/v1/auth/logout`
+- 登录会话：`POST /user-api/v1/login`、`GET /user-api/v1/me`、`POST /user-api/v1/logout`。用户服务错误为顶层 `code`，限流时的 429 另有顶层 `retry_after` 与 `Retry-After` header；`api.ts` 在该明确路径按 HTTP 状态解析，业务响应继续解析 Lens envelope。
 - 创建集合：`POST /api/v1/collections`
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文档：`GET|POST /api/v1/collections/{collection_id}/documents`
@@ -64,7 +64,9 @@
 
 - 不再允许浏览器手工设置 Base URL
 - 遗留调试入口已从浏览器产品流程中退役
-- `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
+- `frontend/nginx.conf` 终止 HTTPS，将 `/api/` 代理到 `backend:8010`，
+  将 `/user-api/` 去掉此前缀后代理到 `user-service:8097/`；HTTP 重定向到配置的公开 HTTPS 源。
+  证书、运行配置与升级步骤见 [部署说明](../../deploy/README.md)。
 - Collection 只组织当前文档；Source、DocumentProfile、Paper Map 和就绪状态
   都属于单篇 Document。上传新文档或重试失败文档不会重新处理其他文档
 - 同一 Document 同时最多一个准备 Pipeline Run，不同 Document 可以并发准备；上传在准备期间保持可用
@@ -105,3 +107,19 @@ Source -> Document` 回溯关系。页面只调用 Objective 的 `evidence-map` 
 - 首页、集合文档、文件上传、单篇任务轮询、明确文档选择、Objective、Published Findings、
   ObjectiveEvidence 与 Source 核验都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`
+
+## 账号流程
+
+匿名用户可访问 `/login`、`/register`、`/forgot-password`；已登录用户通过页头进入 `/account`。账号请求使用同源 `/user-api/v1/*`，复用 user-service 的账号能力，不依赖权限组。
+
+注册、找回与本人改密都要求重复输入新密码；前端比较一致后只提交一次新密码，后端负责密码与邮箱证明规则。验证码保留前导零，仅与密码一起保存在表单内存；更换邮箱会丢弃旧挑战和验证码。重发倒计时来自服务端 `retry_after` / `Retry-After`，刷新后仍由后端限流。
+
+注册成功引导登录。本人改密成功后清理登录和私有聊天缓存，并同步其他标签；失败保留有效登录状态。正在改密时，新登录等待改密响应，避免清除 Cookie 的响应覆盖新登录。找回本人账号成功时也清理其本地登录状态。密码、验证码和邮箱不写入跳转 URL。
+
+## 人员与权限管理
+
+页头的“用户与权限”入口由 `GET /user-api/v1/me/permissions` 返回的 `users.manage` 控制。人员、权限组、权限码页面分别位于 `/admin/users`、`/admin/groups`、`/admin/permissions`。直接访问这些地址也要经过共享权限门：查询中显示加载，缺少权限显示 403 提示，服务故障显示重试；会话过期清理账号状态并进入登录。当前应用使用静态适配器，这些是浏览器中的路由与内容控制；真实管理接口始终由 user-service 独立鉴权。
+
+人员页只对已有账号执行启停、授组和撤组；组页管理组元信息及其权限映射；权限码页管理权限目录。列表和关联列表分别分页，关联输入使用已有稳定代码，不把当前目录第一页当成完整候选项。代码不可改名，内置条目不可删除。禁用账号与删除自定义条目需确认；写入期间禁用相关控件，失败保留草稿并展示服务端拒绝，409 包括关联占用或最后管理员保护。不会提供管理员建号或替用户重置密码的表单。
+
+权限只保存在当前账号的内存状态中。主体变化、退出和页面卸载会使旧请求失效；列表翻页和切换选择也会丢弃晚到响应。进入管理路由、窗口重新获得焦点以及管理写入完成后重新查询权限。其他管理员的变更在下一次查询时反映到界面，后端对每次操作实时校验。接口和字段以 [user-service HTTP 契约](../../user-service/docs/http-api.md) 为准。

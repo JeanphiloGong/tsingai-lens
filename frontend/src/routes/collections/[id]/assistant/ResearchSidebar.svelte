@@ -1,7 +1,16 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import { LoaderCircle, Clock3, CircleAlert, Trash2, Pencil, Pin, PinOff, ChevronDown } from '@lucide/svelte';
+	import {
+		LoaderCircle,
+		Clock3,
+		CircleAlert,
+		Trash2,
+		Pencil,
+		Pin,
+		PinOff,
+		ChevronDown
+	} from '@lucide/svelte';
 	import type { ChatSessionActivity } from './conversationPresentation';
 
 	type SessionSummary = {
@@ -93,23 +102,33 @@
 						{#if activity && activity !== 'idle'}
 							<span class="session-state" data-state={activity}>
 								{#if activity === 'running'}<LoaderCircle
-									size={12}
-								/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
-									size={12}
-								/>{/if}
+										size={12}
+									/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
+										size={12}
+									/>{/if}
 								<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
 							</span>
 						{:else}
 							<time>{formatHistoryTime(item.updated_at)}</time>
 						{/if}
 					</button>
-					<button class="pin-session" type="button" {disabled} aria-label={$t('researchAgent.renameSession')} title={$t('researchAgent.renameSession')} on:click={() => onRenameSession(item.session_id)}><Pencil size={14} aria-hidden="true" /></button>
+					<button
+						class="pin-session"
+						type="button"
+						{disabled}
+						aria-label={$t('researchAgent.renameSession')}
+						title={$t('researchAgent.renameSession')}
+						on:click={() => onRenameSession(item.session_id)}
+						><Pencil size={14} aria-hidden="true" /></button
+					>
 					<button
 						class="pin-session"
 						class:pinned={item.is_pinned}
 						type="button"
 						{disabled}
-						aria-label={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+						aria-label={$t(
+							item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession'
+						)}
 						title={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
 						aria-pressed={item.is_pinned}
 						aria-busy={pinningSessionId === item.session_id}
@@ -133,8 +152,13 @@
 				<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>
 			{/each}
 			{#if historyHasMore}
-				<button class="load-more" type="button" disabled={disabled || historyPageLoading}
-					aria-label={$t('researchAgent.loadMoreSessions')} on:click={onLoadMoreHistory}>
+				<button
+					class="load-more"
+					type="button"
+					disabled={disabled || historyPageLoading}
+					aria-label={$t('researchAgent.loadMoreSessions')}
+					on:click={onLoadMoreHistory}
+				>
 					{#if historyPageLoading}<LoaderCircle size={14} />{:else}<ChevronDown size={14} />{/if}
 					{$t('researchAgent.loadMoreSessions')}
 				</button>

@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { authState } from '../_shared/authState';
-import { login } from '../_shared/auth';
+	import { login } from '../_shared/auth';
 	import { errorMessage } from '../_shared/api';
 	import { language, t } from '../_shared/i18n';
 	import { ChevronDown, Globe2 } from '@lucide/svelte';
@@ -17,7 +19,7 @@ import { login } from '../_shared/auth';
 	}
 
 	$: if ($authState.status === 'authenticated') {
-		void goto('/', { replaceState: true });
+		void goto(resolve('/'), { replaceState: true });
 	}
 
 	async function submitLogin(event: SubmitEvent) {
@@ -32,7 +34,7 @@ import { login } from '../_shared/auth';
 		loading = true;
 		try {
 			await login(email.trim(), password);
-			await goto('/', { replaceState: true });
+			await goto(resolve('/'), { replaceState: true });
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -50,6 +52,15 @@ import { login } from '../_shared/auth';
 		<img class="login-mark" src="/lens-mark-a2.svg" alt="" />
 		<h1 id="login-title">{$t('auth.title')}</h1>
 
+		{#if $page.url.searchParams.has('registered')}<p role="status">
+				{$t('onboarding.registered')}
+			</p>{/if}
+		{#if $page.url.searchParams.has('passwordReset')}<p role="status">
+				{$t('onboarding.resetDone')}
+			</p>{/if}
+		{#if $page.url.searchParams.has('passwordChanged')}<p role="status">
+				{$t('onboarding.changed')}
+			</p>{/if}
 		<form class="login-form" on:submit={submitLogin}>
 			<label class="field" for="auth-email">
 				<span>{$t('auth.email')}</span>
@@ -83,6 +94,10 @@ import { login } from '../_shared/auth';
 				{loading ? $t('auth.signingIn') : $t('auth.signIn')}
 			</button>
 		</form>
+		<nav class="account-links" aria-label={$t('onboarding.navigation')}>
+			<a href={resolve('/register')}>{$t('onboarding.register')}</a> ·
+			<a href={resolve('/forgot-password')}>{$t('onboarding.recover')}</a>
+		</nav>
 	</div>
 
 	<div class="login-language">

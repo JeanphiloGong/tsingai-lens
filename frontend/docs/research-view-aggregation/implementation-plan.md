@@ -475,14 +475,14 @@ or normalize API payloads themselves.
 
 ### Tests To Add Or Extend
 
-| File                                                                                               | Test focus                                                   |
-| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `frontend/src/routes/_shared/researchView.spec.ts`                                                 | helper normalization, state mapping, value formatting        |
-| `frontend/src/routes/collections/[id]/workspace-page.svelte.spec.ts`                               | overview ready/partial/processing states and primary action  |
-| `frontend/src/routes/collections/[id]/materials/materials-page.svelte.spec.ts`                     | material summaries, alias display, profile links             |
-| `frontend/src/routes/collections/[id]/materials/material-detail-page.svelte.spec.ts`               | material profile modules, material-scoped comparisons        |
+| File                                                                                               | Test focus                                                                  |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `frontend/src/routes/_shared/researchView.spec.ts`                                                 | helper normalization, state mapping, value formatting                       |
+| `frontend/src/routes/collections/[id]/workspace-page.svelte.spec.ts`                               | overview ready/partial/processing states and primary action                 |
+| `frontend/src/routes/collections/[id]/materials/materials-page.svelte.spec.ts`                     | material summaries, alias display, profile links                            |
+| `frontend/src/routes/collections/[id]/materials/material-detail-page.svelte.spec.ts`               | material profile modules, material-scoped comparisons                       |
 | `frontend/src/routes/collections/[id]/comparisons/comparisons-page.svelte.spec.ts`                 | advanced all-comparisons browser, matrix rendering, evidence drawer opening |
-| `frontend/src/routes/collections/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts` | sample matrix, condition series, evidence detail affordance  |
+| `frontend/src/routes/collections/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts` | sample matrix, condition series, evidence detail affordance                 |
 
 ## Phase 1: Shared API Helper And Types
 

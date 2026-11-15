@@ -11,6 +11,20 @@ uv sync
 
 ## Required Runtime Variables
 
+Web startup also requires `USER_RPC_TARGET`, `USER_RPC_CA`, `USER_RPC_CERT` and
+`USER_RPC_KEY` for the sibling user-service mTLS connection. The user-service
+[local development instructions](../../../user-service/README.md#v4-mtls-and-lens-integration)
+describe certificate preparation and matching server/client variables. Browser
+account traffic uses same-origin `/user-api/v1/*`; research traffic remains on
+`/api/v1/*`. Lens resolves each session remotely and keeps resource ownership
+checks; there is no local-auth fallback.
+
+Migration `20261104_0099` removes local identity tables and is irreversible.
+Use a fresh database for V4 development. Existing databases require stopped
+writes, backup/restore verification and verified account import before the
+later upgrade/cutover procedure; do not apply it to existing data as a learning
+step.
+
 Set the PostgreSQL URL before any backend command that constructs persistence:
 
 ```bash

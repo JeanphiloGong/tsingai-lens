@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { setContext, tick } from 'svelte';
 	import { writable } from 'svelte/store';
 	import { beforeNavigate, goto } from '$app/navigation';
@@ -56,7 +57,8 @@
 	$: collectionId = $page.params.id ?? '';
 	$: documentId = $page.params.document_id ?? '';
 	$: collectionName =
-		$collections.find((item) => item.collection_id === collectionId)?.name || $t('collection.unknownName');
+		$collections.find((item) => item.collection_id === collectionId)?.name ||
+		$t('collection.unknownName');
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
 	$: currentOwner = `${userId}:${collectionId}`;
 	$: if (currentOwner !== owner) {
@@ -89,7 +91,7 @@
 	);
 	$: paperRatio = Math.max(minimumPaperRatio, Math.min(100 - minimumPaperRatio, paperRatio));
 	$: {
-		$agent.sourceVersion;
+		void $agent.sourceVersion;
 		selectedSources = readPendingChatSourceContexts(userId, collectionId);
 	}
 	$: if (!selectedSources.length) showSelection = false;
@@ -100,7 +102,7 @@
 	}
 
 	function documentHref(tab: DocumentTab) {
-		return `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(tab.documentId)}${tab.search}`;
+		return `${resolve('/collections/[id]/documents/[document_id]', { id: collectionId, document_id: tab.documentId })}${tab.search}`;
 	}
 	function openDocument(id: string, search: string, repeat = false) {
 		const existing = tabs.find((tab) => tab.documentId === id);
@@ -131,6 +133,7 @@
 		tabs = tabs.map((tab) => (tab.documentId === id ? { ...tab, title } : tab));
 	}
 	function selectTab(tab: DocumentTab) {
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters.
 		void goto(documentHref(tab), { noScroll: true, keepFocus: true });
 	}
 	function closeTab(id: string) {
@@ -148,7 +151,8 @@
 		if (documentId === id) {
 			const next = tabs.find((tab) => tab.documentId === primaryId) || tabs[0];
 			if (next) selectTab(next);
-			else void goto(`/collections/${collectionId}/documents`, { noScroll: true });
+			else
+				void goto(resolve('/collections/[id]/documents', { id: collectionId }), { noScroll: true });
 		}
 	}
 	function toggleComparison() {
@@ -262,7 +266,7 @@
 			<div class="workspace-toolbar">
 				<a
 					class="library-link"
-					href={`/collections/${collectionId}/documents`}
+					href={resolve('/collections/[id]/documents', { id: collectionId })}
 					aria-label={$t('collection.tabs.papers')}
 					title={$t('collection.tabs.papers')}
 					><ArrowLeft size={18} /><span>{$t('collection.tabs.papers')}</span></a
@@ -287,7 +291,7 @@
 								if (next) selectTab(next);
 							}}
 						>
-							{#each tabs.filter((item) => item.documentId !== primaryId) as option}
+							{#each tabs.filter((item) => item.documentId !== primaryId) as option (option.documentId)}
 								<option value={option.documentId}>{option.title}</option>
 							{/each}
 						</select>
@@ -349,14 +353,18 @@
 				<ul>
 					{#each selectedSources as source, index (`${source.document_id}:${source.source_kind}:${source.source_ref}`)}
 						<li>
+							<!-- eslint-disable svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 							<a
-								href={source.resource_ref.href ||
-									`/collections/${collectionId}/documents/${source.document_id}?source_ref=${encodeURIComponent(source.source_ref)}`}
+								href={resolve(
+									(source.resource_ref.href ||
+										`/collections/${collectionId}/documents/${source.document_id}?source_ref=${encodeURIComponent(source.source_ref)}`) as `/collections/${string}`
+								)}
 								><strong>{source.document_title}</strong><span
 									>{source.heading_path || $t('researchAgent.progress.sourceKind.passage')}</span
 								>
 								<p>{source.quote}</p></a
-							><IconButton
+							>
+							<!-- eslint-enable svelte/no-navigation-without-resolve --><IconButton
 								label={$t('researchAgent.workspace.removeBlock', { title: source.document_title })}
 								disabled={$agent.busy}
 								onClick={() => removeSource(index)}><X size={14} /></IconButton
@@ -399,7 +407,8 @@
 				</div>
 			{/each}
 			{#if dual}
-				<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions (WAI-ARIA window splitters are focusable separators with keyboard resizing.) -->
+				<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The compiler requires this keyboard splitter exception. -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions (WAI-ARIA splitters are focusable separators with keyboard resizing.) -->
 				<div
 					class="splitter paper-splitter"
 					role="separator"
@@ -420,7 +429,8 @@
 	</div>
 	{#if mountedAgent}
 		{#if $agent.open}
-			<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions (WAI-ARIA window splitters are focusable separators with keyboard resizing.) -->
+			<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The compiler requires this keyboard splitter exception. -->
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions (WAI-ARIA splitters are focusable separators with keyboard resizing.) -->
 			<div
 				class="splitter agent-splitter"
 				role="separator"

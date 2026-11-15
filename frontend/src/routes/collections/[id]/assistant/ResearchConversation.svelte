@@ -81,7 +81,12 @@
 	export let onSourcesChanged: () => void = () => {};
 	export let onBusyChange: (busy: boolean) => void = () => {};
 	$: onBusyChange(
-		loading || sending || deciding || revising || running || Boolean(recoveringCallId || recoveryError)
+		loading ||
+			sending ||
+			deciding ||
+			revising ||
+			running ||
+			Boolean(recoveringCallId || recoveryError)
 	);
 	let showHistory = false;
 	let showTree = false;
@@ -139,14 +144,23 @@
 	let renameSaving = false;
 	let renameError = '';
 	let renameDialog: HTMLDialogElement;
-	$: renameInvalid = !renameDraft.trim() || Array.from(renameDraft.trim()).length > 160 || /[\r\n\x00]/.test(renameDraft);
+	$: renameInvalid =
+		!renameDraft.trim() ||
+		Array.from(renameDraft.trim()).length > 160 ||
+		/[\r\n]/.test(renameDraft) ||
+		renameDraft.includes(String.fromCharCode(0));
 	let loading = false;
 	let sending = false;
 	let stopping = false;
 	let submitting = false;
 	let deletingSessionId = '';
 	$: sessionNavigationDisabled =
-		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId) || renameSaving;
+		loading ||
+		submitting ||
+		deciding ||
+		revising ||
+		Boolean(deletingSessionId || pinningSessionId) ||
+		renameSaving;
 	let progress: ChatProgress | null = null;
 	let settledTurn: ChatTurn | null = null;
 	let progressHistory: ChatProgress[] = [];
@@ -155,9 +169,9 @@
 	let modelConnections: ModelConnectionChoice[] = [];
 	let selectedModelConnectionId = '';
 	let modelPicker: HTMLDetailsElement | null = null;
-	$: selectedModelConnectionName = modelConnections.find(
-		(item) => item.connection_id === selectedModelConnectionId
-	)?.display_name ?? '';
+	$: selectedModelConnectionName =
+		modelConnections.find((item) => item.connection_id === selectedModelConnectionId)
+			?.display_name ?? '';
 	let modelConnectionsOwner = '';
 	let modelConnectionsLoading = false;
 	let modelConnectionsError = '';
@@ -217,6 +231,7 @@
 		selectedModelConnectionId = '';
 		modelConnectionsLoading = false;
 		modelConnectionsError = '';
+		// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 		if (userId) void loadModelConnections();
 	}
 	$: if (sourceContextVersion && userId && collectionId) {
@@ -227,7 +242,11 @@
 		: '';
 	$: conversationTitle =
 		session?.title?.trim() ??
-			messages.find((message) => message.role === 'user')?.content.trim().split('\n')[0] ?? '';
+		messages
+			.find((message) => message.role === 'user')
+			?.content.trim()
+			.split('\n')[0] ??
+		'';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: queryReviewFindingId = $page.url.searchParams.get('review_finding_id') ?? '';
@@ -330,10 +349,7 @@
 						typeof item.created_at === 'string' ? item.created_at : new Date().toISOString(),
 					updated_at:
 						typeof item.updated_at === 'string' ? item.updated_at : new Date().toISOString(),
-					status:
-						item.status === 'running' || item.status === 'approval'
-							? item.status
-							: 'idle',
+					status: item.status === 'running' || item.status === 'approval' ? item.status : 'idle',
 					is_pinned: item.is_pinned === true
 				}));
 		} catch {
@@ -372,7 +388,8 @@
 			{
 				session_id: nextSession.session_id,
 				title:
-					nextSession.title || title ||
+					nextSession.title ||
+					title ||
 					(messages.some((message) => message.role === 'user')
 						? titleFromMessages(messages)
 						: previous?.title || $t('researchAgent.untitledSession')),
@@ -394,10 +411,16 @@
 		const historyRequest = historyGeneration;
 		try {
 			const saved = await fetchChatSession(sessionId, sessionController?.signal);
-			if (!isCurrentSession(generation, ownerCollectionId) || session?.session_id !== sessionId ||
-				historyRequest !== historyGeneration || session.title) return;
+			if (
+				!isCurrentSession(generation, ownerCollectionId) ||
+				session?.session_id !== sessionId ||
+				historyRequest !== historyGeneration ||
+				session.title
+			)
+				return;
 			if (!saved.title) {
-				if (attempt < 24) titleTimer = setTimeout(() => void refreshSessionTitle(attempt + 1), 2000);
+				if (attempt < 24)
+					titleTimer = setTimeout(() => void refreshSessionTitle(attempt + 1), 2000);
 				return;
 			}
 			session = { ...session, title: saved.title };
@@ -423,7 +446,10 @@
 					offset: items.length,
 					signal: sessionController?.signal
 				});
-				if (!isCurrentSession(generation, ownerCollectionId) || historyRequest !== historyGeneration)
+				if (
+					!isCurrentSession(generation, ownerCollectionId) ||
+					historyRequest !== historyGeneration
+				)
 					return null;
 				items.push(...response.items);
 				hasMore = response.items.length === historyPageSize;
@@ -450,8 +476,11 @@
 			const previous = stored.find((entry) => entry.session_id === item.session_id);
 			const status: ChatSessionActivity =
 				item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
-			const title = item.title?.trim() || (item.session_id === session?.session_id && messages.length
-				? titleFromMessages(messages) : previous?.title || $t('researchAgent.untitledSession'));
+			const title =
+				item.title?.trim() ||
+				(item.session_id === session?.session_id && messages.length
+					? titleFromMessages(messages)
+					: previous?.title || $t('researchAgent.untitledSession'));
 			return {
 				session_id: item.session_id,
 				title,
@@ -480,14 +509,24 @@
 
 	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
 		const result = await fetchServerHistory(
-			generation, ownerCollectionId, Math.max(historyPageSize, historyPageOffset)
+			generation,
+			ownerCollectionId,
+			Math.max(historyPageSize, historyPageOffset)
 		);
-		if (result) applyServerHistory(result.items, generation, ownerCollectionId, false, result.hasMore);
+		if (result)
+			applyServerHistory(result.items, generation, ownerCollectionId, false, result.hasMore);
 		return result !== null;
 	}
 
 	async function loadMoreHistory(): Promise<void> {
-		if ((!historyHasMore && !historyNeedsRefresh) || historyPageLoading || historyLoading || sessionNavigationDisabled || destroyed) return;
+		if (
+			(!historyHasMore && !historyNeedsRefresh) ||
+			historyPageLoading ||
+			historyLoading ||
+			sessionNavigationDisabled ||
+			destroyed
+		)
+			return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		historyPageLoading = true;
@@ -511,7 +550,8 @@
 				offset: historyPageOffset,
 				signal: sessionController?.signal
 			});
-			if (!isCurrentSession(generation, ownerCollectionId) || historyRequest !== historyGeneration) return;
+			if (!isCurrentSession(generation, ownerCollectionId) || historyRequest !== historyGeneration)
+				return;
 			applyServerHistory(response.items, generation, ownerCollectionId, true);
 		} catch (err) {
 			if (isCurrentSession(generation, ownerCollectionId) && historyRequest === historyGeneration) {
@@ -531,7 +571,16 @@
 	}
 
 	async function refreshHistoryActivities(refreshIndex = true) {
-		if (!session || loading || historyLoading || historyPageLoading || destroyed || deletingSessionId || pinningSessionId) return;
+		if (
+			!session ||
+			loading ||
+			historyLoading ||
+			historyPageLoading ||
+			destroyed ||
+			deletingSessionId ||
+			pinningSessionId
+		)
+			return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		clearTimeout(historyTimer);
@@ -600,13 +649,17 @@
 		try {
 			const result = await fetchModelConnections(controller.signal);
 			if (destroyed || owner !== userId || controller.signal.aborted) return;
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 			modelConnections = result.items;
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 			selectedModelConnectionId = result.items[0]?.connection_id ?? '';
 		} catch (err) {
 			if (!controller.signal.aborted && owner === userId && !destroyed) {
+				// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 				modelConnectionsError = errorMessage(err);
 			}
 		} finally {
+			// eslint-disable-next-line svelte/infinite-reactive-loop -- The owner/request guard controls this effect; async result assignments are not its dependencies.
 			if (modelConnectionsController === controller) modelConnectionsLoading = false;
 		}
 	}
@@ -720,7 +773,11 @@
 			const initialHistory = await initialHistoryPromise;
 			if (initialHistory) {
 				applyServerHistory(
-					initialHistory.items, generation, activeCollectionId, false, initialHistory.hasMore
+					initialHistory.items,
+					generation,
+					activeCollectionId,
+					false,
+					initialHistory.hasMore
 				);
 			}
 			if (createdSession && isCurrentSession(generation, activeCollectionId))
@@ -755,7 +812,8 @@
 				.find(
 					(call) =>
 						call.tool_call_id !== pendingApproval?.tool_call_id &&
-						call.tool_call_id !== retryableDecision?.tool_call_id && !completed.has(call.tool_call_id)
+						call.tool_call_id !== retryableDecision?.tool_call_id &&
+						!completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
 		if (
 			running &&
@@ -804,8 +862,7 @@
 		if (trajectory.response) {
 			acceptSnapshot(trajectory.response);
 			running = responseSnapshot?.status === 'running';
-		}
-		else {
+		} else {
 			responseSnapshot = null;
 			settledTurn = null;
 		}
@@ -975,9 +1032,11 @@
 			if (!isCurrentSession(generation, ownerCollectionId)) return;
 			historyGeneration += 1;
 			historyNeedsRefresh = true;
-			writeHistory(history.map((entry) =>
-				entry.session_id === sessionId ? { ...entry, is_pinned: saved.is_pinned } : entry
-			));
+			writeHistory(
+				history.map((entry) =>
+					entry.session_id === sessionId ? { ...entry, is_pinned: saved.is_pinned } : entry
+				)
+			);
 			if (session?.session_id === sessionId) session = { ...session, is_pinned: saved.is_pinned };
 			await refreshServerHistory(generation, ownerCollectionId);
 		} catch (err) {
@@ -1016,8 +1075,11 @@
 			const saved = await setChatSessionTitle(targetId, title, sessionController?.signal);
 			if (!isCurrentSession(generation, ownerCollectionId)) return;
 			historyGeneration += 1;
-			writeHistory(history.map((entry) => entry.session_id === targetId
-				? { ...entry, title: saved.title || title } : entry));
+			writeHistory(
+				history.map((entry) =>
+					entry.session_id === targetId ? { ...entry, title: saved.title || title } : entry
+				)
+			);
 			if (session?.session_id === targetId) session = { ...session, title: saved.title };
 			renameSaving = false;
 			cancelRename();
@@ -1031,7 +1093,8 @@
 	async function removeSession(sessionId: string) {
 		if (sessionNavigationDisabled || !browser) return;
 		const item = history.find((entry) => entry.session_id === sessionId);
-		if (!item || !window.confirm($t('researchAgent.deleteSessionConfirm', { title: item.title }))) return;
+		if (!item || !window.confirm($t('researchAgent.deleteSessionConfirm', { title: item.title })))
+			return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		deletingSessionId = sessionId;
@@ -1134,7 +1197,8 @@
 			running ||
 			pendingApproval ||
 			retryableDecision ||
-			(recoveringCallId || recoveryError)
+			recoveringCallId ||
+			recoveryError
 		)
 			return false;
 		const ownerCollectionId = collectionId;
@@ -1207,7 +1271,8 @@
 			running ||
 			pendingApproval ||
 			retryableDecision ||
-			(recoveringCallId || recoveryError)
+			recoveringCallId ||
+			recoveryError
 		)
 			return;
 		const isRevision = revisionSources !== undefined;
@@ -1417,8 +1482,11 @@
 		stopping = true;
 		try {
 			const snapshot = await stopChatResponse(session.session_id, responseSnapshot.response_id);
-			if (isCurrentSession(generation, ownerCollectionId) &&
-				responseSnapshot?.response_id === snapshot.response_id && responseSnapshot.status === 'running') {
+			if (
+				isCurrentSession(generation, ownerCollectionId) &&
+				responseSnapshot?.response_id === snapshot.response_id &&
+				responseSnapshot.status === 'running'
+			) {
 				if (snapshot.status === 'running')
 					responseSnapshot = { ...responseSnapshot, stop_requested: snapshot.stop_requested };
 				else acceptSnapshot(snapshot);
@@ -1583,7 +1651,8 @@
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
-		if (toolName === 'create_paper_experiment_revision') return 'researchAgent.paperExperimentRevisionRejected';
+		if (toolName === 'create_paper_experiment_revision')
+			return 'researchAgent.paperExperimentRevisionRejected';
 		if (toolName === 'create_research_plan') return 'researchAgent.researchPlanRejected';
 		return 'researchAgent.rejected';
 	}
@@ -1630,7 +1699,10 @@
 			onSwitchSession={switchSession}
 			onDeleteSession={removeSession}
 			onTogglePin={toggleSessionPin}
-			onRenameSession={(id) => { const item = history.find((entry) => entry.session_id === id); if (item) beginRename(item); }}
+			onRenameSession={(id) => {
+				const item = history.find((entry) => entry.session_id === id);
+				if (item) beginRename(item);
+			}}
 			{pinningSessionId}
 			{historyHasMore}
 			{historyPageLoading}
@@ -1674,7 +1746,6 @@
 					{#each history as item (item.session_id)}
 						{@const activity = sessionActivities[item.session_id]}
 						<div class="embedded-history-item">
-
 							<button
 								class="embedded-history-select"
 								type="button"
@@ -1696,14 +1767,25 @@
 									</span>
 								{/if}
 							</button>
-							<button class="embedded-rename" type="button" disabled={sessionNavigationDisabled} aria-label={$t('researchAgent.renameSession')} title={$t('researchAgent.renameSession')} on:click={() => beginRename(item)}>{$t('researchAgent.renameSession')}</button>
+							<button
+								class="embedded-rename"
+								type="button"
+								disabled={sessionNavigationDisabled}
+								aria-label={$t('researchAgent.renameSession')}
+								title={$t('researchAgent.renameSession')}
+								on:click={() => beginRename(item)}>{$t('researchAgent.renameSession')}</button
+							>
 							<button
 								class="embedded-pin"
 								class:pinned={item.is_pinned}
 								type="button"
 								disabled={sessionNavigationDisabled}
-								aria-label={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
-								title={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+								aria-label={$t(
+									item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession'
+								)}
+								title={$t(
+									item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession'
+								)}
 								aria-pressed={item.is_pinned}
 								aria-busy={pinningSessionId === item.session_id}
 								on:click={() => toggleSessionPin(item.session_id)}
@@ -1722,7 +1804,9 @@
 							aria-label={$t('researchAgent.loadMoreSessions')}
 							on:click={loadMoreHistory}
 						>
-							{#if historyPageLoading}<LoaderCircle size={14} />{:else}<ChevronDown size={14} />{/if}
+							{#if historyPageLoading}<LoaderCircle size={14} />{:else}<ChevronDown
+									size={14}
+								/>{/if}
 							{$t('researchAgent.loadMoreSessions')}
 						</button>
 					{/if}
@@ -1745,10 +1829,24 @@
 				/>{/key}
 		{/if}
 		{#if retryableDecision && !checkpointId}
-			<div class="status status-notice decision-recovery" role="status" data-testid="decision-recovery">
-				<span>{$t(retryableDecision.status === 'approved' ? 'researchAgent.savedApprovalWaiting' : 'researchAgent.savedRejectionWaiting')}</span>
+			<div
+				class="status status-notice decision-recovery"
+				role="status"
+				data-testid="decision-recovery"
+			>
+				<span
+					>{$t(
+						retryableDecision.status === 'approved'
+							? 'researchAgent.savedApprovalWaiting'
+							: 'researchAgent.savedRejectionWaiting'
+					)}</span
+				>
 				<button type="button" disabled={deciding || loading || running} on:click={retryDecision}>
-					{$t(retryableDecision.status === 'approved' ? 'researchAgent.retryApprovedDecision' : 'researchAgent.retryRejectedDecision')}
+					{$t(
+						retryableDecision.status === 'approved'
+							? 'researchAgent.retryApprovedDecision'
+							: 'researchAgent.retryRejectedDecision'
+					)}
 				</button>
 			</div>
 		{/if}
@@ -1774,7 +1872,10 @@
 			{branches}
 			running={!checkpointId && running}
 			revisionDisabled={revising ||
-				Boolean(checkpointId && (running || sending || pendingApproval || retryableDecision || recoveringCallId))}
+				Boolean(
+					checkpointId &&
+					(running || sending || pendingApproval || retryableDecision || recoveringCallId)
+				)}
 			onRevise={reviseMessage}
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
@@ -1789,8 +1890,14 @@
 			approvalError={checkpointId ? '' : error}
 			loadError={!session && failedSessionId !== null ? error : ''}
 			onRetrySession={() => loadSession(failedSessionId ?? '')}
-			onContinue={session && !checkpointId && !branchDraft && !running && !pendingApproval && !retryableDecision
-				? () => sendMessage($t('researchAgent.continueRequest')) : undefined}
+			onContinue={session &&
+			!checkpointId &&
+			!branchDraft &&
+			!running &&
+			!pendingApproval &&
+			!retryableDecision
+				? () => sendMessage($t('researchAgent.continueRequest'))
+				: undefined}
 			recoveringCallId={checkpointId ? null : recoveringCallId}
 			recoveryLoading={!checkpointId && recoveryLoading}
 			recoveryError={checkpointId ? '' : recoveryError}
@@ -1870,21 +1977,42 @@
 					bind:this={modelPicker}
 					data-testid="model-connection-picker"
 					on:focusout={(event) => {
-						if (modelPicker && event.relatedTarget instanceof Node && !modelPicker.contains(event.relatedTarget)) modelPicker.open = false;
+						if (
+							modelPicker &&
+							event.relatedTarget instanceof Node &&
+							!modelPicker.contains(event.relatedTarget)
+						)
+							modelPicker.open = false;
 					}}
 				>
 					<summary title={$t('researchAgent.modelConnectionLabel')}>
 						<span class="sr-only">{$t('researchAgent.modelConnectionLabel')}: </span>
-						<span class="model-picker-name">{selectedModelConnectionName || $t('researchAgent.modelConnectionLabel')}</span>
+						<span class="model-picker-name"
+							>{selectedModelConnectionName || $t('researchAgent.modelConnectionLabel')}</span
+						>
 						<ChevronDown size={14} aria-hidden="true" />
 					</summary>
-					<div class="model-picker-menu" role="group" aria-label={$t('researchAgent.modelConnectionLabel')}>
-						{#if !modelConnectionsLoading && !modelConnections.length}<p>{$t('researchAgent.modelConnectionEmpty')}</p>{/if}
+					<div
+						class="model-picker-menu"
+						role="group"
+						aria-label={$t('researchAgent.modelConnectionLabel')}
+					>
+						{#if !modelConnectionsLoading && !modelConnections.length}<p>
+								{$t('researchAgent.modelConnectionEmpty')}
+							</p>{/if}
 						<div class="model-picker-options">
 							{#each modelConnections as item (item.connection_id)}
-								<button type="button" disabled={modelConnectionsLoading} aria-pressed={item.connection_id === selectedModelConnectionId} on:click={() => selectModelConnection(item.connection_id)}>
+								<button
+									type="button"
+									disabled={modelConnectionsLoading}
+									aria-pressed={item.connection_id === selectedModelConnectionId}
+									on:click={() => selectModelConnection(item.connection_id)}
+								>
 									<span>{item.display_name}</span>
-									{#if item.connection_id === selectedModelConnectionId}<Check size={15} aria-hidden="true" />{/if}
+									{#if item.connection_id === selectedModelConnectionId}<Check
+											size={15}
+											aria-hidden="true"
+										/>{/if}
 								</button>
 							{/each}
 						</div>
@@ -1942,24 +2070,62 @@
 	/>
 {/if}
 
-<dialog bind:this={renameDialog} aria-labelledby="rename-title" on:cancel={(event) => { event.preventDefault(); cancelRename(); }}>
+<dialog
+	bind:this={renameDialog}
+	aria-labelledby="rename-title"
+	on:cancel={(event) => {
+		event.preventDefault();
+		cancelRename();
+	}}
+>
 	<form on:submit|preventDefault={saveRename}>
 		<h2 id="rename-title">{$t('researchAgent.renameSession')}</h2>
 		<label for="rename-input">{$t('researchAgent.renameInput')}</label>
-		<input id="rename-input" bind:value={renameDraft} disabled={renameSaving} aria-describedby="rename-help" aria-invalid={renameInvalid} />
+		<input
+			id="rename-input"
+			bind:value={renameDraft}
+			disabled={renameSaving}
+			aria-describedby="rename-help"
+			aria-invalid={renameInvalid}
+		/>
 		<p id="rename-help">{$t('researchAgent.renameHelp')}</p>
 		{#if renameError}<p role="alert">{renameError}</p>{/if}
-		<button type="button" disabled={renameSaving} on:click={cancelRename}>{$t('researchAgent.cancelRename')}</button>
-		<button type="submit" disabled={renameInvalid || renameSaving}>{$t(renameSaving ? 'researchAgent.savingRename' : 'researchAgent.saveRename')}</button>
+		<button type="button" disabled={renameSaving} on:click={cancelRename}
+			>{$t('researchAgent.cancelRename')}</button
+		>
+		<button type="submit" disabled={renameInvalid || renameSaving}
+			>{$t(renameSaving ? 'researchAgent.savingRename' : 'researchAgent.saveRename')}</button
+		>
 	</form>
 </dialog>
 
 <style>
-	dialog { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; border: 1px solid var(--border-default); border-radius: 12px; padding: 24px; color: var(--text-primary); background: var(--surface-card); }
-	dialog::backdrop { background: rgb(0 0 0 / 35%); }
-	dialog input { display: block; width: 100%; box-sizing: border-box; padding: 10px; margin-top: 8px; }
-	dialog p { font-size: 13px; }
-	dialog button { padding: 8px 16px; margin-right: 8px; }
+	dialog {
+		width: min(420px, calc(100vw - 32px));
+		box-sizing: border-box;
+		border: 1px solid var(--border-default);
+		border-radius: 12px;
+		padding: 24px;
+		color: var(--text-primary);
+		background: var(--surface-card);
+	}
+	dialog::backdrop {
+		background: rgb(0 0 0 / 35%);
+	}
+	dialog input {
+		display: block;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 10px;
+		margin-top: 8px;
+	}
+	dialog p {
+		font-size: 13px;
+	}
+	dialog button {
+		padding: 8px 16px;
+		margin-right: 8px;
+	}
 
 	.checkpoint-bar {
 		display: flex;
@@ -2118,23 +2284,114 @@
 		background: var(--bg-page);
 	}
 
-	.model-picker { min-width: 0; max-width: 100%; }
-	.model-picker summary { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 7px 8px; border-radius: 8px; color: var(--text-secondary); cursor: pointer; list-style: none; font-size: 13px; }
-	.model-picker summary::-webkit-details-marker { display: none; }
-	.model-picker summary:hover, .model-picker[open] summary { background: var(--bg-subtle); color: var(--text-primary); }
-	.model-picker-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.model-picker summary :global(svg) { flex: 0 0 auto; }
-	.model-picker .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-	.model-picker-menu { position: absolute; z-index: 30; right: 10px; bottom: calc(100% + 8px); width: min(280px, calc(100% - 20px)); box-sizing: border-box; padding: 8px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-card); color: var(--text-primary); }
-	.model-picker-options { display: grid; gap: 2px; max-height: 224px; overflow-y: auto; }
-	.model-picker-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
-	.model-picker-menu button span { min-width: 0; overflow-wrap: anywhere; }
-	.model-picker-menu button :global(svg) { flex: 0 0 auto; }
-	.model-picker-menu button:hover { background: var(--bg-subtle); }
-	.model-picker-menu button[aria-pressed='true'] { background: var(--brand-soft); color: var(--brand-primary); }
-	.model-picker-menu p { margin: 4px 8px 10px; font-size: 13px; line-height: 1.5; }
-	.model-picker summary:focus-visible, .model-picker-menu button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
-	.model-picker-menu button:disabled { cursor: not-allowed; opacity: 0.55; }
+	.model-picker {
+		min-width: 0;
+		max-width: 100%;
+	}
+	.model-picker summary {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		padding: 7px 8px;
+		border-radius: 8px;
+		color: var(--text-secondary);
+		cursor: pointer;
+		list-style: none;
+		font-size: 13px;
+	}
+	.model-picker summary::-webkit-details-marker {
+		display: none;
+	}
+	.model-picker summary:hover,
+	.model-picker[open] summary {
+		background: var(--bg-subtle);
+		color: var(--text-primary);
+	}
+	.model-picker-name {
+		min-width: 0;
+		max-width: 180px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.model-picker summary :global(svg) {
+		flex: 0 0 auto;
+	}
+	.model-picker .sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+		border: 0;
+	}
+	.model-picker-menu {
+		position: absolute;
+		z-index: 30;
+		right: 10px;
+		bottom: calc(100% + 8px);
+		width: min(280px, calc(100% - 20px));
+		box-sizing: border-box;
+		padding: 8px;
+		border: 1px solid var(--border-strong);
+		border-radius: 12px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+	}
+	.model-picker-options {
+		display: grid;
+		gap: 2px;
+		max-height: 224px;
+		overflow-y: auto;
+	}
+	.model-picker-menu button {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		width: 100%;
+		padding: 9px 10px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		font-size: 13px;
+		text-align: left;
+		cursor: pointer;
+	}
+	.model-picker-menu button span {
+		min-width: 0;
+		overflow-wrap: anywhere;
+	}
+	.model-picker-menu button :global(svg) {
+		flex: 0 0 auto;
+	}
+	.model-picker-menu button:hover {
+		background: var(--bg-subtle);
+	}
+	.model-picker-menu button[aria-pressed='true'] {
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+	}
+	.model-picker-menu p {
+		margin: 4px 8px 10px;
+		font-size: 13px;
+		line-height: 1.5;
+	}
+	.model-picker summary:focus-visible,
+	.model-picker-menu button:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+	.model-picker-menu button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
 	.status {
 		width: min(calc(100% - 64px), 900px);
 		margin: 12px auto 0;
@@ -2176,7 +2433,9 @@
 		justify-content: space-between;
 		gap: 12px;
 	}
-	.decision-recovery span { flex: 1 1 16rem; }
+	.decision-recovery span {
+		flex: 1 1 16rem;
+	}
 	.decision-recovery button {
 		flex: 0 0 auto;
 		padding: 6px 10px;
@@ -2187,8 +2446,14 @@
 		font: inherit;
 		cursor: pointer;
 	}
-	.decision-recovery button:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
-	.decision-recovery button:disabled { cursor: not-allowed; opacity: 0.55; }
+	.decision-recovery button:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+	.decision-recovery button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
 
 	@media (prefers-reduced-motion: reduce) {
 		:global(.research-agent *),

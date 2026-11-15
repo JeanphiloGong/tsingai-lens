@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -15,7 +14,6 @@ from domain.evaluation import (
     EvaluationScore,
 )
 from domain.source import Collection
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
     CollectionRepository,
     StoredCollection,
@@ -31,15 +29,6 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
-    await AuthRepository().add_user(
-        AuthUserRecord(
-            user_id="user-evaluation",
-            email="evaluation@example.com",
-            display_name="Evaluation Reviewer",
-            password_hash="synthetic-password-hash",
-            created_at="2026-07-20T00:00:00+00:00",
-        )
-    )
     collections = CollectionRepository()
     for collection_id in ("col-gold", "col-other"):
         await collections.add_collection(
@@ -163,8 +152,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
         ),
     )
     assert [
-        item.gold_item_id
-        for item in await repository.list_gold_items("gold-v1")
+        item.gold_item_id for item in await repository.list_gold_items("gold-v1")
     ] == ["gold-2"]
 
     with pytest.raises(ValueError, match="gold set identity cannot be reassigned"):
@@ -215,15 +203,6 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
             (),
         )
 
-    await AuthRepository().add_user(
-        AuthUserRecord(
-            user_id="user-evaluation-cascade",
-            email="evaluation-cascade@example.com",
-            display_name=None,
-            password_hash="synthetic-password-hash",
-            created_at=datetime(2026, 7, 20, tzinfo=timezone.utc).isoformat(),
-        )
-    )
     collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(

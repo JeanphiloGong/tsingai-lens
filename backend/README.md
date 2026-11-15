@@ -84,6 +84,8 @@ Objective discovery and analysis both require an explicit non-empty
 
 - [`docs/README.md`](docs/README.md): backend reading order.
 - [`docs/specs/api.md`](docs/specs/api.md): public API contract.
+- Model connections: [HTTP API](docs/specs/model-connections/api.md) and
+  [data model](docs/specs/model-connections/data-model.md).
 - [`docs/architecture/overview.md`](docs/architecture/overview.md): ownership and
   runtime flow.
 - [`docs/architecture/persistence-model.md`](docs/architecture/persistence-model.md):
@@ -99,6 +101,8 @@ cd backend
 uv venv .venv && source .venv/bin/activate
 uv sync
 
+# Export USER_RPC_TARGET/CA/CERT/KEY as described in ../user-service/README.md.
+# Use a fresh database for V4; existing data needs verified import before 0099.
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local

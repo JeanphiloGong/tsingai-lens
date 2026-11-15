@@ -2,14 +2,16 @@
 
 This document describes the maintained Lens v1 HTTP contract. The generated
 OpenAPI document at `/api/openapi.json` is the field-level runtime reference;
-this file owns resource boundaries and cross-endpoint semantics.
+this file owns resource boundaries and cross-endpoint semantics. Detailed
+module contracts are maintained in the linked topic directories under `specs/`.
 
 ## Conventions
 
 - Product APIs use `/api/v1/*`.
 - API documentation uses `/api/docs`, `/api/redoc`, and `/api/openapi.json`.
-- `POST /api/v1/auth/login` establishes an HttpOnly session cookie. Browser
-  requests send that cookie through the same-origin `/api/v1/*` contract.
+- The sibling user-service establishes the HttpOnly `lens_session` cookie.
+  Browser identity requests use same-origin `/user-api/v1/*`; Lens business
+  requests send that cookie through `/api/v1/*` and resolve it over mTLS gRPC.
 - Every business response carries `X-Request-ID`.
 - Internal application logs correlate authenticated work by request ID and the
   stable internal user ID. They do not log email addresses, session values, or
@@ -21,21 +23,33 @@ this file owns resource boundaries and cross-endpoint semantics.
 - Retired payloads and endpoints are not accepted through aliases or fallback
   parsers.
 
-All failure numbers below are business `code` values under HTTP 200. Stable
-reason strings shown beside a number are carried in `data.code`.
+Unless an identity/shared endpoint below specifies an HTTP status, existing
+failure numbers are business `code` values under HTTP 200. Stable reason strings
+are carried in `data.code`.
 
 ## Resource Map
 
 ### Authentication
 
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/logout`
-- `GET /api/v1/auth/me`
+Identity HTTP routes belong to user-service: `POST /user-api/v1/login`,
+`POST /user-api/v1/logout`, `GET /user-api/v1/me`,
+`GET /user-api/v1/me/permissions`. The former Lens `/auth/*` routes are removed.
 
-Invalid credentials return business code `200301` with reason `invalid_credentials`.
-A missing or expired session returns the same code with reason
-`authentication_required`; only this reason sends the browser to
-login after clearing local authentication and user-scoped chat storage.
+User-service HTTP errors return a flat object such as
+`{"code":"invalid_credentials"}` with the corresponding HTTP error status.
+A rate-limited response also includes top-level `retry_after` seconds and the
+`Retry-After` header; other errors omit that field. These are user-service
+responses; the Lens business envelope below keeps its existing shape.
+User-service returns its own JSON contract and HTTP 401/403/409/422/503 errors.
+Lens does not keep a second user/permission table or local-auth fallback.
+
+Lens identity rejection uses HTTP 401 / business code `200301` with
+`data.code=authentication_required`; unavailable identity uses HTTP 503 /
+`200205`; an explicit capability denial uses HTTP 403 / `200203`.
+Successful Lens JSON and unrelated existing business failures retain the
+`{code,message,data,meta}` envelope; resource-hidden errors remain HTTP 200 /
+`200201`. Business clients must read that envelope rather than infer success
+solely from HTTP 200. Stable user IDs remain in business/audit records.
 
 ### Collections, Documents, And Preparation
 
@@ -147,16 +161,12 @@ handoff record or a second research-result identity.
 
 ### Shared Model Connections
 
-`GET /api/v1/model-connections` requires authentication and returns the standard
-`{code,message,data,meta}` envelope. Its `data` is
-`{"items":[{"connection_id":"lab-a","display_name":"Lab A","model":"lab-chat-a"}]}`.
-Only enabled configurations appear, ordered by `priority` descending, then
-`display_name` and `connection_id` ascending for stable ties. The first entry is
-the default selected by the browser and by new Chat requests without an explicit
-choice. Empty configuration returns an empty array.
-The directory never exposes base URLs, key references, secret values, or provider
-payloads. It has no write endpoint; operators maintain the PostgreSQL
-table through their database tools.
+The [model connection API](model-connections/api.md) defines the user catalog
+and administrator configuration endpoints. Its
+[data model](model-connections/data-model.md) defines connection storage,
+encrypted credentials, and administrative audit records.
+
+#### Chat Connection Binding
 
 `POST /api/v1/chat-sessions/{session_id}/messages` accepts an optional
 `model_connection_id` alongside the existing message, Source, permission, and

@@ -173,14 +173,24 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		fetchMock.mockReset();
 	});
 
-
 	it('switches all objective labels while preserving researcher text', async () => {
-		fetchMock.mockResolvedValue(jsonResponse({collection_id:'col_123', objectives:[objective({question:'研究者问题',confirmation_status:'confirmed'})]}));
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				collection_id: 'col_123',
+				objectives: [objective({ question: '研究者问题', confirmation_status: 'confirmed' })]
+			})
+		);
 		render(Page);
-		await expect.element(browserPage.getByText('研究者问题',{exact:true})).toBeInTheDocument();
+		await expect.element(browserPage.getByText('研究者问题', { exact: true })).toBeInTheDocument();
 		language.set('en');
-		await expect.element(browserPage.getByLabelText('Search research objectives')).toBeInTheDocument();
-		await expect.poll(()=>document.querySelector('.objectives-page')!.textContent!.replaceAll('研究者问题','')).not.toMatch(/[\u3400-\u9fff]/);
+		await expect
+			.element(browserPage.getByLabelText('Search research objectives'))
+			.toBeInTheDocument();
+		await expect
+			.poll(() =>
+				document.querySelector('.objectives-page')!.textContent!.replaceAll('研究者问题', '')
+			)
+			.not.toMatch(/[\u3400-\u9fff]/);
 		language.set('zh');
 		await expect.element(browserPage.getByLabelText('搜索研究目标')).toBeInTheDocument();
 	});
@@ -247,7 +257,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
 					active_analysis: analysisState('queued'),
 					published_analysis: null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+					evidence_review: {
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
+					},
 					warnings: []
 				});
 			}
@@ -321,7 +339,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
 					active_analysis: analysisState('queued'),
 					published_analysis: null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+					evidence_review: {
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
+					},
 					warnings: []
 				});
 			}
@@ -377,7 +403,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 						]
 					},
 					published_analysis: null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+					evidence_review: {
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
+					},
 					warnings: []
 				});
 			}
@@ -387,7 +421,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 2 }),
 					active_analysis: { ...analysisState('queued'), analysis_version: 2 },
 					published_analysis: null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+					evidence_review: {
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
+					},
 					warnings: []
 				});
 			}
@@ -462,7 +504,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					}),
 					active_analysis: analysisState('running'),
 					published_analysis: null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+					evidence_review: {
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
+					},
 					warnings: []
 				});
 			}
@@ -514,7 +564,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					}),
 					active_analysis: analysisState(completed ? 'succeeded' : 'running'),
 					published_analysis: completed ? analysisState('succeeded') : null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+					evidence_review: {
+						total_evidence_count: 0,
+						result_count: 0,
+						comparable_evidence_count: 0,
+						gap_count: 0,
+						omitted_gap_count: 0,
+						status_counts: {},
+						gaps: []
+					},
 					warnings: []
 				});
 			}
@@ -564,7 +622,15 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
 				active_analysis: analysisState('running'),
 				published_analysis: null,
-					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
+				evidence_review: {
+					total_evidence_count: 0,
+					result_count: 0,
+					comparable_evidence_count: 0,
+					gap_count: 0,
+					omitted_gap_count: 0,
+					status_counts: {},
+					gaps: []
+				},
 				warnings: []
 			})
 		);

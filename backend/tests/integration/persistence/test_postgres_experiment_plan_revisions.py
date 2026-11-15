@@ -16,7 +16,6 @@ from domain.goal import (
     ExperimentPlanRecord,
 )
 from exceptions import ResourceConflictException
-from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.experiment_plan_repository import (
     ExperimentPlanRepository,
 )
@@ -60,20 +59,10 @@ async def experiment_plan_repository(source_repository):
         created_by_user_id="user_source",
         created_by_tool_call_id="call-plan-objective",
     )
-    await ObjectiveRepository(
-        ).create_authored_candidate(
+    await ObjectiveRepository().create_authored_candidate(
         objective,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-plan-objective",
-    )
-    await AuthRepository().add_user(
-        AuthUserRecord(
-            user_id="user_reviewer",
-            email="reviewer@example.com",
-            display_name=None,
-            password_hash="synthetic-password-hash",
-            created_at="2026-09-07T00:30:00+00:00",
-        )
     )
     return ExperimentPlanRepository()
 

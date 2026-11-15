@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 ARG PUBLIC_API_BASE_URL=same-origin
 
@@ -14,9 +14,10 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+ENV NGINX_ENVSUBST_FILTER=^LENS_PUBLIC_URL$
+COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY --from=build /app/build /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 80 443
 
 CMD ["nginx", "-g", "daemon off;"]

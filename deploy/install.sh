@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
+umask 077
 
 REPO="${LENS_REPO:-JeanphiloGong/tsingai-lens}"
 RAW_BASE="${LENS_RAW_BASE:-https://raw.githubusercontent.com/$REPO}"
-VERSION="${LENS_VERSION:-v0.4.0}"
-REF="${LENS_REF:-main}"
+VERSION="${LENS_VERSION:-}"
+REF="${LENS_REF:-}"
 TARGET_DIR="${LENS_DEPLOY_DIR:-lens-deploy}"
 
 usage() {
@@ -61,6 +62,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || die "pass --version vX.Y.Z for a published three-image release"
+REF=${REF:-$VERSION}
+
 download() {
   url="$1"
   output="$2"
@@ -85,11 +89,13 @@ for file in \
   compose.yml \
   .env.example \
   backend.env.example \
+  user-service.env.example \
   README.md \
   install.sh \
   scripts/lens \
   scripts/doctor.sh \
-  scripts/upgrade.sh
+  scripts/upgrade.sh \
+  scripts/prepare-identity.sh
 do
   install_file "$file"
 done
@@ -97,7 +103,8 @@ done
 chmod +x "$TARGET_DIR/install.sh" \
   "$TARGET_DIR/scripts/lens" \
   "$TARGET_DIR/scripts/doctor.sh" \
-  "$TARGET_DIR/scripts/upgrade.sh"
+  "$TARGET_DIR/scripts/upgrade.sh" \
+  "$TARGET_DIR/scripts/prepare-identity.sh"
 
 if [ ! -f "$TARGET_DIR/.env" ]; then
   sed "s/^LENS_VERSION=.*/LENS_VERSION=$VERSION/" "$TARGET_DIR/.env.example" > "$TARGET_DIR/.env"
@@ -105,6 +112,9 @@ fi
 
 if [ ! -f "$TARGET_DIR/backend.env" ]; then
   cp "$TARGET_DIR/backend.env.example" "$TARGET_DIR/backend.env"
+fi
+if [ ! -f "$TARGET_DIR/user-service.env" ]; then
+  cp "$TARGET_DIR/user-service.env.example" "$TARGET_DIR/user-service.env"
 fi
 
 mkdir -p "$TARGET_DIR/data/backend"
@@ -117,16 +127,17 @@ Runtime:
   Podman can also be used if it provides a Docker-compatible "docker compose" command.
 
 Before startup:
-  Edit $TARGET_DIR/backend.env for BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD
-  and optional LLM / embedding environment variables.
+  Configure .env, backend.env, user-service.env and certificates using README.md.
+  Initialize the independent identity database and administrator explicitly.
+  Existing Lens installations must complete the documented identity cutover first.
 
 Next steps:
   cd $TARGET_DIR
   ./scripts/lens doctor
-  ./scripts/lens up
+  Follow the fresh-install or legacy-cutover steps in README.md, then ./scripts/lens up.
 
 Open:
-  http://localhost:$(grep '^LENS_HTTP_PORT=' "$TARGET_DIR/.env" | cut -d= -f2-)
+  The HTTPS origin configured in .env as LENS_PUBLIC_URL.
 
 More details:
   $TARGET_DIR/README.md

@@ -15,6 +15,15 @@ are not migrated, read, or retained through compatibility paths.
 | Parser/model scratch | Local runtime paths | Disposable and never a product read authority. |
 | Schema | Alembic | Startup does not create or infer tables. |
 
+## External Identity Boundary
+
+The sibling user-service owns user accounts, password hashes and sessions.
+Lens resolves the `lens_session` cookie through mTLS gRPC and uses the trusted
+`user_id` to enforce research resource ownership. Business/audit user IDs stay
+local, without foreign keys to the identity database. Migration `20261104_0099`
+removes the former local identity tables; existing data requires a verified
+account import and backup before cutover.
+
 ## Domain Ownership
 
 ```text

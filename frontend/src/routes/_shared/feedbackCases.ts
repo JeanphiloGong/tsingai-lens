@@ -149,7 +149,9 @@ export async function fetchFeedbackCases(
 	}
 	params.set('limit', String(options.limit ?? 50));
 	params.set('offset', String(options.offset ?? 0));
-	return (await requestJson(`/feedback-cases?${params.toString()}`, { method: 'GET' })) as FeedbackCaseList;
+	return (await requestJson(`/feedback-cases?${params.toString()}`, {
+		method: 'GET'
+	})) as FeedbackCaseList;
 }
 
 export async function fetchFeedbackCase(collectionId: string, caseId: string) {

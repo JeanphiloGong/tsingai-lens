@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { authState } from '../../../../_shared/authState';
 
-
 type DocumentDetailPageState = {
 	params: {
 		id: string;
@@ -130,9 +129,10 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			const rawUrl =
 				typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 			const url = new URL(rawUrl, 'http://localhost');
-			if (url.pathname.endsWith('/source')) return new Response('%PDF-1.7 mock', {
-				headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline' }
-			});
+			if (url.pathname.endsWith('/source'))
+				return new Response('%PDF-1.7 mock', {
+					headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'inline' }
+				});
 
 			if (url.pathname === '/api/v1/collections/col_123/documents/doc_1/content') {
 				return jsonResponse({

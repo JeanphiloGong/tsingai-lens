@@ -16,7 +16,10 @@
 	export let artifact: ToolActivityOperation;
 	function findingStatement(message: ChatMessage) {
 		const finding = message.tool_result?.data.finding;
-		return finding && typeof finding === 'object' && 'statement' in finding && typeof finding.statement === 'string'
+		return finding &&
+			typeof finding === 'object' &&
+			'statement' in finding &&
+			typeof finding.statement === 'string'
 			? finding.statement
 			: '';
 	}
@@ -66,7 +69,7 @@
 		const activeTitle =
 			active && typeof active === 'object' && 'title' in active && typeof active.title === 'string'
 				? active.title
-					: '';
+				: '';
 		if (progress && typeof progress === 'object' && 'current' in progress && 'total' in progress) {
 			return $t('researchAgent.researchProcess.documentProgress', {
 				document: activeTitle || $t('researchAgent.researchProcess.currentPaper'),

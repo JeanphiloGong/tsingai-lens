@@ -1,6 +1,7 @@
 import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
+import { language } from '../../_shared/i18n';
 
 const { pageStore, collectionStore, fetchCollectionMock, fetchCollectionsMock } = vi.hoisted(
 	() => ({
@@ -47,6 +48,7 @@ const Layout = (await import('./+layout.svelte')).default;
 
 describe('current collection layout', () => {
 	beforeEach(() => {
+		language.set('en');
 		fetchCollectionMock.mockResolvedValue(null);
 		fetchCollectionsMock.mockResolvedValue(null);
 	});

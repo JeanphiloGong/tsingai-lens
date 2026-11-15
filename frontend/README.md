@@ -3,7 +3,8 @@
 The frontend is a SvelteKit browser application for collection creation,
 independent paper preparation, ready-paper selection, Objective discovery and
 analysis, published Finding comparison, Objective Evidence Map inspection, and exact Source
-verification through the same-origin `/api/*` and `/api/v1/*` contract.
+verification through same-origin `/api/*` and `/api/v1/*`; account requests use
+the sibling user-service through same-origin `/user-api/v1/*`.
 
 This file is the frontend module entry page. Formal frontend docs live in
 `frontend/docs/`. Shared route ownership seams use local `README.md` files next
@@ -20,6 +21,9 @@ to code.
   Collection paper, Objective, Finding, Evidence Map, and Source route family
 - `src/routes/_shared/`
   Shared browser-side API clients, i18n, and route support code
+- `src/routes/admin/`
+  Personnel, group and permission catalog administration, gated by
+  `users.manage` and backed by the same-origin user-service APIs
 - `docs/frontend-plan.md`
   Same-origin browser contract and product-flow guide
 - `e2e/`
@@ -68,7 +72,9 @@ npm run test:e2e
 
 ## Frontend Contract Rules
 
-- Browser requests must stay on same-origin `/api/*` and `/api/v1/*`.
+- Research requests use same-origin `/api/*` and `/api/v1/*`; identity requests
+  use `/user-api/v1/*`. Vite proxies `/user-api` to `USER_SERVICE_ORIGIN`
+  (default `http://127.0.0.1:8097`).
 - Research Agent Chat requires a collection but does not wait for Objective
   discovery or every paper preparation to finish. Data-backed capabilities report
   unavailable collection artifacts explicitly while processing continues.

@@ -29,7 +29,7 @@ Out of scope:
 - changing the public collection graph route path
 - introducing a new graph rendering framework in the same cutover
 - redesigning graph semantics beyond the current `document / evidence /
-  comparison` projection
+comparison` projection
 - promoting graph to a primary Lens v1 acceptance surface
 - adding a frontend wrapper that reconstructs the removed graph detail fields
 
@@ -145,33 +145,33 @@ The shared graph client should move to these frontend-facing types:
 
 ```ts
 type GraphNode = {
-  id: string;
-  label: string;
-  type?: string | null;
-  degree?: number | null;
+	id: string;
+	label: string;
+	type?: string | null;
+	degree?: number | null;
 };
 
 type GraphEdge = {
-  id: string;
-  source: string;
-  target: string;
-  weight?: number | null;
-  edge_description?: string | null;
+	id: string;
+	source: string;
+	target: string;
+	weight?: number | null;
+	edge_description?: string | null;
 };
 
 type GraphResponse = {
-  collection_id: string;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  truncated: boolean;
+	collection_id: string;
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+	truncated: boolean;
 };
 
 type GraphNeighborsResponse = {
-  collection_id: string;
-  center_node_id: string;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  truncated: boolean;
+	collection_id: string;
+	center_node_id: string;
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+	truncated: boolean;
 };
 ```
 
@@ -179,10 +179,10 @@ The graph page should also introduce a frontend-local node-id discriminator:
 
 ```ts
 type GraphNodeRef =
-  | { kind: 'document'; resourceId: string }
-  | { kind: 'evidence'; resourceId: string }
-  | { kind: 'comparison'; resourceId: string }
-  | { kind: 'unknown'; resourceId: string };
+	| { kind: 'document'; resourceId: string }
+	| { kind: 'evidence'; resourceId: string }
+	| { kind: 'comparison'; resourceId: string }
+	| { kind: 'unknown'; resourceId: string };
 ```
 
 This parser should be local to the shared graph helper layer so the page does

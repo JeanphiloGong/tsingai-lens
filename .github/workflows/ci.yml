@@ -84,7 +84,7 @@ jobs:
           -k 'postgres_migration_head_matches_current_metadata or external_identity_cutover'
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend

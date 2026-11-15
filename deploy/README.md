@@ -250,11 +250,9 @@ Create the GitHub `production` environment and configure:
 
 SMTP, HMAC/database secrets and certificate private keys remain on the server;
 CI does not need them. Configure required CI status checks in branch protection
-through the GitHub repository settings. The current frontend formatting,
-collection-navigation unit-test and research/chat browser-test failures must
-be resolved before this pipeline can publish a release; checks
-are not skipped or marked non-blocking. Local workflow validation is distinct
-from a successful hosted Actions run.
+through the GitHub repository settings. All release gates remain blocking;
+checks are not skipped or marked non-blocking. Local workflow validation is
+distinct from a successful hosted Actions run.
 
 ## Backup and restore
 

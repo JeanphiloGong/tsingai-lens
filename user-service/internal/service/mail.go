@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/mail"
 	"net/smtp"
+	"strings"
 	"time"
 )
 
@@ -129,11 +131,23 @@ func (s SMTPSettings) Send(ctx context.Context, email, purpose, verificationCode
 	}
 
 	// formats and writes the email headers and plain-text body to the SMTP data writer
-	_, err = fmt.Fprintf(writer, "From: %s\r\nTo: %s\r\nSubject: Lens %s code\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n Your Lens %s code is %s. It expires in 10 minutes.\r\n", s.From, email, purpose, purpose, verificationCode)
+	messageID := fmt.Sprintf("<%s@%s>", randomID(), from.Address[strings.LastIndexByte(from.Address, '@')+1:])
+	_, err = fmt.Fprintf(writer,
+		"Date: %s\r\n"+
+			"Message-ID: %s\r\n"+
+			"From: %s\r\nTo: %s\r\n"+
+			"Subject: Lens %s code\r\n"+
+			"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n"+
+			"\r\n Your Lens %s code is %s. It expires in 10 minutes.\r\n",
+		time.Now().Format(time.RFC1123Z), messageID, s.From, email, purpose, purpose, verificationCode)
 	if err != nil {
 		return err
 	}
 
-	// finishes the SMTP data transmission and returns the result of closing the data writer directly
-	return writer.Close()
+	// Closing DATA waits for the provider's acceptance, not the recipient's delivery.
+	if err = writer.Close(); err != nil {
+		return err
+	}
+	slog.Info("verification email accepted by SMTP", "message_id", messageID, "purpose", purpose)
+	return nil
 }

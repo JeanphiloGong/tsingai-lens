@@ -4,7 +4,18 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import {
+		ArrowLeft,
+		Check,
+		ChevronDown,
+		ChevronRight,
+		Languages,
+		LogOut,
+		Settings,
+		ShieldCheck,
+		SunMoon
+	} from '@lucide/svelte';
 	import { authState, startAuthSynchronization } from './_shared/authState';
 	import { fetchCurrentSession, logout } from './_shared/auth';
 	import { API_DOCS_PATH } from './_shared/base';
@@ -20,15 +31,15 @@
 	import { themePreference } from './_shared/theme';
 	import type { ThemePreference } from './_shared/theme';
 
-	let isLangOpen = false;
-	let langMenu: HTMLDivElement | null = null;
-	let isThemeOpen = false;
-	let themeMenu: HTMLDivElement | null = null;
+	let sessionView: 'main' | 'theme' | 'language' | null = null;
+	let sessionMenu: HTMLDivElement | null = null;
 	let authError = '';
 	const appVersion = `v${version}`;
 
 	$: isAuthRoute = ['/login', '/register', '/forgot-password'].includes($page.url.pathname);
 	$: authenticatedUser = $authState.user;
+	$: if (!authenticatedUser) sessionView = null;
+	$: userName = authenticatedUser?.display_name || authenticatedUser?.email || '';
 	$: userInitial = (authenticatedUser?.display_name || authenticatedUser?.email || 'U')
 		.slice(0, 1)
 		.toUpperCase();
@@ -45,50 +56,27 @@
 		}
 	}
 
-	function toggleLangMenu() {
-		isLangOpen = !isLangOpen;
-		if (isLangOpen) {
-			isThemeOpen = false;
-		}
-	}
-
-	function closeLangMenu() {
-		isLangOpen = false;
-		langMenu?.querySelector('button')?.focus();
-	}
-
 	function setLanguage(value: 'en' | 'zh') {
 		language.set(value);
-		closeLangMenu();
+		void showSessionView('main');
 	}
 
-	function handleLangKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
-			closeLangMenu();
-		}
-	}
-
-	function toggleThemeMenu() {
-		isThemeOpen = !isThemeOpen;
-		if (isThemeOpen) {
-			isLangOpen = false;
-		}
-	}
-
-	function closeThemeMenu() {
-		isThemeOpen = false;
-		themeMenu?.querySelector('button')?.focus();
+	function toggleSessionMenu() {
+		sessionView = sessionView ? null : 'main';
 	}
 
 	function setTheme(value: ThemePreference) {
 		themePreference.set(value);
-		closeThemeMenu();
+		void showSessionView('main');
 	}
 
-	function handleThemeKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
-			closeThemeMenu();
-		}
+	async function showSessionView(view: 'main' | 'theme' | 'language') {
+		const previousView = sessionView;
+		sessionView = view;
+		await tick();
+		const selector =
+			view === 'main' ? `[data-preference="${previousView}"]` : '[aria-pressed="true"]';
+		sessionMenu?.querySelector<HTMLButtonElement>(selector)?.focus();
 	}
 
 	async function loadSession() {
@@ -125,25 +113,33 @@
 		};
 		window.addEventListener('focus', recheckPermissions);
 
-		const handleClick = (event: MouseEvent) => {
-			const target = event.target as Node;
-			if (isLangOpen && langMenu && !langMenu.contains(target)) {
-				isLangOpen = false;
-			}
-			if (isThemeOpen && themeMenu && !themeMenu.contains(target)) {
-				isThemeOpen = false;
+		const closeSessionOutside = (event: Event) => {
+			if (sessionView && sessionMenu && !event.composedPath().includes(sessionMenu)) {
+				sessionView = null;
 			}
 		};
-		window.addEventListener('click', handleClick);
+		const handleKeydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape' && sessionView) {
+				event.preventDefault();
+				sessionView = null;
+				sessionMenu?.querySelector<HTMLButtonElement>('.session-trigger')?.focus();
+			}
+		};
+		window.addEventListener('click', closeSessionOutside);
+		window.addEventListener('focusin', closeSessionOutside);
+		window.addEventListener('keydown', handleKeydown);
 		return () => {
 			stopAuthSynchronization();
 			stopPermissionSynchronization();
 			window.removeEventListener('focus', recheckPermissions);
-			window.removeEventListener('click', handleClick);
+			window.removeEventListener('click', closeSessionOutside);
+			window.removeEventListener('focusin', closeSessionOutside);
+			window.removeEventListener('keydown', handleKeydown);
 		};
 	});
 
 	afterNavigate(({ from, to }) => {
+		sessionView = null;
 		if (from && to?.url.pathname.startsWith('/admin') && $authState.status === 'authenticated') {
 			void refreshPermissions();
 		}
@@ -192,129 +188,156 @@
 
 		<div class="header-actions">
 			{#if authenticatedUser}
-				<a class="header-action" href={resolve('/account')}>{$t('onboarding.account')}</a>
-				{#if $permissionState.status === 'ready' && $permissionState.userId === authenticatedUser.user_id && $permissionState.codes.includes('users.manage')}
-					<a class="header-action" href={resolve('/admin/users')}>{$t('admin.title')}</a>
-				{/if}
 				<ResearchAgentLauncher collectionId={headerCollectionId} />
-			{/if}
-			<div
-				class="theme-menu"
-				bind:this={themeMenu}
-				role="group"
-				aria-label={$t('header.themeLabel')}
-			>
-				<button
-					type="button"
-					class="header-action"
-					aria-controls="theme-options"
-					aria-expanded={isThemeOpen}
-					on:click|stopPropagation={toggleThemeMenu}
-					on:keydown={handleThemeKeydown}
-				>
-					{$t('header.themeLabel')}
-					<span class="theme-state">
-						{#if $themePreference === 'system'}
-							{$t('header.themeSystem')}
-						{:else if $themePreference === 'light'}
-							{$t('header.themeLight')}
-						{:else}
-							{$t('header.themeDark')}
-						{/if}
-					</span>
-					<span class="chevron" aria-hidden="true">▾</span>
-				</button>
-				{#if isThemeOpen}
-					<div
-						id="theme-options"
-						class="lang-dropdown"
-						role="group"
-						aria-label={$t('header.themeLabel')}
+				<div class="session-menu" bind:this={sessionMenu}>
+					<button
+						class="session-trigger"
+						type="button"
+						aria-label={`${$t('header.userMenuLabel')}: ${userName}`}
+						aria-controls="session-options"
+						aria-expanded={sessionView !== null}
+						title={userName}
+						on:click|stopPropagation={toggleSessionMenu}
 					>
-						<button
-							type="button"
-							on:keydown={handleThemeKeydown}
-							aria-pressed={$themePreference === 'system'}
-							class:active={$themePreference === 'system'}
-							on:click={() => setTheme('system')}
-						>
-							{$t('header.themeSystem')}
-						</button>
-						<button
-							type="button"
-							on:keydown={handleThemeKeydown}
-							aria-pressed={$themePreference === 'light'}
-							class:active={$themePreference === 'light'}
-							on:click={() => setTheme('light')}
-						>
-							{$t('header.themeLight')}
-						</button>
-						<button
-							type="button"
-							on:keydown={handleThemeKeydown}
-							aria-pressed={$themePreference === 'dark'}
-							class:active={$themePreference === 'dark'}
-							on:click={() => setTheme('dark')}
-						>
-							{$t('header.themeDark')}
-						</button>
-					</div>
-				{/if}
-			</div>
-			<div
-				class="lang-menu"
-				bind:this={langMenu}
-				role="group"
-				aria-label={$t('header.languageLabel')}
-			>
-				<button
-					type="button"
-					class="header-action"
-					aria-controls="language-options"
-					aria-expanded={isLangOpen}
-					on:click|stopPropagation={toggleLangMenu}
-					on:keydown={handleLangKeydown}
-				>
-					{$t('header.languageLabel')}
-					<span class="chevron" aria-hidden="true">▾</span>
-				</button>
-				{#if isLangOpen}
-					<div
-						id="language-options"
-						class="lang-dropdown"
-						role="group"
-						aria-label={$t('header.languageLabel')}
-					>
-						<button
-							type="button"
-							on:keydown={handleLangKeydown}
-							aria-pressed={$language === 'en'}
-							class:active={$language === 'en'}
-							on:click={() => setLanguage('en')}
-						>
-							EN
-						</button>
-						<button
-							type="button"
-							on:keydown={handleLangKeydown}
-							aria-pressed={$language === 'zh'}
-							class:active={$language === 'zh'}
-							on:click={() => setLanguage('zh')}
-						>
-							中文
-						</button>
-					</div>
-				{/if}
-			</div>
-			{#if authenticatedUser}
-				<div class="session-summary" title={authenticatedUser.email}>
-					<span class="avatar-placeholder" aria-hidden="true">{userInitial}</span>
-					<span class="session-summary__name">
-						{authenticatedUser.display_name || authenticatedUser.email}
-					</span>
-					<button class="header-action" type="button" on:click={submitLogout}>
-						{$t('auth.logout')}
+						<span class="session-avatar" aria-hidden="true">{userInitial}</span>
+						<span class="session-name">{userName}</span>
+						<ChevronDown size={14} aria-hidden="true" />
 					</button>
+					{#if sessionView}
+						<div
+							id="session-options"
+							class="session-dropdown"
+							role="group"
+							aria-label={$t('header.userMenuLabel')}
+						>
+							{#if sessionView === 'main'}
+								<div class="session-identity">
+									<span class="session-avatar" aria-hidden="true">{userInitial}</span>
+									<div>
+										<strong>{userName}</strong>
+										{#if authenticatedUser.display_name}<span>{authenticatedUser.email}</span>{/if}
+									</div>
+								</div>
+								<div class="session-section">
+									<a
+										href={resolve('/account')}
+										aria-current={$page.url.pathname === '/account' ? 'page' : undefined}
+									>
+										<Settings size={17} aria-hidden="true" />
+										{$t('onboarding.account')}
+									</a>
+									<button
+										type="button"
+										data-preference="theme"
+										on:click={() => showSessionView('theme')}
+									>
+										<SunMoon size={17} aria-hidden="true" />
+										{$t('header.themeLabel')}
+										<span class="session-preference"
+											>{$t(
+												$themePreference === 'system'
+													? 'header.themeSystem'
+													: $themePreference === 'light'
+														? 'header.themeLight'
+														: 'header.themeDark'
+											)}</span
+										>
+										<ChevronRight size={14} aria-hidden="true" />
+									</button>
+									<button
+										type="button"
+										data-preference="language"
+										on:click={() => showSessionView('language')}
+									>
+										<Languages size={17} aria-hidden="true" />
+										{$t('header.languageLabel')}
+										<span class="session-preference"
+											>{$language === 'en' ? 'English' : '简体中文'}</span
+										>
+										<ChevronRight size={14} aria-hidden="true" />
+									</button>
+								</div>
+								{#if $permissionState.status === 'ready' && $permissionState.userId === authenticatedUser.user_id && $permissionState.codes.includes('users.manage')}
+									<div class="session-section">
+										<a href={resolve('/admin/users')}>
+											<ShieldCheck size={17} aria-hidden="true" />
+											{$t('admin.title')}
+										</a>
+									</div>
+								{/if}
+								<div class="session-section">
+									<button type="button" on:click={submitLogout}>
+										<LogOut size={17} aria-hidden="true" />
+										{$t('auth.logout')}
+									</button>
+								</div>
+							{:else}
+								<div class="session-subheader">
+									<button
+										type="button"
+										aria-label={$t('header.userMenuBack')}
+										on:click={() => showSessionView('main')}
+									>
+										<ArrowLeft size={18} aria-hidden="true" />
+									</button>
+									<h2>
+										{sessionView === 'theme' ? $t('header.themeLabel') : $t('header.languageLabel')}
+									</h2>
+								</div>
+								{#if sessionView === 'theme'}
+									<div class="session-section" role="group" aria-label={$t('header.themeLabel')}>
+										<button
+											type="button"
+											aria-pressed={$themePreference === 'system'}
+											on:click={() => setTheme('system')}
+										>
+											{$t('header.themeSystem')}{#if $themePreference === 'system'}<Check
+													size={16}
+													aria-hidden="true"
+												/>{/if}
+										</button>
+										<button
+											type="button"
+											aria-pressed={$themePreference === 'light'}
+											on:click={() => setTheme('light')}
+										>
+											{$t('header.themeLight')}{#if $themePreference === 'light'}<Check
+													size={16}
+													aria-hidden="true"
+												/>{/if}
+										</button>
+										<button
+											type="button"
+											aria-pressed={$themePreference === 'dark'}
+											on:click={() => setTheme('dark')}
+										>
+											{$t('header.themeDark')}{#if $themePreference === 'dark'}<Check
+													size={16}
+													aria-hidden="true"
+												/>{/if}
+										</button>
+									</div>
+								{:else}
+									<div class="session-section" role="group" aria-label={$t('header.languageLabel')}>
+										<button
+											type="button"
+											aria-pressed={$language === 'en'}
+											on:click={() => setLanguage('en')}
+										>
+											English{#if $language === 'en'}<Check size={16} aria-hidden="true" />{/if}
+										</button>
+										<button
+											type="button"
+											aria-pressed={$language === 'zh'}
+											on:click={() => setLanguage('zh')}
+										>
+											简体中文{#if $language === 'zh'}<Check size={16} aria-hidden="true" />{/if}
+										</button>
+									</div>
+								{/if}
+							{/if}
+						</div>
+					{/if}
 				</div>
 			{/if}
 		</div>

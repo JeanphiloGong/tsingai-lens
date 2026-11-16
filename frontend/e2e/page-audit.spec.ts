@@ -1565,6 +1565,7 @@ test.describe('page interaction audit', () => {
 		});
 		try {
 			await page.goto('/');
+			await page.getByRole('button', { name: /^Account menu:/ }).click();
 			await page.getByRole('button', { name: 'Log out', exact: true }).click();
 			await expect(page).toHaveURL(/\/login$/);
 			await page.locator('#auth-email').fill('second@example.test');
@@ -1573,7 +1574,7 @@ test.describe('page interaction audit', () => {
 			await expect(page.getByRole('button', { name: 'Signing in...', exact: true })).toBeDisabled();
 			expect(logins).toBe(0);
 			finish();
-			await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: /^Account menu:/ })).toBeVisible();
 			expect(logins).toBe(1);
 			expect(new URL(page.url()).pathname).toBe('/');
 		} finally {
@@ -1718,6 +1719,7 @@ test.describe('page interaction audit', () => {
 			await sendAgentMessage(page, privateQuestion);
 			await expect(page.getByTestId('research-progress')).toBeVisible();
 			await other.goto('/');
+			await other.getByRole('button', { name: /^Account menu:/ }).click();
 			await other.getByRole('button', { name: 'Log out', exact: true }).click();
 			await expect(other).toHaveURL(/\/login$/);
 			finish();
@@ -2638,21 +2640,20 @@ test.describe('page interaction audit', () => {
 	test('language preference updates document language and restores focus', async ({ page }) => {
 		await page.goto('/');
 		await expect(page.locator('.collections-table')).toContainText('316L LPBF evidence set');
-		const trigger = page.locator('.lang-menu > button');
-		await trigger.click();
-		await page.locator('#language-options').getByRole('button', { name: '中文' }).click();
+		await page.getByRole('button', { name: /^Account menu:/ }).click();
+		await page.getByRole('button', { name: /^Language / }).click();
+		await page.getByRole('button', { name: '简体中文', exact: true }).click();
 		await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-		await expect(trigger).toBeFocused();
-		await trigger.click();
-		await expect(page.locator('#language-options button').last()).toHaveAttribute(
+		const language = page.getByRole('button', { name: /^语言 / });
+		await expect(language).toBeFocused();
+		await language.click();
+		await expect(page.getByRole('button', { name: '简体中文', exact: true })).toHaveAttribute(
 			'aria-pressed',
 			'true'
 		);
-		await page
-			.locator('#language-options')
-			.getByRole('button', { name: 'EN', exact: true })
-			.click();
+		await page.getByRole('button', { name: 'English', exact: true }).click();
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+		await expect(page.getByRole('button', { name: /^Language / })).toBeFocused();
 	});
 
 	test('create collection keeps the background inert and restores focus', async ({ page }) => {

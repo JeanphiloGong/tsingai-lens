@@ -176,14 +176,22 @@ test('the collection entry uses task datasets and keeps internal IDs out of the 
 	expect(body).not.toContain('source_ref');
 });
 
-test('the global header keeps language controls visible at tablet width', async ({ page }) => {
+test('the global header keeps personal preferences reachable at tablet width', async ({ page }) => {
 	await mockTaskEntry(page);
 	await page.setViewportSize({ width: 1024, height: 800 });
 	await page.goto(`/collections/${collectionId}/feedback`);
 
-	const bounds = await page.locator('.site-header .lang-menu').boundingBox();
+	await page.getByRole('button', { name: /^个人菜单:/ }).click();
+	const language = page.getByRole('button', { name: /^语言 / });
+	await expect(language).toBeVisible();
+	const bounds = await language.boundingBox();
 	expect(bounds).not.toBeNull();
 	expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1024);
+	await language.click();
+	await expect(page.getByRole('button', { name: '简体中文', exact: true })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
 });
 

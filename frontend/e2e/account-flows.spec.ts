@@ -52,6 +52,142 @@ async function mockAccountApi(page: Page, authenticated = false) {
 	return { writes, state };
 }
 
+for (const width of [320, 768, 1024, 1440]) {
+	test(`personal menu supports preferences, account navigation and logout at ${width}px`, async ({
+		page
+	}, testInfo) => {
+		const { writes } = await mockAccountApi(page, true);
+		await page.setViewportSize({ width, height: 900 });
+		const errors: string[] = [];
+		page.on('pageerror', (error) => errors.push(error.message));
+		await page.goto('/');
+		const trigger = page.getByRole('button', { name: 'Account menu: Researcher', exact: true });
+		const menu = page.getByRole('group', { name: 'Account menu', exact: true });
+		await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+		await expect(page.getByRole('link', { name: 'Account settings', exact: true })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: /^Appearance/ })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: /^Language/ })).toHaveCount(0);
+		const headerBox = (await page.getByRole('banner').boundingBox())!;
+		expect(headerBox.height).toBeLessThanOrEqual(80);
+		if (width <= 720) await expect(trigger.locator('.session-name')).toBeHidden();
+		else await expect(trigger.locator('.session-name')).toBeVisible();
+		await trigger.click();
+		await expect(menu.getByText('Researcher', { exact: true })).toBeVisible();
+		await expect(menu.getByText('researcher@example.test', { exact: true })).toBeVisible();
+		await expect(
+			menu.getByRole('link', { name: 'Users and permissions', exact: true })
+		).toHaveCount(0);
+		const box = (await menu.boundingBox())!;
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(width);
+		await page.screenshot({ path: testInfo.outputPath(`personal-menu-light-${width}.png`) });
+		await trigger.click();
+		await expect(menu).toHaveCount(0);
+		await trigger.click();
+		await page.mouse.click(2, 2);
+		await expect(menu).toHaveCount(0);
+		await trigger.click();
+		const appearance = menu.getByRole('button', { name: /^Appearance / });
+		await appearance.click();
+		await expect(menu.getByRole('button', { name: 'System', exact: true })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await expect(menu.getByRole('button', { name: 'System', exact: true })).toBeFocused();
+		await page.screenshot({ path: testInfo.outputPath(`personal-menu-appearance-${width}.png`) });
+		await page.keyboard.press('Escape');
+		await expect(menu).toHaveCount(0);
+		await expect(trigger).toBeFocused();
+		await trigger.click();
+		await expect(menu.getByRole('link', { name: 'Account settings', exact: true })).toBeVisible();
+		await appearance.click();
+		await menu.getByRole('button', { name: 'Back to account menu', exact: true }).click();
+		await expect(appearance).toBeFocused();
+		await trigger.click();
+		await trigger.press('Enter');
+		const account = menu.getByRole('link', { name: 'Account settings', exact: true });
+		await page.keyboard.press('Tab');
+		await expect(account).toBeFocused();
+		await page.keyboard.press('Escape');
+		await expect(menu).toHaveCount(0);
+		await expect(trigger).toBeFocused();
+		await trigger.press('Enter');
+		await page.keyboard.press('Tab');
+		await page.keyboard.press('Tab');
+		await expect(appearance).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(menu.getByRole('button', { name: /^Language / })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(menu.getByRole('button', { name: 'Log out', exact: true })).toBeFocused();
+		await page.keyboard.press('Tab');
+		await expect(menu).toHaveCount(0);
+		await trigger.click();
+		await account.click();
+		await expect(page).toHaveURL(/\/account$/);
+		await expect(menu).toHaveCount(0);
+		const password = page.getByLabel('Current password', { exact: true });
+		await password.fill('unsaved-password-input');
+		await trigger.click();
+		await appearance.click();
+		await menu.getByRole('button', { name: 'Dark', exact: true }).click();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await expect(appearance).toBeFocused();
+		await expect(password).toHaveValue('unsaved-password-input');
+		await menu.getByRole('button', { name: /^Language / }).click();
+		await expect(menu.getByRole('button', { name: 'English', exact: true })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		await page.screenshot({ path: testInfo.outputPath(`personal-menu-language-${width}.png`) });
+		await menu.getByRole('button', { name: '简体中文', exact: true }).click();
+		await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+		await expect(page.getByRole('button', { name: /^语言 / })).toBeFocused();
+		await expect(page.getByLabel('当前密码', { exact: true })).toHaveValue(
+			'unsaved-password-input'
+		);
+		await expect(page.getByRole('link', { name: '账号设置', exact: true })).toBeVisible();
+		expect(writes).toHaveLength(0);
+		await page.screenshot({ path: testInfo.outputPath(`personal-menu-dark-${width}.png`) });
+		await page.getByRole('button', { name: '退出', exact: true }).click();
+		await expect(page).toHaveURL(/\/login$/);
+		await expect(page.getByRole('button', { name: /^个人菜单:/ })).toHaveCount(0);
+		expect(writes.map((write) => write.path)).toEqual(['/user-api/v1/logout']);
+		expect(errors).toEqual([]);
+	});
+}
+
+test('personal menu keeps long account details and actions reachable on a short mobile screen', async ({
+	page
+}) => {
+	await mockAccountApi(page, true);
+	const displayName = '负责跨论文材料研究与实验结果比较的科研工作者';
+	await page.route('**/user-api/v1/me', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				user_id: 'researcher',
+				email: 'researcher.with.a.long.email.address@example.test',
+				display_name: displayName
+			})
+		})
+	);
+	await page.setViewportSize({ width: 320, height: 360 });
+	await page.goto('/account');
+	const trigger = page.getByRole('button', { name: `Account menu: ${displayName}`, exact: true });
+	await trigger.click();
+	const menu = page.getByRole('group', { name: 'Account menu', exact: true });
+	await expect(menu.getByText(displayName, { exact: true })).toBeVisible();
+	const bounds = (await menu.boundingBox())!;
+	expect(bounds.x).toBeGreaterThanOrEqual(0);
+	expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+	expect(bounds.y + bounds.height).toBeLessThanOrEqual(360);
+	await menu.getByRole('button', { name: 'Log out', exact: true }).scrollIntoViewIfNeeded();
+	await expect(menu.getByRole('button', { name: 'Log out', exact: true })).toBeInViewport();
+	await page.keyboard.press('Escape');
+	await expect(trigger).toBeFocused();
+});
+
 for (const route of ['register', 'forgot-password'] as const) {
 	test(`${route} rejects mismatched passwords, preserves code strings and returns to login`, async ({
 		page
@@ -190,7 +326,7 @@ test('account password errors retain login; confirmation stays local and success
 }) => {
 	const { writes, state } = await mockAccountApi(page, true);
 	await page.goto('/account');
-	await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: /^Account menu:/ })).toBeVisible();
 	await page.getByLabel('Current password', { exact: true }).fill('current-password');
 	await page
 		.getByLabel('New password (12 characters minimum)', { exact: true })
@@ -208,7 +344,7 @@ test('account password errors retain login; confirmation stays local and success
 			status === 401 ? 'current password is incorrect' : 'unavailable'
 		);
 		await expect(page).toHaveURL(/\/account$/);
-		await expect(page.getByRole('button', { name: 'Log out', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: /^Account menu:/ })).toBeVisible();
 	}
 	state.passwordStatus = 200;
 	await button.click();

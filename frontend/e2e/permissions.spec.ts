@@ -51,6 +51,7 @@ test('direct administration routes block anonymous and ordinary accounts before 
 	for (const path of ['/admin/users', '/admin/groups', '/admin/permissions']) {
 		await page.goto(path);
 		await expect(page.getByRole('alert')).toContainText('403');
+		await page.getByRole('button', { name: /^Account menu:/ }).click();
 		await expect(
 			page.getByRole('link', { name: 'Users and permissions', exact: true })
 		).toHaveCount(0);
@@ -71,10 +72,31 @@ test('permission outages offer retry without presenting an outage as denial', as
 	await expect(page.getByRole('alert')).toContainText('Access denied');
 	state.codes = ['users.manage'];
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
+	await page.getByRole('button', { name: /^Account menu:/ }).click();
 	await expect(
 		page.getByRole('link', { name: 'Users and permissions', exact: true })
 	).toBeVisible();
 	await expect(page.getByLabel('Page size', { exact: true })).toBeVisible();
+});
+
+test('personal menu exposes administration only when the current account has the grant', async ({
+	page
+}, testInfo) => {
+	const { state, reads } = await administrationApi(page);
+	await page.goto('/account');
+	await page.getByRole('button', { name: /^Account menu:/ }).click();
+	const administration = page.getByRole('link', { name: 'Users and permissions', exact: true });
+	await expect(administration).toBeVisible();
+	expect(reads).toEqual([]);
+	await page.screenshot({ path: testInfo.outputPath('personal-menu-administrator.png') });
+	await administration.click();
+	await expect(page).toHaveURL(/\/admin\/users$/);
+	await expect(page.getByRole('group', { name: 'Account menu', exact: true })).toHaveCount(0);
+	state.codes = [];
+	await page.reload();
+	await expect(page.getByRole('alert')).toContainText('Access denied');
+	await page.getByRole('button', { name: /^Account menu:/ }).click();
+	await expect(administration).toHaveCount(0);
 });
 
 test('failed catalog writes retain drafts and protected entries cannot be deleted', async ({

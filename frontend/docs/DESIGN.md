@@ -114,8 +114,10 @@ Findings belong to a published Objective analysis. These are not nested
 collections. The route ownership and detailed behavior remain in the
 [collection route guide](../src/routes/collections/README.md).
 
-The shared shell places brand and collection context on the left and functional
-account/preferences controls on the right. On narrow screens it wraps. Primary
+The shared shell places brand and collection context on the left, with the
+Research Agent and an avatar/name disclosure on the right. The disclosure shows
+identity, account settings, appearance, language, permission-gated administration
+and logout. Narrow screens retain one action row and show only the avatar. Primary
 navigation exposes Overview, Papers, Objectives, and AI Copilot. More contains
 Evidence Map, Feedback, and Settings. Objective screens use compact collection
 context so the question and result receive space.
@@ -151,8 +153,11 @@ A2 logo's geometry rather than generating an alternative logo.
 - **Navigation:** active links expose `aria-current="page"` and an underline.
   The More disclosure opens with native keyboard behavior; Escape closes it and
   returns focus to its summary.
-- **Preferences:** theme and language are disclosure groups with ordinary buttons
-  and `aria-pressed`; do not apply menu roles without complete menu behavior.
+- **Preferences:** appearance and language replace the content of the account
+  disclosure with ordinary buttons and `aria-pressed`. A back action returns to
+  the main view; applying a choice restores focus to its row without navigating
+  or clearing drafts. Escape closes the disclosure and restores the avatar focus.
+  Do not apply menu roles without complete menu behavior.
 - **Create dialog:** native `showModal()`, a heading-connected accessible name,
   inert background, Escape dismissal, and focus restoration. Do not hand-build
   a second focus trap around the native dialog.

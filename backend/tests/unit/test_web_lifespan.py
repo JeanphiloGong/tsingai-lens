@@ -23,22 +23,24 @@ def resources(monkeypatch, tmp_path):
     engine = SimpleNamespace(
         dispose=AsyncMock(side_effect=lambda: events.append("database"))
     )
-    model = SimpleNamespace(
-        client=SimpleNamespace(
-            close=AsyncMock(side_effect=lambda: events.append("model"))
-        )
+    identity = SimpleNamespace(
+        close=AsyncMock(side_effect=lambda: events.append("identity"))
     )
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "DatabaseSettings", Mock())
     monkeypatch.setattr(main, "build_database_engine", lambda _: engine)
     monkeypatch.setattr(shared_database, "AsyncSessionLocal", Mock())
-    monkeypatch.setattr(main, "OpenAIChatModel", lambda: model)
-    return engine, model, events
+    monkeypatch.setattr(main.identity, "IdentityClient", lambda: identity)
+    monkeypatch.setattr(
+        "infra.llm.chat_model.AsyncOpenAI",
+        Mock(side_effect=AssertionError("Web startup must not create a model client")),
+    )
+    return engine, identity, events
 
 
 @pytest.mark.anyio
-async def test_lifespan_cancels_chat_before_closing_model_and_database(resources):
-    engine, model, events = resources
+async def test_lifespan_starts_without_model_and_cancels_chat_before_shutdown(resources):
+    engine, identity, events = resources
     previous = None
     for _ in range(2):
         async with main.lifespan():
@@ -57,29 +59,33 @@ async def test_lifespan_cancels_chat_before_closing_model_and_database(resources
             await asyncio.sleep(0)
         assert task.cancelled()
         previous = service
-    assert events == ["turn", "model", "database"] * 2
+    assert events == ["turn", "identity", "database"] * 2
     assert engine.dispose.await_count == 2
-    assert model.client.close.await_count == 2
+    assert identity.close.await_count == 2
 
 
 @pytest.mark.anyio
-async def test_runner_startup_failure_closes_created_resources(resources, monkeypatch):
-    engine, model, events = resources
-    monkeypatch.setattr(main, "ResearchAgentRunner", Mock(side_effect=RuntimeError("runner failed")))
-    with pytest.raises(RuntimeError, match="runner failed"):
+async def test_chat_startup_failure_closes_created_resources(resources, monkeypatch):
+    engine, identity, events = resources
+    monkeypatch.setattr(
+        shared_chat_service,
+        "ChatSessionService",
+        Mock(side_effect=RuntimeError("chat startup failed")),
+    )
+    with pytest.raises(RuntimeError, match="chat startup failed"):
         async with main.lifespan():
             pytest.fail("failed startup must not serve requests")
-    assert events == ["model", "database"]
-    model.client.close.assert_awaited_once()
+    assert events == ["identity", "database"]
+    identity.close.assert_awaited_once()
     engine.dispose.assert_awaited_once()
 
 
 @pytest.mark.anyio
-async def test_chat_shutdown_failure_still_closes_model_and_database(resources, monkeypatch):
+async def test_chat_shutdown_failure_still_closes_identity_and_database(resources, monkeypatch):
     _, _, events = resources
     service = SimpleNamespace(close=AsyncMock(side_effect=RuntimeError("chat close failed")))
     monkeypatch.setattr(shared_chat_service, "ChatSessionService", lambda **_: service)
     with pytest.raises(RuntimeError, match="chat close failed"):
         async with main.lifespan():
             assert shared_chat_service.ChatService is service
-    assert events == ["model", "database"]
+    assert events == ["identity", "database"]

@@ -4,7 +4,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from time import perf_counter
 
 from infra.identity import client as identity
-from application.chat import AgentRunLimits, CapabilityRegistry, ResearchAgentRunner
+from application.chat import AgentRunLimits, CapabilityRegistry
 from application.chat import session_service
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
@@ -36,7 +36,6 @@ from application.chat.capabilities import (
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
-from infra.llm.chat_model import OpenAIChatModel
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -151,10 +150,7 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
         )
         identity.Client = identity.IdentityClient()
         cleanup.push_async_callback(identity.Client.close)
-        chat_model = OpenAIChatModel()
-        cleanup.push_async_callback(chat_model.client.close)
-        runner = ResearchAgentRunner(
-            model=chat_model,
+        service = session_service.ChatSessionService(
             limits=_parse_agent_run_limits(),
             capabilities=CapabilityRegistry(
                 (
@@ -188,9 +184,6 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
                     ReviseResearchPlanCapability(),
                 )
             ),
-        )
-        service = session_service.ChatSessionService(
-            runner=runner,
         )
         cleanup.push_async_callback(service.close)
         session_service.ChatService = service

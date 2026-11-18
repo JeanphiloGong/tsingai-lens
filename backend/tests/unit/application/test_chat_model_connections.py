@@ -10,7 +10,7 @@ import httpx
 from openai import AsyncOpenAI
 import pytest
 
-from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
+from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, ModelTurn
 from application.chat.context_builder import ChatModelContext
 from application.chat import session_service as session_service_module
 from application.chat.session_service import ChatSessionService, RepositoryModelCallObserver
@@ -86,7 +86,7 @@ def service(repository, model_builder=None, chat_repository=None, *capabilities)
     session_service_module.ChatRepo = chat_repository if chat_repository is not None else ChatRepository()
     provider_module.OpenAIChatModel = model_builder or OpenAIChatModel
     return ChatSessionService(
-        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(capabilities)),
+        capabilities=CapabilityRegistry(capabilities),
     )
 
 
@@ -228,9 +228,7 @@ async def test_real_sdk_records_binding_without_recording_key(monkeypatch, postg
         session_id="s1", user_id="alice", collection_id="col-alice",
         created_at="2026-10-25T00:00:00+00:00",
     ))
-    runtime = ChatSessionService(runner=ResearchAgentRunner(
-        model=_Model(), capabilities=CapabilityRegistry(()),
-    ))
+    runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
     message = ChatMessage.user(message_id="m1", session_id="s1", content="Explain uncertainty", created_at="2026-10-25T00:00:00+00:00")
     async with runtime._runner_for_connection(record) as runner:
         model = runner.model
@@ -468,8 +466,8 @@ async def test_connection_limits_fall_back_and_reach_sdk(
     runtime = service(
         await configured(postgres_session_factory, record),
     )
-    runtime.runner.limits = _parse_agent_run_limits()
-    original_limits = runtime.runner.limits
+    runtime.limits = _parse_agent_run_limits()
+    original_limits = runtime.limits
     bound = await ModelConnectionRepo.read_enabled(record.connection_id)
     async with runtime._runner_for_connection(bound) as runner:
         limits = runner.limits
@@ -487,7 +485,7 @@ async def test_connection_limits_fall_back_and_reach_sdk(
         )
         assert result.status.value == "completed"
         model = runner.model
-    assert runtime.runner.limits is original_limits
+    assert runtime.limits is original_limits
     assert model.client.is_closed()
     assert json.loads(requests[0].content)["max_completion_tokens"] == expected[1]
     assert requests[0].extensions["timeout"]["read"] == expected[4]
@@ -508,9 +506,7 @@ async def test_connection_limits_fall_back_and_reach_sdk(
 async def test_invalid_connection_use_fails_without_creating_client(change, monkeypatch):
     monkeypatch.setattr("infra.llm.chat_model.AsyncOpenAI", lambda **kwargs: pytest.fail("client created"))
     with pytest.raises(ProjectException) as captured:
-        runtime = ChatSessionService(runner=ResearchAgentRunner(
-            model=_Model(), capabilities=CapabilityRegistry(()),
-        ))
+        runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
         async with runtime._runner_for_connection(replace(replace(connection(), api_key_ref=None), **change)):
             pytest.fail("invalid configuration reached Runner")
     assert captured.value.code == 200205
@@ -519,9 +515,7 @@ async def test_invalid_connection_use_fails_without_creating_client(change, monk
 
 async def test_environment_key_reference_has_no_project_naming_rule(monkeypatch):
     monkeypatch.setenv("LAB_PROVIDER_TOKEN", "synthetic-test-value")
-    runtime = ChatSessionService(runner=ResearchAgentRunner(
-        model=_Model(), capabilities=CapabilityRegistry(()),
-    ))
+    runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
     async with runtime._runner_for_connection(replace(connection(), api_key_ref="env:LAB_PROVIDER_TOKEN")) as runner:
         assert runner.model.client.api_key == "synthetic-test-value"
     assert runner.model.client.is_closed()

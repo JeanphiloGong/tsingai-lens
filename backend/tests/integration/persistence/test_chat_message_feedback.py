@@ -9,6 +9,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
+from application.chat import CapabilityRegistry
 from alembic import command
 from alembic.config import Config
 from tests.support.identity import subjects as identity_subjects
@@ -167,9 +168,8 @@ async def feedback_app(postgres_session_factory, tmp_path, monkeypatch):
     chat_session_service.collection_service = collection_service
     chat_session_service.SourceArtifactRepo = None
     chat_session_service.ChatRepo = repository
-    runner = None
     collection_service.CollectionRepo = collections
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = chat_session_service.ChatSessionService(capabilities=CapabilityRegistry(()))
     app = FastAPI()
     monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     app.add_exception_handler(ProjectException, project_exception_handler)

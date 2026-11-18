@@ -319,6 +319,9 @@ async def run(args):
 
     async with lifespan():
         chat_session_service = session_service.ChatService
+        connection = await chat_session_service._resolve_model_connection(
+            None, None, continuation=False
+        )
         report = {
             "implementation_revision": subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], text=True
@@ -328,9 +331,9 @@ async def run(args):
             ).hexdigest(),
             "fixture_sha256": hashlib.sha256(fixture_bytes).hexdigest(),
             "database_name": url.database,
-            "model": getattr(chat_session_service.runner.model, "model", "unknown"),
+            "model": connection.model,
             "prompt_version": RESEARCH_AGENT_PROMPT_VERSION,
-            "limits": asdict(chat_session_service.runner.limits),
+            "limits": asdict(chat_session_service.limits),
             "before": before,
             "scenarios": [],
         }

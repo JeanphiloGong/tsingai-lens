@@ -53,7 +53,7 @@ from repositories.source_artifact_repository import SourceArtifactRepository
 from tests.support.postgres import read_tool_calls, read_tool_results, seed_collection
 from tests.unit.application.test_research_agent_runner import _Model
 
-from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner  # noqa: F401
 
 pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 
@@ -156,7 +156,7 @@ def _service(
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry(tuple(capabilities))
     )
-    return chat_session_service.ChatSessionService(runner=runner)
+    return make_scripted_chat_service(runner)
 
 
 async def test_chat_session_service_persists_ordinary_conversation(
@@ -208,7 +208,7 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(
         model=_Model(ModelTurn(content="answer")), capabilities=CapabilityRegistry(())
     )
     chat_session_service.AnalysisJobRepo = _FailingAnalysisJobs()
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = make_scripted_chat_service(runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.save_trajectory(
         chat_session=session,
@@ -321,7 +321,7 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(
         model=_Model(ModelTurn(content="Check the measurement conditions.")),
         capabilities=CapabilityRegistry(()),
     )
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = make_scripted_chat_service(runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     contexts = tuple(
         ChatSourceContext(
@@ -647,7 +647,7 @@ async def test_chat_shutdown_keeps_another_apps_stream_running(
                 async for event in stream:
                     if event["type"] == "text_delta":
                         break
-            assert first.runner is not second.runner
+            assert first.scripted_runner is not second.scripted_runner
             first_task, = first._active_stream_tasks
             second_task, = second._active_stream_tasks
             await first.close()
@@ -1074,7 +1074,7 @@ async def test_approved_continuation_captures_text_without_repeating_the_write(
     assert call is not None
     original_snapshot = await repository.read_response_snapshot(session.session_id)
     model = _PausedResponseModel()
-    service.runner.model = model
+    service.scripted_runner.model = model
     decision = asyncio.create_task(
         service.decide_tool_call_for_user(
             session.session_id,
@@ -1141,7 +1141,7 @@ async def test_approved_write_response_failure_preserves_saved_result_but_fails_
     )
     pending = proposed["pending_approval"]
     assert pending is not None
-    service.runner.model = _Model(
+    service.scripted_runner.model = _Model(
         ModelResponseError(
             "Model request exceeds its context window.",
             reason="context_window_exceeded",
@@ -1306,7 +1306,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = collection
     chat_session_service.SourceArtifactRepo = sources
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = make_scripted_chat_service(runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     stream = await service.send_message_stream(
         session.session_id,

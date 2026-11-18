@@ -12,6 +12,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
+from application.chat import CapabilityRegistry
 from application.chat import session_service as chat_session_service
 from application.chat.agent_runner import (
     AgentCompletionReason,
@@ -525,9 +526,8 @@ async def test_chat_turn_trigger_requires_adjacent_final_answer_and_deduplicates
     chat_session_service.collection_service = SimpleNamespace()
     chat_session_service.SourceArtifactRepo = SimpleNamespace()
     chat_session_service.ChatRepo = SimpleNamespace()
-    runner = SimpleNamespace()
     chat_session_service.AnalysisJobRepo = _SignalJobs()
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = chat_session_service.ChatSessionService(capabilities=CapabilityRegistry(()))
     result = AgentRunResult(
         status=AgentRunStatus.COMPLETED,
         messages=messages

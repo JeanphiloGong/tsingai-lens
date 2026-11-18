@@ -67,6 +67,9 @@ async def run(args):
         fixture = json.loads(raw)
         if fixture["issue"] != 399 or len(fixture["turns"]) != 4:
             raise ValueError("expected the frozen four-turn fixture")
+        connection = await service._resolve_model_connection(
+            None, None, continuation=False
+        )
         report = {
             "fixture_sha256": hashlib.sha256(raw).hexdigest(),
             "before": before,
@@ -76,9 +79,9 @@ async def run(args):
             "diff_sha256": hashlib.sha256(
                 subprocess.check_output(["git", "diff", "HEAD", "--", "backend"])
             ).hexdigest(),
-            "model": getattr(service.runner.model, "model", "unknown"),
+            "model": connection.model,
             "prompt_version": RESEARCH_AGENT_PROMPT_VERSION,
-            "limits": asdict(service.runner.limits),
+            "limits": asdict(service.limits),
             "turns": [],
             "technical_result": "incomplete",
             "scientific_review": "not_reviewed",

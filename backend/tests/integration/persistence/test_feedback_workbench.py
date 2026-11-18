@@ -18,6 +18,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from application.chat import CapabilityRegistry
 from application.chat import session_service as chat_session_service
 from application.feedback import dataset_snapshot_service, feedback_case_service
 from application.feedback.dataset_snapshot_service import (
@@ -166,9 +167,8 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     chat_session_service.collection_service = collection_service
     chat_session_service.SourceArtifactRepo = None
     chat_session_service.ChatRepo = chat
-    runner = None
     chat_session_service.AnalysisJobRepo = jobs
-    chat_service = chat_session_service.ChatSessionService(runner=runner)
+    chat_service = chat_session_service.ChatSessionService(capabilities=CapabilityRegistry(()))
     cases = FeedbackCaseRepository()
     feedback_case_service.FeedbackCaseRepo = cases
     feedback_case_service.ChatRepo = chat

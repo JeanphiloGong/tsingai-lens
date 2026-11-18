@@ -91,7 +91,7 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
 
 @pytest.mark.parametrize("decision", ["approved", "rejected"])
 async def test_other_worker_recovers_saved_decision_through_http(branch_app, decision, monkeypatch):
-    from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
+    from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn
     from application.chat.session_service import ChatSessionService
     from infra.llm import chat_model as provider_module
     from infra.llm.chat_model import OpenAIChatModel
@@ -141,7 +141,7 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
     assert [item["connection_id"] for item in directory["data"]["items"]] == ["lab-b"]
     write = _WriteCapability()
     second = ChatSessionService(
-        runner=ResearchAgentRunner(model=first.runner.model, capabilities=CapabilityRegistry((write,))),
+        capabilities=CapabilityRegistry((write,)),
     )
     monkeypatch.setattr("application.chat.session_service.ChatService", second)
     monkeypatch.setattr(provider_module, "OpenAIChatModel", OpenAIChatModel)
@@ -161,7 +161,7 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
 
     # A third instance sees only durable state, as it would after a reload/restart.
     third = ChatSessionService(
-        runner=ResearchAgentRunner(model=first.runner.model, capabilities=CapabilityRegistry((write,))),
+        capabilities=CapabilityRegistry((write,)),
     )
     monkeypatch.setattr("application.chat.session_service.ChatService", third)
     monkeypatch.setattr(provider_module, "OpenAIChatModel", build_model)

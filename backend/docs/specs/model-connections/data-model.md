@@ -67,18 +67,18 @@ master key causes decryption to fail.
 
 ## Administrative Audit: `model_connection_audit`
 
-Record successful administrative connection changes in the same transaction as
-the configuration update. Failed tests or database operations do not produce a
-successful-change record.
+Record successful administrative creation and updates in the same transaction
+as the configuration write.
 
 | Field | Type | Nullable | Purpose |
 | --- | --- | --- | --- |
 | `id` | bigint identity | No | Primary key |
 | `connection_id` | varchar(64) | No | References `model_connections.connection_id`; no cascading deletion |
 | `actor_id` | text | No | Stable acting-user ID resolved by user-service; no cross-database foreign key |
+| `actor_display_name` | text | Yes | Display name from the authenticated session at the time of the operation, or NULL when unavailable |
 | `action` | text | No | `create` or `update`; credential changes belong to the combined configuration update |
 | `version` | bigint | No | Connection version after this successful write |
-| `changed_fields` | jsonb | No | Field-name array only, for example `["enabled", "priority"]` |
+| `changes` | jsonb | No | Field names mapped to before and after values, with only redacted state and operation for the API key |
 | `created_at` | timestamptz | No | Operation time in UTC |
 
 ```text
@@ -87,21 +87,30 @@ FOREIGN KEY (connection_id) REFERENCES model_connections(connection_id) ON DELET
 CHECK (length(actor_id) BETWEEN 1 AND 64)
 CHECK (action IN ('create', 'update'))
 CHECK (version > 0)
-CHECK (jsonb_typeof(changed_fields) = 'array')
+CHECK (jsonb_typeof(changes) = 'object')
 UNIQUE (connection_id, version)
 ```
 
-Generate `changed_fields` from a fixed set of field names. A credential change
-records only `api_key`, never its value, ciphertext, master-key path, request
-body, or SDK error. Saving a name and credential together creates one
-`action=update` record, for example
-`changed_fields=["display_name", "api_key"]`.
+Read the actor ID and display name from the authenticated session when writing
+the record. Subsequent name changes leave the recorded display name intact.
+
+Generate `changes` from a fixed set of ordinary fields: `display_name`,
+`base_url`, `model`, `enabled`, `priority`, `context_window_tokens`,
+`max_output_tokens`, and `request_timeout_seconds`. For creation, record
+`before=null` and the saved initial value in `after`. For updates, compare
+the values read during the version check with the saved values in the same
+transaction. Record only the fields whose values changed.
+
+Add an `api_key` entry only for a credential operation. Its before and after
+values are `configured` or `unconfigured`, and its operation is `set`,
+`replace`, or `clear`. These are the only credential details stored in the
+audit. See the [audit query contract](api.md#6-list-model-connection-audit-records).
 
 Configuration, credentials, and audit commit atomically. One effective update
 increments the version once. A version conflict or failed write rolls back the
-entire operation. An update with no effective changes increments no version
-and writes no audit; submitting a nonempty API key always counts as a
-replacement.
+entire operation. An update with no effective changes preserves the version
+and audit history. Submitting a nonempty value while a key is configured
+counts as a replacement, even if the submitted value is the same.
 
 ## Model Management Permission
 

@@ -1,9 +1,8 @@
 # Model Connection API
 
 Manage system-wide Research Agent Chat model connections through the model
-catalog and administrator configuration endpoints. The table and credential
-formats are defined in the
-[model connection data model](data-model.md).
+catalog, administrator configuration endpoints, and audit history. Table and
+credential formats are defined in the [model connection data model](data-model.md).
 
 ## Model Connection Conventions
 
@@ -180,8 +179,10 @@ explicitly. Display names need not be unique.
 ```
 
 Return the administrator connection object. The example supplies a key, so
-`api_key_configured=true`; without a key it is false. Saving does not send a
-model request.
+`api_key_configured=true`. A connection created without a key returns false.
+Saving does not send a model request.
+Successful creation records the initial configuration in one `action=create`
+audit entry.
 
 ### 4. Update a Model Connection
 
@@ -250,9 +251,10 @@ in one transaction; a version conflict, encryption failure, or failed write
 rolls back the entire operation.
 
 One effective update increments `version` once and writes one `action=update`
-audit. `changed_fields` names the ordinary fields that changed and uses only
-`api_key` for credential changes, never their values. Submitting the same
-nonempty key still replaces it with a fresh nonce. Clearing an already-empty
+audit entry. The entry's `changes` object records the before and after values
+of the fields that changed. The `api_key` entry holds only the credential state
+and operation. Submitting the same nonempty key still replaces it with a fresh
+nonce. Clearing an already-empty
 key with no other effective changes returns the original version without an
 audit. Clear the frontend key input after success or failure; do not retry
 failed submissions automatically.
@@ -330,6 +332,116 @@ audit, and persists no last-success flag. Concurrent edits do not alter a probe
 already in flight. Its result identifies `tested_version`; the frontend
 ignores results for a different known version. Canceling the browser request
 does not guarantee that a dispatched probe incurs no provider cost.
+
+### 6. List Model Connection Audit Records
+
+- **URL:** `/api/v1/admin/model-connection-audit`
+- **Method:** `GET`
+- **Description:** Read successful creation and update records across enabled
+  and disabled connections. An optional filter selects one connection.
+
+| Query parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `connection_id` | string | Omitted | Optional stable connection ID, 1–64 characters |
+| `limit` | integer | 50 | Page size, 1–100 |
+| `offset` | integer | 0 | Number of records to skip, at least 0 |
+
+The request has no JSON body. Sort by `created_at DESC, id DESC` and read the
+page and total from the same database snapshot. An omitted `connection_id`
+matches all records. A filter with no matches, including an unknown connection
+ID, returns `items=[]` and `total=0`. An offset beyond the last record returns
+an empty page with the matching total. Invalid parameters return
+`200100/invalid_request`.
+
+| Response field | Type | Description |
+| --- | --- | --- |
+| `data.items[].connection_id` | string | Connection affected by the operation |
+| `data.items[].actor_id` | string | Stable user ID from the authenticated session |
+| `data.items[].actor_display_name` | string / null | Display name at the time of the operation, or null when unavailable |
+| `data.items[].action` | string | `create` or `update` |
+| `data.items[].version` | integer | Configuration version after the successful write |
+| `data.items[].changes` | object | Field names mapped to changes containing `before` and `after` |
+| `data.items[].created_at` | string | Operation time in UTC RFC3339 |
+| `data.total` | integer | Number of records matching the filter |
+| `data.limit`, `data.offset` | integer | Effective pagination parameters |
+
+Update records include only changed fields. The before and after values for
+ordinary fields use the configuration field types. A null limit represents
+inheritance. For a creation, the ordinary fields have `before=null` and
+`after` set to the saved initial values, including defaults.
+
+When the credential changes, `changes.api_key` contains only the configuration
+states and an `operation`.
+
+| `operation` | `before` | `after` | Display label |
+| --- | --- | --- | --- |
+| `set` | `unconfigured` | `configured` | Set |
+| `replace` | `configured` | `configured` | Replaced |
+| `clear` | `configured` | `unconfigured` | Cleared |
+
+**Request examples**
+
+```http
+GET /api/v1/admin/model-connection-audit?limit=20&offset=0
+GET /api/v1/admin/model-connection-audit?connection_id=lab-a&limit=20&offset=0
+```
+
+**Response example**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "items": [
+      {
+        "connection_id": "lab-a",
+        "actor_id": "user_operator",
+        "actor_display_name": "Model administrator",
+        "action": "update",
+        "version": 4,
+        "changes": {
+          "priority": { "before": 0, "after": 100 },
+          "api_key": {
+            "before": "configured",
+            "after": "configured",
+            "operation": "replace"
+          }
+        },
+        "created_at": "2026-11-14T08:00:00Z"
+      },
+      {
+        "connection_id": "lab-b",
+        "actor_id": "user_reviewer",
+        "actor_display_name": null,
+        "action": "update",
+        "version": 2,
+        "changes": { "enabled": { "before": false, "after": true } },
+        "created_at": "2026-11-14T07:30:00Z"
+      }
+    ],
+    "total": 2,
+    "limit": 20,
+    "offset": 0
+  },
+  "meta": null
+}
+```
+
+#### Audit List Display
+
+The model dropdown defaults to **All models**. Load its options from the
+[administrator connection list](#1-list-model-connections), using each
+connection's `display_name` as the label and its `connection_id` as the value.
+Reset `offset` to 0 when the selection changes.
+
+Each row shows the time, model connection name, actor, action, and number of
+keys in `changes`. Show the saved actor display name, falling back to
+`actor_id` when it is null. **View details** expands the row to show each
+field's before and after values. For example, show Priority as `0` and `100`,
+and API key as **Configured** and **Replaced**. Render `enabled` as
+**Enabled** or **Disabled**, null limits as **Inherited**, and ordinary
+creation fields' old values as **No previous value**.
 
 ## Model Connection Errors
 

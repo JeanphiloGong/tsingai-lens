@@ -1,6 +1,8 @@
 """Verify real PostgreSQL snapshot/audit binding through authenticated HTTP."""
 from __future__ import annotations
 
+from infra.llm.model_credentials import encrypt_api_key
+
 from datetime import datetime, timezone
 import json
 
@@ -24,7 +26,7 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
     async with factory.begin() as database:
         database.add(ModelConnectionORM(
             connection_id="lab-a", display_name="Lab A", model="model-a",
-            base_url="https://lab-a.example.invalid/v1", api_key_ref="env:LENS_MODEL_KEY_LAB_A",
+            base_url="https://lab-a.example.invalid/v1", api_key_ciphertext=encrypt_api_key(bytes(range(32)), "lab-a", "synthetic-binding-test-value"),
             enabled=True, created_at=now, updated_at=now,
         ))
     token = "synthetic-binding-test-value"
@@ -45,7 +47,8 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
                                         "choices": [{"index": 0, "message": message, "finish_reason": "stop"}]})
 
     def build_client(**kwargs):
-        client = AsyncOpenAI(**kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(provider)))
+        kwargs["http_client"] = httpx.AsyncClient(transport=httpx.MockTransport(provider))
+        client = AsyncOpenAI(**kwargs)
         clients.append(client)
         return client
 
@@ -104,7 +107,7 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
     async with fixture.factory.begin() as database:
         database.add(ModelConnectionORM(
             connection_id="lab-a", display_name="Lab A", model="model-a",
-            base_url="https://lab-a.example.invalid/v1", api_key_ref="env:LENS_MODEL_KEY_LAB_A",
+            base_url="https://lab-a.example.invalid/v1", api_key_ciphertext=encrypt_api_key(bytes(range(32)), "lab-a", "synthetic-binding-test-value"),
             enabled=True, created_at=now, updated_at=now,
         ))
     selected = []
@@ -134,7 +137,7 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
         await database.execute(update(ModelConnectionORM).values(enabled=False))
         database.add(ModelConnectionORM(
             connection_id="lab-b", display_name="Lab B", model="model-b",
-            base_url="https://lab-a.example.invalid/v1", api_key_ref=None,
+            base_url="https://lab-a.example.invalid/v1", api_key_ciphertext=None,
             enabled=True, created_at=now, updated_at=now,
         ))
     directory = (await fixture.client.get("/api/v1/model-connections")).json()
@@ -145,12 +148,13 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
     )
     monkeypatch.setattr("application.chat.session_service.ChatService", second)
     monkeypatch.setattr(provider_module, "OpenAIChatModel", OpenAIChatModel)
-    monkeypatch.delenv("LENS_MODEL_KEY_LAB_A", raising=False)
+    async with fixture.factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).where(ModelConnectionORM.connection_id == "lab-a").values(api_key_ciphertext=b"\x01" + b"x" * 40))
     path = f"/api/v1/chat-sessions/{session.session_id}"
     body = {"arguments_digest": pending.arguments_digest, "decision": decision}
     response = await fixture.client.post(f"{path}/tool-calls/{pending.tool_call_id}/decision", json=body)
     assert response.status_code == 200 and response.json()["code"] == 200205
-    assert response.json()["data"]["code"] == "model_connection_key_unavailable"
+    assert response.json()["data"]["code"] == "model_credentials_unavailable"
     saved = await fixture.repository.read_tool_call(pending.tool_call_id)
     assert saved.status.value == decision and write.executed == []
     trajectory = (await fixture.client.get(f"{path}/messages")).json()["data"]
@@ -165,7 +169,8 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
     )
     monkeypatch.setattr("application.chat.session_service.ChatService", third)
     monkeypatch.setattr(provider_module, "OpenAIChatModel", build_model)
-    monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-restored-key")
+    async with fixture.factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).where(ModelConnectionORM.connection_id == "lab-a").values(api_key_ciphertext=encrypt_api_key(bytes(range(32)), "lab-a", "synthetic-restored-key")))
     response = await fixture.client.post(f"{path}/tool-calls/{pending.tool_call_id}/decision", json=body)
     assert response.status_code == 200 and response.json()["data"]["status"] == "completed", response.text
     snapshot = await fixture.repository.read_response_snapshot(session.session_id)

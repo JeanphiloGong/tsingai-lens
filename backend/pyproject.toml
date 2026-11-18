@@ -11,6 +11,7 @@ dependencies = [
     "azure-identity>=1.19.0",
     "azure-search-documents>=11.5.2",
     "azure-storage-blob>=12.24.0",
+    "cryptography>=46.0.3,<47",
     "devtools>=0.12.2",
     "docling>=2.90.0",
     "environs>=11.0.0",

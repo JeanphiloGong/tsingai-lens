@@ -98,7 +98,7 @@ def _worker(
                     display_name="Worker test model",
                     base_url="https://worker.example.invalid/v1",
                     model="scripted-model",
-                    api_key_ref=None,
+                    api_key_ciphertext=None,
                     enabled=True,
                     created_at=now,
                     updated_at=now,

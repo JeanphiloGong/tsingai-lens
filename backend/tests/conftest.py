@@ -576,3 +576,14 @@ def _external_identity_transport(monkeypatch):
     subjects.tokens.clear()
     monkeypatch.setattr(client, "Client", subjects, raising=False)
     monkeypatch.setattr(client, "IdentityClient", lambda: subjects)
+
+
+@pytest.fixture(autouse=True)
+def model_master_key(tmp_path, monkeypatch):
+    from infra.llm.model_credentials import load_master_key
+    path = tmp_path / "model-key"
+    path.write_bytes(bytes(range(32)))
+    monkeypatch.setenv("LENS_MODEL_KEY_FILE", str(path))
+    load_master_key.cache_clear()
+    yield
+    load_master_key.cache_clear()

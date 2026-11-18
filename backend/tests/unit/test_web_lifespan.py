@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -29,7 +29,10 @@ def resources(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "DatabaseSettings", Mock())
     monkeypatch.setattr(main, "build_database_engine", lambda _: engine)
-    monkeypatch.setattr(shared_database, "AsyncSessionLocal", Mock())
+    database_session = SimpleNamespace(execute=AsyncMock(return_value=Mock(all=lambda: [])))
+    sessions = MagicMock()
+    sessions.return_value.__aenter__.return_value = database_session
+    monkeypatch.setattr(shared_database, "AsyncSessionLocal", sessions)
     monkeypatch.setattr(main.identity, "IdentityClient", lambda: identity)
     monkeypatch.setattr(
         "infra.llm.chat_model.AsyncOpenAI",

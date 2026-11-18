@@ -16,13 +16,15 @@ class ModelConnectionRecord:
     display_name: str
     base_url: str
     model: str
-    api_key_ref: str | None
+    api_key_ciphertext: bytes | None
     enabled: bool
     context_window_tokens: int | None
     max_output_tokens: int | None
     request_timeout_seconds: float | None
     created_at: datetime
     updated_at: datetime
+    priority: int = 0
+    version: int = 1
 
 
 class ModelConnectionRepository:
@@ -42,13 +44,13 @@ class ModelConnectionRepository:
                     display_name=row.display_name,
                     base_url=row.base_url,
                     model=row.model,
-                    api_key_ref=row.api_key_ref,
+                    api_key_ciphertext=row.api_key_ciphertext,
                     enabled=row.enabled,
                     context_window_tokens=row.context_window_tokens,
                     max_output_tokens=row.max_output_tokens,
                     request_timeout_seconds=row.request_timeout_seconds,
                     created_at=row.created_at,
-                    updated_at=row.updated_at,
+                    updated_at=row.updated_at, priority=row.priority, version=row.version,
                 )
                 for row in rows
             )
@@ -68,13 +70,13 @@ class ModelConnectionRepository:
                 display_name=row.display_name,
                 base_url=row.base_url,
                 model=row.model,
-                api_key_ref=row.api_key_ref,
+                api_key_ciphertext=row.api_key_ciphertext,
                 enabled=row.enabled,
                 context_window_tokens=row.context_window_tokens,
                 max_output_tokens=row.max_output_tokens,
                 request_timeout_seconds=row.request_timeout_seconds,
                 created_at=row.created_at,
-                updated_at=row.updated_at,
+                updated_at=row.updated_at, priority=row.priority, version=row.version,
             )
 
     async def read(self, connection_id: str) -> ModelConnectionRecord | None:
@@ -87,13 +89,13 @@ class ModelConnectionRepository:
                 display_name=row.display_name,
                 base_url=row.base_url,
                 model=row.model,
-                api_key_ref=row.api_key_ref,
+                api_key_ciphertext=row.api_key_ciphertext,
                 enabled=row.enabled,
                 context_window_tokens=row.context_window_tokens,
                 max_output_tokens=row.max_output_tokens,
                 request_timeout_seconds=row.request_timeout_seconds,
                 created_at=row.created_at,
-                updated_at=row.updated_at,
+                updated_at=row.updated_at, priority=row.priority, version=row.version,
             )
 
 

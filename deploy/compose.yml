@@ -46,6 +46,7 @@ services:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      LENS_MODEL_KEY_FILE: /run/lens-secrets/model-key
       USER_RPC_TARGET: user-service:50057
       USER_RPC_CA: /run/identity/ca.crt
       USER_RPC_CERT: /run/identity/client.crt
@@ -55,6 +56,7 @@ services:
       - ./identity-certs/ca.crt:/run/identity/ca.crt:ro,z
       - ./identity-certs/client.crt:/run/identity/client.crt:ro,Z
       - ./identity-certs/client.key:/run/identity/client.key:ro,Z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,Z
     expose:
       - "8010"
     depends_on:

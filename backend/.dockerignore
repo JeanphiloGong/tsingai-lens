@@ -11,3 +11,5 @@ tests
 docs
 README.md
 env.sh
+
+**/model-secrets/

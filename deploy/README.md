@@ -46,7 +46,8 @@ not rotate an existing PostgreSQL role's password. The preparation script keeps
 existing roles and databases unchanged. Compose injects database URLs, public
 origin and trusted proxy address; do not duplicate them in service env files.
 
-`backend.env` owns LLM/embedding settings and model-connection secret references.
+`backend.env` owns worker LLM and embedding settings. Chat model credentials use
+the database and the separate [model master-key file](../backend/docs/runbooks/model-key-operations.md).
 `user-service.env` owns SMTP, the challenge secret and registration availability.
 Keep registration disabled until an active administrator and actual SMTP
 configuration are verified. Use a stable random `CHALLENGE_SECRET` of at least
@@ -97,6 +98,9 @@ responsibilities.
 
 Use this path only for an empty Lens database and an empty identity account
 table. Existing accounts require the cutover procedure below.
+
+Create the [model master-key file](../backend/docs/runbooks/model-key-operations.md#prepare-a-deployment)
+before starting the backend.
 
 ```bash
 docker compose --env-file .env -f compose.yml up -d postgres
@@ -183,6 +187,11 @@ database, resources, code and configuration together. New writes in the new
 system are not automatically merged into the old system.
 
 ## Routine upgrade
+
+Before the first upgrade to encrypted Chat model credentials, follow the
+[credential cutover](../backend/docs/runbooks/model-key-operations.md#first-cutover-of-an-existing-database)
+and back up the master key separately. The routine upgrade command cannot
+import existing environment references.
 
 After the first identity cutover, use the manual **Deploy Production** workflow
 or the server command:
@@ -336,8 +345,8 @@ Worker exits, the next Worker pass returns an expired `running` job to
 Research Agent Chat requires an enabled model connection in PostgreSQL; the
 registry is not populated from `LLM_MODEL`. Follow the
 [model connection setup and recovery runbook](../backend/docs/runbooks/backend-ops.md#chat-binding-and-operational-recovery)
-to provision a connection and its referenced key in `backend.env`. The browser
-lets each new question select an enabled connection. Available connections sort
+for selection and recovery. The browser lets each new question select an
+enabled connection. Available connections sort
 by `priority` descending (default `0`), then name and ID; both the browser and
 clients that omit a choice use the first entry. Set the preferred connection's
 priority higher in PostgreSQL and remove the obsolete

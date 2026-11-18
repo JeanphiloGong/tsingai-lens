@@ -102,7 +102,8 @@ uv venv .venv && source .venv/bin/activate
 uv sync
 
 # Export USER_RPC_TARGET/CA/CERT/KEY as described in ../user-service/README.md.
-# Use a fresh database for V4; existing data needs verified import before 0099.
+# Set LENS_MODEL_KEY_FILE to the absolute path of your 32-byte master key.
+# Use a fresh database here. Existing databases require the documented cutovers.
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
@@ -116,6 +117,8 @@ uvicorn main:app --reload --port 8010
 
 PostgreSQL is the maintained structured-state authority. Alembic is the only
 schema authority. Do not add a runtime schema fallback or compatibility read.
+See [model credential operations](docs/runbooks/model-key-operations.md) for
+master-key setup and the migration of existing provider keys.
 
 Research task execution requires the three independent workers documented in
 [`scripts/README.md`](scripts/README.md#research-workers). HTTP requests only

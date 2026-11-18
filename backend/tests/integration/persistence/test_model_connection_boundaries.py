@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.llm.model_credentials import encrypt_api_key
+
 from datetime import datetime, timezone
 
 import pytest
@@ -22,7 +24,7 @@ async def _insert(session_factory, *, connection_id: str, enabled: bool):
                 display_name=connection_id,
                 base_url="https://model.example.invalid/v1",
                 model=f"model-{connection_id}",
-                api_key_ref=f"env:LENS_MODEL_KEY_{connection_id.upper().replace('-', '_')}",
+                api_key_ciphertext=encrypt_api_key(bytes(range(32)), connection_id, "synthetic-test-value"),
                 enabled=enabled,
                 context_window_tokens=65536,
                 max_output_tokens=8192,
@@ -97,24 +99,29 @@ def test_priority_migration_preserves_existing_connections(postgres_sync_engine)
     from pathlib import Path
     from alembic import command
     from alembic.config import Config
-    from sqlalchemy import inspect, text
-
+    from sqlalchemy import text
     config = Config(str(Path(__file__).resolve().parents[3] / "alembic.ini"))
     with postgres_sync_engine.begin() as database:
-        config.attributes["connection"] = database
-        command.downgrade(config, "20261101_0092")
+        # Reconstruct the exact pre-priority table rather than downgrade through
+        # the intentionally irreversible external-identity/credential cutovers.
+        database.execute(text("DROP TABLE model_connections CASCADE"))
         database.execute(text("""
-            INSERT INTO model_connections
-                (connection_id, display_name, base_url, model, enabled, created_at, updated_at)
-            VALUES ('existing', 'Existing model', 'https://model.example.invalid/v1',
-                    'model-existing', true, now(), now())
+            CREATE TABLE model_connections (
+                connection_id varchar(64) PRIMARY KEY, display_name text NOT NULL,
+                base_url text NOT NULL, model text NOT NULL, api_key_ref text,
+                enabled boolean NOT NULL DEFAULT false,
+                context_window_tokens integer, max_output_tokens integer,
+                request_timeout_seconds double precision,
+                created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL
+            )
         """))
+        database.execute(text("CREATE INDEX ix_model_connections_enabled ON model_connections(enabled)"))
+        database.execute(text("""
+            INSERT INTO model_connections(connection_id,display_name,base_url,model,enabled,created_at,updated_at)
+            VALUES ('existing','Existing model','https://model.example.invalid/v1','model-existing',true,now(),now())
+        """))
+        config.attributes["connection"] = database
+        command.stamp(config, "20261101_0092")
         command.upgrade(config, "head")
-        row = database.execute(text(
-            "SELECT model, enabled, priority FROM model_connections WHERE connection_id = 'existing'"
-        )).one()
-        assert tuple(row) == ("model-existing", True, 0)
-        command.downgrade(config, "20261101_0092")
-        assert "priority" not in {column["name"] for column in inspect(database).get_columns("model_connections")}
-        assert database.execute(text("SELECT model FROM model_connections WHERE connection_id = 'existing'")).scalar_one() == "model-existing"
-        command.upgrade(config, "head")
+        row = database.execute(text("SELECT model,enabled,priority,version FROM model_connections WHERE connection_id='existing'")).one()
+        assert tuple(row) == ("model-existing", True, 0, 1)

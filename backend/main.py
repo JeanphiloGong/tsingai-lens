@@ -148,6 +148,18 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
         object_store.Store = object_store.FileObjectStore(
             collection_workspace.Workspace.root_dir
         )
+        from infra.llm.model_credentials import decrypt_api_key, load_master_key
+        from infra.persistence.postgres.models.model_connection import ModelConnectionORM
+        from sqlalchemy import select
+
+        master_key = load_master_key()
+        async with database.AsyncSessionLocal() as session:
+            encrypted = (await session.execute(select(
+                ModelConnectionORM.connection_id, ModelConnectionORM.api_key_ciphertext,
+            ))).all()
+        for connection_id, ciphertext in encrypted:
+            if ciphertext is not None:
+                decrypt_api_key(master_key, connection_id, ciphertext)
         identity.Client = identity.IdentityClient()
         cleanup.push_async_callback(identity.Client.close)
         service = session_service.ChatSessionService(

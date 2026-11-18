@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, Index, Integer, LargeBinary, String, Text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Identity, Index, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from infra.persistence.postgres.base import Base
 
@@ -34,4 +35,23 @@ class ModelConnectionORM(Base):
         CheckConstraint("request_timeout_seconds IS NULL OR (request_timeout_seconds > 0 AND request_timeout_seconds < 'Infinity'::float8)", name='timeout_finite'),
         CheckConstraint('api_key_ciphertext IS NULL OR (octet_length(api_key_ciphertext) BETWEEN 30 AND 8221 AND get_byte(api_key_ciphertext, 0) = 1)', name='ciphertext_format'),
 
+    )
+
+
+class ModelConnectionAuditORM(Base):
+    __tablename__ = "model_connection_audit"
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(String(64), ForeignKey("model_connections.connection_id", ondelete="RESTRICT"))
+    actor_id: Mapped[str] = mapped_column(Text)
+    actor_display_name: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(BigInteger)
+    changes: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("length(actor_id) BETWEEN 1 AND 64", name="actor_length"),
+        CheckConstraint("action IN ('create', 'update')", name="action"),
+        CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint("jsonb_typeof(changes) = 'object'", name="changes_object"),
+        UniqueConstraint("connection_id", "version"),
     )

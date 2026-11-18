@@ -1,6 +1,6 @@
 """PostgreSQL ORM model registry."""
 
-from infra.persistence.postgres.models.model_connection import ModelConnectionORM
+from infra.persistence.postgres.models.model_connection import ModelConnectionAuditORM, ModelConnectionORM
 from infra.persistence.postgres.models.execution import (
     PipelineRunORM,
     AnalysisJobORM,
@@ -58,6 +58,7 @@ from infra.persistence.postgres.models.paper_experiment import (
 )
 __all__ = [
     "ModelConnectionORM",
+    "ModelConnectionAuditORM",
     "AnalysisJobORM",
     "ChatModelCallORM",
     "ChatMessageORM",

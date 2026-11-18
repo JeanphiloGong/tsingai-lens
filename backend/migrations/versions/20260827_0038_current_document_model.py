@@ -90,12 +90,17 @@ def upgrade() -> None:
     # merged document_preparations table.
     # Answer feedback is introduced by 0056, not this historical cutover.
     # Model connections are introduced by 0089 with the original schema.
+    # Model connection audit is introduced by 0102.
     Base.metadata.create_all(
         bind=bind,
         tables=[
             table
             for table in Base.metadata.sorted_tables
-            if table.name not in {"chat_message_feedback", "model_connections"}
+            if table.name not in {
+                "chat_message_feedback",
+                "model_connections",
+                "model_connection_audit",
+            }
         ],
     )
     if "document_preparations" in inspect(bind).get_table_names():

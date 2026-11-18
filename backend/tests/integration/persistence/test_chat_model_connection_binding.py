@@ -11,7 +11,7 @@ from openai import AsyncOpenAI
 import pytest
 from sqlalchemy import update
 
-from controllers.model_connection_routes import model_connection_router as model_router
+from controllers.models.catalog_routes import model_connection_router as model_router
 from repositories.chat_repository import ChatRepository
 from infra.persistence.postgres.models.model_connection import ModelConnectionORM
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401

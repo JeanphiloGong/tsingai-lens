@@ -13,6 +13,7 @@ from exceptions import (
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from utils.logger import bind_request_id, bind_user_id, clear_request_id, clear_user_id
 from utils.response import make_api_response
@@ -42,6 +43,10 @@ async def project_exception_handler(
 async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
+    if exc.status_code == 400 and getattr(request.state, "model_admin", False):
+        return await project_exception_handler(
+            request, RequestInvalidException(data={"code": "invalid_request"})
+        )
     if isinstance(exc.detail, dict) and exc.detail.get("code") in {
         "authentication_required",
         "permission_denied",
@@ -73,6 +78,14 @@ async def http_exception_handler(
 async def request_validation_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    if getattr(request.state, "model_admin", False):
+        return await project_exception_handler(
+            request,
+            RequestInvalidException(
+                message="Check the supplied fields.",
+                data={"code": "invalid_request"},
+            ),
+        )
     return await project_exception_handler(
         request,
         RequestInvalidException(data={"errors": exc.errors()}),
@@ -80,6 +93,25 @@ async def request_validation_handler(
 
 
 async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    if getattr(request.state, "model_admin", False):
+        logger.error(
+            "Model administration failed method=%s path=%s type=%s",
+            request.method,
+            request.url.path,
+            type(exc).__name__,
+        )
+        if isinstance(exc, SQLAlchemyError):
+            return make_api_response(
+                code=200205,
+                message="Model configuration is unavailable.",
+                data={"code": "model_configuration_unavailable"},
+            )
+        return make_api_response(
+            code=200000,
+            message="The server could not complete the request.",
+            data={"code": "internal_error"},
+        )
+
     request_token = bind_request_id(getattr(request.state, "request_id", None))
     user_token = bind_user_id(getattr(request.state, "user_id", ""))
     try:

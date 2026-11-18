@@ -45,7 +45,7 @@ from infra.persistence.file import collection_workspace, object_store
 
 from config import DATA_DIR
 from controllers import feedback_case_routes as feedback_cases
-from controllers import model_connection_routes as model_connections
+from controllers.models import catalog_routes as model_connections
 from controllers.chat import chat_session_routes as chat_sessions
 from controllers.core import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
@@ -63,7 +63,7 @@ from controllers.goal import goal_routes as goals
 from controllers.source import collection_routes as collections
 from controllers.source import pipeline_run_routes as pipeline_runs
 from controllers.source import reference_routes as references
-from exceptions import ProjectException
+from exceptions import ProjectException, RequestInvalidException
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,6 +83,10 @@ logger = setup_logger("lens")
 
 PUBLIC_API_PREFIX = "/api"
 PUBLIC_API_V1_PREFIX = f"{PUBLIC_API_PREFIX}/v1"
+MODEL_ADMIN_PATHS = (
+    f"{PUBLIC_API_V1_PREFIX}/admin/model-connections",
+    f"{PUBLIC_API_V1_PREFIX}/admin/model-connection-audit",
+)
 
 
 def _parse_cors_allowed_origins() -> list[str]:
@@ -218,6 +222,12 @@ def configure_middleware(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
+        path = request.url.path
+        model_admin = any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in MODEL_ADMIN_PATHS
+        )
+        request.state.model_admin = model_admin
         incoming_request_id = request.headers.get(REQUEST_ID_HEADER)
         request_id, reused_incoming_id = resolve_request_id(incoming_request_id)
         token = bind_request_id(request_id)
@@ -237,18 +247,27 @@ def configure_middleware(app: FastAPI) -> None:
             )
 
         try:
-            response = await call_next(request)
-        except Exception:
-            logger.exception(
-                "HTTP request failed method=%s path=%s",
-                request.method,
-                request.url.path,
-            )
-            raise
-        else:
-            duration_ms = (perf_counter() - start_time) * 1000
+            try:
+                if model_admin and request.method != "GET":
+                    body = bytearray()
+                    async for chunk in request.stream():
+                        if len(body) + len(chunk) > 16384:
+                            raise RequestInvalidException(data={"code": "invalid_request"})
+                        body.extend(chunk)
+                    request._body = bytes(body)
+                response = await call_next(request)
+            except RequestInvalidException as exc:
+                response = await project_exception_handler(request, exc)
+            except Exception as exc:
+                if not model_admin:
+                    logger.exception("HTTP request failed method=%s path=%s", request.method, path)
+                    raise
+                response = await general_exception_handler(request, exc)
+            if model_admin:
+                response.headers["Cache-Control"] = "no-store"
             response.headers[REQUEST_ID_HEADER] = request_id
             bind_user_id(getattr(request.state, "user_id", ""))
+            duration_ms = (perf_counter() - start_time) * 1000
             logger.info(
                 "HTTP request finished method=%s path=%s status_code=%s duration_ms=%.2f",
                 request.method,
@@ -276,6 +295,8 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(
         model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX
     )
+    from controllers.models.admin_connection_routes import admin_model_router
+    app.include_router(admin_model_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX

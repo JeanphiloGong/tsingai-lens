@@ -104,6 +104,7 @@ def test_priority_migration_preserves_existing_connections(postgres_sync_engine)
     with postgres_sync_engine.begin() as database:
         # Reconstruct the exact pre-priority table rather than downgrade through
         # the intentionally irreversible external-identity/credential cutovers.
+        database.execute(text("DROP TABLE model_connection_audit"))
         database.execute(text("DROP TABLE model_connections CASCADE"))
         database.execute(text("""
             CREATE TABLE model_connections (

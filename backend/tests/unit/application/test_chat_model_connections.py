@@ -20,7 +20,7 @@ from repositories.model_connection_repository import ModelConnectionRepo
 from exceptions import ProjectException, ResourceConflictException, TokenInvalidException
 from repositories.model_connection_repository import ModelConnectionRecord
 from controllers.chat.chat_session_routes import chat_session_router as chat_router
-from controllers.model_connection_routes import model_connection_router as model_router
+from controllers.models.catalog_routes import model_connection_router as model_router
 from domain.chat import ChatMessage, ChatSession
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError

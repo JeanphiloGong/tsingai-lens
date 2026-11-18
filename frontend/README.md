@@ -23,7 +23,8 @@ to code.
   Shared browser-side API clients, i18n, and route support code
 - `src/routes/admin/`
   Personnel, group and permission catalog administration, gated by
-  `users.manage` and backed by the same-origin user-service APIs
+  `users.manage` and backed by the same-origin user-service APIs; model
+  administration uses `models.manage` and the Lens model connection API
 - `docs/frontend-plan.md`
   Same-origin browser contract and product-flow guide
 - `e2e/`

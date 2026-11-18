@@ -75,7 +75,7 @@ for (const width of [320, 768, 1024, 1440]) {
 		await expect(menu.getByText('Researcher', { exact: true })).toBeVisible();
 		await expect(menu.getByText('researcher@example.test', { exact: true })).toBeVisible();
 		await expect(
-			menu.getByRole('link', { name: 'Users and permissions', exact: true })
+			menu.getByRole('link', { name: 'Administration', exact: true })
 		).toHaveCount(0);
 		const box = (await menu.boundingBox())!;
 		expect(box.x).toBeGreaterThanOrEqual(0);

@@ -1936,10 +1936,8 @@ async def _resolve_manifest_document_ids(
             DatabaseSettings,
             build_database_engine,
         )
-        from infra.persistence.postgres.models.document import (  # noqa: PLC0415
+        from infra.persistence.postgres.models.collection import (  # noqa: PLC0415
             DocumentORM,
-        )
-        from infra.persistence.postgres.models.document_preparation import (  # noqa: PLC0415
             DocumentPreparationORM,
         )
         from sqlalchemy import select  # noqa: PLC0415

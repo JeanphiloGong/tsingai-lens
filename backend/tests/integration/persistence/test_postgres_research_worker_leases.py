@@ -12,7 +12,7 @@ from application.pipeline import pipeline_run_service
 from application.source import collection_service
 from domain.core import PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
-from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+from infra.persistence.postgres.models.execution import PipelineRunORM
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.objective_repository import ObjectiveRepo, AnalysisLeaseLostError

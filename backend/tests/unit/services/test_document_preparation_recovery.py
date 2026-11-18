@@ -174,7 +174,7 @@ async def test_preparation_takeover_rejects_late_stage_publication(
 ):
     from datetime import datetime, timezone
     from sqlalchemy import update
-    from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+    from infra.persistence.postgres.models.execution import PipelineRunORM
     from repositories.document_profile_repository import DocumentProfileRepo
     from repositories.pipeline_run_repository import PipelineLeaseLostError
 

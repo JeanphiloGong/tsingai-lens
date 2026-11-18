@@ -11,9 +11,9 @@ from typing import Any
 from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.document import DocumentORM
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
+    CollectionORM,
+    DocumentORM,
     DocumentPreparationORM,
 )
 from repositories.feedback_dataset_repository import ensure_system_datasets

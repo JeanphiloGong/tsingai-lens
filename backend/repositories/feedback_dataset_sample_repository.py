@@ -29,7 +29,7 @@ from domain.feedback.sample_revision import (
 )
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
+from infra.persistence.postgres.models.execution import AnalysisJobORM
 from infra.persistence.postgres.models.feedback import FeedbackCaseORM
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetORM,

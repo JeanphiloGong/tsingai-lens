@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
-from infra.persistence.postgres.models.objective_experiment_selection import (
+from infra.persistence.postgres.models.objective import (
+    ObjectiveAnalysisORM,
     ObjectiveExperimentSelectionORM,
     SelectionComparisonORM,
     SelectionMeasurementORM,

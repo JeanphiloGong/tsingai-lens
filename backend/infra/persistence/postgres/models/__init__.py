@@ -1,14 +1,16 @@
 """PostgreSQL ORM model registry."""
 
 from infra.persistence.postgres.models.model_connection import ModelConnectionORM
-from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+from infra.persistence.postgres.models.execution import (
+    PipelineRunORM,
+    AnalysisJobORM,
+)
 from infra.persistence.postgres.models.chat import (
     ChatMessageFeedbackORM,
     ChatMessageORM,
     ChatSessionORM,
     ChatToolCallORM,
 )
-from infra.persistence.postgres.models.analysis_job import AnalysisJobORM
 from infra.persistence.postgres.models.chat import ChatModelCallORM
 from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackSignalAnalysisResultORM, ToolFailureAnalysisResultORM, FeedbackAnnotationORM, FeedbackCaseORM, FeedbackReviewDecisionORM, FeedbackDatasetSnapshotORM
 from infra.persistence.postgres.models.feedback_dataset import (
@@ -21,17 +23,30 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetExportMemberORM,
     FeedbackDatasetMigrationRunORM,
 )
-from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.document import DocumentORM
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationORM
+from infra.persistence.postgres.models.collection import (
+    CollectionORM,
+    DocumentORM,
+    DocumentPreparationORM,
+)
 from infra.persistence.postgres.models.evaluation import EvaluationGoldSetORM, EvaluationPredictionSnapshotORM, EvaluationRunORM
-from infra.persistence.postgres.models.finding_review import FindingCurationORM, FindingFeedbackORM
+from infra.persistence.postgres.models.finding import (
+    FindingCurationORM,
+    FindingFeedbackORM,
+    ExperimentFindingORM,
+    FindingComparisonGroupORM,
+    FindingSelectionORM,
+)
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisLegacyCheckpointORM,
     ObjectiveAnalysisORM,
     ObjectiveResearchORM,
+    ObjectiveExperimentPlanORM,
+    ObjectiveExperimentSelectionORM,
+    SelectionComparisonORM,
+    SelectionMeasurementORM,
+    ComparisonGroupMemberORM,
+    ComparisonGroupORM,
 )
-from infra.persistence.postgres.models.experiment_plan import ObjectiveExperimentPlanORM
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentComparisonMeasurementORM,
     ExperimentComparisonORM,
@@ -40,20 +55,6 @@ from infra.persistence.postgres.models.paper_experiment import (
     ExperimentalVariantORM,
     PaperExperimentORM,
     ReportedInterpretationORM,
-)
-from infra.persistence.postgres.models.objective_experiment_selection import (
-    ObjectiveExperimentSelectionORM,
-    SelectionComparisonORM,
-    SelectionMeasurementORM,
-)
-from infra.persistence.postgres.models.comparison_group import (
-    ComparisonGroupMemberORM,
-    ComparisonGroupORM,
-)
-from infra.persistence.postgres.models.experiment_finding import (
-    ExperimentFindingORM,
-    FindingComparisonGroupORM,
-    FindingSelectionORM,
 )
 __all__ = [
     "ModelConnectionORM",

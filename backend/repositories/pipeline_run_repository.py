@@ -10,9 +10,11 @@ from typing import Any
 
 from infra.persistence.database import AsyncSessionLocal
 from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
-from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.document import DocumentORM
-from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+from infra.persistence.postgres.models.collection import (
+    CollectionORM,
+    DocumentORM,
+)
+from infra.persistence.postgres.models.execution import PipelineRunORM
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 

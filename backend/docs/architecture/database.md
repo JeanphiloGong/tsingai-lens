@@ -116,6 +116,25 @@ Only lifecycle-local children that are always read and replaced with their
 owner are embedded in JSON aggregates. This keeps the relational schema small
 without weakening identity, versioning, or audit boundaries.
 
+## ORM Module Ownership
+
+ORM classes are grouped by business responsibility. Each file may define several
+related tables; their identities, constraints and lifecycles remain independent.
+Repositories import their mapped classes directly from the owning module.
+
+| Module under `infra/persistence/postgres/models/` | Responsibility |
+| --- | --- |
+| `collection.py` | Collection metadata, current documents and document preparation |
+| `paper_experiment.py` | Immutable paper experiments and revision-local measurements/comparisons |
+| `objective.py` | Research objectives, analysis versions, selections, comparison groups and follow-up plans |
+| `finding.py` | Findings, selection/group links, expert feedback and curation |
+| `execution.py` | Worker analysis-job envelopes and pipeline execution history |
+| `chat.py` | Sessions, messages, capability calls and model-call records |
+| `feedback.py` | Answer feedback analysis, cases, annotation and review |
+| `feedback_dataset.py` | Dataset membership, sample revisions and export records |
+| `evaluation.py` | Gold sets, prediction snapshots and evaluation runs |
+| `model_connection.py` | Shared model connection configuration and its administrative audit when available |
+
 ## Schema by Main Logic Flow
 
 ### 1. Authentication

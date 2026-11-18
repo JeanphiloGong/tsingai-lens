@@ -9,7 +9,7 @@ from domain.core import DocumentProfile, PaperResearchMap
 from infra.persistence import database
 
 
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
     DocumentPreparationORM,
 )
 from repositories.collection_repository import (
@@ -160,7 +160,7 @@ async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_read
 ) -> None:
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import update
-    from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+    from infra.persistence.postgres.models.execution import PipelineRunORM
     from repositories.pipeline_run_repository import PipelineLeaseLostError
 
     runs = PipelineRunRepository()

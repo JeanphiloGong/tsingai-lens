@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
-from infra.persistence.postgres.models.comparison_group import (
+from infra.persistence.postgres.models.objective import (
     ComparisonGroupMemberORM,
     ComparisonGroupORM,
-)
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
-from infra.persistence.postgres.models.objective_experiment_selection import (
+    ObjectiveAnalysisORM,
     ObjectiveExperimentSelectionORM,
 )
 from sqlalchemy import select

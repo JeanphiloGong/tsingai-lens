@@ -1,12 +1,13 @@
 """Credential effects and a bounded saved-configuration probe."""
 import asyncio
+from math import isfinite
 from time import perf_counter
 from uuid import uuid4
 import httpx
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 from pydantic import ValidationError
 from exceptions import ResourceConflictException, ResourceNotFoundException
-from infra.llm.model_credentials import decrypt_api_key, encrypt_api_key, load_master_key
+from infra.llm.model_credentials import encrypt_api_key, load_master_key, provider_api_key
 from repositories.model_connection_repository import ModelConnectionRepo
 
 
@@ -39,7 +40,7 @@ async def test_connection(connection_id: str, expected_version: int):
         raise ResourceNotFoundException("Model connection not found.", data={"code": "model_connection_not_found"})
     if saved.version != expected_version:
         raise ResourceConflictException("Configuration changed; reload before saving.", data={"code": "model_connection_version_conflict"})
-    api_key = decrypt_api_key(load_master_key(), saved.connection_id, saved.api_key_ciphertext) if saved.api_key_ciphertext is not None else "not-needed"
+    api_key = provider_api_key(saved.connection_id, saved.api_key_ciphertext)
     timeout = min(10.0, saved.request_timeout_seconds or 10.0)
     started = perf_counter()
     reason = None
@@ -48,12 +49,21 @@ async def test_connection(connection_id: str, expected_version: int):
             timeout=timeout, max_retries=0,
             http_client=httpx.AsyncClient(follow_redirects=False),
         ) as client:
-            completion = await asyncio.wait_for(client.chat.completions.create(
-                model=saved.model, messages=[{"role":"user", "content":"Reply with OK."}],
-                max_completion_tokens=min(128, saved.max_output_tokens or 128),
-            ), timeout=timeout)
-            if not completion.choices or not isinstance(completion.choices[0].message.content, str) or not completion.choices[0].message.content.strip():
-                reason = "provider_response_invalid"
+            if saved.kind == "embedding":
+                result = await asyncio.wait_for(
+                    client.embeddings.create(model=saved.model, input=["Lens connectivity check"]),
+                    timeout=timeout,
+                )
+                if (len(result.data) != 1 or result.data[0].index != 0
+                    or not result.data[0].embedding or not all(map(isfinite, result.data[0].embedding))):
+                    reason = "provider_response_invalid"
+            else:
+                completion = await asyncio.wait_for(client.chat.completions.create(
+                    model=saved.model, messages=[{"role":"user", "content":"Reply with OK."}],
+                    max_completion_tokens=min(128, saved.max_output_tokens or 128),
+                ), timeout=timeout)
+                if not completion.choices or not isinstance(completion.choices[0].message.content, str) or not completion.choices[0].message.content.strip():
+                    reason = "provider_response_invalid"
     except (APITimeoutError, asyncio.TimeoutError):
         reason = "provider_timeout"
     except APIStatusError as error:

@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import ExitStack
 from dataclasses import replace
 from hashlib import sha256 as hash_sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Awaitable, Callable
 
+import httpx
 import pandas as pd
+from openai import OpenAI
 from application.core.document_profiles import service as document_profile_service
 from application.core.document_profiles.extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
@@ -25,6 +28,8 @@ from application.source import (
 )
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from domain.source import Document, SourceDocument
+from exceptions import ServiceUnavailableException
+from infra.llm.model_credentials import provider_options
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.file import FileCollectionWorkspace
 from infra.source.artifact_bundle import SourceArtifactBundle
@@ -36,6 +41,7 @@ from infra.source.config.source_parser_config import (
 )
 from repositories.collection_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepo
+from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.object_store import ObjectStore
 from repositories.pipeline_run_repository import (
     PipelineLeaseLostError,
@@ -78,11 +84,15 @@ def profile_fingerprint(
     *,
     source_fingerprint: str,
     profile_version: str,
+    connection_id: str | None = None,
 ) -> str:
+    # Keep historical fingerprints readable for already completed runs.
+    model = {"model_connection_id": connection_id} if connection_id is not None else {}
     return _stage_fingerprint(
         "profile",
         source_fingerprint=str(source_fingerprint),
         profile_version=str(profile_version),
+        **model,
     )
 
 
@@ -100,27 +110,36 @@ async def queue_document_preparation(
         collection_id,
         document_id,
     )
-    fingerprint = preparation_fingerprint_for(document.document)
+    assignment = await ModelConnectionRepo.read_assignment("document_profile")
+    if assignment is None:
+        raise ServiceUnavailableException(
+            "Ask an administrator to assign a processing model.",
+            data={"code": "processing_model_unassigned", "purpose": "document_profile"},
+        )
+    connection_id = assignment.connection_id
+    source_identity, profile_identity = fingerprints_for(document.document, connection_id)
     run, _ = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
         pipeline_name="document_preparation",
-        input_fingerprint=fingerprint,
+        input_fingerprint=profile_identity,
         context={
             "document_sha256": document.document.sha256,
             "profile_version": DOCUMENT_ANALYSIS_VERSION,
             "parser_version": SOURCE_PARSER_VERSION,
+            "model_connection_id": connection_id,
         },
-        reuse_completed=await _can_reuse_document_preparation(collection_id, document),
+        reuse_completed=await _can_reuse_document_preparation(
+            collection_id, document, source_identity, profile_identity
+        ),
     )
     return run
 
 
 async def _can_reuse_document_preparation(
-    collection_id: str, record: StoredDocument
+    collection_id: str, record: StoredDocument, source_identity: str, profile_identity: str
 ) -> bool:
     document = record.document
-    source_identity, profile_identity = fingerprints_for(document)
     if (
         document.status != "ready"
         or document.preparation_fingerprint != profile_identity
@@ -243,7 +262,9 @@ async def _check_preparation_input(
         job.run.collection_id, job.run.scope_id, db=db
     )
     if (
-        preparation_fingerprint_for(record.document) != job.run.input_fingerprint
+        preparation_fingerprint_for(
+            record.document, job.run.context.get("model_connection_id")
+        ) != job.run.input_fingerprint
         or job.run.context["document_sha256"] != record.document.sha256
     ):
         raise ValueError("document preparation input changed")
@@ -256,17 +277,18 @@ async def execute_document_preparation_job(
     workspace: FileCollectionWorkspace,
     object_store: ObjectStore,
     source_artifact_builder: SourceArtifactBuilder,
-    profile_extractor: DocumentProfileExtractor,
+    profile_extractor: DocumentProfileExtractor | None = None,
 ) -> PipelineRun:
     run_id = job.run.run_id
     collection_id = job.run.collection_id
     document_id = job.run.scope_id
     stage = "source_parsing"
     warnings: list[str] = []
+    connection_id = job.run.context.get("model_connection_id")
     try:
         async with AsyncSessionLocal() as db, db.begin():
             record = await _check_preparation_input(db, job)
-            source_identity, profile_identity = fingerprints_for(record.document)
+            source_identity, profile_identity = fingerprints_for(record.document, connection_id)
             await collection_service.update_document_preparation(
                 collection_id, document_id, status="processing", db=db
             )
@@ -354,13 +376,28 @@ async def execute_document_preparation_job(
             or record.document.profile_fingerprint != profile_identity
             or profile.profile_status != PROFILE_STATUS_COMPLETED
         ):
-            profile = await document_profile_service.build_document_profile(
-                collection_id,
-                document_id,
-                source_fingerprint=source_identity,
-                profile_fingerprint=profile_identity,
-                extractor=profile_extractor,
-            )
+            with ExitStack() as clients:
+                if profile_extractor is None:
+                    connection = (
+                        await ModelConnectionRepo.read(connection_id) if connection_id else None
+                    )
+                    if connection is None:
+                        raise ServiceUnavailableException(
+                            "Queue document preparation with an assigned model.",
+                            data={"code": "processing_model_unavailable"},
+                        )
+                    client = clients.enter_context(OpenAI(
+                        **provider_options(connection),
+                        http_client=httpx.Client(follow_redirects=False),
+                    ))
+                    profile_extractor = DocumentProfileExtractor(client=client, model=connection.model)
+                profile = await document_profile_service.build_document_profile(
+                    collection_id,
+                    document_id,
+                    source_fingerprint=source_identity,
+                    profile_fingerprint=profile_identity,
+                    extractor=profile_extractor,
+                )
         async with AsyncSessionLocal() as db, db.begin():
             await _check_preparation_input(db, job)
             await DocumentProfileRepo.replace(collection_id, profile, db=db)
@@ -418,11 +455,11 @@ async def execute_document_preparation_job(
             )
 
 
-def preparation_fingerprint_for(document: Document) -> str:
-    return fingerprints_for(document)[1]
+def preparation_fingerprint_for(document: Document, connection_id: str | None = None) -> str:
+    return fingerprints_for(document, connection_id)[1]
 
 
-def fingerprints_for(document: Document) -> tuple[str, str]:
+def fingerprints_for(document: Document, connection_id: str | None = None) -> tuple[str, str]:
     source_identity = source_fingerprint(
         sha256=document.sha256,
         parser_version=SOURCE_PARSER_VERSION,
@@ -430,5 +467,6 @@ def fingerprints_for(document: Document) -> tuple[str, str]:
     profile_identity = profile_fingerprint(
         source_fingerprint=source_identity,
         profile_version=DOCUMENT_PROFILE_PROMPT_VERSION,
+        connection_id=connection_id,
     )
     return source_identity, profile_identity

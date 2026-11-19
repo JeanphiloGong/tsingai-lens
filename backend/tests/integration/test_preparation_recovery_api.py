@@ -56,6 +56,7 @@ def test_upload_classification_retry_content_and_research_readiness(
     classifier = Classifier()
     from application.source import document_preparation_service as preparation
     from controllers.source import pipeline_run_routes
+    from repositories.model_connection_repository import ModelConnectionRepo
     from repositories.pipeline_run_repository import PipelineRunRepo
     from datetime import timedelta
 
@@ -64,6 +65,20 @@ def test_upload_classification_retry_content_and_research_readiness(
         "queue_document_preparation",
         preparation.queue_document_preparation,
     )
+
+    async def assign_model():
+        model = await ModelConnectionRepo.create("manager", "profile-recovery", {
+            "display_name": "Profile recovery",
+            "model": "profile-recovery",
+            "base_url": "http://127.0.0.1:1/v1",
+        }, actor_display_name=None)
+        await ModelConnectionRepo.update(
+            "manager", model.connection_id, model.version, {"enabled": True},
+            actor_display_name=None,
+        )
+        await ModelConnectionRepo.assign("document_profile", model.connection_id, 0, "manager")
+
+    app_client.portal.call(assign_model)
     collection_id = _create_collection(app_client, "LPBF classification recovery")
     text = b"Laser power and Ti-6Al-4V porosity\n\nMethods\nLaser power was varied from 100 W to 150 W.\n\nResults\nPorosity decreased from 2.0% to 0.5%."
     uploaded = _upload(app_client, collection_id, "laser-porosity.txt", text)

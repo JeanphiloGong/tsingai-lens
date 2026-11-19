@@ -58,3 +58,18 @@ def decrypt_api_key(master_key: bytes, connection_id: str, ciphertext: bytes) ->
             "Model credentials are unavailable.",
             data={"code": "model_credentials_unavailable"},
         ) from None
+
+
+def provider_api_key(connection_id: str, ciphertext: bytes | None) -> str:
+    if ciphertext is None:
+        return "not-needed"
+    return decrypt_api_key(load_master_key(), connection_id, ciphertext)
+
+
+def provider_options(connection, *, default_timeout: float = 180.0) -> dict:
+    return {
+        "api_key": provider_api_key(connection.connection_id, connection.api_key_ciphertext),
+        "base_url": connection.base_url,
+        "timeout": connection.request_timeout_seconds or default_timeout,
+        "max_retries": 0,
+    }

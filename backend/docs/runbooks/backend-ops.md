@@ -63,13 +63,10 @@ production settings. A larger pool does not replace bounded preparation and
 polling concurrency or fix slow queries. Apply changes by restarting the
 backend after deployment; existing processes retain their engine configuration.
 
-Set backend LLM runtime variables before local runs that invoke model-backed
+Set backend LLM runtime options before local runs that invoke model-backed
 features:
 
 ```bash
-export LLM_BASE_URL=http://localhost:11434/v1
-export LLM_MODEL=qwen1.5-8b-chat
-export LLM_API_KEY=sk-local
 export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
@@ -105,15 +102,17 @@ including streamed Chat responses. Set it to a value supported by the model
 provider, such as `none`, when a reasoning model must reserve its bounded
 completion budget for structured output. When unset, the provider default is
 used. A Chat request must not silently ignore this operator setting.
-`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` configure Core extraction and
-explicitly injected environment-based clients. Database-backed Research Agent
-Chat selects the address, model, and encrypted credential from an enabled
-`model_connections` row; reasoning effort continues to use `LLM_REASONING_EFFORT`.
-Core model IDs must match the configured endpoint, for example:
+Configure document profiles, research analysis, model-backed feedback and the
+Source text-unit retrieval benchmark under Administration → Model assignments.
+Give each process that opens encrypted connections the same read-only master
+key file through `LENS_MODEL_KEY_FILE`. Research Agent Chat selects an enabled
+Chat connection from its catalog. See the
+[model assignment contract](../specs/model-connections/api.md#processing-model-assignments).
 
-```bash
-curl "$LLM_BASE_URL/models"
-```
+Before upgrading an existing installation to model assignments, stop new
+document preparation submissions and let the old workers finish the queued
+runs. Apply the database migrations, configure the purposes that workers
+will use, then start the updated workers.
 
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.

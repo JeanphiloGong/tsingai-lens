@@ -50,7 +50,7 @@ from application.core.objectives.finding_summary import (
 )
 from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
-    build_default_structured_response_client,
+    build_research_response_client,
 )
 from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
@@ -60,7 +60,7 @@ from application.source import collection_service
 from domain.core import ResearchObjective
 from domain.core.finding import Finding
 from domain.core.research_objective import ObjectiveEvidence
-from exceptions import ResourceConflictException, ResourceNotFoundException
+from exceptions import ResourceConflictException, ResourceNotFoundException, ServiceUnavailableException
 from infra.llm.usage import capture_llm_usage
 from infra.persistence.database import AsyncSessionLocal
 from repositories.objective_repository import (
@@ -198,18 +198,21 @@ def _experiment_abstention(
 async def execute_objective_analysis_job(
     job: ObjectiveAnalysisJobSnapshot,
     *,
-    response_client: StructuredResponseClient,
-    source_screener: ObjectiveSourceScreener,
-    paper_map_extractor: PaperResearchMapExtractor,
-    paper_experiment_extractor: PaperExperimentExtractor,
+    response_client: StructuredResponseClient | None = None,
+    source_screener: ObjectiveSourceScreener | None = None,
+    paper_map_extractor: PaperResearchMapExtractor | None = None,
+    paper_experiment_extractor: PaperExperimentExtractor | None = None,
 ) -> dict[str, Any]:
     collection_id, objective_id, analysis_version = job.analysis.key
+    owns_client = response_client is None
     try:
         objective = await _require_objective(collection_id, objective_id)
         claimed = job.analysis
         async with AsyncSessionLocal() as db, db.begin():
             await ObjectiveRepo.lock_analysis_job(db, job)
             await ObjectiveRepo.check_analysis_inputs(db, claimed)
+        if response_client is None:
+            response_client = await build_research_response_client()
         usage_started_at = perf_counter()
         progress_callback = _build_progress_callback(job)
         with (
@@ -224,9 +227,9 @@ async def execute_objective_analysis_job(
                     progress_callback=progress_callback,
                     job=job,
                     response_client=response_client,
-                    source_screener=source_screener,
-                    paper_map_extractor=paper_map_extractor,
-                    paper_experiment_extractor=paper_experiment_extractor,
+                    source_screener=source_screener or ObjectiveSourceScreener(response_client),
+                    paper_map_extractor=paper_map_extractor or PaperResearchMapExtractor(response_client),
+                    paper_experiment_extractor=paper_experiment_extractor or PaperExperimentExtractor(response_client),
                 )
                 _validate_artifacts(artifacts)
             except Exception as exc:
@@ -311,6 +314,9 @@ async def execute_objective_analysis_job(
                 error_message=analysis_error_message(_error_code(exc)),
             )
         return await _result(collection_id, objective_id, analysis=current)
+    finally:
+        if owns_client and response_client is not None:
+            response_client.client.close()
 
 
 async def summarize_objective_finding(
@@ -364,17 +370,10 @@ async def summarize_objective_finding(
     owns_client = response_client is None
     if owns_client:
         try:
-            response_client = build_default_structured_response_client()
+            response_client = await build_research_response_client(default_timeout=60.0)
         except Exception as exc:
             raise FindingSummaryUnavailable("summary_generation_failed") from exc
     try:
-        if owns_client:
-            try:
-                response_client.client = response_client.client.with_options(
-                    timeout=60.0, max_retries=0
-                )
-            except Exception as exc:
-                raise FindingSummaryUnavailable("summary_generation_failed") from exc
         summary_task = asyncio.create_task(
             to_thread(
                 summarize_finding_evidence,
@@ -1752,6 +1751,8 @@ def _build_progress_callback(
 
 
 def _error_code(exc: Exception) -> str:
+    if isinstance(exc, ServiceUnavailableException) and isinstance(exc.data, dict):
+        return exc.data.get("code", "objective_analysis_failed")
     if isinstance(exc, TimeoutError):
         return "provider_timeout"
     if isinstance(exc, ValueError):

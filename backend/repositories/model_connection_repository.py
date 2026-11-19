@@ -2,14 +2,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Literal
 
 from sqlalchemy import func, select
-from datetime import timezone
-from exceptions import ResourceConflictException, ResourceNotFoundException
+from sqlalchemy.dialects.postgresql import insert
+from exceptions import ResourceConflictException, ResourceNotFoundException, ServiceUnavailableException
 from infra.persistence.database import AsyncSessionLocal
 
-from infra.persistence.postgres.models.model_connection import ModelConnectionAuditORM, ModelConnectionORM
+from infra.persistence.postgres.models.model_connection import (
+    ModelAssignmentORM,
+    ModelConnectionAuditORM,
+    ModelConnectionORM,
+)
+
+
+ModelPurpose = Literal["document_profile", "research_analysis", "feedback", "embedding"]
+ModelKind = Literal["chat", "embedding"]
 
 
 @dataclass(frozen=True)
@@ -27,6 +36,7 @@ class ModelConnectionRecord:
     updated_at: datetime
     priority: int = 0
     version: int = 1
+    kind: str = "chat"
 
 
 @dataclass(frozen=True)
@@ -44,6 +54,13 @@ class AdminConnection:
     version: int
     created_at: datetime
     updated_at: datetime
+    kind: str
+
+
+@dataclass(frozen=True)
+class ModelAssignment:
+    connection_id: str
+    version: int
 
 
 @dataclass(frozen=True)
@@ -58,7 +75,7 @@ class AuditRecord:
 
 
 INITIAL_AUDIT_FIELDS = (
-    "display_name", "base_url", "model", "enabled", "priority",
+    "display_name", "base_url", "model", "kind", "enabled", "priority",
     "context_window_tokens", "max_output_tokens", "request_timeout_seconds",
 )
 
@@ -70,16 +87,77 @@ admin_query = select(
     ModelConnectionORM.enabled, ModelConnectionORM.priority,
     ModelConnectionORM.context_window_tokens, ModelConnectionORM.max_output_tokens,
     ModelConnectionORM.request_timeout_seconds, ModelConnectionORM.version,
-    ModelConnectionORM.created_at, ModelConnectionORM.updated_at,
+    ModelConnectionORM.created_at, ModelConnectionORM.updated_at, ModelConnectionORM.kind,
 )
 
 
 class ModelConnectionRepository:
-    async def list_enabled(self) -> tuple[ModelConnectionRecord, ...]:
+    async def read_assigned_connection(self, purpose: ModelPurpose) -> ModelConnectionORM:
+        async with AsyncSessionLocal() as database:
+            connection = await database.scalar(
+                select(ModelConnectionORM)
+                .join(ModelAssignmentORM, ModelAssignmentORM.connection_id == ModelConnectionORM.connection_id)
+                .where(ModelAssignmentORM.purpose == purpose)
+            )
+            if connection is None:
+                raise ServiceUnavailableException(
+                    "Ask an administrator to assign a processing model.",
+                    data={"code": "processing_model_unassigned", "purpose": purpose},
+                )
+            return connection
+
+    async def read_assignment(self, purpose: str) -> ModelAssignment | None:
+        async with AsyncSessionLocal() as database:
+            row = await database.get(ModelAssignmentORM, purpose)
+            return ModelAssignment(row.connection_id, row.version) if row else None
+
+    async def assign(
+        self, purpose: str, connection_id: str, expected_version: int, actor_id: str
+    ) -> ModelAssignment:
+        async with AsyncSessionLocal.begin() as database:
+            # Use the same connection-row lock as the enable/disable operation.
+            connection = await database.get(ModelConnectionORM, connection_id, with_for_update=True)
+            required_kind = "embedding" if purpose == "embedding" else "chat"
+            if connection is None or not connection.enabled or connection.kind != required_kind:
+                raise ResourceConflictException(
+                    "Select an enabled model connection of the required type.",
+                    data={"code": "processing_model_unavailable"},
+                )
+            if expected_version == 0:
+                statement = (
+                    insert(ModelAssignmentORM)
+                    .values(
+                        purpose=purpose,
+                        connection_id=connection_id,
+                        version=1,
+                        updated_by=actor_id,
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                    .on_conflict_do_nothing(index_elements=["purpose"])
+                    .returning(ModelAssignmentORM.connection_id, ModelAssignmentORM.version)
+                )
+                row = (await database.execute(statement)).one_or_none()
+                if row is not None:
+                    return ModelAssignment(row.connection_id, row.version)
+            else:
+                current = await database.get(ModelAssignmentORM, purpose, with_for_update=True)
+                if current is not None and current.version == expected_version:
+                    if current.connection_id != connection_id:
+                        current.connection_id = connection_id
+                        current.version += 1
+                        current.updated_by = actor_id
+                        current.updated_at = datetime.now(timezone.utc)
+                    return ModelAssignment(current.connection_id, current.version)
+            raise ResourceConflictException(
+                "Assignment changed. Reload before saving.",
+                data={"code": "model_assignment_version_conflict"},
+            )
+
+    async def list_enabled(self, kind: ModelKind = "chat") -> tuple[ModelConnectionRecord, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
                 select(ModelConnectionORM)
-                .where(ModelConnectionORM.enabled.is_(True))
+                .where(ModelConnectionORM.enabled.is_(True), ModelConnectionORM.kind == kind)
                 .order_by(
                     ModelConnectionORM.priority.desc(),
                     ModelConnectionORM.display_name, ModelConnectionORM.connection_id,
@@ -98,6 +176,7 @@ class ModelConnectionRepository:
                     request_timeout_seconds=row.request_timeout_seconds,
                     created_at=row.created_at,
                     updated_at=row.updated_at, priority=row.priority, version=row.version,
+                    kind=row.kind,
                 )
                 for row in rows
             )
@@ -108,6 +187,7 @@ class ModelConnectionRepository:
                 select(ModelConnectionORM).where(
                     ModelConnectionORM.connection_id == connection_id,
                     ModelConnectionORM.enabled.is_(True),
+                    ModelConnectionORM.kind == "chat",
                 )
             )
             if row is None:
@@ -124,6 +204,7 @@ class ModelConnectionRepository:
                 request_timeout_seconds=row.request_timeout_seconds,
                 created_at=row.created_at,
                 updated_at=row.updated_at, priority=row.priority, version=row.version,
+                kind=row.kind,
             )
 
     async def read(self, connection_id: str) -> ModelConnectionRecord | None:
@@ -143,6 +224,7 @@ class ModelConnectionRepository:
                 request_timeout_seconds=row.request_timeout_seconds,
                 created_at=row.created_at,
                 updated_at=row.updated_at, priority=row.priority, version=row.version,
+                kind=row.kind,
             )
 
 
@@ -224,6 +306,15 @@ class ModelConnectionRepository:
                 raise ResourceNotFoundException("Model connection not found.", data={"code": "model_connection_not_found"})
             if row.version != expected_version:
                 raise ResourceConflictException("Configuration changed; reload before saving.", data={"code": "model_connection_version_conflict"})
+            if changes.get("enabled") is False and await database.scalar(
+                select(ModelAssignmentORM.purpose)
+                .where(ModelAssignmentORM.connection_id == connection_id)
+                .limit(1)
+            ) is not None:
+                raise ResourceConflictException(
+                    "Reassign processing tasks before disabling this model.",
+                    data={"code": "model_connection_assigned"},
+                )
             audit_changes = {}
             for field, value in changes.items():
                 before = getattr(row, field)

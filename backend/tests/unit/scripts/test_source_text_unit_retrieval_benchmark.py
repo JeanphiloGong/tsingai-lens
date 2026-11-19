@@ -121,8 +121,6 @@ def test_validate_fixture_rejects_missing_or_untraceable_gold_ids() -> None:
             available_ids={"untraceable"},
             locators={"untraceable": {"document_ids": ["doc-1"], "blocks": []}},
         )
-
-
 def test_validate_fixture_rejects_locator_that_does_not_match_source() -> None:
     benchmark = _load_benchmark_module()
     fixture = {
@@ -167,18 +165,3 @@ def test_validate_fixture_rejects_locator_that_does_not_match_source() -> None:
                 }
             },
         )
-
-
-def test_normalize_embedding_base_url_accepts_configured_endpoint_url() -> None:
-    benchmark = _load_benchmark_module()
-
-    assert (
-        benchmark.normalize_embedding_base_url(
-            "https://embedding.example/v1/embeddings/"
-        )
-        == "https://embedding.example/v1"
-    )
-    assert (
-        benchmark.normalize_embedding_base_url("https://embedding.example/v1")
-        == "https://embedding.example/v1"
-    )

@@ -1,6 +1,8 @@
 """Public wording for Objective analysis failures, independent of provider text."""
 
 _ANALYSIS_ERROR_MESSAGES = {
+    "processing_model_unassigned": "Ask an administrator to assign a research analysis model.",
+    "model_credentials_unavailable": "The assigned research model credentials are unavailable.",
     "provider_timeout": "The analysis request timed out. Retry the analysis.",
     "invalid_analysis_artifact": (
         "The analysis returned an invalid result. Retry the analysis."

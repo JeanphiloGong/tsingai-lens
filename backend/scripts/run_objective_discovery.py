@@ -32,19 +32,12 @@ from application.core.objectives.objective_discovery_service import (
     execute_objective_discovery_job,
 )
 
-from application.core.objectives.llm.structured_response import (
-    build_default_structured_response_client,
-    StructuredResponseClient,
-)
-
-
 logger = logging.getLogger(__name__)
 
 
 async def run_forever(
     *,
     worker_id: str,
-    client: StructuredResponseClient,
     lease_duration: timedelta,
     heartbeat_interval: float,
     interval_seconds: float = 2,
@@ -65,7 +58,7 @@ async def run_forever(
             await asyncio.sleep(interval_seconds)
             continue
         operation_task = asyncio.create_task(
-            execute_objective_discovery_job(job, client=client)
+            execute_objective_discovery_job(job)
         )
         heartbeat_task = asyncio.create_task(heartbeat(job))
         try:
@@ -100,18 +93,13 @@ async def run(
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
-        client = build_default_structured_response_client()
-        try:
-            await run_forever(
-                worker_id=f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}",
-                client=client,
-                lease_duration=timedelta(seconds=lease_seconds),
-                heartbeat_interval=heartbeat_interval,
-                interval_seconds=interval_seconds,
-                once=once,
-            )
-        finally:
-            client.client.close()
+        await run_forever(
+            worker_id=f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}",
+            lease_duration=timedelta(seconds=lease_seconds),
+            heartbeat_interval=heartbeat_interval,
+            interval_seconds=interval_seconds,
+            once=once,
+        )
     finally:
         try:
             await database_engine.dispose()

@@ -91,6 +91,7 @@ def upgrade() -> None:
     # Answer feedback is introduced by 0056, not this historical cutover.
     # Model connections are introduced by 0089 with the original schema.
     # Model connection audit is introduced by 0102.
+    # Model assignments are introduced by 0103.
     Base.metadata.create_all(
         bind=bind,
         tables=[
@@ -100,6 +101,7 @@ def upgrade() -> None:
                 "chat_message_feedback",
                 "model_connections",
                 "model_connection_audit",
+                "model_assignments",
             }
         ],
     )

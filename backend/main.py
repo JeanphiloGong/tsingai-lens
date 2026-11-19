@@ -86,6 +86,7 @@ PUBLIC_API_V1_PREFIX = f"{PUBLIC_API_PREFIX}/v1"
 MODEL_ADMIN_PATHS = (
     f"{PUBLIC_API_V1_PREFIX}/admin/model-connections",
     f"{PUBLIC_API_V1_PREFIX}/admin/model-connection-audit",
+    f"{PUBLIC_API_V1_PREFIX}/admin/model-assignments",
 )
 
 
@@ -295,8 +296,10 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(
         model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX
     )
+    from controllers.models.admin_assignment_routes import admin_assignment_router
     from controllers.models.admin_connection_routes import admin_model_router
     app.include_router(admin_model_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(admin_assignment_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX

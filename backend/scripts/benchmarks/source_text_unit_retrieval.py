@@ -4,12 +4,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import httpx
 from openai import OpenAI
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -29,9 +29,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fixture", required=True, type=Path)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--embedding-model")
-    parser.add_argument("--embedding-base-url")
-    parser.add_argument("--embedding-api-key")
     return parser.parse_args()
 
 
@@ -192,10 +189,6 @@ def embed_texts(client: OpenAI, model: str, texts: list[str]) -> np.ndarray:
     return np.asarray(vectors, dtype=float)
 
 
-def normalize_embedding_base_url(base_url: str) -> str:
-    return base_url.rstrip("/").removesuffix("/embeddings")
-
-
 def build_locators(text_units: list[Any], blocks: list[Any]) -> dict[str, dict[str, Any]]:
     locators = {
         text_unit.text_unit_id: {
@@ -263,6 +256,9 @@ async def main_async() -> int:
     from repositories.source_artifact_repository import (  # noqa: PLC0415
         SourceArtifactRepository,
     )
+    from exceptions import ProjectException
+    from infra.llm.model_credentials import provider_options
+    from repositories.model_connection_repository import ModelConnectionRepo
 
     fixture = json.loads(args.fixture.resolve().read_text(encoding="utf-8"))
     engine = build_database_engine(DatabaseSettings())
@@ -271,6 +267,9 @@ async def main_async() -> int:
         repository = SourceArtifactRepository()
         text_units = await repository.list_text_units(args.collection_id)
         blocks = await repository.list_blocks(args.collection_id)
+        connection = await ModelConnectionRepo.read_assigned_connection("embedding")
+    except ProjectException as exc:
+        raise SystemExit(exc.message) from None
     finally:
         await engine.dispose()
     if not text_units:
@@ -294,24 +293,14 @@ async def main_async() -> int:
         locators=locators,
     )
 
-    model = args.embedding_model or os.getenv("EMBEDDING_MODEL", "").strip()
-    base_url = normalize_embedding_base_url(
-        args.embedding_base_url or os.getenv("EMBEDDING_BASE_URL", "").strip()
-    )
-    api_key = args.embedding_api_key or os.getenv("EMBEDDING_API_KEY", "").strip()
-    if not model:
-        raise SystemExit("EMBEDDING_MODEL is unresolved; set it or pass --embedding-model")
-    if not api_key and base_url:
-        api_key = "not-needed"
-    if not api_key:
-        raise SystemExit(
-            "EMBEDDING_API_KEY is unresolved; set it or pass --embedding-api-key"
-        )
-
     queries = fixture["queries"]
-    client = OpenAI(api_key=api_key, base_url=base_url or None)
-    corpus_vectors = embed_texts(client, model, [item["text"] for item in corpus])
-    query_vectors = embed_texts(client, model, [query["query"] for query in queries])
+    try:
+        options = provider_options(connection)
+    except ProjectException as exc:
+        raise SystemExit(exc.message) from None
+    with OpenAI(**options, http_client=httpx.Client(follow_redirects=False)) as client:
+        corpus_vectors = embed_texts(client, connection.model, [item["text"] for item in corpus])
+        query_vectors = embed_texts(client, connection.model, [query["query"] for query in queries])
     rankings = {
         "tfidf": rank_tfidf(corpus, queries),
         "embedding": rank_embeddings(
@@ -328,7 +317,8 @@ async def main_async() -> int:
         "filters": fixture["filters"],
         "corpus_text_unit_count": len(corpus),
         "k": args.k,
-        "embedding_model": model,
+        "embedding_model": connection.model,
+        "embedding_connection_id": connection.connection_id,
         "methods": build_results(
             fixture=fixture,
             rankings=rankings,

@@ -13,6 +13,7 @@ class ModelConnectionORM(Base):
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="chat")
     api_key_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
@@ -25,6 +26,7 @@ class ModelConnectionORM(Base):
 
     __table_args__ = (
         Index("ix_model_connections_enabled", "enabled"),
+        CheckConstraint("kind IN ('chat', 'embedding')", name="kind"),
         CheckConstraint('length(connection_id) BETWEEN 1 AND 64', name='id_length'),
         CheckConstraint('length(btrim(display_name)) BETWEEN 1 AND 100', name='name_length'),
         CheckConstraint('length(base_url) BETWEEN 1 AND 2048', name='base_length'),
@@ -55,3 +57,16 @@ class ModelConnectionAuditORM(Base):
         CheckConstraint("jsonb_typeof(changes) = 'object'", name="changes_object"),
         UniqueConstraint("connection_id", "version"),
     )
+
+
+class ModelAssignmentORM(Base):
+    __tablename__ = "model_assignments"
+    __table_args__ = (CheckConstraint("version > 0", name="version_positive"),)
+
+    purpose: Mapped[str] = mapped_column(String(64), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("model_connections.connection_id", ondelete="RESTRICT")
+    )
+    version: Mapped[int] = mapped_column(BigInteger)
+    updated_by: Mapped[str] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -1,19 +1,32 @@
 """Actual HTTP, PostgreSQL transactions and a local OpenAI transport."""
 import asyncio
+from datetime import timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+from threading import Thread
 from types import SimpleNamespace
+import sys
+from unittest.mock import AsyncMock
 import httpx
 import pytest
 from sqlalchemy import event, select, text
 from openai import AsyncOpenAI
 from application import model_connection_service as service
+from application.core.objectives.llm.structured_response import build_research_response_client
+from application.source import document_preparation_service as preparation
 from controllers.dependencies.auth import get_current_user_id
+from domain.source import SourceBlock, SourceDocument, SourceTextUnit
 from exceptions import ProjectException
 from infra.identity.client import IdentityUnavailableError, SessionNotFoundError
 from infra.llm.model_credentials import decrypt_api_key
 from infra.persistence.postgres.models.model_connection import ModelConnectionAuditORM
 from main import create_app
 from repositories.model_connection_repository import ModelConnectionRepo
+from repositories.document_profile_repository import DocumentProfileRepo
+from repositories.pipeline_run_repository import PipelineRunRepo
+from repositories.source_artifact_repository import SourceArtifactRepo
+from scripts.benchmarks import source_text_unit_retrieval as benchmark
+from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio
 
@@ -40,7 +53,7 @@ async def management(postgres_session_factory, monkeypatch):
     monkeypatch.setattr("infra.identity.client.Client", LocalIdentity(), raising=False)
     monkeypatch.setenv("BROWSER_ORIGIN", "http://testserver")
     app = create_app()
-    async def user(): return "reader"
+    async def user(): return "user-1"
     app.dependency_overrides[get_current_user_id] = user
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver",
         headers={"Cookie":"lens_session=manager","Origin":"http://testserver"}) as client:
@@ -54,6 +67,265 @@ async def create(client, **overrides):
     assert response.headers["cache-control"] == "no-store"
     assert "synthetic-initial" not in response.text
     return response.json()["data"]
+
+
+@pytest.fixture
+def profile_provider():
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append((self.path, body["model"], self.headers["Authorization"]))
+            if self.path.endswith("/embeddings"):
+                response = {
+                    "object": "list", "model": body["model"],
+                    "data": [
+                        {"object": "embedding", "index": index, "embedding": [1.0, 0.0]}
+                        for index, _ in enumerate(body["input"])
+                    ],
+                    "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                }
+            else:
+                content = {
+                    "doc_type": "experimental", "profile_warnings": [], "confidence": 0.9,
+                }
+                if body["model"] == "feedback":
+                    payload = json.loads(body["messages"][-1]["content"])
+                    if payload.get("task_type") == "sft":
+                        content = {"target": "Paper B reports a lower porosity.", "missing_reasons": []}
+                    else:
+                        content = {"task_relation": "same_task", "reason": "Same original comparison."}
+                response = {
+                    "id": "profile", "object": "chat.completion", "created": 1, "model": body["model"],
+                    "choices": [{
+                        "index": 0, "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": json.dumps(content)},
+                    }],
+                }
+            result = json.dumps(response).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(result)))
+            self.end_headers()
+            self.wfile.write(result)
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}/v1", requests
+        finally:
+            server.shutdown()
+            thread.join()
+
+
+async def test_document_profile_assignment_through_http_and_worker(
+    management, profile_provider, collection_workspace, monkeypatch
+):
+    client, factory = management
+    base_url, model_requests = profile_provider
+    await seed_collection(factory, "porosity", document_ids=("paper-a",))
+    parse = AsyncMock(return_value=SourceDocument(
+        "paper-a", 0, "Laser power and porosity", "Methods: vary laser power. Results: porosity decreases.",
+    ))
+    monkeypatch.setattr(preparation, "_parse_document_sources", parse)
+    assignment = "/api/v1/admin/model-assignments/document_profile"
+    document = "/api/v1/collections/porosity/documents/paper-a/preparation"
+
+    assert (await client.get(assignment, headers={"Cookie": "lens_session=reader"})).status_code == 403
+    assert (await client.get(assignment)).json()["data"] == {"connection_id": None, "version": 0}
+    assert (await client.post(document)).json()["data"]["code"] == "processing_model_unassigned"
+    assert await PipelineRunRepo.claim_next_document_preparation_job(
+        worker_id="empty", lease_duration=timedelta(seconds=60)
+    ) is None
+    first = await create(client, base_url=base_url, model="profile-a", api_key="test-key-a")
+    second = await create(client, base_url=base_url, model="profile-b", api_key="test-key-b")
+    first_id, second_id = first["connection_id"], second["connection_id"]
+
+    async def assign(connection_id, version):
+        response = await client.put(assignment, json={
+            "connection_id": connection_id, "expected_version": version,
+        })
+        return response.json()["data"]
+
+    async def enable(connection_id, enabled):
+        response = await client.patch(
+            f"/api/v1/admin/model-connections/{connection_id}",
+            json={"expected_version": 1 if enabled else 2, "enabled": enabled},
+        )
+        return response.json()["data"]
+
+    assert (await assign(first_id, 0))["code"] == "processing_model_unavailable"
+    assert (await enable(first_id, True))["enabled"]
+    assert (await enable(second_id, True))["enabled"]
+    assert await assign(first_id, 0) == {"connection_id": first_id, "version": 1}
+    assert (await enable(first_id, False))["code"] == "model_connection_assigned"
+    original = (await client.post(document)).json()["data"]
+    assert (await assign(second_id, 0))["code"] == "model_assignment_version_conflict"
+    assert await assign(second_id, 1) == {"connection_id": second_id, "version": 2}
+    assert not (await enable(first_id, False))["enabled"]
+    assert (await client.post(document)).json()["data"]["run_id"] == original["run_id"]
+
+    async def run_worker(expected, connection_id):
+        job = await PipelineRunRepo.claim_next_document_preparation_job(
+            worker_id="profile-worker", lease_duration=timedelta(seconds=60)
+        )
+        assert job.run.run_id == expected["run_id"]
+        assert job.run.context["model_connection_id"] == connection_id
+        result = await preparation.execute_document_preparation_job(
+            job, workspace=collection_workspace, object_store=object(), source_artifact_builder=object()
+        )
+        assert result.status == "completed"
+        return await DocumentProfileRepo.read("porosity", "paper-a")
+
+    first_profile = await run_worker(original, first_id)
+    next_run = (await client.post(document)).json()["data"]
+    assert next_run["run_id"] != original["run_id"]
+    second_profile = await run_worker(next_run, second_id)
+    assert [profile.doc_type for profile in (first_profile, second_profile)] == ["experimental"] * 2
+    assert first_profile.profile_fingerprint != second_profile.profile_fingerprint
+    assert first_profile.source_fingerprint == second_profile.source_fingerprint
+    assert parse.await_count == 1
+    assert model_requests == [
+        ("/v1/chat/completions", "profile-a", "Bearer test-key-a"),
+        ("/v1/chat/completions", "profile-b", "Bearer test-key-b"),
+    ]
+
+
+async def test_embedding_assignment_drives_benchmark_without_entering_chat_catalog(
+    management, profile_provider, monkeypatch, tmp_path, capsys
+):
+    from infra.persistence import database
+
+    client, factory = management
+    base_url, calls = profile_provider
+    chat = await create(client, base_url=base_url, model="research")
+    vectors = await create(
+        client, base_url=base_url, kind="embedding", model="vectors", api_key="vector-test-key"
+    )
+    admin = "/api/v1/admin/model-connections"
+    assignments = "/api/v1/admin/model-assignments"
+    chat_id, vector_id = chat["connection_id"], vectors["connection_id"]
+    for connection_id in (chat_id, vector_id):
+        enabled = await client.patch(f"{admin}/{connection_id}", json={"expected_version": 1, "enabled": True})
+        assert enabled.json()["data"]["enabled"]
+
+    response = await client.post(f"{admin}/{vector_id}/test", json={"expected_version": 2})
+    assert response.json()["data"]["success"]
+    directory = (await client.get("/api/v1/model-connections")).json()["data"]["items"]
+    assert [item["connection_id"] for item in directory] == [chat_id]
+    choices = (await client.get(f"{assignments}/choices?kind=embedding")).json()["data"]["items"]
+    assert [item["connection_id"] for item in choices] == [vector_id]
+
+    async def assign(purpose, connection_id):
+        return (await client.put(
+            f"{assignments}/{purpose}", json={"connection_id": connection_id, "expected_version": 0}
+        )).json()["data"]
+
+    assert (await assign("embedding", chat_id))["code"] == "processing_model_unavailable"
+    assert (await assign("research_analysis", vector_id))["code"] == "processing_model_unavailable"
+    assert (await assign("embedding", vector_id))["connection_id"] == vector_id
+    assert (await assign("research_analysis", chat_id))["connection_id"] == chat_id
+    assert (await assign("feedback", chat_id))["connection_id"] == chat_id
+
+    research = await build_research_response_client()
+    with research.client as provider:
+        completion = await asyncio.to_thread(
+            provider.chat.completions.create,
+            model=research.model,
+            messages=[{"role": "user", "content": "Classify the porosity study."}],
+        )
+    assert completion.model == "research"
+
+    await seed_collection(factory, "benchmark", document_ids=("paper",))
+    await SourceArtifactRepo.replace_document("benchmark", SourceDocument(
+        "paper", 0, "LPBF", "Laser power affects porosity.",
+        text_units=(SourceTextUnit("tu", 0, "Laser power affects porosity.", 5, ("paper",)),),
+        blocks=(SourceBlock("block", "paper", "text", "Laser power affects porosity.", 0, ("tu",), 1),),
+    ))
+    fixture = tmp_path / "benchmark.json"
+    fixture.write_text(json.dumps({
+        "schema_version": 1, "name": "porosity", "collection_id": "benchmark",
+        "filters": {"collection_id": "benchmark", "document_ids": ["paper"]},
+        "queries": [{
+            "id": "question", "query": "laser power porosity", "relevant_text_unit_ids": ["tu"],
+            "source_locators": [{"text_unit_id": "tu", "document_id": "paper", "block_id": "block", "page": 1}],
+        }],
+    }))
+    monkeypatch.setattr(database, "build_database_engine", lambda _: factory.kw["bind"])
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--collection-id", "benchmark", "--fixture", str(fixture)])
+    assert await benchmark.main_async() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["embedding_connection_id"] == vector_id
+    assert result["methods"]["embedding"]["recall_at_k"] == 1
+    assert calls == [
+        ("/v1/embeddings", "vectors", "Bearer vector-test-key"),
+        ("/v1/chat/completions", "research", "Bearer synthetic-initial"),
+        ("/v1/embeddings", "vectors", "Bearer vector-test-key"),
+        ("/v1/embeddings", "vectors", "Bearer vector-test-key"),
+    ]
+
+
+async def test_feedback_workers_use_feedback_assignment(management, profile_provider, monkeypatch):
+    from dataclasses import replace
+    from datetime import datetime, timezone
+    from application.feedback import analysis_handler, conversation_context
+    from application.feedback import correction_signal_handler, correction_signal_worker
+    from application.feedback import sample_build_worker, worker_lease
+    from tests.unit.feedback.test_correction_signal import _Cases, _Chat, _Jobs, _job, _messages
+    from tests.unit.feedback import test_sample_build_worker as sample_fixture
+
+    client, _ = management
+    base_url, calls = profile_provider
+    messages = _messages()
+    jobs = _Jobs(_job(messages))
+    cases = _Cases()
+    chat = _Chat(messages)
+    for module in (correction_signal_handler, analysis_handler, conversation_context):
+        monkeypatch.setattr(module, "ChatRepo", chat)
+    monkeypatch.setattr(correction_signal_worker, "AnalysisJobRepo", jobs)
+    monkeypatch.setattr(correction_signal_worker, "FeedbackCaseRepo", cases)
+    now = datetime.now(timezone.utc).isoformat()
+    unassigned = await jobs.claim_next_correction_signal_analysis_job(now)
+    await correction_signal_worker.execute_correction_signal_analysis_job(unassigned)
+    assert jobs.finished == ("failed", "processing_model_unassigned")
+    assert cases.calls == [] and calls == []
+
+    connection = await create(client, base_url=base_url, model="feedback", api_key="feedback-test-key")
+    connection_id = connection["connection_id"]
+    response = await client.patch(
+        f"/api/v1/admin/model-connections/{connection_id}",
+        json={"expected_version": 1, "enabled": True},
+    )
+    assert response.json()["data"]["enabled"]
+    response = await client.put(
+        "/api/v1/admin/model-assignments/feedback",
+        json={"connection_id": connection_id, "expected_version": 0},
+    )
+    assert response.json()["code"] == 200
+    jobs.job = _job(messages)
+    job = await jobs.claim_next_correction_signal_analysis_job(now)
+    await correction_signal_worker.execute_correction_signal_analysis_job(job)
+    assert len(cases.calls) == 1
+    assert cases.calls[0]["result"].model == "feedback"
+
+    sample_job = sample_fixture._job()
+    sample_jobs = sample_fixture._Jobs(replace(
+        sample_job, payload={**sample_job.payload, "review_note": "Use the original evidence."}
+    ))
+    samples = sample_fixture._Samples(sample_fixture._sample(), sample_jobs)
+    monkeypatch.setattr(sample_build_worker, "AnalysisJobRepo", sample_jobs)
+    monkeypatch.setattr(worker_lease, "AnalysisJobRepo", sample_jobs)
+    monkeypatch.setattr(sample_build_worker, "FeedbackDatasetRepo", sample_fixture._Datasets())
+    monkeypatch.setattr(sample_build_worker, "FeedbackDatasetSampleRepo", samples)
+    monkeypatch.setattr(sample_build_worker, "FeedbackCaseRepo", sample_fixture._Cases())
+    claimed = await sample_jobs.claim_next_dataset_sample_build_job(now=now)
+    outcome = await sample_build_worker.execute_dataset_sample_build_job(claimed)
+    assert outcome.status == "succeeded"
+    assert samples.completed["outcome"] == "candidate"
+    assert samples.revision.provenance["builder"] == "feedback"
+    assert calls == [("/v1/chat/completions", "feedback", "Bearer feedback-test-key")] * 2
 
 
 async def test_permissions_origin_and_secret_validation_precede_effects(management, monkeypatch):
@@ -159,6 +431,7 @@ async def test_audit_query_authorizes_filters_and_pages_successful_writes(manage
     assert (page["total"], page["limit"], page["offset"]) == (2, 1, 0)
     assert page["items"][0]["connection_id"] == second["connection_id"]
     assert page["items"][0]["actor_display_name"] == "Model operator"
+    assert page["items"][0]["changes"]["kind"] == {"before": None, "after": "chat"}
     assert "api_key" not in page["items"][0]["changes"]
 
     filtered = (await client.get(endpoint, params={"connection_id": first["connection_id"]})).json()["data"]

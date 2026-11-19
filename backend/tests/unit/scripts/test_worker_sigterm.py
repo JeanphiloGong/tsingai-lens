@@ -10,18 +10,18 @@ import pytest
 
 
 @pytest.mark.parametrize(
-    "name,has_client",
+    "name",
     [
-        ("run_document_preparation", True),
-        ("run_objective_discovery", True),
-        ("run_objective_analysis", True),
-        ("feedback_analysis_worker", False),
-        ("correction_signal_analysis_worker", True),
-        ("tool_failure_analysis_worker", False),
-        ("dataset_sample_worker", True),
+        "run_document_preparation",
+        "run_objective_discovery",
+        "run_objective_analysis",
+        "feedback_analysis_worker",
+        "correction_signal_analysis_worker",
+        "tool_failure_analysis_worker",
+        "dataset_sample_worker",
     ],
 )
-def test_sigterm_drains_work_and_closes_resources(tmp_path, name, has_client):
+def test_sigterm_drains_work_and_closes_resources(tmp_path, name):
     output = tmp_path / "events"
     script = """
 import asyncio
@@ -49,25 +49,13 @@ async def wait_for_shutdown(*args, **kwargs):
 async def dispose():
     event("database_closed")
 
-class Client:
-    async def __aenter__(self):
-        return self
-    async def __aexit__(self, *args):
-        self.close()
-    def close(self):
-        event("client_closed")
-
 module.DatabaseSettings = lambda: object()
 module.build_database_engine = lambda _: SimpleNamespace(dispose=dispose)
 module.AsyncSessionLocal = SimpleNamespace(configure=lambda **_: None)
 if sys.argv[1].startswith("run_"):
-    resource = SimpleNamespace(client=Client())
     if sys.argv[1] == "run_document_preparation":
-        module.build_default_document_profile_extractor = lambda: resource
         module.FileCollectionWorkspace = lambda _: SimpleNamespace(root_dir=output.parent)
         module.FileObjectStore = lambda _: object()
-    else:
-        module.build_default_structured_response_client = lambda: resource
     module.run_forever = wait_for_shutdown
 else:
     module.AnalysisJobRepo.recover_expired_jobs = AsyncMock()
@@ -78,8 +66,6 @@ else:
         "dataset_sample_worker": "dataset_sample_build",
     }[sys.argv[1]]
     setattr(module.AnalysisJobRepo, "claim_next_" + kind + "_job", wait_for_shutdown)
-    if hasattr(module, "AsyncOpenAI"):
-        module.AsyncOpenAI = lambda **_: Client()
     if sys.argv[1] == "dataset_sample_worker":
         module.FeedbackDatasetSampleRepo.backfill_existing_cases = AsyncMock()
 sys.argv = ["worker", "--once"]
@@ -107,7 +93,6 @@ module.main()
         assert output.read_text().splitlines() == [
             "started",
             "drained",
-            *(["client_closed"] if has_client else []),
             "database_closed",
         ]
     finally:

@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import uuid4
 
-from application.feedback.evaluation_sample_builder import EvaluationBuildNeedsInput
-from application.feedback.preference_sample_builder import PreferenceBuildNeedsInput
-from application.feedback.sft_sample_builder import SftBuildNeedsInput
+import httpx
+from openai import AsyncOpenAI
+
+from application.feedback.evaluation_sample_builder import EvaluationBuildNeedsInput, EvaluationSampleBuilder
+from application.feedback.preference_sample_builder import PreferenceBuildNeedsInput, PreferenceSampleBuilder
+from application.feedback.sft_sample_builder import SftBuildNeedsInput, SftSampleBuilder
+from application.feedback.sample_generation import OpenAIFeedbackSampleGenerator
 from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
 from domain.feedback import SampleRevision
 from domain.feedback.sample_revision import content_digest_for
+from exceptions import ServiceUnavailableException
+from infra.llm.model_credentials import provider_options
+from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.analysis_job_repository import (
     AnalysisJob,
     AnalysisJobRepo,
@@ -33,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 async def execute_dataset_sample_build_job(
-    job: AnalysisJob, *, builders: Mapping[str, Any], build_timeout_seconds: float = 600
+    job: AnalysisJob, *, builders: Mapping[str, Any] | None = None, build_timeout_seconds: float = 600
 ) -> AnalysisJob:
     if job.status != "running":
         return job
@@ -68,7 +76,7 @@ async def execute_dataset_sample_build_job(
 
 
 async def _build_dataset_sample(
-    job: AnalysisJob, *, builders: Mapping[str, Any]
+    job: AnalysisJob, *, builders: Mapping[str, Any] | None
 ) -> Any:
     payload = job.payload
     try:
@@ -110,26 +118,38 @@ async def _build_dataset_sample(
             )
             return await _read_finished_dataset_sample_job(job)
         annotation = await FeedbackCaseRepo.read_annotation(case.case_id)
-        task_builder = builders.get(dataset.task_type)
-        if task_builder is None:
-            raise ValueError("unsupported_dataset_task_type")
         previous = (
             await FeedbackDatasetSampleRepo.read_revision(sample.current_revision_id)
             if sample.current_revision_id
             else None
         )
-        built = await task_builder.build(
-            dataset=dataset,
-            sample=sample,
-            case=case,
-            annotation=annotation,
-            review_note=payload.get("review_note"),
-            **(
-                {"previous_revision": previous}
-                if dataset.task_type == "preference"
-                else {}
-            ),
-        )
+        async with AsyncExitStack() as resources:
+            if builders is None:
+                builder_type = {
+                    "sft": SftSampleBuilder,
+                    "preference": PreferenceSampleBuilder,
+                    "evaluation": EvaluationSampleBuilder,
+                }.get(dataset.task_type)
+                if builder_type is None:
+                    raise ValueError("unsupported_dataset_task_type")
+                connection = await ModelConnectionRepo.read_assigned_connection("feedback")
+                client = await resources.enter_async_context(AsyncOpenAI(
+                    **provider_options(connection), http_client=httpx.AsyncClient(follow_redirects=False)
+                ))
+                generator = OpenAIFeedbackSampleGenerator(client=client, model=connection.model)
+                task_builder = builder_type(generator=generator)
+            else:
+                task_builder = builders.get(dataset.task_type)
+                if task_builder is None:
+                    raise ValueError("unsupported_dataset_task_type")
+            built = await task_builder.build(
+                dataset=dataset,
+                sample=sample,
+                case=case,
+                annotation=annotation,
+                review_note=payload.get("review_note"),
+                **({"previous_revision": previous} if dataset.task_type == "preference" else {}),
+            )
         if isinstance(
             built,
             (SftBuildNeedsInput, PreferenceBuildNeedsInput, EvaluationBuildNeedsInput),
@@ -257,6 +277,8 @@ def _positive_int(value: Any, name: str) -> int:
 
 
 def _error_code(exc: Exception) -> str:
+    if isinstance(exc, ServiceUnavailableException):
+        return exc.data["code"]
     value = str(exc).strip()
     if value.startswith("dataset_sample_build_") and value.replace("_", "").isalnum():
         return value[:128]

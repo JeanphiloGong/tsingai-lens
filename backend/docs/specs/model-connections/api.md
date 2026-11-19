@@ -111,6 +111,7 @@ Order by `priority DESC, display_name ASC, connection_id ASC`. Read `items` and
         "display_name": "Lab A",
         "base_url": "https://model.example.invalid/v1",
         "model": "lab-chat-a",
+        "kind": "chat",
         "api_key_configured": true,
         "enabled": false,
         "priority": 0,

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from application import model_connection_service as service
 from controllers.dependencies.authz import ModelManager, require_model_manager
-from repositories.model_connection_repository import ModelConnectionRepo
+from repositories.model_connection_repository import ModelConnectionRepo, ModelKind
 from utils.response import make_api_response
 
 PositiveInt = Annotated[int, Field(gt=0, le=2147483647)]
@@ -18,6 +18,7 @@ class CreateConnectionRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     base_url: str = Field(min_length=1, max_length=2048)
     model: str = Field(min_length=1, max_length=200)
+    kind: ModelKind = "chat"
     api_key: str | None = None
     priority: int = Field(default=0, ge=-2147483648, le=2147483647)
     context_window_tokens: PositiveInt | None = None
@@ -85,6 +86,7 @@ class ConnectionResponse(BaseModel):
     display_name: str
     base_url: str
     model: str
+    kind: ModelKind
     api_key_configured: bool
     enabled: bool
     priority: int

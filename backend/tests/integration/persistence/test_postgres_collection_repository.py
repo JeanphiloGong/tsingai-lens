@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import event
 
 from domain.source import Collection, Document
-from infra.persistence.postgres.models.document import DocumentORM
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
+    DocumentORM,
     DocumentPreparationORM,
 )
 from repositories.collection_repository import (

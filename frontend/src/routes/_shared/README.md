@@ -69,8 +69,9 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
   Permission outages offer retry, missing grants show access denied, and expired
   sessions clear authentication. Codes stay in memory and are refreshed on
   administration navigation, window focus and completed management writes.
-  The gate controls SPA presentation; user-service independently authorizes
-  every management API request.
+  The gate controls SPA presentation. User-service authorizes its account APIs;
+  Lens independently checks model administration through the existing gRPC
+  permission service.
 
 There is one browser contract. Do not add alternate API origins, compatibility
 normalizers, or parallel Objective result types.

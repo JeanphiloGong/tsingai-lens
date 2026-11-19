@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 from domain.core.document_profile import DocumentProfile
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.document import DocumentORM
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
+    DocumentORM,
     DocumentPreparationORM,
 )
 from sqlalchemy import select

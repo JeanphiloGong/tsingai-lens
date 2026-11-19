@@ -6,7 +6,6 @@ import json
 import os
 from typing import Any, Mapping
 
-from openai import AsyncOpenAI
 
 from application.feedback.sample_builder_support import (
     SftSampleModelOutput,
@@ -97,8 +96,8 @@ Example: {"suggested_preference":"a","rationale":"A preserves the passage's 200 
 
 
 class OpenAIFeedbackSampleGenerator:
-    def __init__(self, *, client: Any | None = None, model: str | None = None) -> None:
-        self.model_name = (model or os.getenv("LLM_MODEL") or "gpt-4o-mini").strip()
+    def __init__(self, *, client: Any, model: str) -> None:
+        self.model_name = model
         self.client = client
 
     async def generate(
@@ -143,16 +142,7 @@ class OpenAIFeedbackSampleGenerator:
         if effort:
             request["reasoning_effort"] = effort
         record_llm_prompt_version("feedback_sample_construction", SAMPLE_PROMPT_VERSION)
-        if self.client is not None:
-            completion = await self.client.chat.completions.create(**request)
-        else:
-            async with AsyncOpenAI(
-                api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
-                base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
-                timeout=float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "180")),
-                max_retries=0,
-            ) as client:
-                completion = await client.chat.completions.create(**request)
+        completion = await self.client.chat.completions.create(**request)
         record_llm_completion(completion, requested_model=self.model_name)
         choice = completion.choices[0]
         if choice.finish_reason != "stop":

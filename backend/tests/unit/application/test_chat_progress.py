@@ -50,7 +50,7 @@ async def test_heartbeat_preserves_research_phase_and_completed_counts(
             completion_reason=AgentCompletionReason.MODEL_ANSWER,
         )
 
-    monkeypatch.setattr(service.runner, "run_turn", slow_turn)
+    monkeypatch.setattr(service.scripted_runner, "run_turn", slow_turn)
     events = await service.send_message_stream(
         session.session_id, "user-1", message="Review the evidence"
     )

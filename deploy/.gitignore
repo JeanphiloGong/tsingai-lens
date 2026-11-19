@@ -5,3 +5,4 @@ identity-certs/
 public-tls/
 backups/
 data/
+model-secrets/

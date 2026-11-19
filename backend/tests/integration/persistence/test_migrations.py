@@ -29,7 +29,8 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261104_0099"
+HEAD_REVISION = "20261114_0101"
+IDENTITY_REVISION = "20261104_0099"
 # Keep historical rollback cases before the irreversible PostgreSQL identity cutover.
 PRE_IDENTITY_REVISION = "20261102_0098"
 POSTGRES_IDENTIFIER_LIMIT = 63
@@ -1688,7 +1689,7 @@ def test_external_identity_cutover_preserves_collection_owner_and_requires_resto
         ))
         before = dict(connection.execute(select(collections)).mappings().one())
 
-        command.upgrade(config, "head")
+        command.upgrade(config, IDENTITY_REVISION)
 
         inspector = inspect(connection)
         assert "auth_users" not in inspector.get_table_names()
@@ -1699,6 +1700,6 @@ def test_external_identity_cutover_preserves_collection_owner_and_requires_resto
             for table in inspector.get_table_names()
             for foreign_key in inspector.get_foreign_keys(table)
         )
-        assert MigrationContext.configure(connection).get_current_revision() == HEAD_REVISION
+        assert MigrationContext.configure(connection).get_current_revision() == IDENTITY_REVISION
         with pytest.raises(RuntimeError, match="restore the pre-cutover database backup"):
             command.downgrade(config, PRE_IDENTITY_REVISION)

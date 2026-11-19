@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 from zipfile import ZipFile
 
 import application.source.source_archive_service as source_archive_service_module
@@ -98,7 +98,11 @@ def test_app_disposes_owned_database_engine_when_identity_start_fails(
     service = Mock(side_effect=RuntimeError("identity failed"))
     monkeypatch.setattr("main.DatabaseSettings", lambda: object())
     monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
-    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", Mock())
+    sessions = MagicMock()
+    sessions.return_value.__aenter__.return_value.execute = AsyncMock(
+        return_value=Mock(all=lambda: [])
+    )
+    monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", sessions)
     monkeypatch.setattr(
         "infra.identity.client.IdentityClient",
         service,
@@ -158,7 +162,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
         )
         capability_names = {
             spec.name
-            for spec in shared_chat_service.ChatService.runner.capabilities.specs
+            for spec in shared_chat_service.ChatService.capabilities.specs
         }
         assert {
             "get_collection_context",

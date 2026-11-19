@@ -36,12 +36,12 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.document import DocumentORM
-from exceptions import ResourceConflictException, ResourceNotFoundException
-from infra.persistence.postgres.models.collection import CollectionORM
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
+    DocumentORM,
+    CollectionORM,
     DocumentPreparationORM,
 )
+from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisORM,
     ObjectiveResearchORM,

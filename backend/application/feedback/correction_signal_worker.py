@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import AsyncExitStack
 import logging
+import httpx
+from openai import AsyncOpenAI
 
+from exceptions import ServiceUnavailableException
+from infra.llm.model_credentials import provider_options
+from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo, LeaseLostError
 from repositories.feedback_case_repository import FeedbackCaseRepo, FeedbackCaseWriteConflict
 
 from application.feedback.errors import AnalysisInputError
+from application.feedback.correction_scope_analysis import OpenAICorrectionSignalAnalysisEngine
 from application.feedback.correction_signal_handler import CorrectionSignalAnalysisEngine, analyze_correction_signal_job
 
 
@@ -16,17 +23,28 @@ logger = logging.getLogger(__name__)
 
 
 async def execute_correction_signal_analysis_job(
-    job: AnalysisJob, *, engine: CorrectionSignalAnalysisEngine, model_name: str
+    job: AnalysisJob, *, engine: CorrectionSignalAnalysisEngine | None = None,
+    model_name: str | None = None,
 ) -> AnalysisJob:
     try:
-        (
-            result,
-            context_snapshot,
-            source_signal_ids,
-        ) = await analyze_correction_signal_job(
-            job,
-            engine=engine,
-            model_name=model_name,
+        async with AsyncExitStack() as resources:
+            if engine is None:
+                connection = await ModelConnectionRepo.read_assigned_connection("feedback")
+                client = await resources.enter_async_context(AsyncOpenAI(
+                    **provider_options(connection), http_client=httpx.AsyncClient(follow_redirects=False)
+                ))
+                engine = OpenAICorrectionSignalAnalysisEngine(client=client, model=connection.model)
+                model_name = connection.model
+            result, context_snapshot, source_signal_ids = await analyze_correction_signal_job(
+                job, engine=engine, model_name=model_name,
+            )
+    except ServiceUnavailableException as exc:
+        return await AnalysisJobRepo.mark_failed(
+            job_id=job.job_id,
+            error_code=exc.data["code"],
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
         )
     except AnalysisInputError as exc:
         code = str(exc)

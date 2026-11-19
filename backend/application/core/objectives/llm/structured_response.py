@@ -10,6 +10,7 @@ from contextvars import ContextVar
 from time import perf_counter
 from typing import Any
 
+import httpx
 import tiktoken
 from openai import LengthFinishReasonError, OpenAI
 from openai.lib._pydantic import to_strict_json_schema
@@ -23,7 +24,9 @@ from application.core.structured_extraction.json_support import (
     trace_json,
     trace_text,
 )
+from infra.llm.model_credentials import provider_options
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
+from repositories.model_connection_repository import ModelConnectionRepo
 
 logger = logging.getLogger(__name__)
 
@@ -681,5 +684,12 @@ class StructuredResponseClient:
         return _DEFAULT_EXTRACTION_MODE
 
 
-def build_default_structured_response_client() -> StructuredResponseClient:
-    return StructuredResponseClient()
+async def build_research_response_client(
+    *, default_timeout: float = 180.0
+) -> StructuredResponseClient:
+    connection = await ModelConnectionRepo.read_assigned_connection("research_analysis")
+    options = provider_options(connection, default_timeout=default_timeout)
+    return StructuredResponseClient(
+        client=OpenAI(**options, http_client=httpx.Client(follow_redirects=False)),
+        model=connection.model,
+    )

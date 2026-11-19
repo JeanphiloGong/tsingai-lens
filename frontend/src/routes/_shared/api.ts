@@ -5,6 +5,14 @@ import { clearAuthState } from './authState';
 import { language, translateKey } from './i18n';
 
 const ERROR_CODE_TRANSLATIONS = {
+	model_connection_version_conflict: 'modelAdmin.conflict',
+	model_connection_not_found: 'modelAdmin.notFound',
+	model_connection_assigned: 'modelAdmin.assigned',
+	model_assignment_version_conflict: 'modelAssignments.conflict',
+	processing_model_unavailable: 'modelAssignments.unavailable',
+	processing_model_unassigned: 'modelAssignments.required',
+	model_credentials_unavailable: 'modelAdmin.credentialsUnavailable',
+	model_configuration_unavailable: 'modelAdmin.configurationUnavailable',
 	permission_denied: 'admin.denied',
 	operation_conflict: 'admin.conflict',
 	invalid_reference: 'admin.invalidReference',

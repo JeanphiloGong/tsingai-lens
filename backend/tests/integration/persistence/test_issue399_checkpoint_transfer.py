@@ -84,7 +84,7 @@ async def test_new_http_request_inherits_notes_but_not_old_runtime_budget(
                 content="Paper B excluded. Density remains an unmeasured constraint."
             )
 
-    fixture.service.runner = ResearchAgentRunner(
+    fixture.service.scripted_runner = ResearchAgentRunner(
         model=Model(), capabilities=CapabilityRegistry(())
     )
     response = await fixture.client.post(

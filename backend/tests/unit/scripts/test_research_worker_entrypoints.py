@@ -60,10 +60,8 @@ async def test_worker_reclaims_its_operation_and_heartbeat(
     )
     if kind == "document_preparation":
         kwargs.update(
-            workspace=object(), object_store=object(), profile_extractor=object()
+            workspace=object(), object_store=object()
         )
-    else:
-        kwargs["client"] = object()
     task = asyncio.create_task(module.run_forever(**kwargs))
     await asyncio.wait_for(started.wait(), timeout=1)
     if termination == "cancel":

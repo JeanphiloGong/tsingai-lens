@@ -147,15 +147,11 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
 @pytest.fixture(autouse=True)
 def _patch_domain_model_extractors(monkeypatch):
     from application.core.document_profiles import extraction
-    from application.core.objectives.llm import structured_response
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
     monkeypatch.setattr(
         extraction, "build_default_document_profile_extractor", lambda: fake
-    )
-    monkeypatch.setattr(
-        structured_response, "build_default_structured_response_client", lambda: fake
     )
 
 
@@ -576,3 +572,14 @@ def _external_identity_transport(monkeypatch):
     subjects.tokens.clear()
     monkeypatch.setattr(client, "Client", subjects, raising=False)
     monkeypatch.setattr(client, "IdentityClient", lambda: subjects)
+
+
+@pytest.fixture(autouse=True)
+def model_master_key(tmp_path, monkeypatch):
+    from infra.llm.model_credentials import load_master_key
+    path = tmp_path / "model-key"
+    path.write_bytes(bytes(range(32)))
+    monkeypatch.setenv("LENS_MODEL_KEY_FILE", str(path))
+    load_master_key.cache_clear()
+    yield
+    load_master_key.cache_clear()

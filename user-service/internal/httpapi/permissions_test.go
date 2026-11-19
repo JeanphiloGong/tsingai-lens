@@ -33,7 +33,7 @@ func newManagementFixture(t *testing.T) *managementFixture {
  DELETE FROM groups WHERE NOT is_system;
  DELETE FROM permissions WHERE NOT is_system;
  INSERT INTO group_permissions VALUES
- ('admin','users.manage'),('annotator','research.read_all'),('annotator','annotation.annotate'),
+ ('admin','users.manage'),('admin','models.manage'),('annotator','research.read_all'),('annotator','annotation.annotate'),
  ('reviewer','research.read_all'),('reviewer','annotation.review'),
  ('publisher','research.read_all'),('publisher','dataset.publish'),('publisher','dataset.download');`
 	if _, err = pool.Exec(ctx, reset); err != nil {

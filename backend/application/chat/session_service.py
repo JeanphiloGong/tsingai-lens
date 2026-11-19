@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -22,11 +21,13 @@ from uuid import uuid4
 
 from application.chat.agent_runner import (
     AgentCompletionReason,
+    AgentRunLimits,
     AgentRunResult,
     AgentRunStatus,
     ResearchAgentRunner,
 )
-from application.chat.capabilities import AgentContext
+from application.chat.capabilities import AgentContext, CapabilityRegistry
+from application.chat.context_builder import ChatContextBuilder
 from repositories.model_connection_repository import ModelConnectionRepo, ModelConnectionRecord
 from application.chat.inline_citations import (
     format_inline_citations,
@@ -271,9 +272,15 @@ class ChatSessionService:
     """Own one app's Research Agent runner, observer and streaming turns."""
 
     def __init__(
-        self, *, runner: ResearchAgentRunner,
+        self,
+        *,
+        capabilities: CapabilityRegistry,
+        limits: AgentRunLimits | None = None,
+        context_builder: ChatContextBuilder | None = None,
     ) -> None:
-        self.runner = runner
+        self.capabilities = capabilities
+        self.limits = limits or AgentRunLimits()
+        self.context_builder = context_builder or ChatContextBuilder()
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -1382,6 +1389,7 @@ class ChatSessionService:
         # Import at construction time: application.chat's package entrypoint
         # also imports this service, so an eager provider import forms a cycle.
         from infra.llm.chat_model import OpenAIChatModel
+        from infra.llm.model_credentials import decrypt_api_key, load_master_key
 
         try:
             url = httpx.URL(connection.base_url)
@@ -1401,25 +1409,17 @@ class ChatSessionService:
                 data={"code": "model_connection_invalid_configuration"},
             )
         api_key = "not-needed"
-        if connection.api_key_ref is not None:
-            if not connection.api_key_ref.startswith("env:") or not connection.api_key_ref[4:]:
-                raise ServiceUnavailableException(
-                    "The selected model connection is unavailable.",
-                    data={"code": "model_connection_invalid_configuration"},
-                )
-            api_key = os.getenv(connection.api_key_ref[4:], "").strip()
-            if not api_key:
-                raise ServiceUnavailableException(
-                    "The selected model connection is unavailable.",
-                    data={"code": "model_connection_key_unavailable"},
-                )
+        if connection.api_key_ciphertext is not None:
+            api_key = decrypt_api_key(
+                load_master_key(), connection.connection_id, connection.api_key_ciphertext
+            )
         timeout = connection.request_timeout_seconds
         if timeout is not None and (not isfinite(timeout) or timeout <= 0):
             raise ServiceUnavailableException(
                 "The selected model connection is unavailable.",
                 data={"code": "model_connection_invalid_configuration"},
             )
-        base = self.runner.limits
+        base = self.limits
         request_timeout = base.max_request_seconds
         if timeout is not None:
             request_timeout = min(request_timeout, timeout) if request_timeout is not None else timeout
@@ -1454,8 +1454,8 @@ class ChatSessionService:
         try:
             yield ResearchAgentRunner(
                 model=model,
-                capabilities=self.runner.capabilities,
-                context_builder=self.runner.context_builder,
+                capabilities=self.capabilities,
+                context_builder=self.context_builder,
                 limits=limits,
             )
         finally:

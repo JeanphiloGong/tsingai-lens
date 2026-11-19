@@ -52,9 +52,7 @@ test('direct administration routes block anonymous and ordinary accounts before 
 		await page.goto(path);
 		await expect(page.getByRole('alert')).toContainText('403');
 		await page.getByRole('button', { name: /^Account menu:/ }).click();
-		await expect(
-			page.getByRole('link', { name: 'Users and permissions', exact: true })
-		).toHaveCount(0);
+		await expect(page.getByRole('link', { name: 'Administration', exact: true })).toHaveCount(0);
 		await expect(page.locator('form')).toHaveCount(0);
 	}
 	expect(reads).toEqual([]);
@@ -73,9 +71,7 @@ test('permission outages offer retry without presenting an outage as denial', as
 	state.codes = ['users.manage'];
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	await page.getByRole('button', { name: /^Account menu:/ }).click();
-	await expect(
-		page.getByRole('link', { name: 'Users and permissions', exact: true })
-	).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Administration', exact: true })).toBeVisible();
 	await expect(page.getByLabel('Page size', { exact: true })).toBeVisible();
 });
 
@@ -85,7 +81,7 @@ test('personal menu exposes administration only when the current account has the
 	const { state, reads } = await administrationApi(page);
 	await page.goto('/account');
 	await page.getByRole('button', { name: /^Account menu:/ }).click();
-	const administration = page.getByRole('link', { name: 'Users and permissions', exact: true });
+	const administration = page.getByRole('link', { name: 'Administration', exact: true });
 	await expect(administration).toBeVisible();
 	expect(reads).toEqual([]);
 	await page.screenshot({ path: testInfo.outputPath('personal-menu-administrator.png') });
@@ -142,9 +138,7 @@ test('administration layout uses the current paginated contract without search o
 		if (request.url().includes('/user-api/v1/admin/')) requests.push(new URL(request.url()));
 	});
 	await page.goto('/admin/groups');
-	await expect(
-		page.getByRole('navigation', { name: 'Users and permissions', exact: true })
-	).toBeVisible();
+	await expect(page.getByRole('navigation', { name: 'Administration', exact: true })).toBeVisible();
 	await expect(
 		page.getByRole('button', { name: 'Select group Administrator', exact: true })
 	).toBeVisible();

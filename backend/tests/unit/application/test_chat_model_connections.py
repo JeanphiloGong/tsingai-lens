@@ -1,6 +1,8 @@
 """Run the real session/runner chain with scripted model decisions."""
 from __future__ import annotations
 
+from infra.llm.model_credentials import encrypt_api_key
+
 import asyncio
 import json
 from dataclasses import asdict, replace
@@ -10,7 +12,7 @@ import httpx
 from openai import AsyncOpenAI
 import pytest
 
-from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
+from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, ModelTurn
 from application.chat.context_builder import ChatModelContext
 from application.chat import session_service as session_service_module
 from application.chat.session_service import ChatSessionService, RepositoryModelCallObserver
@@ -18,7 +20,7 @@ from repositories.model_connection_repository import ModelConnectionRepo
 from exceptions import ProjectException, ResourceConflictException, TokenInvalidException
 from repositories.model_connection_repository import ModelConnectionRecord
 from controllers.chat.chat_session_routes import chat_session_router as chat_router
-from controllers.model_connection_routes import model_connection_router as model_router
+from controllers.models.catalog_routes import model_connection_router as model_router
 from domain.chat import ChatMessage, ChatSession
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -48,7 +50,7 @@ def connection(name="lab-a", *, enabled=True):
     now = datetime.now(timezone.utc)
     return ModelConnectionRecord(
         name, name.upper(), f"https://{name}.example.invalid/v1", f"model-{name}",
-        f"env:LENS_MODEL_KEY_{name.upper().replace('-', '_')}", enabled,
+        encrypt_api_key(bytes(range(32)), name, "synthetic-test-value"), enabled,
         65536, 8192, 30.0, now, now,
     )
 
@@ -86,7 +88,7 @@ def service(repository, model_builder=None, chat_repository=None, *capabilities)
     session_service_module.ChatRepo = chat_repository if chat_repository is not None else ChatRepository()
     provider_module.OpenAIChatModel = model_builder or OpenAIChatModel
     return ChatSessionService(
-        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(capabilities)),
+        capabilities=CapabilityRegistry(capabilities),
     )
 
 
@@ -171,7 +173,7 @@ async def test_directory_requires_login_and_never_exposes_private_fields(postgre
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     runtime = service(
-        await configured(postgres_session_factory, connection(), replace(connection("lab-b"), request_timeout_seconds=0)),
+        await configured(postgres_session_factory, connection(), connection("lab-b")),
         lambda **_: ClosableModel(ModelTurn(content="Ready.")),
     )
     monkeypatch.setattr(session_service_module, "ChatService", runtime, raising=False)
@@ -220,7 +222,8 @@ async def test_real_sdk_records_binding_without_recording_key(monkeypatch, postg
         })
 
     def build_client(**kwargs):
-        return AsyncOpenAI(**kwargs, http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+        kwargs["http_client"] = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        return AsyncOpenAI(**kwargs)
 
     monkeypatch.setattr("infra.llm.chat_model.AsyncOpenAI", build_client)
     repository = ChatRepository()
@@ -228,9 +231,7 @@ async def test_real_sdk_records_binding_without_recording_key(monkeypatch, postg
         session_id="s1", user_id="alice", collection_id="col-alice",
         created_at="2026-10-25T00:00:00+00:00",
     ))
-    runtime = ChatSessionService(runner=ResearchAgentRunner(
-        model=_Model(), capabilities=CapabilityRegistry(()),
-    ))
+    runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
     message = ChatMessage.user(message_id="m1", session_id="s1", content="Explain uncertainty", created_at="2026-10-25T00:00:00+00:00")
     async with runtime._runner_for_connection(record) as runner:
         model = runner.model
@@ -244,7 +245,7 @@ async def test_real_sdk_records_binding_without_recording_key(monkeypatch, postg
     assert saved.model_connection_id == "lab-a"
     assert saved.request["reasoning_effort"] == "high"
     assert json.loads(requests[0].content)["reasoning_effort"] == "high"
-    assert token not in str(saved) and record.api_key_ref not in str(saved)
+    assert token not in str(saved) and record.api_key_ciphertext.hex() not in str(saved)
 
 
 @pytest.mark.parametrize("failure", ["cancel", "snapshot"])
@@ -286,11 +287,14 @@ async def test_missing_key_keeps_a_saved_decision_visible_and_retryable(decision
     turn = await runtime.send_message(session.session_id, "alice", message="Save the objective.",
                                                model_connection_id="lab-a")
     pending = turn["pending_approval"]
-    monkeypatch.delenv("LENS_MODEL_KEY_LAB_A", raising=False)
+    async with postgres_session_factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).where(ModelConnectionORM.connection_id == "lab-a").values(
+            api_key_ciphertext=b"\x01" + b"x" * 40,
+        ))
     with pytest.raises(ProjectException) as captured:
         await runtime.decide_tool_call_for_user(session.session_id, pending.tool_call_id, "alice",
             arguments_digest=pending.arguments_digest, decision=decision)
-    assert captured.value.data["code"] == "model_connection_key_unavailable"
+    assert captured.value.data["code"] == "model_credentials_unavailable"
     saved = await session_service_module.ChatRepo.read_tool_call(pending.tool_call_id)
     trajectory = await runtime.get_trajectory_for_user(session.session_id, "alice")
     assert saved.status.value == decision and write.executed == []
@@ -318,7 +322,10 @@ async def test_missing_key_keeps_a_saved_decision_visible_and_retryable(decision
         selected.append(model)
         return resumed
     provider_module.OpenAIChatModel = restored
-    monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-restored-key")
+    async with postgres_session_factory.begin() as database:
+        await database.execute(update(ModelConnectionORM).where(ModelConnectionORM.connection_id == "lab-a").values(
+            api_key_ciphertext=encrypt_api_key(bytes(range(32)), "lab-a", "synthetic-restored-key"),
+        ))
     result = await runtime.decide_tool_call_for_user(session.session_id, pending.tool_call_id, "alice",
         arguments_digest=pending.arguments_digest, decision=decision)
     await asyncio.gather(*runtime._title_tasks.values())
@@ -444,7 +451,7 @@ async def test_connection_limits_fall_back_and_reach_sdk(
     for name, value in global_values.items():
         monkeypatch.setenv(name, value)
     record = replace(
-        connection(), api_key_ref=None, context_window_tokens=row_limits[0],
+        connection(), api_key_ciphertext=None, context_window_tokens=row_limits[0],
         max_output_tokens=row_limits[1], request_timeout_seconds=row_limits[2],
     )
     requests = []
@@ -460,16 +467,15 @@ async def test_connection_limits_fall_back_and_reach_sdk(
         })
 
     def build_client(**kwargs):
-        return AsyncOpenAI(**kwargs, http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(respond),
-        ))
+        kwargs["http_client"] = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        return AsyncOpenAI(**kwargs)
 
     monkeypatch.setattr("infra.llm.chat_model.AsyncOpenAI", build_client)
     runtime = service(
         await configured(postgres_session_factory, record),
     )
-    runtime.runner.limits = _parse_agent_run_limits()
-    original_limits = runtime.runner.limits
+    runtime.limits = _parse_agent_run_limits()
+    original_limits = runtime.limits
     bound = await ModelConnectionRepo.read_enabled(record.connection_id)
     async with runtime._runner_for_connection(bound) as runner:
         limits = runner.limits
@@ -487,7 +493,7 @@ async def test_connection_limits_fall_back_and_reach_sdk(
         )
         assert result.status.value == "completed"
         model = runner.model
-    assert runtime.runner.limits is original_limits
+    assert runtime.limits is original_limits
     assert model.client.is_closed()
     assert json.loads(requests[0].content)["max_completion_tokens"] == expected[1]
     assert requests[0].extensions["timeout"]["read"] == expected[4]
@@ -498,8 +504,6 @@ async def test_connection_limits_fall_back_and_reach_sdk(
     {"base_url": "https://model.example.invalid/v1?key=synthetic"},
     {"base_url": "file:///tmp/model"},
     {"base_url": "https://model.example.invalid:bad/v1"},
-    {"api_key_ref": "synthetic-inline-key"},
-    {"api_key_ref": "env:"},
     {"model": ""},
     {"model": "   "},
     {"request_timeout_seconds": 0},
@@ -508,21 +512,17 @@ async def test_connection_limits_fall_back_and_reach_sdk(
 async def test_invalid_connection_use_fails_without_creating_client(change, monkeypatch):
     monkeypatch.setattr("infra.llm.chat_model.AsyncOpenAI", lambda **kwargs: pytest.fail("client created"))
     with pytest.raises(ProjectException) as captured:
-        runtime = ChatSessionService(runner=ResearchAgentRunner(
-            model=_Model(), capabilities=CapabilityRegistry(()),
-        ))
-        async with runtime._runner_for_connection(replace(replace(connection(), api_key_ref=None), **change)):
+        runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
+        async with runtime._runner_for_connection(replace(replace(connection(), api_key_ciphertext=None), **change)):
             pytest.fail("invalid configuration reached Runner")
     assert captured.value.code == 200205
     assert captured.value.data["code"] == "model_connection_invalid_configuration"
 
 
-async def test_environment_key_reference_has_no_project_naming_rule(monkeypatch):
-    monkeypatch.setenv("LAB_PROVIDER_TOKEN", "synthetic-test-value")
-    runtime = ChatSessionService(runner=ResearchAgentRunner(
-        model=_Model(), capabilities=CapabilityRegistry(()),
-    ))
-    async with runtime._runner_for_connection(replace(connection(), api_key_ref="env:LAB_PROVIDER_TOKEN")) as runner:
+async def test_database_key_does_not_depend_on_environment_reference(monkeypatch):
+    monkeypatch.delenv("LENS_MODEL_KEY_LAB_A", raising=False)
+    runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
+    async with runtime._runner_for_connection(connection()) as runner:
         assert runner.model.client.api_key == "synthetic-test-value"
     assert runner.model.client.is_closed()
 
@@ -530,12 +530,6 @@ async def test_environment_key_reference_has_no_project_naming_rule(monkeypatch)
 @pytest.mark.parametrize("field", ["context_window_tokens", "max_output_tokens"])
 @pytest.mark.parametrize("value", [0, -1])
 async def test_nonpositive_token_limit_stops_before_model_request(field, value, postgres_session_factory):
-    runtime = service(
-        await configured(postgres_session_factory, replace(connection(), **{field: value})),
-        lambda **_: pytest.fail("invalid limits created a client"),
-    )
-    selected = await ModelConnectionRepo.read_enabled("lab-a")
-    with pytest.raises(ProjectException) as captured:
-        async with runtime._runner_for_connection(selected):
-            pytest.fail("invalid limits reached Runner")
-    assert captured.value.data["code"] == "model_connection_invalid_configuration"
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError):
+        await configured(postgres_session_factory, replace(connection(), **{field: value}))

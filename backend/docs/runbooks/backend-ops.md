@@ -25,6 +25,10 @@ writes, backup/restore verification and verified account import before the
 later upgrade/cutover procedure; do not apply it to existing data as a learning
 step.
 
+Web startup also requires the 32-byte file identified by `LENS_MODEL_KEY_FILE`.
+See [model credential operations](model-key-operations.md) for provisioning,
+legacy key import, and recovery.
+
 Set the PostgreSQL URL before any backend command that constructs persistence:
 
 ```bash
@@ -59,13 +63,10 @@ production settings. A larger pool does not replace bounded preparation and
 polling concurrency or fix slow queries. Apply changes by restarting the
 backend after deployment; existing processes retain their engine configuration.
 
-Set backend LLM runtime variables before local runs that invoke model-backed
+Set backend LLM runtime options before local runs that invoke model-backed
 features:
 
 ```bash
-export LLM_BASE_URL=http://localhost:11434/v1
-export LLM_MODEL=qwen1.5-8b-chat
-export LLM_API_KEY=sk-local
 export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
@@ -101,15 +102,17 @@ including streamed Chat responses. Set it to a value supported by the model
 provider, such as `none`, when a reasoning model must reserve its bounded
 completion budget for structured output. When unset, the provider default is
 used. A Chat request must not silently ignore this operator setting.
-`LLM_MODEL`, `LLM_BASE_URL`, and `LLM_API_KEY` configure Core extraction and
-explicitly injected environment-based clients. Database-backed Research Agent
-Chat selects the address, model, and key reference from an enabled
-`model_connections` row; reasoning effort continues to use `LLM_REASONING_EFFORT`.
-Core model IDs must match the configured endpoint, for example:
+Configure document profiles, research analysis, model-backed feedback and the
+Source text-unit retrieval benchmark under Administration → Model assignments.
+Give each process that opens encrypted connections the same read-only master
+key file through `LENS_MODEL_KEY_FILE`. Research Agent Chat selects an enabled
+Chat connection from its catalog. See the
+[model assignment contract](../specs/model-connections/api.md#processing-model-assignments).
 
-```bash
-curl "$LLM_BASE_URL/models"
-```
+Before upgrading an existing installation to model assignments, stop new
+document preparation submissions and let the old workers finish the queued
+runs. Apply the database migrations, configure the purposes that workers
+will use, then start the updated workers.
 
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.
@@ -220,15 +223,16 @@ budget, allow at least 60 additional seconds for persistence and UI settling.
 ## Initialize Or Upgrade The Schema
 
 Alembic is the only schema authority. Application startup never creates or
-changes tables:
+changes tables. Existing model registries with environment references require
+the [credential import](model-key-operations.md#first-cutover-of-an-existing-database)
+before the final migration. For a fresh database, run:
 
 ```bash
 alembic upgrade head
 alembic current --check-heads
 ```
 
-For a fresh development database, run the same commands. Historical SQLite or
-JSON data is not imported by startup or by these migrations.
+Historical SQLite or JSON data requires a separate import.
 
 Revision `20260924_0065` removes the retired Chat correction workflow: exact
 model-call records, cases, samples, reviews, datasets, and candidates. Back up
@@ -356,37 +360,34 @@ Migration `20261025_0089` adds one PostgreSQL `model_connections` table. Operato
 maintain it with their approved database tools; the application exposes no
 configuration CLI, administrator API, or configuration write route. Migration
 `20261101_0091` removes configuration revisions: `connection_id` is the primary
-key, and each row is one complete address/model/key-reference configuration.
+key, and each row is one complete address, model and credential configuration.
 Multiple models at the same address use distinct connection IDs. Enabling a row
 does not verify the provider.
 
-The address and model are configuration, not credentials. Store only an
-`api_key_ref`, such as `env:LENS_MODEL_KEY_LAB_A`, and provision its value in the
-server environment. A NULL reference is reserved for services that require no
-API key. Never put a real key in SQL history, database exports, browser state, or
-model audit payloads.
+Store provider keys as authenticated ciphertext in `api_key_ciphertext`.
+A NULL value is reserved for services that require no API key. Keep plaintext
+keys out of SQL history, database exports, browser state and model audit payloads.
 
-Insert configurations directly. The following values show two models at one
-provider address in a disposable database:
+The following example configures two models at a local endpoint without
+provider authentication in a disposable database:
 
 ```sql
 INSERT INTO model_connections (
-  connection_id, display_name, base_url, model, api_key_ref,
+  connection_id, display_name, base_url, model,
   enabled, context_window_tokens, max_output_tokens,
   request_timeout_seconds, created_at, updated_at
 )
 VALUES
-  ('lab-a', 'Lab A', 'https://model.example.invalid/v1', 'lab-chat-a',
-   'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now()),
-  ('lab-b', 'Lab B', 'https://model.example.invalid/v1', 'lab-chat-b',
-   'env:LENS_MODEL_KEY_LAB_A', true, 65536, 8192, 180, now(), now());
+  ('lab-a', 'Lab A', 'http://localhost:11434/v1', 'lab-chat-a',
+   true, 65536, 8192, 180, now(), now()),
+  ('lab-b', 'Lab B', 'http://localhost:11434/v1', 'lab-chat-b',
+   true, 65536, 8192, 180, now(), now());
 ```
 
 `list_enabled()` and `read_enabled(connection_id)` expose enabled configurations;
 `read(connection_id)` also reads disabled rows. To hide a configuration from
-selection, set `enabled = false` and update `updated_at`. There is no revision
-allocation or configuration history. This registry alone does not connect Chat
-requests to a selected model.
+selection, set `enabled = false` and update `updated_at`. Each row stores the
+current configuration.
 
 Before upgrading an existing registry, check for repeated IDs:
 
@@ -442,8 +443,8 @@ Completed history without a binding remains readable. An old unbound approval
 must not be assigned a fabricated connection; it fails with
 `model_connection_binding_missing`. Keep a referenced row readable while a
 response or approval still depends on it. A missing row fails explicitly rather
-than substituting another enabled choice. If the environment key is absent, restore
-the intended secret reference; construction fails before an approved write is
+than substituting another enabled choice. If credential decryption fails, restore
+the matching database and master key. Construction fails before an approved write is
 claimed, so the approved action remains unexecuted. If either a saved approval
 or rejection has no result, the trajectory exposes it as `retryable_decision`.
 After restoring the original configuration, resubmit the saved decision and
@@ -486,5 +487,5 @@ Provider usage records consumption for each request, not context capacity.
 Budget the current complete input plus reserved output and safety headroom;
 do not subtract cumulative usage over previous calls from the window. Operators
 obtain capacity from the actual model/provider specification. Missing defaults,
-missing bound rows, and missing referenced keys still fail explicitly;
+missing bound rows, and unreadable credentials still fail explicitly;
 limit fallback never substitutes another provider or credential.

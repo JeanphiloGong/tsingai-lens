@@ -15,6 +15,7 @@ from application.core.document_profiles import service as profiles
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceDocument
 from repositories.pipeline_run_repository import PipelineRunRepo
+from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 from tests.support.postgres import seed_collection
 
@@ -31,6 +32,14 @@ async def prepared_inputs(postgres_session_factory, monkeypatch, collection_work
     await seed_collection(
         postgres_session_factory, "prepare-papers", document_ids=("paper-a",)
     )
+    model = await ModelConnectionRepo.create("manager", "profile-a", {
+        "display_name": "Profile A", "model": "profile-a", "base_url": "http://127.0.0.1:1/v1",
+    }, actor_display_name=None)
+    await ModelConnectionRepo.update(
+        "manager", model.connection_id, model.version, {"enabled": True},
+        actor_display_name=None,
+    )
+    await ModelConnectionRepo.assign("document_profile", model.connection_id, 0, "manager")
     parse = AsyncMock(
         return_value=SourceDocument(
             document_id="paper-a",
@@ -174,7 +183,7 @@ async def test_preparation_takeover_rejects_late_stage_publication(
 ):
     from datetime import datetime, timezone
     from sqlalchemy import update
-    from infra.persistence.postgres.models.pipeline_run import PipelineRunORM
+    from infra.persistence.postgres.models.execution import PipelineRunORM
     from repositories.document_profile_repository import DocumentProfileRepo
     from repositories.pipeline_run_repository import PipelineLeaseLostError
 

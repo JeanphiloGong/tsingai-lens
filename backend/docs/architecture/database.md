@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20261104_0099`. The identity and fingerprint rules are
+and the Alembic head `20261114_0101`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 50 application tables and 603 mapped fields. A
+The current ORM metadata contains 50 application tables and 604 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -115,6 +115,25 @@ count. The remaining tables are separate for these concrete reasons:
 Only lifecycle-local children that are always read and replaced with their
 owner are embedded in JSON aggregates. This keeps the relational schema small
 without weakening identity, versioning, or audit boundaries.
+
+## ORM Module Ownership
+
+ORM classes are grouped by business responsibility. Each file may define several
+related tables; their identities, constraints and lifecycles remain independent.
+Repositories import their mapped classes directly from the owning module.
+
+| Module under `infra/persistence/postgres/models/` | Responsibility |
+| --- | --- |
+| `collection.py` | Collection metadata, current documents and document preparation |
+| `paper_experiment.py` | Immutable paper experiments and revision-local measurements/comparisons |
+| `objective.py` | Research objectives, analysis versions, selections, comparison groups and follow-up plans |
+| `finding.py` | Findings, selection/group links, expert feedback and curation |
+| `execution.py` | Worker analysis-job envelopes and pipeline execution history |
+| `chat.py` | Sessions, messages, capability calls and model-call records |
+| `feedback.py` | Answer feedback analysis, cases, annotation and review |
+| `feedback_dataset.py` | Dataset membership, sample revisions and export records |
+| `evaluation.py` | Gold sets, prediction snapshots and evaluation runs |
+| `model_connection.py` | Shared model connection configuration and its administrative audit when available |
 
 ## Schema by Main Logic Flow
 
@@ -248,6 +267,10 @@ immutable snapshot payload. The retired checkpoint payload is classified by
 migration `20260924_0075` and is not used at runtime.
 
 ### 7. Collection-Bound Agent Chat
+
+Chat selects provider settings from `model_connections`. The
+[model connection data contract](../specs/model-connections/data-model.md)
+describes its fields and ciphertext format.
 
 `application.chat.session_service`, `ResearchAgentRunner`, and the Chat capability registry
 persist an auditable trajectory. Chat references Core records; it does not

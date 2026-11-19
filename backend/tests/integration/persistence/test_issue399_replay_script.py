@@ -1,12 +1,13 @@
 """Verify the CLI's current lifecycle wiring with synthetic Sources and an offline model."""
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
-from application.chat import ModelTurn
+from application.chat import ModelTurn, ResearchAgentRunner
+from application.chat.session_service import ChatSessionService
 from domain.source import SourceBlock, SourceDocument
 from repositories.source_artifact_repository import SourceArtifactRepo
 from scripts.evaluation.research_agent import run_inconel_four_turns as replay
@@ -24,8 +25,6 @@ async def test_freeze_and_replay_use_current_lifespan_without_scientific_writes(
     monkeypatch,
     scripted_chat_runner,
 ):
-    import main
-
     document_ids = tuple(f"doc-{i:03d}" for i in range(100))
     await seed_collection(
         postgres_session_factory, "col-cli", document_ids=document_ids
@@ -52,7 +51,8 @@ async def test_freeze_and_replay_use_current_lifespan_without_scientific_writes(
             ),
         )
 
-    def offline_model():
+    @asynccontextmanager
+    async def offline_runner(service, connection):
         model = _Model(
             *(
                 ModelTurn(
@@ -61,10 +61,14 @@ async def test_freeze_and_replay_use_current_lifespan_without_scientific_writes(
                 for _ in range(4)
             )
         )
-        model.client = SimpleNamespace(close=AsyncMock())
-        return model
+        yield ResearchAgentRunner(
+            model=model,
+            capabilities=service.capabilities,
+            limits=service.limits,
+            context_builder=service.context_builder,
+        )
 
-    monkeypatch.setattr(main, "OpenAIChatModel", offline_model)
+    monkeypatch.setattr(ChatSessionService, "_runner_for_connection", offline_runner)
     monkeypatch.setenv(
         "LENS_TEST_DATABASE_URL",
         postgres_sync_engine.url.render_as_string(hide_password=False),
@@ -87,6 +91,7 @@ async def test_freeze_and_replay_use_current_lifespan_without_scientific_writes(
     assert await replay.run(args) == 0
     report = json.loads(args.output.read_text())
     assert len(report["turns"]) == 4
+    assert report["model"] == "scripted-test"
     assert (
         report["technical_result"] == "passed" and report["scientific_data_unchanged"]
     )

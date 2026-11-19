@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import httpx
 import logging
 import os
 from datetime import datetime, timezone
@@ -56,6 +57,7 @@ class OpenAIChatModel:
                 base_url=base_url if base_url is not None else os.getenv("LLM_BASE_URL", "").strip() or None,
                 timeout=self.request_timeout,
                 max_retries=0,
+                http_client=httpx.AsyncClient(follow_redirects=False),
             )
 
     async def aclose(self) -> None:

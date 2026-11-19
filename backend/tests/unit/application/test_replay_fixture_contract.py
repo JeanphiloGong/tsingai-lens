@@ -12,7 +12,7 @@ from scripts.evaluation.research_agent.run_scenarios import (
 )
 
 
-from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner  # noqa: F401
 
 pytestmark = pytest.mark.usefixtures("scripted_chat_runner")
 
@@ -168,7 +168,7 @@ async def test_replay_uses_service_permission_and_exact_approval(
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((write,))
     )
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = make_scripted_chat_service(runner)
     case = {
         "id": "S21",
         "collection_id": "col-1",

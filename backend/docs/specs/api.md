@@ -202,10 +202,10 @@ JSON endpoints keep HTTP 200 and return the existing business error envelope.
 An unknown or disabled choice uses `ResourceConflictException` (business code
 `200204`) and `data.code = "model_connection_unavailable"`. The request schema
 accepts IDs of 1–64 characters; invalid input uses `200100`. A missing default,
-missing saved binding, invalid configuration or missing key uses
+missing saved binding, invalid configuration or an unreadable credential uses
 `ServiceUnavailableException` (`200205`) with the stable reason in `data.code`:
 `model_connection_default_unavailable`, `model_connection_binding_missing`,
-`model_connection_invalid_configuration`, or `model_connection_key_unavailable`.
+`model_connection_invalid_configuration`, or `model_credentials_unavailable`.
 Authentication failure uses the existing `200301` contract. The directory calls
 the concrete repository directly; unexpected database errors follow the existing
 application exception handler, without inventing a second directory error API.

@@ -37,8 +37,10 @@ The scientific meaning belongs to the Core services and analysis stages.
 [`../../main.py`](../../main.py) configures routes and middleware and owns the
 startup/shutdown lifespan. It binds the database session factory, creates file
 resources in their infrastructure modules, creates and closes the mTLS identity
-client (`infra.identity.client.Client`), and configures the Chat runner and
-model-call observer. Shared instances live with their actual owners:
+client (`infra.identity.client.Client`), and gives the Chat session service its
+tools and runtime limits. For each new Chat turn or approval continuation, the
+service creates a model client from the selected database connection and closes
+it after execution. Shared instances live with their actual owners:
 `application.chat.session_service.ChatService`,
 `infra.persistence.file.collection_workspace.Workspace`, and
 `infra.persistence.file.object_store.Store`. Modules declare these names without
@@ -53,7 +55,7 @@ only their own database and model resources. Each independent worker owns its
 operation, file resources and heartbeat and closes its resources on exit.
 The optional synchronous Finding summary owns a separate request client with
 its existing budget. On shutdown the Web lifespan cancels and awaits active
-Chat tasks, closes the model client, then disposes the database engine. The same
+Chat tasks, closes the identity client, then disposes the database engine. The same
 cleanup runs for resources already created when startup fails. Each Web worker
 process owns one set of shared instances; overlapping applications with
 different bindings in the same process are not supported. Browser disconnect

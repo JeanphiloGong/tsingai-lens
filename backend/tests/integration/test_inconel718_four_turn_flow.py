@@ -14,17 +14,14 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.capabilities.document_sources import ReadSourceCapability
-from application.chat.session_service import (
-    ChatSessionService,
-    ChatSessionNotFoundError,
-)
+from application.chat.session_service import ChatSessionNotFoundError
 from domain.source import SourceDocument, SourceBlock
 from repositories.chat_repository import ChatRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 from application.chat import session_service
 from tests.support.postgres import seed_collection
 from tests.unit.application.test_research_agent_runner import _Model
-from tests.support.chat_model_connections import scripted_chat_runner
+from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/chat/inconel718_four_turns.json"
 TURNS = json.loads(FIXTURE.read_text())["turns"]
@@ -110,8 +107,8 @@ async def test_four_turns_keep_original_table_sources_and_user_scope(
     repository = ChatRepository()
     monkeypatch.setattr(session_service, "ChatRepo", repository)
     monkeypatch.setattr(session_service, "SourceArtifactRepo", sources)
-    service = ChatSessionService(
-        runner=ResearchAgentRunner(
+    service = make_scripted_chat_service(
+        ResearchAgentRunner(
             model=model, capabilities=CapabilityRegistry((ReadSourceCapability(),))
         )
     )

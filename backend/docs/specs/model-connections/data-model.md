@@ -1,13 +1,14 @@
 # Model Connection Data Model
 
-Store system-wide model connections, encrypted credentials, and administrative
-change records. Connections and audit records belong to the Lens PostgreSQL
-database; user-service owns accounts and permissions. See the
+Store system-wide model connections, encrypted credentials, processing
+assignments, and administrative change records in Lens PostgreSQL.
+User-service owns accounts and permissions. See the
 [model connection HTTP contract](api.md).
 
 - [Model Connections: `model_connections`](#model-connections-model_connections)
 - [Ciphertext Format](#ciphertext-format)
 - [Administrative Audit: `model_connection_audit`](#administrative-audit-model_connection_audit)
+- [Model Assignments: `model_assignments`](#model-assignments-model_assignments)
 - [Model Management Permission](#model-management-permission)
 
 ## Model Connections: `model_connections`
@@ -21,8 +22,9 @@ Connections have no owning user.
 | `display_name` | text | No | Display name, 1–100 characters after trimming surrounding whitespace |
 | `base_url` | text | No | Complete OpenAI-compatible API base, at most 2048 characters; immutable after creation |
 | `model` | text | No | Provider model identifier, 1–200 characters after trimming surrounding whitespace; immutable after creation |
+| `kind` | varchar(16) | No | Immutable capability, `chat` or `embedding`. Defaults to `chat`, including for existing connections |
 | `api_key_ciphertext` | bytea | Yes | Authenticated AES-GCM ciphertext; NULL means this connection requires no API key |
-| `enabled` | boolean | No | Defaults to false; disabling prevents selection for new questions |
+| `enabled` | boolean | No | Defaults to false; disabling prevents new selection or assignment |
 | `priority` | integer | No | Defaults to 0; higher values sort first |
 | `context_window_tokens` | integer | Yes | Positive connection context limit; NULL inherits the Agent limit |
 | `max_output_tokens` | integer | Yes | Positive connection output limit; NULL inherits the Agent limit |
@@ -39,6 +41,7 @@ CHECK (length(connection_id) BETWEEN 1 AND 64)
 CHECK (length(btrim(display_name)) BETWEEN 1 AND 100)
 CHECK (length(base_url) BETWEEN 1 AND 2048)
 CHECK (length(btrim(model)) BETWEEN 1 AND 200)
+CHECK (kind IN ('chat', 'embedding'))
 CHECK (version > 0)
 CHECK (context_window_tokens IS NULL OR context_window_tokens > 0)
 CHECK (max_output_tokens IS NULL OR max_output_tokens > 0)
@@ -67,18 +70,18 @@ master key causes decryption to fail.
 
 ## Administrative Audit: `model_connection_audit`
 
-Record successful administrative connection changes in the same transaction as
-the configuration update. Failed tests or database operations do not produce a
-successful-change record.
+Record successful administrative creation and updates in the same transaction
+as the configuration write.
 
 | Field | Type | Nullable | Purpose |
 | --- | --- | --- | --- |
 | `id` | bigint identity | No | Primary key |
 | `connection_id` | varchar(64) | No | References `model_connections.connection_id`; no cascading deletion |
 | `actor_id` | text | No | Stable acting-user ID resolved by user-service; no cross-database foreign key |
+| `actor_display_name` | text | Yes | Display name from the authenticated session at the time of the operation, or NULL when unavailable |
 | `action` | text | No | `create` or `update`; credential changes belong to the combined configuration update |
 | `version` | bigint | No | Connection version after this successful write |
-| `changed_fields` | jsonb | No | Field-name array only, for example `["enabled", "priority"]` |
+| `changes` | jsonb | No | Field names mapped to before and after values, with only redacted state and operation for the API key |
 | `created_at` | timestamptz | No | Operation time in UTC |
 
 ```text
@@ -87,27 +90,63 @@ FOREIGN KEY (connection_id) REFERENCES model_connections(connection_id) ON DELET
 CHECK (length(actor_id) BETWEEN 1 AND 64)
 CHECK (action IN ('create', 'update'))
 CHECK (version > 0)
-CHECK (jsonb_typeof(changed_fields) = 'array')
+CHECK (jsonb_typeof(changes) = 'object')
 UNIQUE (connection_id, version)
 ```
 
-Generate `changed_fields` from a fixed set of field names. A credential change
-records only `api_key`, never its value, ciphertext, master-key path, request
-body, or SDK error. Saving a name and credential together creates one
-`action=update` record, for example
-`changed_fields=["display_name", "api_key"]`.
+Read the actor ID and display name from the authenticated session when writing
+the record. Subsequent name changes leave the recorded display name intact.
+
+Generate `changes` from a fixed set of ordinary fields: `display_name`,
+`base_url`, `model`, `kind`, `enabled`, `priority`, `context_window_tokens`,
+`max_output_tokens`, and `request_timeout_seconds`. For creation, record
+`before=null` and the saved initial value in `after`. For updates, compare
+the values read during the version check with the saved values in the same
+transaction. Record only the fields whose values changed.
+
+Add an `api_key` entry only for a credential operation. Its before and after
+values are `configured` or `unconfigured`, and its operation is `set`,
+`replace`, or `clear`. These are the only credential details stored in the
+audit. See the [audit query contract](api.md#6-list-model-connection-audit-records).
 
 Configuration, credentials, and audit commit atomically. One effective update
 increments the version once. A version conflict or failed write rolls back the
-entire operation. An update with no effective changes increments no version
-and writes no audit; submitting a nonempty API key always counts as a
-replacement.
+entire operation. An update with no effective changes preserves the version
+and audit history. Submitting a nonempty value while a key is configured
+counts as a replacement, even if the submitted value is the same.
+
+## Model Assignments: `model_assignments`
+
+Each configured purpose has one row. The table starts empty and a row is
+created on the first assignment. The service validates the purpose and the
+required connection kind. See the
+[assignment HTTP contract](api.md#processing-model-assignments).
+
+| Field | PostgreSQL type | Purpose |
+| --- | --- | --- |
+| `purpose` | varchar(64) | Primary key |
+| `connection_id` | varchar(64) | Foreign key to `model_connections.connection_id`, with `ON DELETE RESTRICT` |
+| `version` | bigint | Positive assignment version, initially 1 |
+| `updated_by` | varchar(64) | Stable user ID of the last administrator to change the assignment |
+| `updated_at` | timestamptz | Time of the last effective assignment change |
+
+All fields are required. The database enforces `CHECK (version > 0)`.
+Assigning a connection and disabling it acquire the same connection-row lock.
+Disabling is permitted after its assignments move to another connection.
+Saving the same connection at the current version preserves the assignment
+version, last editor, and timestamp. Connection changes retain their separate
+audit history.
+
+A document preparation run records its assigned `model_connection_id` in its
+existing context. The profile fingerprint includes that ID so a new assignment
+can trigger classification again. The independently computed Source
+fingerprint continues to use the document checksum and parser version.
 
 ## Model Management Permission
 
-`models.manage` permits management of system-wide model connections and API
-keys. User-service stores the following permission and built-in administrator
-group association:
+`models.manage` permits management of system-wide model connections, API
+keys, and processing assignments. User-service stores the permission and
+its association with the built-in administrator group.
 
 | Table | Field | Value |
 | --- | --- | --- |

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from repositories.document_profile_repository import DocumentProfileRepository
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
     DocumentPreparationORM,
 )
 from domain.core.document_profile import (

@@ -32,8 +32,8 @@ from domain.source import (
     render_plain_table_text,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.document import DocumentORM
-from infra.persistence.postgres.models.document_preparation import (
+from infra.persistence.postgres.models.collection import (
+    DocumentORM,
     DocumentPreparationORM,
 )
 from sqlalchemy import select

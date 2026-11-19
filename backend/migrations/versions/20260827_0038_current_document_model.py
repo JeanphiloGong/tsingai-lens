@@ -89,12 +89,20 @@ def upgrade() -> None:
     # migrations can backfill it even though the maintained ORM now owns the
     # merged document_preparations table.
     # Answer feedback is introduced by 0056, not this historical cutover.
+    # Model connections are introduced by 0089 with the original schema.
+    # Model connection audit is introduced by 0102.
+    # Model assignments are introduced by 0103.
     Base.metadata.create_all(
         bind=bind,
         tables=[
             table
             for table in Base.metadata.sorted_tables
-            if table.name != "chat_message_feedback"
+            if table.name not in {
+                "chat_message_feedback",
+                "model_connections",
+                "model_connection_audit",
+                "model_assignments",
+            }
         ],
     )
     if "document_preparations" in inspect(bind).get_table_names():

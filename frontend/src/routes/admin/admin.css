@@ -470,6 +470,69 @@
 .admin-table-wrap {
 	overflow-x: auto;
 }
+.model-list {
+	margin-block: 1rem;
+}
+.model-list button {
+	overflow-wrap: anywhere;
+	max-width: 100%;
+}
+.model-editor {
+	margin-top: 1.5rem;
+}
+.model-form {
+	max-width: 48rem;
+	display: grid;
+	gap: 1rem;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	align-items: start;
+}
+.model-form > label {
+	min-width: 0;
+	display: grid;
+	gap: 0.5rem;
+}
+.model-form .input {
+	width: 100%;
+	min-width: 0;
+}
+.model-long-value {
+	overflow-wrap: anywhere;
+}
+.model-form > p,
+.model-form > .toolbar,
+.model-form > button,
+.model-form > .model-key-field,
+.model-form > .model-checkbox {
+	grid-column: 1 / -1;
+}
+.model-form > button {
+	justify-self: start;
+}
+.model-form > .model-checkbox {
+	display: flex;
+	align-items: center;
+}
+.model-form > .model-checkbox input {
+	width: auto;
+}
+.model-default {
+	margin-inline-start: 0.5rem;
+	font-size: 0.8em;
+	font-weight: 600;
+}
+.model-actions,
+.model-editor .toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+}
+@media (max-width: 48rem) {
+	.model-form {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
 .admin-workspace table {
 	width: 100%;
 	border-collapse: collapse;

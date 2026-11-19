@@ -4,7 +4,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from time import perf_counter
 
 from infra.identity import client as identity
-from application.chat import AgentRunLimits, CapabilityRegistry, ResearchAgentRunner
+from application.chat import AgentRunLimits, CapabilityRegistry
 from application.chat import session_service
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
@@ -36,7 +36,6 @@ from application.chat.capabilities import (
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
-from infra.llm.chat_model import OpenAIChatModel
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -46,7 +45,7 @@ from infra.persistence.file import collection_workspace, object_store
 
 from config import DATA_DIR
 from controllers import feedback_case_routes as feedback_cases
-from controllers import model_connection_routes as model_connections
+from controllers.models import catalog_routes as model_connections
 from controllers.chat import chat_session_routes as chat_sessions
 from controllers.core import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
@@ -64,7 +63,7 @@ from controllers.goal import goal_routes as goals
 from controllers.source import collection_routes as collections
 from controllers.source import pipeline_run_routes as pipeline_runs
 from controllers.source import reference_routes as references
-from exceptions import ProjectException
+from exceptions import ProjectException, RequestInvalidException
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -84,6 +83,11 @@ logger = setup_logger("lens")
 
 PUBLIC_API_PREFIX = "/api"
 PUBLIC_API_V1_PREFIX = f"{PUBLIC_API_PREFIX}/v1"
+MODEL_ADMIN_PATHS = (
+    f"{PUBLIC_API_V1_PREFIX}/admin/model-connections",
+    f"{PUBLIC_API_V1_PREFIX}/admin/model-connection-audit",
+    f"{PUBLIC_API_V1_PREFIX}/admin/model-assignments",
+)
 
 
 def _parse_cors_allowed_origins() -> list[str]:
@@ -149,12 +153,21 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
         object_store.Store = object_store.FileObjectStore(
             collection_workspace.Workspace.root_dir
         )
+        from infra.llm.model_credentials import decrypt_api_key, load_master_key
+        from infra.persistence.postgres.models.model_connection import ModelConnectionORM
+        from sqlalchemy import select
+
+        master_key = load_master_key()
+        async with database.AsyncSessionLocal() as session:
+            encrypted = (await session.execute(select(
+                ModelConnectionORM.connection_id, ModelConnectionORM.api_key_ciphertext,
+            ))).all()
+        for connection_id, ciphertext in encrypted:
+            if ciphertext is not None:
+                decrypt_api_key(master_key, connection_id, ciphertext)
         identity.Client = identity.IdentityClient()
         cleanup.push_async_callback(identity.Client.close)
-        chat_model = OpenAIChatModel()
-        cleanup.push_async_callback(chat_model.client.close)
-        runner = ResearchAgentRunner(
-            model=chat_model,
+        service = session_service.ChatSessionService(
             limits=_parse_agent_run_limits(),
             capabilities=CapabilityRegistry(
                 (
@@ -189,9 +202,6 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
                 )
             ),
         )
-        service = session_service.ChatSessionService(
-            runner=runner,
-        )
         cleanup.push_async_callback(service.close)
         session_service.ChatService = service
         yield
@@ -213,6 +223,12 @@ def configure_middleware(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
+        path = request.url.path
+        model_admin = any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in MODEL_ADMIN_PATHS
+        )
+        request.state.model_admin = model_admin
         incoming_request_id = request.headers.get(REQUEST_ID_HEADER)
         request_id, reused_incoming_id = resolve_request_id(incoming_request_id)
         token = bind_request_id(request_id)
@@ -232,18 +248,27 @@ def configure_middleware(app: FastAPI) -> None:
             )
 
         try:
-            response = await call_next(request)
-        except Exception:
-            logger.exception(
-                "HTTP request failed method=%s path=%s",
-                request.method,
-                request.url.path,
-            )
-            raise
-        else:
-            duration_ms = (perf_counter() - start_time) * 1000
+            try:
+                if model_admin and request.method != "GET":
+                    body = bytearray()
+                    async for chunk in request.stream():
+                        if len(body) + len(chunk) > 16384:
+                            raise RequestInvalidException(data={"code": "invalid_request"})
+                        body.extend(chunk)
+                    request._body = bytes(body)
+                response = await call_next(request)
+            except RequestInvalidException as exc:
+                response = await project_exception_handler(request, exc)
+            except Exception as exc:
+                if not model_admin:
+                    logger.exception("HTTP request failed method=%s path=%s", request.method, path)
+                    raise
+                response = await general_exception_handler(request, exc)
+            if model_admin:
+                response.headers["Cache-Control"] = "no-store"
             response.headers[REQUEST_ID_HEADER] = request_id
             bind_user_id(getattr(request.state, "user_id", ""))
+            duration_ms = (perf_counter() - start_time) * 1000
             logger.info(
                 "HTTP request finished method=%s path=%s status_code=%s duration_ms=%.2f",
                 request.method,
@@ -271,6 +296,10 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(
         model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX
     )
+    from controllers.models.admin_assignment_routes import admin_assignment_router
+    from controllers.models.admin_connection_routes import admin_model_router
+    app.include_router(admin_model_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(admin_assignment_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX
@@ -297,7 +326,7 @@ def create_app() -> FastAPI:
                 "description": "Business errors use the JSON envelope under HTTP 200.",
             }
         },
-        version="0.13.20",
+        version="0.13.21",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

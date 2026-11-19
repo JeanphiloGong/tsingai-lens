@@ -194,7 +194,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
             base_url="https://provider.invalid/v1",
             http_client=provider_http,
         ) as client:
-            fixture.service.runner = ResearchAgentRunner(
+            fixture.service.scripted_runner = ResearchAgentRunner(
                 model=OpenAIChatModel(client=client, model="offline-test"),
                 capabilities=CapabilityRegistry(()),
             )

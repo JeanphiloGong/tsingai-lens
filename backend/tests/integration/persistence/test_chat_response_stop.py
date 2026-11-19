@@ -11,7 +11,7 @@ from domain.chat import ChatToolResult, ToolResultStatus, ToolRisk
 from repositories.chat_repository import ChatRepository
 from infra.identity.client import SESSION_COOKIE_NAME
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401
-from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner  # noqa: F401
 from tests.unit.application.test_research_agent_runner import _Capability, _Model
 from tests.unit.application.test_chat_session_service import _WriteCapability
 
@@ -38,7 +38,7 @@ async def test_another_web_instance_stops_model_wait_and_accepts_new_instruction
                                   data={"content": "Test temperature: 293 K."})
 
     read = Read("read_source", ToolRisk.READ)
-    fixture.service.runner = ResearchAgentRunner(
+    fixture.service.scripted_runner = ResearchAgentRunner(
         model=Model(ModelTurn(tool_calls=(ModelToolCall("read_source", {}),))),
         capabilities=CapabilityRegistry((read,)),
     )
@@ -49,7 +49,7 @@ async def test_another_web_instance_stops_model_wait_and_accepts_new_instruction
     try:
         await asyncio.wait_for(entered.wait(), 3)
         snapshot = await fixture.repository.read_response_snapshot(session.session_id)
-        observer = session_service.ChatSessionService(runner=fixture.service.runner)
+        observer = make_scripted_chat_service(fixture.service.scripted_runner)
         monkeypatch.setattr(session_service, "ChatService", observer)
         path = f"/api/v1/chat-sessions/{session.session_id}/responses/{snapshot.response_id}/stop"
         response = await fixture.client.post(path)
@@ -65,7 +65,7 @@ async def test_another_web_instance_stops_model_wait_and_accepts_new_instruction
         assert (await fixture.client.post(path)).json()["data"]["status"] == "cancelled"
 
         model = _Model(ModelTurn(content="I will now compare only specimens tested at 293 K."))
-        fixture.service.runner.model = model
+        fixture.service.scripted_runner.model = model
         result = await fixture.client.post(f"/api/v1/chat-sessions/{session.session_id}/messages", json={
             "message": "Change the plan: compare only the 293 K tests.",
         })
@@ -110,7 +110,7 @@ async def test_stop_closes_unfinished_reads_before_accepting_another_question(br
             await asyncio.Event().wait()
 
     read = Read("read_source", ToolRisk.READ)
-    fixture.service.runner = ResearchAgentRunner(
+    fixture.service.scripted_runner = ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=(ModelToolCall("read_source", {}),))),
         capabilities=CapabilityRegistry((read,)),
     )
@@ -138,7 +138,7 @@ async def test_stop_closes_unfinished_reads_before_accepting_another_question(br
         call = await fixture.repository.read_tool_call(requests[0].tool_call_id)
         assert call.status.value == "failed" and call.error_code == "user_cancelled"
         assert sum(m.tool_result is not None and m.tool_call_id == call.tool_call_id for m in messages) == 1
-        fixture.service.runner.model = _Model(ModelTurn(content="I will follow the revised question."))
+        fixture.service.scripted_runner.model = _Model(ModelTurn(content="I will follow the revised question."))
         revised = await fixture.service.send_message(session.session_id, fixture.owner, message="Use a different comparison.")
         assert revised["status"] == "completed"
     finally:
@@ -158,7 +158,7 @@ async def test_stop_waits_for_approved_write_checkpoint_without_repeating_write(
             return await super().execute(context, arguments)
 
     write = Write()
-    fixture.service.runner = ResearchAgentRunner(
+    fixture.service.scripted_runner = ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {"question": "Compare 293 K tests"}),))),
         capabilities=CapabilityRegistry((write,)),
     )

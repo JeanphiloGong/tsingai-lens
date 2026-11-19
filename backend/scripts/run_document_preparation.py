@@ -36,10 +36,6 @@ from config import DATA_DIR
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 from infra.source.build_source_artifacts import build_source_artifacts
-from application.core.document_profiles.extraction import (
-    build_default_document_profile_extractor,
-    DocumentProfileExtractor,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -50,7 +46,6 @@ async def run_forever(
     worker_id: str,
     workspace: FileCollectionWorkspace,
     object_store: FileObjectStore,
-    profile_extractor: DocumentProfileExtractor,
     lease_duration: timedelta,
     heartbeat_interval: float,
     interval_seconds: float = 2,
@@ -76,7 +71,6 @@ async def run_forever(
                 workspace=workspace,
                 object_store=object_store,
                 source_artifact_builder=build_source_artifacts,
-                profile_extractor=profile_extractor,
             )
         )
         heartbeat_task = asyncio.create_task(heartbeat(job))
@@ -114,20 +108,15 @@ async def run(
     try:
         workspace = FileCollectionWorkspace(DATA_DIR / "collections")
         object_store = FileObjectStore(workspace.root_dir)
-        profile_extractor = build_default_document_profile_extractor()
-        try:
-            await run_forever(
-                worker_id=f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}",
-                workspace=workspace,
-                object_store=object_store,
-                profile_extractor=profile_extractor,
-                lease_duration=timedelta(seconds=lease_seconds),
-                heartbeat_interval=heartbeat_interval,
-                interval_seconds=interval_seconds,
-                once=once,
-            )
-        finally:
-            profile_extractor.client.close()
+        await run_forever(
+            worker_id=f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}",
+            workspace=workspace,
+            object_store=object_store,
+            lease_duration=timedelta(seconds=lease_seconds),
+            heartbeat_interval=heartbeat_interval,
+            interval_seconds=interval_seconds,
+            once=once,
+        )
     finally:
         try:
             await database_engine.dispose()

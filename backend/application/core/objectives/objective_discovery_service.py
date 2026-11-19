@@ -24,7 +24,9 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
-from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.objectives.llm.structured_response import (
+    StructuredResponseClient, build_research_response_client,
+)
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
 )
@@ -99,7 +101,7 @@ async def _check_discovery_inputs(
 
 
 async def execute_objective_discovery_job(
-    job: PipelineRunJobSnapshot, *, client: StructuredResponseClient
+    job: PipelineRunJobSnapshot, *, client: StructuredResponseClient | None = None
 ) -> PipelineRun:
     run_id = job.run.run_id
     collection_id = job.run.collection_id
@@ -107,6 +109,7 @@ async def execute_objective_discovery_job(
     progress_callback = _build_discovery_progress_callback(
         job, pending_progress_updates
     )
+    owns_client = client is None
     try:
         async with AsyncSessionLocal() as db, db.begin():
             document_inputs = await _check_discovery_inputs(db, job)
@@ -116,6 +119,8 @@ async def execute_objective_discovery_job(
         source_inputs = await objective_input_service.load_source_inputs(
             collection_id, document_inputs=document_inputs
         )
+        if client is None:
+            client = await build_research_response_client()
         paper_maps = await objective_input_service.load_or_build_paper_maps(
             collection_id,
             document_inputs=document_inputs,
@@ -182,7 +187,11 @@ async def execute_objective_discovery_job(
                 },
             )
     finally:
-        await _flush_progress_updates(pending_progress_updates)
+        try:
+            await _flush_progress_updates(pending_progress_updates)
+        finally:
+            if owns_client and client is not None:
+                client.client.close()
 
 
 def _build_discovery_progress_callback(

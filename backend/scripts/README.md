@@ -38,9 +38,10 @@ cd backend
 ./.venv/bin/python scripts/feedback_analysis_worker.py --once
 ```
 
-Each script creates its own database engine and actual model resources, reuses
-them while polling, and closes them on exit. It never imports `main` or creates
-a Chat/Web runtime. Successful analysis, Case updates, sample queues and the job
+Each script creates its own database engine. The correction-signal and sample
+workers open the assigned feedback model for each job that reaches the model
+stage. The workers run independently of the Web process. Successful analysis,
+Case updates, sample queues and the job
 success state commit in one transaction guarded by the claimed lease.
 
 The worker does not retry failed jobs automatically. An operator can explicitly

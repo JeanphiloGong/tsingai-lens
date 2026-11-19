@@ -28,7 +28,7 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
-from infra.persistence.postgres.models.experiment_finding import ExperimentFindingORM
+from infra.persistence.postgres.models.finding import ExperimentFindingORM
 from repositories.finding_review_repository import (
     FindingReviewRepository,
 )

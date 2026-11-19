@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import logging
 import signal
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,8 +19,6 @@ from repositories.analysis_job_repository import AnalysisJobRepo, LeaseLostError
 from application.feedback.correction_signal_worker import execute_correction_signal_analysis_job
 from application.feedback.worker_lease import run_with_lease_heartbeat
 
-from application.feedback.correction_scope_analysis import OpenAICorrectionSignalAnalysisEngine
-from openai import AsyncOpenAI
 
 
 logger = logging.getLogger(__name__)
@@ -32,35 +29,23 @@ async def run_loop(interval_seconds: float, *, once: bool = False) -> None:
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
-        async with AsyncOpenAI(
-            api_key=os.getenv("LLM_API_KEY", "").strip() or "not-needed",
-            base_url=os.getenv("LLM_BASE_URL", "").strip() or None,
-            timeout=float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "180")),
-            max_retries=0,
-        ) as client:
-            engine = OpenAICorrectionSignalAnalysisEngine(client=client)
-            while True:
-                now = datetime.now(timezone.utc).isoformat()
-                await AnalysisJobRepo.recover_expired_jobs(now=now)
-                job = await AnalysisJobRepo.claim_next_correction_signal_analysis_job(
-                    now=now
-                )
-                if job is not None:
-                    try:
-                        result = await run_with_lease_heartbeat(
-                            job,
-                            lambda: execute_correction_signal_analysis_job(
-                                job, engine=engine, model_name=engine.model_name
-                            ),
-                        )
-                        print(result.status, flush=True)
-                    except LeaseLostError:
-                        logger.warning("Worker lease lost job_id=%s", job.job_id)
-                else:
-                    print("idle", flush=True)
-                if once:
-                    return
-                await asyncio.sleep(interval_seconds)
+        while True:
+            now = datetime.now(timezone.utc).isoformat()
+            await AnalysisJobRepo.recover_expired_jobs(now=now)
+            job = await AnalysisJobRepo.claim_next_correction_signal_analysis_job(now=now)
+            if job is not None:
+                try:
+                    result = await run_with_lease_heartbeat(
+                        job, lambda: execute_correction_signal_analysis_job(job),
+                    )
+                    print(result.status, flush=True)
+                except LeaseLostError:
+                    logger.warning("Worker lease lost job_id=%s", job.job_id)
+            else:
+                print("idle", flush=True)
+            if once:
+                return
+            await asyncio.sleep(interval_seconds)
     finally:
         try:
             await database_engine.dispose()

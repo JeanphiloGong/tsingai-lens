@@ -7,18 +7,16 @@ from domain.core.scientific_fact import (
     ScientificAttribute,
     ScientificContext,
 )
-from infra.persistence.postgres.models.comparison_group import (
+from infra.persistence.postgres.models.objective import (
     ComparisonGroupMemberORM,
     ComparisonGroupORM,
+    ObjectiveAnalysisORM,
+    ObjectiveExperimentSelectionORM,
 )
-from infra.persistence.postgres.models.experiment_finding import (
+from infra.persistence.postgres.models.finding import (
     ExperimentFindingORM,
     FindingComparisonGroupORM,
     FindingSelectionORM,
-)
-from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
-from infra.persistence.postgres.models.objective_experiment_selection import (
-    ObjectiveExperimentSelectionORM,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

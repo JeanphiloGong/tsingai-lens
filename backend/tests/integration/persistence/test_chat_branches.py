@@ -62,7 +62,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from tests.unit.application.test_chat_session_service import _WriteCapability
 from tests.unit.application.test_research_agent_runner import _Model
 
-from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
+from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner  # noqa: F401
 
 pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
 NOW = "2026-09-09T00:00:00+00:00"
@@ -278,7 +278,7 @@ async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
     chat_session_service.SourceArtifactRepo = sources
     chat_session_service.ChatRepo = repository
     collection_service.CollectionRepo = collections
-    service = chat_session_service.ChatSessionService(runner=runner)
+    service = make_scripted_chat_service(runner)
     app = FastAPI()
     monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
     app.add_exception_handler(ProjectException, project_exception_handler)
@@ -750,7 +750,7 @@ async def test_branch_authorization_busy_worker_and_message_boundaries(branch_ap
 
 async def test_regenerated_write_requires_a_fresh_exact_approval(branch_app):
     app = branch_app
-    app.service.runner.model = _Model(
+    app.service.scripted_runner.model = _Model(
         ModelTurn(
             tool_calls=(
                 ModelToolCall(
@@ -827,7 +827,7 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
             await release.wait()
             return await super().respond(**kwargs)
 
-    app.service.runner.model = PausedModel(ModelTurn(content=ANSWER))
+    app.service.scripted_runner.model = PausedModel(ModelTurn(content=ANSWER))
     branch = await _branch(app)
     events = await app.service.send_message_stream(
         branch["session_id"],
@@ -865,14 +865,14 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
 
 async def test_failed_model_answer_can_be_regenerated_with_the_same_source(branch_app):
     app = branch_app
-    app.service.runner.model = _Model(RuntimeError("synthetic provider failure"))
+    app.service.scripted_runner.model = _Model(RuntimeError("synthetic provider failure"))
     first = await _branch(app)
     failed = (await _send(app, first)).json()["data"]
     assert failed["status"] == "failed"
     question = next(
         message for message in failed["messages"] if message["role"] == "user"
     )
-    app.service.runner.model = _Model(ModelTurn(content=ANSWER))
+    app.service.scripted_runner.model = _Model(ModelTurn(content=ANSWER))
     second = await _branch(app, first["session_id"], question["message_id"], None)
     completed = (await _send(app, second)).json()["data"]
     assert completed["status"] == "completed"

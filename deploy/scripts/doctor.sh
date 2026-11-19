@@ -70,6 +70,12 @@ for file in public-tls/tls.crt public-tls/tls.key identity-certs/ca.crt identity
   [ -f "$ROOT_DIR/$file" ] && pass "$file exists" || fail "$file is missing"
 done
 
+if [ -r "$ROOT_DIR/model-secrets/model-key" ] && [ "$(wc -c < "$ROOT_DIR/model-secrets/model-key")" -eq 32 ]; then
+  pass "model master-key file contains 32 bytes"
+else
+  fail "model master-key file must exist, be readable and contain exactly 32 bytes"
+fi
+
 VERIFY_VERSION=${LENS_VERSION:-}
 load_env
 if [ -n "$VERIFY_VERSION" ]; then

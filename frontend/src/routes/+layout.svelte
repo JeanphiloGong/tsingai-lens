@@ -38,6 +38,16 @@
 
 	$: isAuthRoute = ['/login', '/register', '/forgot-password'].includes($page.url.pathname);
 	$: authenticatedUser = $authState.user;
+	$: adminPath =
+		authenticatedUser &&
+		$permissionState.status === 'ready' &&
+		$permissionState.userId === authenticatedUser.user_id
+			? $permissionState.codes.includes('users.manage')
+				? ('/admin/users' as const)
+				: $permissionState.codes.includes('models.manage')
+					? ('/admin/models' as const)
+					: null
+			: null;
 	$: if (!authenticatedUser) sessionView = null;
 	$: userName = authenticatedUser?.display_name || authenticatedUser?.email || '';
 	$: userInitial = (authenticatedUser?.display_name || authenticatedUser?.email || 'U')
@@ -257,9 +267,9 @@
 										<ChevronRight size={14} aria-hidden="true" />
 									</button>
 								</div>
-								{#if $permissionState.status === 'ready' && $permissionState.userId === authenticatedUser.user_id && $permissionState.codes.includes('users.manage')}
+								{#if adminPath}
 									<div class="session-section">
-										<a href={resolve('/admin/users')}>
+										<a href={resolve(adminPath)}>
 											<ShieldCheck size={17} aria-hidden="true" />
 											{$t('admin.title')}
 										</a>

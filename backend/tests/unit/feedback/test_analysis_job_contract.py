@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import ModuleType
 
 import pytest
+from application.chat import CapabilityRegistry
 from application.chat import session_service as chat_session_service
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
@@ -109,9 +110,8 @@ def _service(chat: _Chat, jobs: _Jobs) -> chat_session_service.ChatSessionServic
     chat_session_service.CollectionRepo = _Collections()
     chat_session_service.SourceArtifactRepo = object()
     chat_session_service.ChatRepo = chat
-    runner = None
     chat_session_service.AnalysisJobRepo = jobs
-    return chat_session_service.ChatSessionService(runner=runner)
+    return chat_session_service.ChatSessionService(capabilities=CapabilityRegistry(()))
 
 
 async def test_feedback_version_is_the_idempotent_analysis_job_identity() -> None:

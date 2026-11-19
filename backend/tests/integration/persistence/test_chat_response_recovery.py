@@ -22,7 +22,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from infra.identity.client import SESSION_COOKIE_NAME
-from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+from application.chat import CapabilityRegistry, ModelTurn
 from application.chat import session_service as chat_session_service
 from controllers.chat.chat_session_routes import chat_session_router as router
 from fastapi import FastAPI
@@ -98,7 +98,7 @@ def _worker(
                     display_name="Worker test model",
                     base_url="https://worker.example.invalid/v1",
                     model="scripted-model",
-                    api_key_ref=None,
+                    api_key_ciphertext=None,
                     enabled=True,
                     created_at=now,
                     updated_at=now,
@@ -110,13 +110,10 @@ def _worker(
         chat_session_service.collection_service = collection_service
         chat_session_service.SourceArtifactRepo = sources
         chat_session_service.ChatRepo = ChatRepository()
-        runner = ResearchAgentRunner(
-            model=_ProcessPausedModel(resume, finish, calls),
-            capabilities=CapabilityRegistry(()),
-        )
-        chat_model.OpenAIChatModel = lambda **options: runner.model
+        model = _ProcessPausedModel(resume, finish, calls)
+        chat_model.OpenAIChatModel = lambda **options: model
         service = chat_session_service.ChatSessionService(
-            runner=runner,
+            capabilities=CapabilityRegistry(()),
         )
         app = FastAPI()
         shared_chat_service.ChatService = service

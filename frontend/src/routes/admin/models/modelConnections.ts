@@ -3,6 +3,7 @@ export type ModelConnection = {
 	display_name: string;
 	base_url: string;
 	model: string;
+	kind: 'chat' | 'embedding';
 	api_key_configured: boolean;
 	enabled: boolean;
 	priority: number;
@@ -30,6 +31,7 @@ export type ModelDraft = {
 	display_name: string;
 	base_url: string;
 	model: string;
+	kind: ModelConnection['kind'];
 	enabled: boolean;
 	priority: number;
 	context_window_tokens: number | null;

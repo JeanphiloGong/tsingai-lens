@@ -44,6 +44,7 @@
 			display_name: '',
 			base_url: '',
 			model: '',
+			kind: 'chat',
 			enabled: false,
 			priority: 0,
 			context_window_tokens: null,
@@ -106,6 +107,7 @@
 			display_name: value.display_name,
 			base_url: value.base_url,
 			model: value.model,
+			kind: value.kind,
 			enabled: value.enabled,
 			priority: value.priority,
 			context_window_tokens: value.context_window_tokens,
@@ -184,6 +186,7 @@
 					display_name: draft.display_name,
 					base_url: draft.base_url,
 					model: draft.model,
+					kind: draft.kind,
 					priority: draft.priority,
 					context_window_tokens: draft.context_window_tokens ?? null,
 					max_output_tokens: draft.max_output_tokens ?? null,
@@ -347,6 +350,13 @@
 				{saved ? saved.display_name : $t('modelAdmin.create')}
 			</h2>
 			<form class="admin-form model-form" on:submit|preventDefault={save}>
+				<label>
+					{$t('modelAdmin.kind')}
+					<select class="input" bind:value={draft.kind} disabled={busy || Boolean(saved)}>
+						<option value="chat">{$t('modelAdmin.chatKind')}</option>
+						<option value="embedding">{$t('modelAdmin.embeddingKind')}</option>
+					</select>
+				</label>
 				<label
 					>{$t('admin.name')}<input
 						class="input"

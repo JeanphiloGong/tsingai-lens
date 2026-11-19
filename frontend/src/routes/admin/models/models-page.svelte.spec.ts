@@ -21,6 +21,7 @@ const saved = {
 	display_name: 'Laboratory',
 	base_url: 'http://localhost/v1',
 	model: 'chat',
+	kind: 'chat',
 	api_key_configured: true,
 	enabled: false,
 	priority: 0,

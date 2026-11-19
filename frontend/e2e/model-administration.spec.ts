@@ -9,6 +9,7 @@ async function fixture(page: Page) {
 			display_name: 'Laboratory',
 			base_url: 'http://127.0.0.1:9999/v1',
 			model: 'local-chat',
+			kind: 'chat',
 			api_key_configured: true,
 			enabled: false,
 			priority: 0,
@@ -22,6 +23,8 @@ async function fixture(page: Page) {
 	};
 	const writes: { method: string; body: Record<string, unknown> }[] = [];
 	const reads: string[] = [];
+	const assignmentWrites: Record<string, unknown>[] = [];
+	const assignments = new Map<string, { connection_id: string | null; version: number }>();
 	await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'en'));
 	await page.route('**/user-api/v1/**', (route) =>
 		route.fulfill({
@@ -40,6 +43,26 @@ async function fixture(page: Page) {
 			}
 		})
 	);
+	await page.route('**/api/v1/admin/model-assignments/**', (route) => {
+		const url = new URL(route.request().url());
+		const purpose = url.pathname.split('/').at(-1)!;
+		if (purpose === 'choices') {
+			const items = url.searchParams.get('kind') === 'embedding'
+				? [{ connection_id: 'vectors', display_name: 'Vectors', model: 'local-embedding' }]
+				: state.item.enabled ? [state.item] : [];
+			return route.fulfill({ json: { code: 200, message: 'success', data: { items }, meta: null } });
+		}
+		let assignment = assignments.get(purpose) ?? { connection_id: null, version: 0 };
+		if (route.request().method() === 'PUT') {
+			const body = route.request().postDataJSON();
+			assignmentWrites.push(body);
+			assignment = { connection_id: body.connection_id, version: assignment.version + 1 };
+			assignments.set(purpose, assignment);
+		}
+		return route.fulfill({
+			json: { code: 200, message: 'success', data: assignment, meta: null }
+		});
+	});
 	await page.route('**/api/v1/admin/model-connections**', async (route) => {
 		const request = route.request();
 		if (request.method() === 'GET') {
@@ -87,7 +110,7 @@ async function fixture(page: Page) {
 		state.item.version++;
 		return route.fulfill({ json: { code: 200, message: 'success', data: state.item, meta: null } });
 	});
-	return { state, writes, reads };
+	return { state, writes, reads, assignmentWrites };
 }
 test('model-only administrator saves settings and key once, then clears explicitly', async ({
 	page
@@ -100,8 +123,10 @@ test('model-only administrator saves settings and key once, then clears explicit
 	await page.goto('/admin/models?connection_id=lab-a');
 	await expect(page.getByRole('heading', { name: 'Model connections', exact: true })).toBeVisible();
 	const sidebar = page.getByRole('navigation', { name: 'Administration', exact: true });
-	await expect(sidebar.getByRole('link')).toHaveCount(1);
+	await expect(sidebar.getByRole('link')).toHaveCount(3);
 	await expect(sidebar.getByRole('link', { name: 'Model connections' })).toBeVisible();
+	await expect(sidebar.getByRole('link', { name: 'Model assignments' })).toBeVisible();
+	await expect(sidebar.getByRole('link', { name: 'Model change history' })).toBeVisible();
 	await page.getByLabel('Name', { exact: true }).fill('Updated model');
 	await page.getByLabel('New API key', { exact: true }).fill('synthetic-new');
 	await page.getByRole('button', { name: 'Save configuration', exact: true }).click();
@@ -119,6 +144,48 @@ test('model-only administrator saves settings and key once, then clears explicit
 	await expect.poll(() => writes.length).toBe(2);
 	expect(writes[1].body).toEqual({ expected_version: 2, api_key: null });
 	await expect(page.getByRole('button', { name: 'Clear saved key', exact: true })).toHaveCount(0);
+});
+
+test('administrator assigns the document profile model and ordinary accounts cannot access it', async ({
+	page
+}) => {
+	const { state, assignmentWrites } = await fixture(page);
+	state.item.enabled = true;
+	await page.setViewportSize({ width: 375, height: 812 });
+	await page.goto('/admin/models');
+	await page.getByRole('link', { name: 'Model assignments', exact: true }).click();
+	const select = page.getByRole('combobox', { name: 'Model connection', exact: true });
+	await expect(select).toHaveValue('');
+	const save = page.getByRole('button', { name: 'Save assignment', exact: true });
+	await expect(save).toBeDisabled();
+	await select.selectOption('lab-a');
+	await save.click();
+	await expect(page.getByRole('status')).toHaveText('Assignment saved for new jobs.');
+	expect(assignmentWrites).toEqual([{ connection_id: 'lab-a', expected_version: 0 }]);
+	await page.reload();
+	await expect(select).toHaveValue('lab-a');
+	await expect(save).toBeDisabled();
+	expect(await page.locator('body').evaluate((body) => body.scrollWidth <= innerWidth)).toBe(true);
+	const purpose = page.getByRole('combobox', { name: 'Processing task' });
+	await purpose.selectOption('embedding');
+	await expect(select.getByRole('option', { name: 'Laboratory · local-chat' })).toHaveCount(0);
+	await select.selectOption('vectors');
+	await save.click();
+	await expect(page.getByRole('status')).toHaveText('Assignment saved for new jobs.');
+	expect(assignmentWrites[1]).toEqual({ connection_id: 'vectors', expected_version: 0 });
+	await purpose.selectOption('research_analysis');
+	await expect(select).toHaveValue('');
+	await purpose.selectOption('feedback');
+	await select.selectOption('lab-a');
+	await save.click();
+	await expect(page.getByRole('status')).toHaveText('Assignment saved for new jobs.');
+	expect(assignmentWrites[2]).toEqual({ connection_id: 'lab-a', expected_version: 0 });
+
+	state.codes = ['users.manage'];
+	await page.reload();
+	await expect(page.getByRole('alert')).toContainText('403');
+	await expect(page.getByRole('link', { name: 'Model assignments', exact: true })).toHaveCount(0);
+	await expect(select).toHaveCount(0);
 });
 test('conflict retains ordinary draft and clears the key without retry', async ({ page }) => {
 	const { state, writes } = await fixture(page);

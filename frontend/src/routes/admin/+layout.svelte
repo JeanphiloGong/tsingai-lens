@@ -5,7 +5,7 @@
 	import { authState } from '../_shared/authState';
 	import { t } from '../_shared/i18n';
 	import { permissionState } from '../_shared/permissions';
-	import { ArrowLeft, Cpu, Users, Layers, KeyRound, ShieldCheck } from '@lucide/svelte';
+	import { ArrowLeft, ClipboardList, Cpu, History, Users, Layers, KeyRound, ShieldCheck } from '@lucide/svelte';
 
 	$: permissionCodes =
 		$authState.status === 'authenticated' &&
@@ -47,6 +47,16 @@
 						href={resolve('/admin/models')}
 						aria-current={$page.url.pathname === '/admin/models' ? 'page' : undefined}
 						><Cpu size={18} aria-hidden="true" />{$t('modelAdmin.title')}</a
+					>
+					<a
+						href={resolve('/admin/model-assignments')}
+						aria-current={$page.url.pathname === '/admin/model-assignments' ? 'page' : undefined}
+						><ClipboardList size={18} aria-hidden="true" />{$t('modelAssignments.title')}</a
+					>
+					<a
+						href={resolve('/admin/model-connection-audit')}
+						aria-current={$page.url.pathname === '/admin/model-connection-audit' ? 'page' : undefined}
+						><History size={18} aria-hidden="true" />{$t('modelAudit.title')}</a
 					>
 				{/if}
 			</nav>

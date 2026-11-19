@@ -1,8 +1,8 @@
 # Model Connection API
 
-Manage system-wide Research Agent Chat model connections through the model
-catalog, administrator configuration endpoints, and audit history. Table and
-credential formats are defined in the [model connection data model](data-model.md).
+Manage system-wide model connections and processing assignments through the
+catalog, administrator endpoints, and audit history. Table and credential
+formats are defined in the [model connection data model](data-model.md).
 
 ## Model Connection Conventions
 
@@ -22,7 +22,7 @@ credential formats are defined in the [model connection data model](data-model.m
 
 - **URL:** `/api/v1/model-connections`
 - **Method:** `GET`
-- **Description:** List enabled model connections for the authenticated user,
+- **Description:** List enabled Chat connections for the authenticated user,
   ordered by `priority DESC, display_name ASC, connection_id ASC`.
 
 No JSON request body.
@@ -64,8 +64,9 @@ The administrator endpoints share the following connection representation.
 | `display_name` | string | Display name |
 | `base_url` | string | API base visible to administrators |
 | `model` | string | Fixed model identifier |
+| `kind` | string | Immutable capability, either `chat` or `embedding`. Defaults to `chat` at creation |
 | `api_key_configured` | boolean | Whether ciphertext is present; does not establish that the credential is valid |
-| `enabled` | boolean | Whether new questions may select this connection |
+| `enabled` | boolean | Whether new questions and processing assignments may select this connection |
 | `priority` | integer | Default selection order |
 | `context_window_tokens` | integer / null | Positive limit or inheritance |
 | `max_output_tokens` | integer / null | Positive limit or inheritance |
@@ -153,6 +154,7 @@ administrator connection object; a missing connection returns
 | `display_name` | string | Yes | 1–100 characters after trimming surrounding whitespace |
 | `base_url` | string | Yes | At most 2048 characters; complete http/https API base without userinfo, query, fragment, or whitespace |
 | `model` | string | Yes | 1–200 characters after trimming surrounding whitespace |
+| `kind` | string | No | `chat` or `embedding`. Defaults to `chat` |
 | `api_key` | string / null | No | Omitted or null means no key; a string contains 1–8192 UTF-8 bytes without CR/LF and is not trimmed; empty strings are invalid |
 | `priority` | integer | No | PostgreSQL int32 range; defaults to 0 |
 | `context_window_tokens` | integer / null | No | 1–2147483647; defaults to null |
@@ -202,7 +204,7 @@ audit entry.
 | `api_key` | string / null | No | Omit to preserve the key, send a nonempty string to encrypt and replace it, or send explicit null to clear it; empty strings are invalid |
 
 Send ordinary settings and the key in one request. At least one editable field
-is required, using the creation constraints. Connection ID, address, and model
+is required, using the creation constraints. Connection ID, address, model, and kind
 cannot be changed.
 
 | Submitted `api_key` | Server behavior | Frontend behavior |
@@ -277,15 +279,17 @@ failed submissions automatically.
 Only saved connections can be tested, including disabled connections. The
 request accepts no draft address, arbitrary messages, custom test text, or
 temporary API key. After authorization and version checks, use the read
-configuration for one Chat Completions request with `Reply with OK.`. Include
-no tools or research data. Cap output at the smaller of 128 tokens and the
-connection output limit, and total probe time at the smaller of 10 seconds and
-the connection timeout. Do not retry or follow redirects; always close the
-client.
+configuration for one request according to `kind`.
 
-The completion must be parseable with at least one valid choice containing
-nonempty text; it need not equal OK exactly. This probe does not establish
-compatibility with every tool, context size, or streaming operation.
+- `chat` calls `/chat/completions` with `Reply with OK.` and no tools. The
+  first choice must contain nonempty text. The output cap is the smaller of
+  128 tokens and the configured output limit.
+- `embedding` calls `/embeddings` with one fixed synthetic input. The
+  response must contain one nonempty vector of finite values at index 0.
+
+Both probes cap total time at the smaller of 10 seconds and the configured
+timeout, use no research data, and close the client after one attempt.
+Redirects are disabled.
 
 **Response example: successful test**
 
@@ -443,6 +447,70 @@ and API key as **Configured** and **Replaced**. Render `enabled` as
 **Enabled** or **Disabled**, null limits as **Inherited**, and ordinary
 creation fields' old values as **No previous value**.
 
+## Processing Model Assignments
+
+All assignment endpoints require `models.manage`. Saving also requires the
+configured browser Origin. The supported purposes are fixed by the processing
+tasks that use them.
+
+| Purpose | Required connection kind | Consumer |
+| --- | --- | --- |
+| `document_profile` | `chat` | Document preparation worker |
+| `research_analysis` | `chat` | Objective discovery, Objective analysis and Finding summaries |
+| `feedback` | `chat` | Correction-signal analysis and dataset sample construction |
+| `embedding` | `embedding` | Source text-unit retrieval benchmark |
+
+### Read an Assignment
+
+`GET /api/v1/admin/model-assignments/{purpose}` returns the current
+`connection_id` and assignment `version` in `data`. An unassigned purpose
+returns `{"connection_id":null,"version":0}`.
+
+### Save an Assignment
+
+`PUT /api/v1/admin/model-assignments/{purpose}` saves an enabled connection
+of the kind required by the selected purpose.
+
+| Request field | Type | Description |
+| --- | --- | --- |
+| `connection_id` | string | Required, 1–64 characters |
+| `expected_version` | integer | Required, 0–9223372036854775807 |
+
+```json
+{
+  "connection_id": "lab-a",
+  "expected_version": 0
+}
+```
+
+Send zero for an initial assignment, or the version returned by the preceding
+read or write. The first assignment returns version 1. Reassignment increments
+the assignment version. Saving the current connection with the current version
+returns the existing assignment. The response uses the same `data` fields
+as the read endpoint. The assignment and connection have separate versions.
+
+### List Eligible Connections
+
+`GET /api/v1/admin/model-assignments/choices?kind=embedding` requires `kind`
+to be `chat` or `embedding`. It returns `data.items` containing the enabled
+connections of that kind. Each item contains `connection_id`, `display_name`,
+and `model`. Items are ordered by
+`priority DESC, display_name ASC, connection_id ASC`.
+
+### Apply Assignments to Tasks
+
+Document preparation uses the assignment to select a connection for new jobs.
+When the purpose is unassigned, the request returns
+`processing_model_unassigned` and creates no job.
+An active job for the same document is reused until it finishes. Queued jobs
+retain their recorded connection ID. The worker reads the current credential
+for that connection when it needs to classify the document.
+
+The other consumers read their current assignment when starting execution.
+One execution uses the selected connection through completion. The retrieval
+benchmark embeds the corpus and its queries using one selected connection
+and includes that connection ID in its report.
+
 ## Model Connection Errors
 
 | Condition | HTTP | `code` | `data.code` |
@@ -453,6 +521,10 @@ creation fields' old values as **No previous value**.
 | Invalid JSON, type, field, length, or request size | 200 | 200100 | `invalid_request` |
 | Connection not found | 200 | 200201 | `model_connection_not_found` |
 | Stale configuration version | 200 | 200204 | `model_connection_version_conflict` |
+| Stale assignment version | 200 | 200204 | `model_assignment_version_conflict` |
+| Selected assignment connection is missing, disabled, or of the wrong kind | 200 | 200204 | `processing_model_unavailable` |
+| Disabling a connection that is still assigned | 200 | 200204 | `model_connection_assigned` |
+| Document preparation requested before an assignment exists | 200 | 200205 | `processing_model_unassigned` |
 | Master key unavailable or decryption failed | 200 | 200205 | `model_credentials_unavailable` |
 | Database unavailable | 200 | 200205 | `model_configuration_unavailable` |
 | Unexpected failure | 200 | 200000 | `internal_error` |

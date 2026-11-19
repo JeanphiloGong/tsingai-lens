@@ -1,13 +1,14 @@
 # Model Connection Data Model
 
-Store system-wide model connections, encrypted credentials, and administrative
-change records. Connections and audit records belong to the Lens PostgreSQL
-database; user-service owns accounts and permissions. See the
+Store system-wide model connections, encrypted credentials, processing
+assignments, and administrative change records in Lens PostgreSQL.
+User-service owns accounts and permissions. See the
 [model connection HTTP contract](api.md).
 
 - [Model Connections: `model_connections`](#model-connections-model_connections)
 - [Ciphertext Format](#ciphertext-format)
 - [Administrative Audit: `model_connection_audit`](#administrative-audit-model_connection_audit)
+- [Model Assignments: `model_assignments`](#model-assignments-model_assignments)
 - [Model Management Permission](#model-management-permission)
 
 ## Model Connections: `model_connections`
@@ -21,8 +22,9 @@ Connections have no owning user.
 | `display_name` | text | No | Display name, 1–100 characters after trimming surrounding whitespace |
 | `base_url` | text | No | Complete OpenAI-compatible API base, at most 2048 characters; immutable after creation |
 | `model` | text | No | Provider model identifier, 1–200 characters after trimming surrounding whitespace; immutable after creation |
+| `kind` | varchar(16) | No | Immutable capability, `chat` or `embedding`. Defaults to `chat`, including for existing connections |
 | `api_key_ciphertext` | bytea | Yes | Authenticated AES-GCM ciphertext; NULL means this connection requires no API key |
-| `enabled` | boolean | No | Defaults to false; disabling prevents selection for new questions |
+| `enabled` | boolean | No | Defaults to false; disabling prevents new selection or assignment |
 | `priority` | integer | No | Defaults to 0; higher values sort first |
 | `context_window_tokens` | integer | Yes | Positive connection context limit; NULL inherits the Agent limit |
 | `max_output_tokens` | integer | Yes | Positive connection output limit; NULL inherits the Agent limit |
@@ -39,6 +41,7 @@ CHECK (length(connection_id) BETWEEN 1 AND 64)
 CHECK (length(btrim(display_name)) BETWEEN 1 AND 100)
 CHECK (length(base_url) BETWEEN 1 AND 2048)
 CHECK (length(btrim(model)) BETWEEN 1 AND 200)
+CHECK (kind IN ('chat', 'embedding'))
 CHECK (version > 0)
 CHECK (context_window_tokens IS NULL OR context_window_tokens > 0)
 CHECK (max_output_tokens IS NULL OR max_output_tokens > 0)
@@ -95,7 +98,7 @@ Read the actor ID and display name from the authenticated session when writing
 the record. Subsequent name changes leave the recorded display name intact.
 
 Generate `changes` from a fixed set of ordinary fields: `display_name`,
-`base_url`, `model`, `enabled`, `priority`, `context_window_tokens`,
+`base_url`, `model`, `kind`, `enabled`, `priority`, `context_window_tokens`,
 `max_output_tokens`, and `request_timeout_seconds`. For creation, record
 `before=null` and the saved initial value in `after`. For updates, compare
 the values read during the version check with the saved values in the same
@@ -112,11 +115,38 @@ entire operation. An update with no effective changes preserves the version
 and audit history. Submitting a nonempty value while a key is configured
 counts as a replacement, even if the submitted value is the same.
 
+## Model Assignments: `model_assignments`
+
+Each configured purpose has one row. The table starts empty and a row is
+created on the first assignment. The service validates the purpose and the
+required connection kind. See the
+[assignment HTTP contract](api.md#processing-model-assignments).
+
+| Field | PostgreSQL type | Purpose |
+| --- | --- | --- |
+| `purpose` | varchar(64) | Primary key |
+| `connection_id` | varchar(64) | Foreign key to `model_connections.connection_id`, with `ON DELETE RESTRICT` |
+| `version` | bigint | Positive assignment version, initially 1 |
+| `updated_by` | varchar(64) | Stable user ID of the last administrator to change the assignment |
+| `updated_at` | timestamptz | Time of the last effective assignment change |
+
+All fields are required. The database enforces `CHECK (version > 0)`.
+Assigning a connection and disabling it acquire the same connection-row lock.
+Disabling is permitted after its assignments move to another connection.
+Saving the same connection at the current version preserves the assignment
+version, last editor, and timestamp. Connection changes retain their separate
+audit history.
+
+A document preparation run records its assigned `model_connection_id` in its
+existing context. The profile fingerprint includes that ID so a new assignment
+can trigger classification again. The independently computed Source
+fingerprint continues to use the document checksum and parser version.
+
 ## Model Management Permission
 
-`models.manage` permits management of system-wide model connections and API
-keys. User-service stores the following permission and built-in administrator
-group association:
+`models.manage` permits management of system-wide model connections, API
+keys, and processing assignments. User-service stores the permission and
+its association with the built-in administrator group.
 
 | Table | Field | Value |
 | --- | --- | --- |

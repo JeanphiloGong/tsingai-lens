@@ -42,8 +42,8 @@
 		saved = false;
 		loading = false;
 		saving = false;
-		if (subject) void load();
 	}
+	$: if (subject) void load();
 
 	async function load() {
 		request.abort();
@@ -72,7 +72,8 @@
 	}
 
 	async function save() {
-		if (!subject || saving || !assignment || !selected || selected === assignment.connection_id) return;
+		if (!subject || saving || !assignment || !selected || selected === assignment.connection_id)
+			return;
 		const signal = request.signal;
 		saving = true;
 		error = '';
@@ -106,10 +107,15 @@
 	<div class="admin-form">
 		<label>
 			{$t('modelAssignments.purpose')}
-			<select class="input" value={purpose} disabled={saving} on:change={(event) => {
-				purpose = event.currentTarget.value;
-				void load();
-			}}>
+			<select
+				class="input"
+				value={purpose}
+				disabled={saving}
+				on:change={(event) => {
+					purpose = event.currentTarget.value;
+					void load();
+				}}
+			>
 				{#each purposes as item (item.value)}
 					<option value={item.value}>{$t(item.label)}</option>
 				{/each}
@@ -129,7 +135,10 @@
 					{/each}
 				</select>
 			</label>
-			<button class="btn btn--primary" disabled={saving || !selected || selected === assignment.connection_id}>
+			<button
+				class="btn btn--primary"
+				disabled={saving || !selected || selected === assignment.connection_id}
+			>
 				{$t('modelAssignments.save')}
 			</button>
 		</form>

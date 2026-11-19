@@ -47,10 +47,15 @@ async function fixture(page: Page) {
 		const url = new URL(route.request().url());
 		const purpose = url.pathname.split('/').at(-1)!;
 		if (purpose === 'choices') {
-			const items = url.searchParams.get('kind') === 'embedding'
-				? [{ connection_id: 'vectors', display_name: 'Vectors', model: 'local-embedding' }]
-				: state.item.enabled ? [state.item] : [];
-			return route.fulfill({ json: { code: 200, message: 'success', data: { items }, meta: null } });
+			const items =
+				url.searchParams.get('kind') === 'embedding'
+					? [{ connection_id: 'vectors', display_name: 'Vectors', model: 'local-embedding' }]
+					: state.item.enabled
+						? [state.item]
+						: [];
+			return route.fulfill({
+				json: { code: 200, message: 'success', data: { items }, meta: null }
+			});
 		}
 		let assignment = assignments.get(purpose) ?? { connection_id: null, version: 0 };
 		if (route.request().method() === 'PUT') {

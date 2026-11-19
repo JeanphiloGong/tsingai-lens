@@ -43,9 +43,9 @@
 		$permissionState.status === 'ready' &&
 		$permissionState.userId === authenticatedUser.user_id
 			? $permissionState.codes.includes('users.manage')
-				? resolve('/admin/users')
+				? ('/admin/users' as const)
 				: $permissionState.codes.includes('models.manage')
-					? resolve('/admin/models')
+					? ('/admin/models' as const)
 					: null
 			: null;
 	$: if (!authenticatedUser) sessionView = null;
@@ -269,7 +269,7 @@
 								</div>
 								{#if adminPath}
 									<div class="session-section">
-										<a href={adminPath}>
+										<a href={resolve(adminPath)}>
 											<ShieldCheck size={17} aria-hidden="true" />
 											{$t('admin.title')}
 										</a>

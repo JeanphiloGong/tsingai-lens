@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { errorMessage, getApiErrorReason, requestJson } from '../../_shared/api';
 	import { authState } from '../../_shared/authState';
 	import { language, t } from '../../_shared/i18n';
@@ -69,8 +70,8 @@
 		loading = false;
 		error = '';
 		connectionError = '';
-		if (account) void loadConnections();
 	}
+	$: if (account) void loadConnections();
 	$: if (account) void loadAudit(connectionID, offset);
 	$: connectionNames = new Map(
 		connections.map((connection) => [connection.connection_id, connection.display_name])
@@ -90,7 +91,7 @@
 		const options: ConnectionPage['items'] = [];
 		try {
 			while (!controller.signal.aborted) {
-				const params = new URLSearchParams({ limit: '100', offset: String(options.length) });
+				const params = new SvelteURLSearchParams({ limit: '100', offset: String(options.length) });
 				const result: ConnectionPage = await requestJson(
 					'/api/v1/admin/model-connections?' + params,
 					{ signal: controller.signal }
@@ -111,7 +112,10 @@
 		readController?.abort();
 		const controller = new AbortController();
 		readController = controller;
-		const params = new URLSearchParams({ limit: String(pageSize), offset: String(pageOffset) });
+		const params = new SvelteURLSearchParams({
+			limit: String(pageSize),
+			offset: String(pageOffset)
+		});
 		if (filter) params.set('connection_id', filter);
 		loading = true;
 		error = '';
@@ -193,6 +197,7 @@
 		{#if !page.items.length}
 			<p role="status">{$t('modelAudit.empty')}</p>
 		{:else}
+			<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The compiler warns on the keyboard-scrollable region. -->
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users can scroll the named table.) -->
 			<div class="audit-table" role="region" aria-label={$t('modelAudit.title')} tabindex="0">
 				<table>

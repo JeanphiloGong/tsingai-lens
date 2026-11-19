@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { beforeNavigate, goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy, tick } from 'svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import PermissionGate from '../../_shared/PermissionGate.svelte';
 	import { authState } from '../../_shared/authState';
 	import { permissionState, refreshPermissions } from '../../_shared/permissions';
@@ -166,9 +168,10 @@
 		}
 	}
 	async function navigate(id: string, nextOffset = offset) {
-		const query = new URLSearchParams({ offset: String(nextOffset) });
+		const query = new SvelteURLSearchParams({ offset: String(nextOffset) });
 		if (id) query.set('connection_id', id);
-		await goto(`?${query}`, { keepFocus: true, noScroll: true });
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- Resolve the page path before appending search parameters.
+		await goto(`${resolve('/admin/models')}?${query}`, { keepFocus: true, noScroll: true });
 		await tick();
 		editorHeading?.focus();
 	}
@@ -302,6 +305,7 @@
 		</div>{/if}
 	{#if notice}<p class="status" role="status">{notice}</p>{/if}
 	{#if loading}<p role="status">{$t('admin.loading')}</p>{/if}
+	<!-- eslint-disable-next-line svelte/no-unused-svelte-ignore -- The compiler warns on the keyboard-scrollable region. -->
 	<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the named model table.) -->
 	<div
 		class="admin-table-wrap model-list"

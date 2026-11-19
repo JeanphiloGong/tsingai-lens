@@ -58,6 +58,9 @@ class DeployScripts(unittest.TestCase):
             path = self.runtime / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('fixture')
+        model_key = self.runtime / 'model-secrets' / 'model-key'
+        model_key.parent.mkdir()
+        model_key.write_bytes(secrets.token_bytes(32))
         tools = self.base / 'bin'
         tools.mkdir()
         (tools / 'docker').write_text(DOCKER)
@@ -161,6 +164,15 @@ class ComposeContract(unittest.TestCase):
             proxy = services['frontend']['networks']['default']['ipv4_address']
             self.assertEqual(services['user-service']['environment']['TRUSTED_PROXY_IP'], proxy)
             self.assertEqual(services['backend']['environment']['USER_RPC_TARGET'], 'user-service:50057')
+            key_path = '/run/lens-secrets/model-key'
+            for name in ('backend', 'document-preparation-worker', 'objective-discovery-worker',
+                         'objective-analysis-worker', 'correction-signal-analysis-worker',
+                         'dataset-sample-worker'):
+                service = services[name]
+                self.assertEqual(service['environment']['LENS_MODEL_KEY_FILE'], key_path)
+                mount = next(volume for volume in service['volumes'] if volume['target'] == key_path)
+                self.assertTrue(mount['read_only'])
+                self.assertEqual(mount['bind']['selinux'], 'z')
             self.assertEqual(services['user-service']['environment']['BROWSER_ORIGIN'], 'https://lens.example.test')
             self.assertTrue(services['user-service']['healthcheck']['test'])
 

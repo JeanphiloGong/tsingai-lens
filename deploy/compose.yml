@@ -56,7 +56,7 @@ services:
       - ./identity-certs/ca.crt:/run/identity/ca.crt:ro,z
       - ./identity-certs/client.crt:/run/identity/client.crt:ro,Z
       - ./identity-certs/client.key:/run/identity/client.key:ro,Z
-      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,Z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,z
     expose:
       - "8010"
     depends_on:
@@ -78,8 +78,10 @@ services:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      LENS_MODEL_KEY_FILE: /run/lens-secrets/model-key
     volumes:
       - ./data/backend:/app/data:z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,z
     command: ["python", "scripts/run_document_preparation.py"]
     depends_on:
       postgres:
@@ -92,8 +94,10 @@ services:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      LENS_MODEL_KEY_FILE: /run/lens-secrets/model-key
     volumes:
       - ./data/backend:/app/data:z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,z
     command: ["python", "scripts/run_objective_discovery.py"]
     depends_on:
       postgres:
@@ -106,8 +110,10 @@ services:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      LENS_MODEL_KEY_FILE: /run/lens-secrets/model-key
     volumes:
       - ./data/backend:/app/data:z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,z
     command: ["python", "scripts/run_objective_analysis.py"]
     depends_on:
       postgres:
@@ -134,8 +140,10 @@ services:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      LENS_MODEL_KEY_FILE: /run/lens-secrets/model-key
     volumes:
       - ./data/backend:/app/data:z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,z
     command: ["python", "scripts/correction_signal_analysis_worker.py"]
     depends_on:
       postgres:
@@ -162,8 +170,10 @@ services:
       - ./backend.env
     environment:
       LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+      LENS_MODEL_KEY_FILE: /run/lens-secrets/model-key
     volumes:
       - ./data/backend:/app/data:z
+      - ./model-secrets/model-key:/run/lens-secrets/model-key:ro,z
     command: ["python", "scripts/dataset_sample_worker.py"]
     depends_on:
       postgres:

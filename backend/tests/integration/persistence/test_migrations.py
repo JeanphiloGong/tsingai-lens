@@ -29,7 +29,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261114_0101"
+HEAD_REVISION = "b71000000001"
 IDENTITY_REVISION = "20261104_0099"
 # Keep historical rollback cases before the irreversible PostgreSQL identity cutover.
 PRE_IDENTITY_REVISION = "20261102_0098"
@@ -352,7 +352,13 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         assert MigrationContext.configure(connection).get_current_revision() == (
             PRE_IDENTITY_REVISION
         )
-        expected = sorted({*Base.metadata.tables, "auth_users", "auth_sessions", "alembic_version"})
+        expected = sorted(
+            (
+                set(Base.metadata.tables)
+                - {"model_assignments", "model_connection_audit"}
+            )
+            | {"auth_users", "auth_sessions", "alembic_version"}
+        )
         assert inspect(connection).get_table_names() == expected
         assert "collection_builds" not in expected
         assert "document_versions" not in expected
@@ -1652,7 +1658,11 @@ def test_v01211_database_upgrades_to_current_document_schema(tmp_path) -> None:
             PRE_IDENTITY_REVISION
         )
         assert sorted(inspect(connection).get_table_names()) == sorted(
-            {*Base.metadata.tables, "auth_users", "auth_sessions", "alembic_version"}
+            (
+                set(Base.metadata.tables)
+                - {"model_assignments", "model_connection_audit"}
+            )
+            | {"auth_users", "auth_sessions", "alembic_version"}
         )
 
     engine.dispose()

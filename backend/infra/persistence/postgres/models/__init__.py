@@ -6,9 +6,12 @@ from infra.persistence.postgres.models.execution import (
     AnalysisJobORM,
 )
 from infra.persistence.postgres.models.chat import (
+    AgentOperationORM,
     ChatMessageFeedbackORM,
     ChatMessageORM,
     ChatSessionORM,
+    AgentTaskORM,
+    AgentTaskStepORM,
     ChatToolCallORM,
 )
 from infra.persistence.postgres.models.chat import ChatModelCallORM
@@ -61,9 +64,12 @@ __all__ = [
     "ModelConnectionAuditORM",
     "AnalysisJobORM",
     "ChatModelCallORM",
+    "AgentOperationORM",
     "ChatMessageORM",
     "ChatMessageFeedbackORM",
     "ChatSessionORM",
+    "AgentTaskORM",
+    "AgentTaskStepORM",
     "ChatToolCallORM",
     "CollectionORM",
     "ComparisonGroupMemberORM",

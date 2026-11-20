@@ -21,6 +21,8 @@ not in a parallel plan-doc tree.
 
 - Model connections: [HTTP API](specs/model-connections/api.md) and
   [data model](specs/model-connections/data-model.md).
+- Conversation and Agent: [contract index](specs/conversation-agent/README.md),
+  including API, durable Task, tree, Feedback, and persistence contracts.
 
 ## Code-Owned Neighbors
 

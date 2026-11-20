@@ -5,6 +5,10 @@ OpenAPI document at `/api/openapi.json` is the field-level runtime reference;
 this file owns resource boundaries and cross-endpoint semantics. Detailed
 module contracts are maintained in the linked topic directories under `specs/`.
 
+The module-first Conversation and Agent contract is maintained in
+[`conversation-agent/README.md`](conversation-agent/README.md). It owns the
+target Conversation, Feedback, Task, tree, and persistence semantics.
+
 ## Conventions
 
 - Product APIs use `/api/v1/*`.

@@ -84,6 +84,8 @@ Objective discovery and analysis both require an explicit non-empty
 
 - [`docs/README.md`](docs/README.md): backend reading order.
 - [`docs/specs/api.md`](docs/specs/api.md): public API contract.
+- [`docs/specs/conversation-agent/README.md`](docs/specs/conversation-agent/README.md):
+  Conversation and Agent API, tree, Feedback, and persistence contracts.
 - Model connections: [HTTP API](docs/specs/model-connections/api.md) and
   [data model](docs/specs/model-connections/data-model.md).
 - [`docs/architecture/overview.md`](docs/architecture/overview.md): ownership and

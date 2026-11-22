@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -27,6 +28,10 @@ class CheckpointConflict(ValueError):
     """Execution attempted to save from an obsolete checkpoint revision."""
 
 
+class TaskBusyError(RuntimeError):
+    """Another execution currently owns the Task execution lock."""
+
+
 @dataclass(frozen=True)
 class TaskExecutionContext:
     task_id: str
@@ -48,6 +53,26 @@ def _legacy_request_digest(task_id: str, conversation_id: str) -> str:
 
 
 class TaskRepository:
+    @asynccontextmanager
+    async def execution_lock(self, task_id: str):
+        """Hold one PostgreSQL advisory lock for the complete Task run."""
+
+        async with AsyncSessionLocal() as db, db.begin():
+            acquired = await db.scalar(
+                select(
+                    func.pg_try_advisory_xact_lock(
+                        func.hashtextextended(f"agent-task:{task_id}", 0)
+                    )
+                )
+            )
+            if not acquired:
+                raise TaskBusyError("task execution is already in progress")
+            # Keep this transaction and its advisory lock out of the pool while
+            # capability execution is awaiting external work.
+            connection = await db.connection()
+            connection.sync_connection.detach()
+            yield
+
     async def insert_accepted_task(
         self,
         db: AsyncSession,
@@ -249,6 +274,8 @@ class TaskRepository:
             task.checkpoint = checkpoint
             task.status = status
             task.updated_at = _now()
+            if status in {"completed", "failed", "cancelled"}:
+                task.finished_at = task.finished_at or _now()
             if message is not None:
                 task.checkpoint_message_id = message["message_id"]
                 if status == "completed":
@@ -304,6 +331,8 @@ class TaskRepository:
     async def _upsert_operation(
         self, db: AsyncSession, task_id: str, operation: dict[str, Any]
     ) -> None:
+        if operation.get("task_id", task_id) != task_id:
+            raise ValueError("operation belongs to another Task")
         operation_id = operation["operation_id"]
         row = await db.scalar(
             select(AgentOperationORM)
@@ -384,6 +413,7 @@ class TaskRepository:
 
 __all__ = [
     "CheckpointConflict",
+    "TaskBusyError",
     "TaskExecutionContext",
     "TaskNotFound",
     "TaskRepository",

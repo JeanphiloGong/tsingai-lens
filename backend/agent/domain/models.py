@@ -84,6 +84,7 @@ class Operation:
     arguments_digest: str
     status: OperationStatus
     decision_arguments_digest: str | None = None
+    result: dict[str, object] | None = None
 
     def decide(self, decision: Decision, arguments_digest: str) -> Operation:
         if self.status != "approval_required":

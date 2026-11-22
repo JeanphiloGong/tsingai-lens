@@ -63,6 +63,13 @@ from controllers.goal import goal_routes as goals
 from controllers.source import collection_routes as collections
 from controllers.source import pipeline_run_routes as pipeline_runs
 from controllers.source import reference_routes as references
+from conversation.controllers.routes import conversation_error_handler, conversation_router
+from conversation.controllers.schemas import ConversationInputError
+from conversation.repositories.conversation_repository import (
+    ConversationNotFound,
+    ConversationPathConflict,
+    FeedbackTargetInvalid,
+)
 from exceptions import ProjectException, RequestInvalidException
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -293,6 +300,7 @@ def register_routes(app: FastAPI) -> None:
         experiment_plans.experiment_plan_router, prefix=PUBLIC_API_V1_PREFIX
     )
     app.include_router(chat_sessions.chat_session_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(conversation_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX
     )
@@ -337,6 +345,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+    for error in (ConversationNotFound, ConversationPathConflict, FeedbackTargetInvalid, ConversationInputError):
+        app.add_exception_handler(error, conversation_error_handler)
     register_routes(app)
     return app
 

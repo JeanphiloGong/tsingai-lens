@@ -87,6 +87,9 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         )
         monkeypatch.setattr("repositories.chat_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr(
+            "conversation.repositories.conversation_repository.AsyncSessionLocal", factory,
+        )
+        monkeypatch.setattr(
             "application.pipeline.pipeline_run_service.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(

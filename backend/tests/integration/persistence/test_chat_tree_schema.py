@@ -201,7 +201,7 @@ async def test_read_selected_branch_with_scoped_feedback(
 
     repository = conversation_repository.ConversationRepository()
     result = await repository.read_current_path(conversation_id="thread", user_id="owner")
-    assert result.path_revision == 3
+    assert result.conversation.path_revision == 3
     assert result.path.tip_message_id == "retry"
     assert [item.message.message_id for item in result.items] == ["question", "retry"]
     assert result.items[0].source_contexts[0]["source_ref"] == "methods"
@@ -231,7 +231,7 @@ async def test_read_selected_branch_with_scoped_feedback(
     assert [item.message.message_id for item in task_result.items] == ["question", "retry"]
     assert task_result.items[-1].message.produced_by_task_id == "retry-task"
     assert task_result.items[-1].my_feedback == result.items[-1].my_feedback
-    assert task_result.path_revision == 4
+    assert task_result.conversation.path_revision == 4
 
     result = await repository.read_current_path(conversation_id="empty", user_id="owner")
     assert result.path.tip_message_id is None

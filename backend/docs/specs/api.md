@@ -270,6 +270,11 @@ list.
 - `PUT /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback`
 - `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
+[Conversation V3](conversation-agent/conversation-api.md) exposes conversation metadata,
+the selected message path, and [answer feedback](conversation-agent/feedback-api.md)
+under `/api/v1/conversations`. Its path-conflict and resource errors use HTTP `409`
+and `404` with `meta.error_code`.
+
 Chat is the independent conversation and Agent trajectory owner. A Chat session
 belongs to one authenticated user and one collection. Its ordered messages
 record ordinary user and assistant conversation, model tool intent, and bounded

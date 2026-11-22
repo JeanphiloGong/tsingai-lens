@@ -12,14 +12,15 @@
 
 ### `PUT /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 
-目标必须是当前用户可见的 assistant message。请求正文：
+目标必须是当前用户可见、具有正文且没有工具请求的 assistant message。请求正文：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `rating` | string | 是 | `helpful` 或 `not_helpful` |
-| `reason` | string / null | 否 | `incorrect`、`incomplete`、`unclear` 或 `other` |
-| `comment` | string / null | 否 | 用户补充说明 |
+| `reason` | string / null | 否 | `incorrect`、`incomplete`、`unclear` 或 `other`，仅用于 `not_helpful` |
+| `comment` | string / null | 否 | 用户补充说明，去除首尾空白后最多 2000 字符 |
 
+成功时返回已保存的反馈。相同内容的重复提交保留原身份和修改时间。
 服务端保存提交时的 `response_digest`。如果消息内容后来发生变化，反馈仍然
 指向原回答摘要，不把反馈移动到新版本。
 
@@ -27,7 +28,8 @@
 
 ### `DELETE /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 
-删除当前用户对该 assistant message 的评价。它不会删除回答消息。
+删除当前用户对该 assistant message 的评价。目标仍可见时，重复删除返回
+HTTP `204`。回答消息仍然保留。
 
 反馈关系满足以下约束：
 

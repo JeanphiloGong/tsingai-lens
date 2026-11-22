@@ -3,6 +3,9 @@
 
 本文档负责对话列表、打开对话、消息路径、发送、编辑和重试。
 
+V3 已接入列表、创建、详情、当前消息路径、路径选择、标题、置顶和
+[Feedback](feedback-api.md)。现有线性历史的父链和当前选择由历史回填阶段建立。
+
 <!-- vim-markdown-toc GFM -->
 
 * [1. 对话列表](#1-对话列表)
@@ -102,7 +105,8 @@
 {"workspace_id":"ws_01"}
 ```
 
-返回新建的 `ConversationSummary`。创建空白对话不会创建 Task 或 Message。
+成功时 HTTP 返回 `201` 和新建的 `ConversationSummary`。创建空白对话不会创建
+Task 或 Message。工作空间不存在或不属于当前用户时返回 `404` 和 `workspace_not_found`。
 
 ### `GET /api/v1/conversations/{conversation_id}`
 
@@ -239,7 +243,9 @@ GET /api/v1/conversations/conv_01
 ### `GET /api/v1/conversations/{conversation_id}/messages`
 
 按照对话中保存的当前选择返回消息路径。每条消息直接携带当前用户的反馈，
-同时返回活动 Task 摘要，不嵌入完整执行轨迹。
+同时返回活动 Task 摘要。每项包含 `task_id`、`status` 和 `checkpoint_revision`，
+覆盖 `accepted`、`running`、`approval_required` 和 `interrupted`。消息的
+`source_contexts` 保留已保存的原文定位信息。
 
 ```json
 {
@@ -291,13 +297,14 @@ GET /api/v1/conversations/conv_01
 {"expected_path_revision":3,"tip_message_id":"msg_06"}
 ```
 
-也可以选择正在运行或已完成的 Task：
+也可以选择正在运行、等待审批或已完成的 Task：
 
 ```json
 {"expected_path_revision":3,"task_id":"task_07"}
 ```
 
-目标必须属于当前对话。版本过期返回 `conversation_path_conflict`，前端应
+目标必须属于当前对话。版本过期返回 HTTP `409`，`meta.error_code` 为
+`conversation_path_conflict`，`meta.current_path_revision` 为服务端版本。前端应
 在后台重新读取当前版本，并重新提交用户最后一次点击的目标。这个冲突不应
 直接展示为用户错误。重复选择同一目标时版本不递增。
 
@@ -374,6 +381,7 @@ GET /api/v1/conversations/conv_01
 | --- | --- |
 | `conversation_not_found` | 对话不存在或不属于当前用户 |
 | `message_not_found` | 消息不存在或不属于当前对话 |
+| `task_not_found` | Task 不存在、不属于当前对话或当前状态不能作为路径目标 |
 | `message_parent_invalid` | 追问目标不是可继续的路径末端 |
 | `message_content_invalid` | 消息为空、超长或包含禁止字符 |
 | `conversation_path_conflict` | `path_revision` 已过期 |

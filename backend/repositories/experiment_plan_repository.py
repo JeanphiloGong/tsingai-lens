@@ -9,7 +9,7 @@ from domain.goal import (
 )
 from exceptions import ResourceConflictException
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.chat import ChatMessageORM, ChatSessionORM
+from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from infra.persistence.postgres.models.objective import (
     ObjectiveExperimentPlanORM,
 )
@@ -278,13 +278,13 @@ async def _validate_source_message(
 ) -> None:
     if plan.source_message_id is None:
         return
-    message = await db.get(ChatMessageORM, plan.source_message_id)
+    message = await db.get(MessageORM, plan.source_message_id)
     chat = (
-        await db.get(ChatSessionORM, message.session_id)
+        await db.get(ConversationORM, message.conversation_id)
         if message is not None
         else None
     )
-    if message is None or chat is None or chat.collection_id != plan.collection_id:
+    if message is None or chat is None or chat.workspace_id != plan.collection_id:
         raise ValueError("historical source message must belong to the plan collection")
 
 

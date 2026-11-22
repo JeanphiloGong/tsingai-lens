@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 import pytest
 import uvicorn
+from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -285,6 +286,7 @@ async def test_snapshot_migration_preserves_saved_conversations(
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
         # Exercise this migration without crossing the irreversible 0075 step.
+        command.downgrade(config, "b71000000001")
         migration = (
             ScriptDirectory.from_config(config).get_revision("20260910_0058").module
         )
@@ -302,4 +304,5 @@ async def test_snapshot_migration_preserves_saved_conversations(
         assert connection.scalar(
             text("SELECT count(*) FROM chat_messages WHERE session_id = 'original'")
         ) == len(before)
+        command.upgrade(config, "head")
     assert await branch_app.repository.read_messages("original") == before

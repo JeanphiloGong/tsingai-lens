@@ -29,11 +29,23 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "b71000000001"
+HEAD_REVISION = "b71000000002"
 IDENTITY_REVISION = "20261104_0099"
 # Keep historical rollback cases before the irreversible PostgreSQL identity cutover.
 PRE_IDENTITY_REVISION = "20261102_0098"
 POSTGRES_IDENTIFIER_LIMIT = 63
+AFTER_IDENTITY_TABLES = {
+    "agent_tasks",
+    "agent_operations",
+    "agent_task_steps",
+    "model_assignments",
+    "model_connection_audit",
+}
+
+
+def _expected_pre_identity_tables() -> list[str]:
+    tables = set(Base.metadata.tables) - AFTER_IDENTITY_TABLES - {"chat_conversations"}
+    return sorted(tables | {"chat_sessions", "auth_users", "auth_sessions", "alembic_version"})
 
 
 def test_model_connection_migration_creates_schema_and_protects_records(
@@ -352,13 +364,7 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
         assert MigrationContext.configure(connection).get_current_revision() == (
             PRE_IDENTITY_REVISION
         )
-        expected = sorted(
-            (
-                set(Base.metadata.tables)
-                - {"model_assignments", "model_connection_audit"}
-            )
-            | {"auth_users", "auth_sessions", "alembic_version"}
-        )
+        expected = _expected_pre_identity_tables()
         assert inspect(connection).get_table_names() == expected
         assert "collection_builds" not in expected
         assert "document_versions" not in expected
@@ -1657,13 +1663,7 @@ def test_v01211_database_upgrades_to_current_document_schema(tmp_path) -> None:
         assert MigrationContext.configure(connection).get_current_revision() == (
             PRE_IDENTITY_REVISION
         )
-        assert sorted(inspect(connection).get_table_names()) == sorted(
-            (
-                set(Base.metadata.tables)
-                - {"model_assignments", "model_connection_audit"}
-            )
-            | {"auth_users", "auth_sessions", "alembic_version"}
-        )
+        assert sorted(inspect(connection).get_table_names()) == _expected_pre_identity_tables()
 
     engine.dispose()
 

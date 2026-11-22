@@ -293,12 +293,14 @@ Fork 创建新的 Conversation，并复制选定的消息路径。复制后的�
 
 ## 14. 迁移边界
 
-当前生产结构使用 `chat_sessions`、线性消息位置、会话内回答快照、
-`chat_tool_calls` 和 `chat_message_feedback`。迁移到本设计需要单独的迁移方案。
+Conversation V2 的 Alembic revision `b71000000002` 原地改名对话表及归属列，
+保留已有对话、消息和 Feedback 的身份，并约束 Feedback 和目标消息属于同一对话。
+`workspace_id` 在本阶段继续引用 `collections.collection_id`。已有消息的父链回填、
+Agent 运行时迁移和 HTTP 切换在后续阶段完成。
 
 概念映射如下：
 
-| 当前概念 | 目标概念 |
+| 迁移前概念 | 目标概念 |
 | --- | --- |
 | `chat_sessions` | `chat_conversations` |
 | `session_id` | `conversation_id` |
@@ -311,5 +313,4 @@ Fork 创建新的 Conversation，并复制选定的消息路径。复制后的�
 | `chat_message_feedback.session_id` | `chat_message_feedback.conversation_id` |
 
 迁移必须保留消息身份、Source 上下文、Feedback、工具结果和审计记录。旧线性
-分支数据没有明确记录显式 Fork 意图时，不自动推断为显式 Fork。本设计没有执行
-迁移，也没有修改当前 ORM。
+分支数据只有在明确记录显式 Fork 意图时，才回填为显式 Fork。

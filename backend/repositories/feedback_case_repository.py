@@ -6,7 +6,8 @@ import json
 from hashlib import sha256
 from domain.chat.feedback import ChatMessageFeedback
 from domain.feedback.tool_failure import tool_result_digest
-from infra.persistence.postgres.models.chat import ChatMessageFeedbackORM, ChatMessageORM, ChatToolCallORM
+from infra.persistence.postgres.models.chat import ChatToolCallORM
+from infra.persistence.postgres.models.conversation import MessageFeedbackORM, MessageORM
 from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -101,11 +102,11 @@ class FeedbackCaseRepository:
                 raise ValueError("analysis result belongs to another job")
             # Keep this method usable when a caller has not separately persisted
             # the result, while preserving the same result identity and payload.
-            source = await db.get(ChatMessageFeedbackORM, result.feedback_id, with_for_update=True)
+            source = await db.get(MessageFeedbackORM, result.feedback_id, with_for_update=True)
             if source is None:
                 raise FeedbackCaseWriteConflict("feedback_withdrawn")
             feedback = ChatMessageFeedback(
-                feedback_id=source.feedback_id, session_id=source.session_id,
+                feedback_id=source.feedback_id, session_id=source.conversation_id,
                 message_id=source.message_id, user_id=source.user_id, rating=source.rating,
                 reason=source.reason, comment=source.comment, response_digest=source.response_digest,
                 created_at=_iso(source.created_at), updated_at=_iso(source.updated_at),
@@ -247,7 +248,7 @@ class FeedbackCaseRepository:
             job_row = await lock_analysis_job(db, job)
             if result.job_id != job.job_id:
                 raise ValueError("analysis result belongs to another job")
-            trigger = await db.get(ChatMessageORM, result.trigger_message_id, with_for_update=True)
+            trigger = await db.get(MessageORM, result.trigger_message_id, with_for_update=True)
             if trigger is None:
                 raise FeedbackCaseWriteConflict("correction_signal_withdrawn")
             if sha256(trigger.content.strip().encode("utf-8")).hexdigest() != job.payload["trigger_digest"]:
@@ -391,7 +392,7 @@ class FeedbackCaseRepository:
             job_row = await lock_analysis_job(db, job)
             if result.job_id != job.job_id:
                 raise ValueError("analysis result belongs to another job")
-            source = await db.get(ChatMessageORM, result.result_message_id, with_for_update=True)
+            source = await db.get(MessageORM, result.result_message_id, with_for_update=True)
             call = await db.get(ChatToolCallORM, result.tool_call_id, with_for_update=True)
             if source is None or call is None:
                 raise FeedbackCaseWriteConflict("tool_failure_withdrawn")

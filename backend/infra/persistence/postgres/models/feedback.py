@@ -44,7 +44,7 @@ class FeedbackAnalysisResultORM(Base):
     feedback_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(
         String(128),
-        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        ForeignKey("chat_conversations.conversation_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -118,7 +118,7 @@ class FeedbackSignalAnalysisResultORM(Base):
     signal_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(
         String(128),
-        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        ForeignKey("chat_conversations.conversation_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -187,7 +187,7 @@ class ToolFailureAnalysisResultORM(Base):
     signal_id: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     signal_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        String(128), ForeignKey("chat_conversations.conversation_id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
     collection_id: Mapped[str] = mapped_column(
@@ -249,7 +249,7 @@ class FeedbackCaseORM(Base):
     )
     session_id: Mapped[str] = mapped_column(
         String(128),
-        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        ForeignKey("chat_conversations.conversation_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

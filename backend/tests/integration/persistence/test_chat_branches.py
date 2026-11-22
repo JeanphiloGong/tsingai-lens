@@ -408,6 +408,8 @@ async def test_pin_migration_upgrades_existing_sessions_without_changing_message
     before = await app.repository.read_messages("original")
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "b71000000001")
         migration = ScriptDirectory.from_config(config).get_revision("20261009_0087").module
         with Operations.context(MigrationContext.configure(connection)):
             migration.downgrade()
@@ -416,6 +418,7 @@ async def test_pin_migration_upgrades_existing_sessions_without_changing_message
                 for column in inspect(connection).get_columns("chat_sessions")
             }
             migration.upgrade()
+        command.upgrade(config, "head")
     assert (await app.repository.read_session("original")).is_pinned is False
     assert await app.repository.read_messages("original") == before
 
@@ -888,6 +891,7 @@ async def test_branch_migration_round_trip_preserves_original_sessions(
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
         # Exercise this migration without crossing the irreversible 0075 step.
+        command.downgrade(config, "b71000000001")
         migration = (
             ScriptDirectory.from_config(config).get_revision("20260909_0057").module
         )
@@ -898,4 +902,5 @@ async def test_branch_migration_round_trip_preserves_original_sessions(
                 for column in inspect(connection).get_columns("chat_sessions")
             }
             migration.upgrade()
+        command.upgrade(config, "head")
     assert (await app.repository.read_messages("original"))[4].content == QUESTION

@@ -41,9 +41,9 @@ from httpx import ASGITransport, AsyncClient
 
 
 from infra.persistence.postgres.models import (
-    ChatMessageFeedbackORM,
-    ChatMessageORM,
-    ChatSessionORM,
+    MessageFeedbackORM,
+    MessageORM,
+    ConversationORM,
 )
 from infra.persistence.postgres.models.collection import CollectionORM
 from repositories.chat_repository import ChatRepository
@@ -304,13 +304,13 @@ async def test_concurrent_feedback_upserts_keep_one_identity(feedback_app):
     async with app.sessions() as database:
         assert (
             await database.scalar(
-                select(func.count()).select_from(ChatMessageFeedbackORM)
+                select(func.count()).select_from(MessageFeedbackORM)
             )
             == 1
         )
 
 
-@pytest.mark.parametrize("parent", [ChatMessageORM, ChatSessionORM, CollectionORM])
+@pytest.mark.parametrize("parent", [MessageORM, ConversationORM, CollectionORM])
 async def test_parent_deletion_cascades_feedback(feedback_app, parent):
     app = feedback_app
     assert (await app.client.put(PATH, json={"rating": "helpful"})).status_code == 200
@@ -319,7 +319,7 @@ async def test_parent_deletion_cascades_feedback(feedback_app, parent):
     async with app.sessions() as database:
         assert (
             await database.scalar(
-                select(func.count()).select_from(ChatMessageFeedbackORM)
+                select(func.count()).select_from(MessageFeedbackORM)
             )
             == 0
         )

@@ -7,14 +7,16 @@ from infra.persistence.postgres.models.execution import (
 )
 from infra.persistence.postgres.models.chat import (
     AgentOperationORM,
-    ChatMessageFeedbackORM,
-    ChatMessageORM,
-    ChatSessionORM,
     AgentTaskORM,
     AgentTaskStepORM,
     ChatToolCallORM,
 )
 from infra.persistence.postgres.models.chat import ChatModelCallORM
+from infra.persistence.postgres.models.conversation import (
+    ConversationORM,
+    MessageFeedbackORM,
+    MessageORM,
+)
 from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackSignalAnalysisResultORM, ToolFailureAnalysisResultORM, FeedbackAnnotationORM, FeedbackCaseORM, FeedbackReviewDecisionORM, FeedbackDatasetSnapshotORM
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetORM,
@@ -65,9 +67,9 @@ __all__ = [
     "AnalysisJobORM",
     "ChatModelCallORM",
     "AgentOperationORM",
-    "ChatMessageORM",
-    "ChatMessageFeedbackORM",
-    "ChatSessionORM",
+    "MessageORM",
+    "MessageFeedbackORM",
+    "ConversationORM",
     "AgentTaskORM",
     "AgentTaskStepORM",
     "ChatToolCallORM",

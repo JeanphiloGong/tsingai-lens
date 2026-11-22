@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20261114_0101`. The identity and fingerprint rules are
+and the Alembic head `b71000000002`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 50 application tables and 604 mapped fields. A
+The current ORM metadata contains 55 application tables and 674 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -91,7 +91,7 @@ class is in `infra/persistence/postgres/models`.
 | Parse and analyze a paper | `infra/source`, `application/source`, `application/core/document_profiles` | `document_preparations` | One document-keyed preparation aggregate containing Source, Profile, Paper Map, and the provenance for each generated section. |
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `collections`, `document_preparations`, `research_objectives` | Collection-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
 | Inspect experiments and compare papers | `application/core/objectives`, `application/core/paper_facts` | `paper_experiment`, `objective_experiment_selection`, `comparison_group`, `experiment_finding`, `objective_analyses` | Automatic analysis stores immutable experiment revisions, explicit selections, optional cross-paper groups, and Finding references. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
-| Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
+| Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_conversations`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
 | Assess an answer's usefulness | `application/chat`, `domain/chat/feedback.py` | `chat_message_feedback` | One mutable user assessment of a saved answer, separate from scientific Finding review and model context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
 | Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. Evaluation items, scores, and failures remain inside their aggregate payloads. |
@@ -103,7 +103,7 @@ count. The remaining tables are separate for these concrete reasons:
 
 | Group | Why it remains relationally separate |
 | --- | --- |
-| `chat_sessions`, `chat_messages`, `chat_tool_calls` | A session contains ordered messages, and each assistant turn can contain ordered capability calls with approval and execution state. These are different cardinalities and audit events. Tool results are already embedded in their call. |
+| `chat_conversations`, `chat_messages`, `chat_tool_calls` | A conversation contains messages, and each assistant turn can contain ordered capability calls with approval and execution state. Tool results are embedded in their call. |
 | `chat_message_feedback` | A user can revise or withdraw an assessment without rewriting the append-only answer or its tool trajectory. |
 | `collections`, `documents`, `document_preparations` | Collection ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
 | `pipeline_runs` | Technical retry/progress history must remain observable without being confused with scientific artifacts. |
@@ -278,9 +278,9 @@ create a parallel paper-fact model.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `chat_sessions` | `session_id` | Authenticated user and Collection ownership, creation/update timestamps, and monotonic timestamp check. |
-| `chat_messages` | `message_id` | Session ownership, non-negative ordered `position`, role (`user`, `assistant`, `tool`), content, optional tool metadata, and persisted selected `source_contexts`. `(session_id, position)` is unique. |
-| `chat_message_feedback` | `feedback_id` | User/message uniqueness, usefulness rating, optional reason/comment, server-computed saved-answer digest, and timestamps. Foreign keys cascade with the message, session, or user. |
+| `chat_conversations` | `conversation_id` | Authenticated user and Collection ownership, current path selection, creation/update timestamps, and monotonic timestamp check. |
+| `chat_messages` | `message_id` | Conversation ownership, optional parent, role (`user`, `assistant`, `tool`), content, tool metadata, and selected `source_contexts`. `(conversation_id, position)` preserves the existing Chat order. |
+| `chat_message_feedback` | `feedback_id` | User/message uniqueness, usefulness rating, optional reason/comment, saved-answer digest, and timestamps. Foreign keys cascade with the message or conversation. |
 | `chat_tool_calls` | `tool_call_id` | Session and assistant-message ownership, capability name/arguments, argument digest, risk (`unknown`, `read`, `draft`, `write`), approval/execution status, timing, decision-user provenance, and the optional structured result. One call is allowed per assistant message. |
 
 Tool approval is an explicit state transition recorded with the exact argument
@@ -504,7 +504,8 @@ identity used by the Evidence or Finding.
 | `ObjectiveRepository` | `collections.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
 | `PaperExperimentRepository` / `ObjectiveExperimentSelectionRepository` | Immutable automatic experiment revisions and Objective-scoped selections |
 | `ComparisonGroupRepository` / `ExperimentFindingRepository` | Optional comparison groups and Findings that reference fixed selections |
-| `ChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
+| `ChatRepository` | `chat_conversations`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
+| `ConversationRepository` | `chat_conversations`, `chat_messages`, `chat_message_feedback`, `agent_tasks`, `collections` for the selected path read |
 | `ExperimentPlanRepository` | `objective_experiment_plans` |
 | `FindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
 | `EvaluationRepository` | All `evaluation_*` tables |
@@ -784,13 +785,21 @@ Chat is an auditable Collection-bound Agent trajectory. It records user-visible 
 capability requests, approval decisions, and structured results; it references Core Artifacts instead of creating a parallel
 paper-fact model.
 
-#### `chat_sessions` — Chat sessions
+V2 renamed the conversation table and its keys in place. The existing Chat
+routes still use `session_id` in HTTP and read messages by `position`. The
+Conversation repository follows explicit parent links and returns the selected
+path, Source contexts, and the caller's feedback. Historical path backfill is a
+separate migration. See the [Conversation and Agent data model](../specs/conversation-agent/data-model.md#14-迁移边界).
+
+#### `chat_conversations` — Conversations
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `session_id` | `VARCHAR(128)` | No | PK | Stable identifier of the Chat session. |
+| `conversation_id` | `VARCHAR(128)` | No | PK | Stable conversation identity carried forward from `chat_sessions.session_id`. |
 | `user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identifier for the authenticated user. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Collection bound to the session; capability calls cannot cross this boundary. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Collection bound to the conversation. |
+| `current_message_id`, `current_task_id` | `VARCHAR(128)` | Yes | Same-conversation FKs; at most one is set | Selected path tip or Task. |
+| `path_revision` | `BIGINT` | No | `>= 0`; default `0` | Version of the selected path. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
 
@@ -799,7 +808,8 @@ paper-fact model.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `message_id` | `VARCHAR(128)` | No | PK | Stable identifier of the Chat message. |
-| `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions.session_id`; IDX; `ON DELETE CASCADE` | Stable identifier of the Chat session. |
+| `conversation_id` | `VARCHAR(128)` | No | FK -> `chat_conversations.conversation_id`; IDX; `ON DELETE CASCADE` | Conversation that owns the message. |
+| `parent_message_id` | `VARCHAR(128)` | Yes | Same-conversation FK | Previous message on this branch. |
 | `position` | `INTEGER` | No | `>= 0`; UQ per session | Strict message order within the Chat session. |
 | `role` | `VARCHAR(16)` | No | `user` / `assistant` / `tool` | Message role: user, assistant, or tool. |
 | `content` | `TEXT` | No | — | Human- or system-readable text content. |
@@ -812,7 +822,7 @@ paper-fact model.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `feedback_id` | `VARCHAR(64)` | No | PK | Stable assessment identity until withdrawal. |
-| `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions`; IDX; CASCADE | Owned session, validated against the target message. |
+| `conversation_id` | `VARCHAR(128)` | No | FK -> `chat_conversations`; IDX; CASCADE | The composite foreign key with `message_id` enforces that the answer belongs to this conversation. |
 | `message_id` | `VARCHAR(128)` | No | FK -> `chat_messages`; IDX; CASCADE | Saved Assistant text answer without tool requests. |
 | `user_id` | `VARCHAR(64)` | No | External user ID; UQ with `message_id` | Authenticated assessor. |
 | `rating` | `VARCHAR(16)` | No | `helpful` / `not_helpful` | Current usefulness assessment. Withdrawal deletes the row. |
@@ -831,7 +841,7 @@ content, session recency, approvals, Findings, Evidence, or model prompts.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `tool_call_id` | `VARCHAR(128)` | No | PK | Stable identifier of the capability call. |
-| `session_id` | `VARCHAR(128)` | No | FK -> `chat_sessions.session_id`; IDX; `ON DELETE CASCADE` | Stable identifier of the Chat session. |
+| `session_id` | `VARCHAR(128)` | No | FK -> `chat_conversations.conversation_id`; IDX; `ON DELETE CASCADE` | Stable conversation identity for the existing Chat tool-call flow. |
 | `assistant_message_id` | `VARCHAR(128)` | No | FK -> `chat_messages.message_id`; UQ with `position`; `ON DELETE CASCADE` | Assistant message that triggered this call. Multiple ordered calls are allowed per assistant message. |
 | `name` | `VARCHAR(128)` | No | — | Capability name requested by the Agent. |
 | `position` | `INTEGER` | No | `>= 0`; UQ per assistant message | Order of this capability call within the assistant turn. |

@@ -68,6 +68,7 @@ from conversation.controllers.schemas import ConversationInputError
 from conversation.repositories.conversation_repository import (
     ConversationNotFound,
     ConversationPathConflict,
+    ConversationWriteConflict,
     FeedbackTargetInvalid,
 )
 from exceptions import ProjectException, RequestInvalidException
@@ -345,7 +346,13 @@ def create_app() -> FastAPI:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(Exception, general_exception_handler)
-    for error in (ConversationNotFound, ConversationPathConflict, FeedbackTargetInvalid, ConversationInputError):
+    for error in (
+        ConversationNotFound,
+        ConversationPathConflict,
+        ConversationWriteConflict,
+        FeedbackTargetInvalid,
+        ConversationInputError,
+    ):
         app.add_exception_handler(error, conversation_error_handler)
     register_routes(app)
     return app

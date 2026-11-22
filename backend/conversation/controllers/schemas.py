@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Literal, Self
+from uuid import UUID
 
 from domain.chat.feedback import FeedbackRating, FeedbackReason
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -31,6 +32,14 @@ class ConversationListResponse(BaseModel):
     items: list[ConversationResponse]
     limit: int
     offset: int
+
+
+class TaskAcceptedResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    task_id: str
+    trigger_message_id: str
+    status: Literal["accepted"]
 
 
 class MessageFeedbackResponse(BaseModel):
@@ -67,10 +76,59 @@ class ConversationMessagesResponse(BaseModel):
     meta: dict[str, bool] = Field(default_factory=lambda: {"has_more": False})
 
 
+class TreeNodeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    node_id: str
+    kind: Literal["message", "task", "conversation"]
+    parent_node_id: str | None
+    edge_kind: str | None
+    conversation_id: str
+    message_id: str | None
+    task_id: str | None
+    preview: str
+    forked_from_message_id: str | None = None
+
+
+class ConversationTreeResponse(BaseModel):
+    root_conversation_id: str
+    active_path: list[str]
+    nodes: list[TreeNodeResponse]
+
+
 class CreateConversationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workspace_id: str = Field(min_length=1, max_length=64)
+
+
+class SendMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID | None = None
+    parent_message_id: str | None = Field(default=None, min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=12000)
+    source_contexts: list[dict[str, object]] = Field(default_factory=list, max_length=12)
+
+
+class EditMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID | None = None
+    message: str = Field(min_length=1, max_length=12000)
+    source_contexts: list[dict[str, object]] | None = Field(default=None, max_length=12)
+
+
+class RegenerateMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: UUID | None = None
+
+
+class ForkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str = Field(min_length=1, max_length=128)
 
 
 class ActivePathRequest(BaseModel):

@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from controllers.dependencies.auth import get_current_user_id
@@ -9,31 +10,44 @@ from conversation.controllers.schemas import (
     ConversationMessagesResponse,
     ConversationPinRequest,
     ConversationResponse,
+    ConversationTreeResponse,
     ConversationTitleRequest,
     CreateConversationRequest,
+    EditMessageRequest,
     FeedbackRequest,
+    ForkRequest,
     MessageFeedbackResponse,
     MessageResponse,
+    RegenerateMessageRequest,
+    SendMessageRequest,
+    TaskAcceptedResponse,
+    TreeNodeResponse,
 )
+from conversation.application.conversation_service import ConversationService
 from conversation.repositories.conversation_repository import (
     ConversationNotFound,
     ConversationPathConflict,
     ConversationRepository,
+    ConversationWriteConflict,
     FeedbackTargetInvalid,
 )
+from agent.repositories.task_repository import TaskRepository
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from utils.response import ApiResponse
 
 conversation_router = APIRouter(prefix="/conversations", tags=["conversations"])
 repository = ConversationRepository()
+service = ConversationService(repository, TaskRepository())
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
+logger = logging.getLogger(__name__)
 
 
 async def conversation_error_handler(
     _request: Request,
     exc: ConversationNotFound
     | ConversationPathConflict
+    | ConversationWriteConflict
     | FeedbackTargetInvalid
     | ConversationInputError,
 ) -> JSONResponse:
@@ -46,6 +60,9 @@ async def conversation_error_handler(
         }
     elif isinstance(exc, ConversationNotFound):
         status = 404
+        meta = {"error_code": exc.code}
+    elif isinstance(exc, ConversationWriteConflict):
+        status = 409 if exc.code == "fork_source_not_ready" else 422
         meta = {"error_code": exc.code}
     elif isinstance(exc, FeedbackTargetInvalid):
         status = 422
@@ -130,6 +147,98 @@ async def get_messages(
             ],
         )
     )
+
+
+@conversation_router.get("/{conversation_id}/tree")
+async def get_tree(
+    conversation_id: str, user_id: CurrentUserId
+) -> ApiResponse[ConversationTreeResponse]:
+    tree = await repository.read_tree(conversation_id=conversation_id, user_id=user_id)
+    return ApiResponse(
+        data=ConversationTreeResponse(
+            root_conversation_id=tree.root_conversation_id,
+            active_path=list(tree.active_path),
+            nodes=[TreeNodeResponse.model_validate(node) for node in tree.nodes],
+        )
+    )
+
+
+@conversation_router.post("/{conversation_id}/messages")
+async def send_message(
+    conversation_id: str,
+    payload: SendMessageRequest,
+    user_id: CurrentUserId,
+) -> ApiResponse[TaskAcceptedResponse]:
+    logger.info(
+        "conversation message requested",
+        extra={"request_id": str(payload.request_id) if payload.request_id else None},
+    )
+    accepted = await service.accept_message(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        parent_message_id=payload.parent_message_id,
+        content=payload.message,
+        source_contexts=tuple(payload.source_contexts),
+    )
+    return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
+
+
+@conversation_router.post("/{conversation_id}/messages/{message_id}/edits")
+async def edit_message(
+    conversation_id: str,
+    message_id: str,
+    payload: EditMessageRequest,
+    user_id: CurrentUserId,
+) -> ApiResponse[TaskAcceptedResponse]:
+    logger.info(
+        "conversation message edit requested",
+        extra={"request_id": str(payload.request_id) if payload.request_id else None},
+    )
+    accepted = await service.edit_message(
+        conversation_id=conversation_id,
+        message_id=message_id,
+        user_id=user_id,
+        content=payload.message,
+        source_contexts=(
+            tuple(payload.source_contexts)
+            if payload.source_contexts is not None
+            else None
+        ),
+    )
+    return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
+
+
+@conversation_router.post("/{conversation_id}/messages/{message_id}/regenerations")
+async def regenerate_message(
+    conversation_id: str,
+    message_id: str,
+    payload: RegenerateMessageRequest,
+    user_id: CurrentUserId,
+) -> ApiResponse[TaskAcceptedResponse]:
+    logger.info(
+        "conversation message regeneration requested",
+        extra={"request_id": str(payload.request_id) if payload.request_id else None},
+    )
+    accepted = await service.create_retry_task(
+        conversation_id=conversation_id,
+        message_id=message_id,
+        user_id=user_id,
+    )
+    return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
+
+
+@conversation_router.post("/{conversation_id}/forks")
+async def fork_conversation(
+    conversation_id: str,
+    payload: ForkRequest,
+    user_id: CurrentUserId,
+) -> ApiResponse[ConversationResponse]:
+    result = await repository.fork_conversation(
+        conversation_id=conversation_id,
+        message_id=payload.message_id,
+        user_id=user_id,
+    )
+    return ApiResponse(data=ConversationResponse.model_validate(result))
 
 
 @conversation_router.put("/{conversation_id}/active-path")

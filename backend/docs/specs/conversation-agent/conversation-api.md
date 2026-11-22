@@ -333,8 +333,8 @@ GET /api/v1/conversations/conv_01
 | `model_connection_id` | string / null | 否 | 绑定的模型连接 |
 | `permission_mode` | string | 否 | `read_only`、`confirm` 或 `auto`，默认 `confirm` |
 
-事务内先保存 user message，再创建 `agent_tasks` 记录。Task 提交成功后才
-调度 Worker。返回 `TaskAccepted`，其中包含 `task_id` 和初始状态。
+事务内先保存 user message，再创建 `agent_tasks` 记录。Task 提交成功后由调用方
+显式调用 Agent 的直接执行入口。返回 `TaskAccepted`，其中包含 `task_id` 和初始状态。
 
 ```json
 {

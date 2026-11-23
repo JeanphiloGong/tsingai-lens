@@ -15,6 +15,7 @@ from infra.persistence.postgres.models.chat import (
     AgentTaskORM,
     AgentTaskStepORM,
 )
+from infra.persistence.postgres.models.collection import CollectionORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,14 @@ class CheckpointConflict(ValueError):
 
 class TaskBusyError(RuntimeError):
     """Another execution currently owns the Task execution lock."""
+
+
+class OperationDecisionConflict(ValueError):
+    """The operation cannot accept the requested decision."""
+
+
+class TaskResumeConflict(ValueError):
+    """The Task cannot be resumed from the supplied checkpoint."""
 
 
 @dataclass(frozen=True)
@@ -110,9 +119,14 @@ class TaskRepository:
                     ConversationORM,
                     ConversationORM.conversation_id == AgentTaskORM.session_id,
                 )
+                .join(
+                    CollectionORM,
+                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                )
                 .where(
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
+                    CollectionORM.owner_user_id == user_id,
                 )
                 .with_for_update()
             )
@@ -155,10 +169,15 @@ class TaskRepository:
                     ConversationORM,
                     ConversationORM.conversation_id == AgentTaskORM.session_id,
                 )
+                .join(
+                    CollectionORM,
+                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                )
                 .where(
                     AgentTaskORM.session_id == conversation_id,
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
+                    CollectionORM.owner_user_id == user_id,
                 )
             )
             if task is None:
@@ -179,7 +198,58 @@ class TaskRepository:
                 "status": task.status,
                 "checkpoint_revision": task.checkpoint_revision,
                 "active_operation_id": operation_id,
+                "started_at": task.started_at,
+                "updated_at": task.updated_at,
             }
+
+    async def list_tasks(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[dict[str, object], ...]:
+        statement = (
+            select(AgentTaskORM)
+            .join(
+                ConversationORM,
+                ConversationORM.conversation_id == AgentTaskORM.session_id,
+            )
+            .join(
+                CollectionORM,
+                CollectionORM.collection_id == ConversationORM.workspace_id,
+            )
+            .where(
+                AgentTaskORM.session_id == conversation_id,
+                ConversationORM.user_id == user_id,
+                CollectionORM.owner_user_id == user_id,
+            )
+            .order_by(AgentTaskORM.updated_at.desc(), AgentTaskORM.task_id)
+            .limit(limit)
+            .offset(offset)
+        )
+        if status is not None:
+            statement = statement.where(AgentTaskORM.status == status)
+        async with AsyncSessionLocal() as db:
+            tasks = (await db.scalars(statement)).all()
+            operation_ids = (
+                await db.execute(
+                    select(AgentOperationORM.task_id, AgentOperationORM.operation_id)
+                    .where(
+                        AgentOperationORM.task_id.in_(
+                            tuple(task.task_id for task in tasks)
+                        ),
+                        AgentOperationORM.status == "approval_required",
+                    )
+                )
+            ).all()
+        active_operations = {task_id: operation_id for task_id, operation_id in operation_ids}
+        return tuple(
+            self._task_payload(task, active_operations.get(task.task_id))
+            for task in tasks
+        )
 
     async def stop_task(
         self, *, conversation_id: str, task_id: str, user_id: str
@@ -191,10 +261,15 @@ class TaskRepository:
                     ConversationORM,
                     ConversationORM.conversation_id == AgentTaskORM.session_id,
                 )
+                .join(
+                    CollectionORM,
+                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                )
                 .where(
                     AgentTaskORM.session_id == conversation_id,
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
+                    CollectionORM.owner_user_id == user_id,
                     AgentTaskORM.status.in_(
                         ("accepted", "running", "approval_required")
                     ),
@@ -204,6 +279,7 @@ class TaskRepository:
             if task is None:
                 raise TaskNotFound("task not found")
             task.status = "interrupted"
+            task.checkpoint_revision += 1
             task.updated_at = _now()
 
     async def decide_operation(
@@ -227,27 +303,118 @@ class TaskRepository:
                     ConversationORM,
                     ConversationORM.conversation_id == AgentTaskORM.session_id,
                 )
+                .join(
+                    CollectionORM,
+                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                )
                 .where(
                     AgentOperationORM.operation_id == operation_id,
                     AgentOperationORM.task_id == task_id,
                     AgentOperationORM.status == "approval_required",
                     AgentTaskORM.session_id == conversation_id,
                     ConversationORM.user_id == user_id,
+                    CollectionORM.owner_user_id == user_id,
                 )
                 .with_for_update()
             )
             if operation is None:
                 raise TaskNotFound("operation not found")
             if operation.arguments_digest != arguments_digest:
-                raise ValueError("operation arguments digest mismatch")
+                raise OperationDecisionConflict("operation arguments digest mismatch")
             if decision not in {"approved", "rejected"}:
-                raise ValueError("invalid operation decision")
+                raise OperationDecisionConflict("invalid operation decision")
+            task = await db.scalar(
+                select(AgentTaskORM)
+                .where(AgentTaskORM.task_id == task_id)
+                .with_for_update()
+            )
+            if task is None:
+                raise TaskNotFound("task not found")
             now = _now()
             operation.status = decision
             operation.decision_user_id = user_id
             operation.decision_arguments_digest = arguments_digest
             operation.decided_at = now
             operation.updated_at = now
+            checkpoint = dict(task.checkpoint or {})
+            checkpoint_operations = list(checkpoint.get("operations", []))
+            updated_operation = {
+                "operation_id": operation.operation_id,
+                "task_id": operation.task_id,
+                "name": operation.name,
+                "arguments_digest": operation.arguments_digest,
+                "status": decision,
+                "decision_arguments_digest": arguments_digest,
+                "result": operation.result,
+            }
+            for index, item in enumerate(checkpoint_operations):
+                if item.get("operation_id") == operation.operation_id:
+                    checkpoint_operations[index] = {
+                        **item,
+                        **updated_operation,
+                    }
+                    break
+            else:
+                checkpoint_operations.append(updated_operation)
+            checkpoint["operations"] = checkpoint_operations
+            task.checkpoint = checkpoint
+            task.checkpoint_revision += 1
+            task.status = "running"
+            task.updated_at = now
+
+    async def resume_task(
+        self,
+        *,
+        conversation_id: str,
+        task_id: str,
+        user_id: str,
+        expected_checkpoint_revision: int,
+    ) -> dict[str, object]:
+        async with AsyncSessionLocal() as db, db.begin():
+            task = await db.scalar(
+                select(AgentTaskORM)
+                .join(
+                    ConversationORM,
+                    ConversationORM.conversation_id == AgentTaskORM.session_id,
+                )
+                .join(
+                    CollectionORM,
+                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                )
+                .where(
+                    AgentTaskORM.session_id == conversation_id,
+                    AgentTaskORM.task_id == task_id,
+                    ConversationORM.user_id == user_id,
+                    CollectionORM.owner_user_id == user_id,
+                )
+                .with_for_update()
+            )
+            if task is None:
+                raise TaskNotFound("task not found")
+            if task.checkpoint_revision != expected_checkpoint_revision:
+                raise CheckpointConflict("checkpoint revision is stale")
+            if task.status not in {"interrupted", "accepted"}:
+                raise TaskResumeConflict("task is not resumable")
+            task.status = "running"
+            task.checkpoint_revision += 1
+            task.updated_at = _now()
+            return self._task_payload(task)
+
+    @staticmethod
+    def _task_payload(
+        task: AgentTaskORM, active_operation_id: str | None = None
+    ) -> dict[str, object]:
+        return {
+            "task_id": task.task_id,
+            "conversation_id": task.session_id,
+            "trigger_message_id": task.trigger_message_id,
+            "final_message_id": task.final_message_id,
+            "status": task.status,
+            "checkpoint_revision": task.checkpoint_revision,
+            "active_operation_id": active_operation_id,
+            "started_at": task.started_at,
+            "updated_at": task.updated_at,
+        }
 
     async def write_checkpoint_bundle(
         self,
@@ -263,6 +430,8 @@ class TaskRepository:
         async with AsyncSessionLocal() as db, db.begin():
             task = await self._locked_task(db, task_id)
             self._require_revision(task, expected_revision)
+            if task.status == "interrupted" and status != "interrupted":
+                raise CheckpointConflict("task was interrupted")
             if message is not None:
                 await self._insert_message(db, task, message)
             if operation is not None:

@@ -71,6 +71,14 @@ from conversation.repositories.conversation_repository import (
     ConversationWriteConflict,
     FeedbackTargetInvalid,
 )
+from agent.controllers.routes import agent_router, task_error_handler
+from agent.repositories.task_repository import (
+    CheckpointConflict,
+    OperationDecisionConflict,
+    TaskBusyError,
+    TaskNotFound,
+    TaskResumeConflict,
+)
 from exceptions import ProjectException, RequestInvalidException
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -302,6 +310,7 @@ def register_routes(app: FastAPI) -> None:
     )
     app.include_router(chat_sessions.chat_session_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(conversation_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(agent_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         model_connections.model_connection_router, prefix=PUBLIC_API_V1_PREFIX
     )
@@ -354,6 +363,14 @@ def create_app() -> FastAPI:
         ConversationInputError,
     ):
         app.add_exception_handler(error, conversation_error_handler)
+    for error in (
+        TaskNotFound,
+        CheckpointConflict,
+        OperationDecisionConflict,
+        TaskResumeConflict,
+        TaskBusyError,
+    ):
+        app.add_exception_handler(error, task_error_handler)
     register_routes(app)
     return app
 

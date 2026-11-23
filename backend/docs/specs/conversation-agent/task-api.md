@@ -69,15 +69,16 @@ data: {"task_id":"task_07","final_message_id":"msg_10"}
 {"request_id":"00000000-0000-4000-8000-000000000003"}
 ```
 
-停止请求先写入 Task 的停止标记，再由 Worker 停止当前模型调用或安全结束
-当前 Operation。响应状态为 `interrupted` 或 `cancelled` 时，才表示执行已结束。
+停止请求先把 Task 标记为 `interrupted`。当前直接执行调用在下一个 checkpoint
+边界观察这个状态并结束，响应状态为 `interrupted` 或 `cancelled` 时，才表示执行已结束。
 
 ## 4. 恢复 Task
 
 ### `POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/resume`
 
-用于 Worker 重启、网络断开或用户重新打开页面后的显式恢复。恢复继续使用
-原 `task_id` 和最近的 `checkpoint_revision`。
+用于进程中断、网络断开或用户重新打开页面后的显式恢复。调用方提交恢复请求后，
+再次直接调用 `TaskExecution.run_task()`，继续使用原 `task_id` 和最近的
+`checkpoint_revision`。
 
 请求正文：
 
@@ -112,7 +113,7 @@ data: {"task_id":"task_07","final_message_id":"msg_10"}
 - `arguments_digest` 与待审批参数完全一致。
 - 当前用户拥有该 Operation 所需的权限。
 
-批准后由 Worker 继续原 Task。拒绝后 Operation 进入 `rejected`，Task 根据
+批准后由调用方提交后继续调用原 Task。拒绝后 Operation 进入 `rejected`，Task 根据
 执行计划进入继续回答、失败或等待用户输入状态。
 
 ## 6. Operation 状态
@@ -133,11 +134,11 @@ Operation 必须先进入 `needs_reconciliation`，不能直接自动重试。
 | 状态 | 说明 |
 | --- | --- |
 | `accepted` | 已写入 Task，尚未开始执行 |
-| `running` | Worker 正在执行 |
+| `running` | `TaskExecution` 正在执行 |
 | `approval_required` | 等待用户对 Operation 作决定 |
 | `completed` | 已产生最终回答 |
 | `failed` | 发生不可恢复错误 |
-| `interrupted` | 被停止或 Worker 中断，仍可恢复 |
+| `interrupted` | 被停止或进程中断，仍可恢复 |
 | `cancelled` | 用户明确取消，不能继续原执行 |
 
 错误响应统一包含：

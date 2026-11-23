@@ -33,7 +33,7 @@ Granting Evidence or Finding creation includes publishing its new analysis versi
 uses GET/PUT on the session's `/permissions` endpoint and an optimistic revision;
 conflicts require reload, never an automatic overwrite. Revoking during a turn
 blocks the next unclaimed write, not an operation already running. New sessions
-and branches default to confirmation.
+and messages/{message_id}/edits default to confirmation.
 
 ## Product Boundary
 
@@ -95,15 +95,15 @@ The route uses only same-origin endpoints:
 
 ```text
 GET  /api/v1/model-connections
-POST /api/v1/chat-sessions
-GET  /api/v1/chat-sessions/{session_id}
-GET  /api/v1/chat-sessions/{session_id}/messages
-POST /api/v1/chat-sessions/{session_id}/messages
-POST /api/v1/chat-sessions/{session_id}/responses/{response_id}/stop
-POST /api/v1/chat-sessions/{session_id}/branches
-GET  /api/v1/chat-sessions/{session_id}/tree
-PUT  /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback
-POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
+POST /api/v1/conversations
+GET  /api/v1/conversations/{conversation_id}
+GET  /api/v1/conversations/{conversation_id}/messages
+POST /api/v1/conversations/{conversation_id}/messages
+POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/stop
+POST /api/v1/conversations/{conversation_id}/messages/{message_id}/edits
+GET  /api/v1/conversations/{conversation_id}/tree
+PUT  /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback
+POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/operations/{operation_id}/decision
 GET  /api/v1/collections/{collection_id}/agent-permissions
 PUT  /api/v1/collections/{collection_id}/agent-permissions
 ```
@@ -386,7 +386,7 @@ an owned-session tree of saved question/answer turns, with shared prefixes shown
 once. Selecting a node previews its question, Source context, answer, and status.
 Previewing and closing do not change the active conversation or create a branch.
 Desktop shows a top-down node graph and preview side by side. Shared prefixes
-appear once, sibling questions are laid out as parallel branches, and the
+appear once, sibling questions are laid out as parallel messages/{message_id}/edits, and the
 active path uses the accent connector. The graph has zoom, fit, and locate
 controls; on narrow screens it remains a pannable overview before opening the
 selected preview with a return-to-tree control. Escape closes the dialog and
@@ -748,7 +748,7 @@ does not show the latest turn's recovery controls.
 an open browser request, a backend task, and a submitted approval decision.
 Losing a connection does not establish that the backend failed or that no
 scientific evidence exists. Check result reads the existing trajectory with
-`GET /chat-sessions/{session_id}/messages` and may reconnect its event stream;
+`GET /conversations/{conversation_id}/messages` and may reconnect its event stream;
 it never resends the question or repeats an approval. Even when the first
 response snapshot has not arrived, a failed stream and failed recovery read
 leave received text visible until the saved result can be checked. Confirmed

@@ -1,10 +1,5 @@
-import type {
-	ChatExecutionPlan,
-	ChatMessage,
-	ChatProgress,
-	ChatTurn,
-	ChatResponseSnapshot
-} from '../../../_shared/chatSessions';
+import type { ChatExecutionPlan, ChatProgress, ChatTurn, ChatResponseSnapshot } from '$lib/agent/api';
+import type { ChatMessage } from '$lib/conversation/api';
 
 type RecoveryState =
 	| 'resourceLimited'

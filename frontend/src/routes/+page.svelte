@@ -14,7 +14,7 @@
 		fetchCollections,
 		getCollectionStatusGroup,
 		type Collection
-	} from './_shared/collections';
+	} from '$lib/workspace/collections';
 	import { language, t } from './_shared/i18n';
 	import { prepareCollectionDocument } from './_shared/pipelineRuns';
 

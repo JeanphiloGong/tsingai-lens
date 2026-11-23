@@ -2,11 +2,7 @@
 	import { tick } from 'svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
-	import type {
-		ChatFeedbackInput,
-		ChatFeedbackReason,
-		ChatFeedbackState
-	} from '../../../_shared/chatSessions';
+	import type { ChatFeedbackInput, ChatFeedbackReason, ChatFeedbackState } from '$lib/conversation/api';
 
 	export let messageId: string;
 	export let state: ChatFeedbackState | undefined = undefined;

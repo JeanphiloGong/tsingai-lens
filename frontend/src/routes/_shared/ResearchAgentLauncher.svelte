@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import './ResearchAgentLauncher.css';
 	import { errorMessage } from './api';
-	import { collections, fetchCollections } from './collections';
+	import { collections, fetchCollections } from '$lib/workspace/collections';
 	import { t } from './i18n';
 
 	export let collectionId = '';

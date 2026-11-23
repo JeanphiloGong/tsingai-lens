@@ -53,7 +53,7 @@
 
 <script lang="ts">
 	import { t } from '../../../_shared/i18n';
-	import { sanitizeStreamingCitationText } from './conversationPresentation';
+	import { sanitizeStreamingCitationText } from '$lib/research/conversationPresentation';
 	export let content = '';
 	export let streaming = false;
 	$: visibleContent = streaming ? sanitizeStreamingCitationText(content) : content;

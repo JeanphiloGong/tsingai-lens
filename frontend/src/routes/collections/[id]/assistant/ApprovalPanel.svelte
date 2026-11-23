@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { Check, X, FileCheck2, ChevronDown } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatToolCall } from '../../../_shared/chatSessions';
+	import type { ChatToolCall } from '$lib/agent/api';
 	import { fetchCollectionObjectives } from '../../../_shared/researchView';
-	import { capabilityName, formatValue } from './capabilityPresentation';
+	import { capabilityName, formatValue } from '$lib/research/capabilityPresentation';
 	export let call: ChatToolCall;
 	export let collectionId = '';
 	export let deciding = false;

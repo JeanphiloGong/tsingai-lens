@@ -18,7 +18,7 @@
 	} from '@lucide/svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatTree, ChatTreeNode } from '../../../_shared/chatSessions';
+	import type { ChatTree, ChatTreeNode } from '$lib/conversation/api';
 	import MessageContent from './MessageContent.svelte';
 
 	export let tree: ChatTree | null = null;

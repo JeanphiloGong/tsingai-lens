@@ -37,7 +37,7 @@ const { pageStore, collectionStore, fetchCollectionMock, fetchCollectionsMock } 
 
 vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
-vi.mock('../../_shared/collections', () => ({
+vi.mock('$lib/workspace/collections', () => ({
 	collections: collectionStore,
 	deleteCollection: vi.fn(),
 	fetchCollection: fetchCollectionMock,

@@ -4,12 +4,9 @@
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import { resolve } from '$app/paths';
-	import type {
-		ChatMessage,
-		ChatSourceContext,
-		ChatBranchOptions
-	} from '../../../_shared/chatSessions';
-	import { formatTime } from './conversationPresentation';
+	import type { ChatMessage, ChatBranchOptions } from '$lib/conversation/api';
+	import type { ChatSourceContext } from '$lib/document/source-context';
+	import { formatTime } from '$lib/research/conversationPresentation';
 	import MessageContent from './MessageContent.svelte';
 	export let message: ChatMessage;
 	export let disabled = false;

@@ -21,6 +21,10 @@ to code.
   Collection paper, Objective, Finding, Evidence Map, and Source route family
 - `src/routes/_shared/`
   Shared browser-side API clients, i18n, and route support code
+- `src/lib/conversation/`, `src/lib/agent/`, `src/lib/workspace/`,
+  `src/lib/document/`, and `src/lib/research/`
+  Conversation requests, Agent execution and permissions, collection context,
+  pending Source context, and research presentation
 - `src/routes/admin/`
   Personnel, group and permission catalog administration, gated by
   `users.manage` and backed by the same-origin user-service APIs; model

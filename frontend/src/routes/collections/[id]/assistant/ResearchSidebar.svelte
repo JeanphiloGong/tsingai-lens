@@ -11,7 +11,7 @@
 		PinOff,
 		ChevronDown
 	} from '@lucide/svelte';
-	import type { ChatSessionActivity } from './conversationPresentation';
+	import type { ChatSessionActivity } from '$lib/research/conversationPresentation';
 
 	type SessionSummary = {
 		session_id: string;

@@ -72,13 +72,13 @@ test('real administrator saves/tests/enables a model, researcher uses it and los
 	// Exercise the existing authenticated Chat entrypoint with the selected ID.
 	const session = (
 		await (
-			await researcher.request.post('/api/v1/chat-sessions', {
+			await researcher.request.post('/api/v1/conversations', {
 				data: { collection_id: collectionID }
 			})
 		).json()
 	).data;
 	const answer = await researcher.request.post(
-		`/api/v1/chat-sessions/${session.session_id}/messages`,
+		`/api/v1/conversations/${session.session_id}/messages`,
 		{
 			data: {
 				message: 'Respond without tools for this synthetic connectivity check.',

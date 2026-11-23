@@ -19,7 +19,7 @@
 		readPendingChatSourceContexts,
 		MAX_CHAT_SOURCE_CONTEXTS,
 		type ChatSourceContext
-	} from '../../../../_shared/chatSessions';
+	} from '$lib/document/source-context';
 	import { t } from '../../../../_shared/i18n';
 	import MarkdownPaperReader from './_components/MarkdownPaperReader.svelte';
 	import PaperReader from './_components/PaperReader.svelte';

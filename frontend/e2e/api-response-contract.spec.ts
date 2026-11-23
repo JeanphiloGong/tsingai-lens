@@ -96,14 +96,14 @@ async function installApi(page: Page, authenticated = true) {
 				'Source archive is unavailable.'
 			);
 		}
-		if (path === '/chat-sessions') {
+		if (path === '/conversations') {
 			return reply(request.method() === 'POST' ? session : { items: [], limit: 12, offset: 0 });
 		}
-		if (path === `/chat-sessions/${session.session_id}`) return reply(session);
-		if (path === `/chat-sessions/${session.session_id}/permissions`) {
+		if (path === `/conversations/${session.session_id}`) return reply(session);
+		if (path === `/conversations/${session.session_id}/permissions`) {
 			return reply({ mode: 'confirm', actions: [], expires_at: null, revision: 0 });
 		}
-		if (path === `/chat-sessions/${session.session_id}/messages`) {
+		if (path === `/conversations/${session.session_id}/messages`) {
 			if (request.method() === 'POST') {
 				state.streams += 1;
 				return reply(

@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	readPendingChatSourceContexts,
 	storePendingChatSourceContexts,
-	type ChatMessage,
 	type ChatSourceContext
-} from './chatSessions';
+} from '$lib/document/source-context';
+import type { ChatMessage } from '$lib/conversation/api';
 
 const source: ChatSourceContext = {
 	resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },

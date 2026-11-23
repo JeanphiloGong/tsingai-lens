@@ -6,13 +6,13 @@
 	import { page } from '$app/stores';
 	import { authState } from '../../../_shared/authState';
 
-	import { collections } from '../../../_shared/collections';
+	import { collections } from '$lib/workspace/collections';
 	import { t } from '../../../_shared/i18n';
 	import {
 		readPendingChatSourceContexts,
 		storePendingChatSourceContexts,
 		type ChatSourceContext
-	} from '../../../_shared/chatSessions';
+	} from '$lib/document/source-context';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import {
 		X,

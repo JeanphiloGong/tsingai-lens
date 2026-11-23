@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../../_shared/chatSessions';
+import type { ChatMessage } from '$lib/conversation/api';
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 export function capabilityName(toolName: string | null, translate: Translate) {

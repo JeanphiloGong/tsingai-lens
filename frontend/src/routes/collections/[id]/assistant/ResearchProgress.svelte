@@ -2,13 +2,9 @@
 	import { BookOpen, ChevronDown, Check, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import { capabilityName } from './capabilityPresentation';
-	import type { CurrentReading } from './conversationPresentation';
-	import {
-		formatChatElapsed,
-		getChatProgressActions,
-		type ChatProgress
-	} from '../../../_shared/chatSessions';
+	import { capabilityName } from '$lib/research/capabilityPresentation';
+	import type { CurrentReading } from '$lib/research/conversationPresentation';
+	import { formatChatElapsed, getChatProgressActions, type ChatProgress } from '$lib/agent/api';
 	export let progress: ChatProgress;
 	export let active = true;
 	export let progressHistory: ChatProgress[] = [];

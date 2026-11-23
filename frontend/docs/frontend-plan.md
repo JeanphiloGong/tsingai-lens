@@ -55,10 +55,10 @@
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`、
   `GET /api/v1/collections/{collection_id}/documents/{document_id}/markdown`
-- Collection-bound Research Agent：`POST /api/v1/chat-sessions`、
-  `GET /api/v1/chat-sessions/{session_id}`、
-  `GET|POST /api/v1/chat-sessions/{session_id}/messages`、
-  `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
+- Collection-bound Research Agent：`POST /api/v1/conversations`、
+  `GET /api/v1/conversations/{conversation_id}`、
+  `GET|POST /api/v1/conversations/{conversation_id}/messages`、
+  `POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/operations/{operation_id}/decision`
 
 ## 前端实现约束
 
@@ -78,7 +78,7 @@
   `objective_id`，不维护第二套持久化目标身份
 - 研究目标详情页默认进入已发布分析的结果总览：先看实验比较表和 Finding 列表；分析范围通过独立页签调整。
   点击 Finding 后通过 `finding_id` 进入单条 Finding 详情，返回操作清理该参数并回到总览，页面不会自动选中第一条 Finding。
-- `/collections/{collection_id}/assistant` 使用同源 `chat-sessions` API，是绑定当前
+- `/collections/{collection_id}/assistant` 使用同源 `conversations` API，是绑定当前
   collection 的 Research Agent 入口。普通对话不要求 capability；读取和草拟 capability
   自动执行并将结构化结果与最终回答分开显示；消息 POST 通过同一 URL 的
   `Accept: text/event-stream` 内容协商增量显示模型文本，并以服务端持久化后的完整 turn

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { stopChatResponse } from './chatSessions';
-import { getTurnNotice } from '../collections/[id]/assistant/conversationPresentation';
+import { stopChatResponse } from '$lib/agent/api';
+import { getTurnNotice } from '$lib/research/conversationPresentation';
 
 describe('stopping research responses', () => {
 	it('targets an exact response through the same-origin stop endpoint', async () => {
@@ -10,16 +10,16 @@ describe('stopping research responses', () => {
 					code: 200,
 					message: 'success',
 					meta: null,
-					data: { status: 'running', stop_requested: true }
+					data: { task_id: 'response/one', status: 'interrupted' }
 				})
 			)
 		);
 		try {
 			await expect(stopChatResponse('session/one', 'response/one')).resolves.toMatchObject({
-				stop_requested: true
+				status: 'interrupted'
 			});
 			expect(fetch).toHaveBeenCalledWith(
-				'/api/v1/chat-sessions/session%2Fone/responses/response%2Fone/stop',
+				'/api/v1/conversations/session%2Fone/tasks/response%2Fone/stop',
 				expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
 			);
 		} finally {

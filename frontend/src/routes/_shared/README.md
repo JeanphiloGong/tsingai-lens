@@ -27,7 +27,7 @@ This node owns browser-side helpers shared across frontend routes.
   errors remain ordinary errors. `requestBlob` rejects JSON failures before
   saving, unwraps ordinary JSON exports, and preserves file bytes identified
   by Content-Disposition. `buildApiUrl` owns URLs for requests and streams.
-- `collections.ts`, `collectionDocuments.ts`, `pipelineRuns.ts`
+- `collectionDocuments.ts`, `pipelineRuns.ts`
   Collection upload, current Document, independent preparation, and Pipeline
   Run progress contracts. Collection history uses compact run summaries; one
   run read retains complete diagnostic state. `pipelineRuns.ts` also queues
@@ -50,12 +50,6 @@ This node owns browser-side helpers shared across frontend routes.
 finding_id)`. Dataset URLs preserve the selected label and dataset-use
   filters for JSON or training JSONL downloads; collection-level dataset and
   gold-draft URLs serve the corresponding collection exports.
-- `chatSessions.ts`
-  Collection-bound Research Agent sessions, typed trajectories, streamed text
-  deltas, capability results, exact write decisions, and the bounded pending
-  Source handoff between a document reader and its Collection Agent. JSON
-  rejection before stream start is handled before parsing SSE; after start,
-  `error` events and cancellation retain the existing recovery flow.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans
   may retain source provenance returned by the API.

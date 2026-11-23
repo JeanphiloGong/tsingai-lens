@@ -5,7 +5,7 @@
 
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { ChevronDown, Quote, X, ArrowUpRight, Square } from '@lucide/svelte';
-	import type { ChatSourceContext } from '../../../_shared/chatSessions';
+	import type { ChatSourceContext } from '$lib/document/source-context';
 	import {
 		matchingResearchAgentSlashCommands,
 		resolveResearchAgentSlashCommand,

@@ -7,43 +7,46 @@
 	import { errorMessage, getApiErrorReason, isApiErrorCode } from '../../../_shared/api';
 	import { authState } from '../../../_shared/authState';
 
-	import { collections } from '../../../_shared/collections';
+	import { collections } from '$lib/workspace/collections';
 	import {
 		createChatSession,
-		fetchModelConnections,
 		deleteChatSession,
 		setChatSessionPin,
 		setChatSessionTitle,
 		listChatSessions,
 		branchChatMessage,
-		clearPendingChatSourceContexts,
-		decideChatToolCall,
 		fetchChatSession,
-		fetchChatTrajectory,
 		fetchChatTree,
-		appendChatProgress,
-		readPendingChatSourceContexts,
-		storePendingChatSourceContexts,
-		streamChatMessage,
-		streamChatUpdates,
-		stopChatResponse,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
 		type ChatBranchOptions,
 		type ChatFeedbackState,
 		type ChatMessageFeedback,
 		type ChatMessage,
+		type ChatSession,
+		type ChatTree,
+		type ChatTreeNode
+	} from '$lib/conversation/api';
+	import { fetchModelConnections, type ModelConnectionChoice } from '$lib/agent/model-connections';
+	import {
+		clearPendingChatSourceContexts,
+		readPendingChatSourceContexts,
+		storePendingChatSourceContexts,
+		type ChatSourceContext
+	} from '$lib/document/source-context';
+	import {
+		decideChatToolCall,
+		fetchChatTrajectory,
+		appendChatProgress,
+		streamChatMessage,
+		streamChatUpdates,
+		stopChatResponse,
 		type ChatProgress,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
-		type ChatSession,
-		type ChatSourceContext,
 		type ChatToolCall,
-		type ChatTurn,
-		type ChatTree,
-		type ChatTreeNode,
-		type ModelConnectionChoice
-	} from '../../../_shared/chatSessions';
+		type ChatTurn
+	} from '$lib/agent/api';
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
 	import ConversationHeader from './ConversationHeader.svelte';
@@ -55,7 +58,7 @@
 		getChatSessionActivity,
 		getModelServiceErrorKey,
 		type ChatSessionActivity
-	} from './conversationPresentation';
+	} from '$lib/research/conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
 	import type { ResearchAgentSlashCommandName } from '../../../_shared/researchAgentSlashCommands';
@@ -1561,9 +1564,11 @@
 		localMessageIds: string[] = [],
 		decidedToolName: string | null = null
 	) {
-		running = false;
+		const taskStillRunning =
+			turn.messages.length === 0 && responseSnapshot?.status === 'running';
+		running = taskStillRunning;
 		stopping = false;
-		responseSnapshot = null;
+		if (!taskStillRunning) responseSnapshot = null;
 		settledTurn = turn;
 		recoveryError = '';
 		const prior = localMessageIds.length

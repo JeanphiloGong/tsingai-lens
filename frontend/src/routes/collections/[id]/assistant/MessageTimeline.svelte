@@ -8,20 +8,15 @@
 		getRecoveredChatProgress,
 		getCurrentReadings,
 		getTurnNotice
-	} from './conversationPresentation';
+	} from '$lib/research/conversationPresentation';
 	import { ArrowRight, RotateCw } from '@lucide/svelte';
+	import type { ChatToolCall, ChatProgress, ChatTurn, ChatResponseSnapshot } from '$lib/agent/api';
 	import type {
 		ChatMessage,
-		ChatToolCall,
-		ChatProgress,
-		ChatTurn,
-		ChatResponseSnapshot
-	} from '../../../_shared/chatSessions';
-	import type {
 		ChatFeedbackInput,
 		ChatFeedbackState,
 		ChatBranchOptions
-	} from '../../../_shared/chatSessions';
+	} from '$lib/conversation/api';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
 	import ResearchProgress from './ResearchProgress.svelte';

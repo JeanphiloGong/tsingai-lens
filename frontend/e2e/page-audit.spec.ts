@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type Page, type Route } from '@playwright/test';
-import type { ChatFeedbackInput, ChatMessageFeedback } from '../src/routes/_shared/chatSessions';
+import type { ChatFeedbackInput, ChatMessageFeedback } from '../src/lib/conversation/api';
 
 const collectionId = 'col_123';
 const documentId = 'doc_1';
@@ -66,10 +66,10 @@ test.describe('page interaction audit', () => {
 					source_status: 'preparing'
 				}
 			];
-			await page.route('**/api/v1/chat-sessions?*', (route) =>
+			await page.route('**/api/v1/conversations?*', (route) =>
 				route.fulfill(json({ items: [chatSession()], limit: 12, offset: 0 }))
 			);
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) =>
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, (route) =>
 				route.fulfill(
 					json({
 						items: [
@@ -207,11 +207,11 @@ test.describe('page interaction audit', () => {
 				running: stage !== 2,
 				response: snapshot(stage ? second : first, stage + 1, stage === 2)
 			});
-			await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) => {
+			await page.route('**/api/v1/conversations/chat_1/messages', (route) => {
 				if (route.request().method() === 'POST') writes++;
 				return route.fulfill(json(trajectory()));
 			});
-			await page.route('**/api/v1/chat-sessions/chat_1/events?*', async (route) => {
+			await page.route('**/api/v1/conversations/chat_1/events?*', async (route) => {
 				if (stage === 0) {
 					await next;
 					return route.fulfill({
@@ -303,7 +303,7 @@ test.describe('page interaction audit', () => {
 				},
 				{ question, started }
 			);
-			await page.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+			await page.route('**/api/v1/conversations/*{,/messages}', (route) => {
 				const path = new URL(route.request().url()).pathname;
 				const id = path.split('/')[4];
 				requests.push(route.request().method());
@@ -383,7 +383,7 @@ test.describe('page interaction audit', () => {
 					);
 				return route.fulfill(json({ items, feedback: [], pending_approval: null, running }));
 			});
-			await page.route('**/api/v1/chat-sessions?*', (route) =>
+			await page.route('**/api/v1/conversations?*', (route) =>
 				route.fulfill(
 					json({
 						items: [
@@ -482,12 +482,12 @@ test.describe('page interaction audit', () => {
 			const turns = new Map<string, ReturnType<typeof agentMessage>[]>();
 			const submissions: string[] = [];
 			let created = 0;
-			await page.route('**/api/v1/chat-sessions', (route) => {
+			await page.route('**/api/v1/conversations', (route) => {
 				const id = `scope_${++created}`;
 				turns.set(id, []);
 				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
 			});
-			await page.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+			await page.route('**/api/v1/conversations/*{,/messages}', (route) => {
 				const parts = new URL(route.request().url()).pathname.split('/');
 				const id = parts[4];
 				if (!turns.has(id)) return route.fulfill(json({ detail: 'Session not found' }, 404));
@@ -551,12 +551,12 @@ test.describe('page interaction audit', () => {
 			expect(created).toBe(3);
 			const other = await page.context().newPage();
 			await mockApis(other);
-			await other.route('**/api/v1/chat-sessions', (route) => {
+			await other.route('**/api/v1/conversations', (route) => {
 				const id = `scope_${++created}`;
 				turns.set(id, []);
 				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
 			});
-			await other.route('**/api/v1/chat-sessions/*{,/messages}', (route) => {
+			await other.route('**/api/v1/conversations/*{,/messages}', (route) => {
 				const path = new URL(route.request().url()).pathname;
 				return route.fulfill(
 					json(
@@ -707,11 +707,11 @@ test.describe('page interaction audit', () => {
 				source_contexts: { document_id: string; source_ref: string }[];
 				message: string;
 			} | null = null;
-			await page.route('**/api/v1/chat-sessions', (route) => {
+			await page.route('**/api/v1/conversations', (route) => {
 				sessionsCreated += 1;
 				return route.fulfill(json(chatSession(), 201));
 			});
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, (route) => {
 				if (route.request().method() === 'GET')
 					return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
 				submitted = route.request().postDataJSON();
@@ -995,7 +995,7 @@ test.describe('page interaction audit', () => {
 		const composer = page.getByRole('textbox', { name: 'Message', exact: true });
 		await composer.fill('Keep this separate question');
 		let fail = true;
-		await page.route('**/chat-sessions/*/tree', (route) =>
+		await page.route('**/conversations/*/tree', (route) =>
 			fail ? route.abort('failed') : route.fallback()
 		);
 		await page.getByRole('button', { name: 'Conversation branches', exact: true }).click();
@@ -1228,7 +1228,7 @@ test.describe('page interaction audit', () => {
 					)
 			);
 			let sent: Record<string, unknown> | null = null;
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, (route) => {
 				if (route.request().method() === 'GET')
 					return route.fulfill(json({ items: [], feedback: [], pending_approval: null }));
 				sent = route.request().postDataJSON();
@@ -1356,7 +1356,7 @@ test.describe('page interaction audit', () => {
 			let messages: ReturnType<typeof agentMessage>[] = [];
 			const pageErrors: string[] = [];
 			page.on('pageerror', (error) => pageErrors.push(error.message));
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) => {
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, (route) => {
 				if (route.request().method() === 'GET')
 					return route.fulfill(json({ items: messages, feedback: [], pending_approval: null }));
 				messages = [
@@ -1466,7 +1466,7 @@ test.describe('page interaction audit', () => {
 					agentMessage('md_answer', 'assistant', answer)
 				];
 				let saved = false;
-				await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) => {
+				await page.route('**/api/v1/conversations/chat_1/messages', (route) => {
 					if (route.request().method() === 'GET')
 						return route.fulfill(
 							json({
@@ -1637,7 +1637,7 @@ test.describe('page interaction audit', () => {
 			let approved = false;
 			let completed = false;
 			let decisions = 0;
-			await page.route('**/api/v1/chat-sessions/chat_1/messages', (route) =>
+			await page.route('**/api/v1/conversations/chat_1/messages', (route) =>
 				route.fulfill(
 					json({
 						feedback: [],
@@ -1649,7 +1649,7 @@ test.describe('page interaction audit', () => {
 				)
 			);
 			await page.route(
-				'**/api/v1/chat-sessions/chat_1/tool-calls/call_write_1/decision',
+				'**/api/v1/conversations/chat_1/tool-calls/call_write_1/decision',
 				(route) => {
 					approved = true;
 					decisions += 1;
@@ -1692,7 +1692,7 @@ test.describe('page interaction audit', () => {
 		const completion = new Promise<void>((resolve) => {
 			finish = resolve;
 		});
-		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+		await page.route(`**/api/v1/conversations/${sessionId}/messages`, async (route) => {
 			if (route.request().method() === 'GET')
 				return route.fulfill(json({ items: [], pending_approval: null, feedback: [] }));
 			await completion;
@@ -1748,7 +1748,7 @@ test.describe('page interaction audit', () => {
 			await page.addInitScript(() =>
 				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
 			);
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) =>
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, (route) =>
 				route.fulfill(
 					json({
 						items: [
@@ -1769,7 +1769,7 @@ test.describe('page interaction audit', () => {
 				)
 			);
 			await page.route(
-				`**/api/v1/chat-sessions/${sessionId}/messages/answer/feedback`,
+				`**/api/v1/conversations/${sessionId}/messages/answer/feedback`,
 				async (route) => {
 					expect(route.request().method()).toBe('PUT');
 					const input = route.request().postDataJSON() as ChatFeedbackInput;
@@ -1899,7 +1899,7 @@ test.describe('page interaction audit', () => {
 				)
 			);
 			let sent: Record<string, unknown> | null = null;
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, async (route) => {
 				if (route.request().method() === 'GET')
 					return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
 				sent = route.request().postDataJSON();
@@ -2178,18 +2178,18 @@ test.describe('page interaction audit', () => {
 			const request = route.request();
 			const url = new URL(request.url());
 			const path = url.pathname;
-			if (path === '/api/v1/chat-sessions' && request.method() === 'POST') {
+			if (path === '/api/v1/conversations' && request.method() === 'POST') {
 				return route.fulfill(json(chatSession(), 201));
 			}
-			if (path === `/api/v1/chat-sessions/${sessionId}` && request.method() === 'GET') {
+			if (path === `/api/v1/conversations/${sessionId}` && request.method() === 'GET') {
 				return route.fulfill(json(chatSession()));
 			}
-			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'GET') {
+			if (path === `/api/v1/conversations/${sessionId}/messages` && request.method() === 'GET') {
 				return route.fulfill(
 					json({ feedback: [], items: trajectory, pending_approval: pendingApproval })
 				);
 			}
-			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'POST') {
+			if (path === `/api/v1/conversations/${sessionId}/messages` && request.method() === 'POST') {
 				expect(request.headers().accept).toContain('text/event-stream');
 				const prompt = String(request.postDataJSON().message ?? '');
 				messageSequence += 1;
@@ -2233,8 +2233,8 @@ test.describe('page interaction audit', () => {
 			return route.fallback();
 		};
 
-		await page.route('**/api/v1/chat-sessions', handleChatRoute);
-		await page.route('**/api/v1/chat-sessions/**', handleChatRoute);
+		await page.route('**/api/v1/conversations', handleChatRoute);
+		await page.route('**/api/v1/conversations/**', handleChatRoute);
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto(`/collections/${collectionId}/assistant`);
 
@@ -2339,7 +2339,7 @@ test.describe('page interaction audit', () => {
 		const messageRequests: string[] = [];
 		let sequence = 0;
 		let trajectory: Array<Record<string, unknown>> = [];
-		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+		await page.route(`**/api/v1/conversations/${sessionId}/messages`, async (route) => {
 			const request = route.request();
 			if (request.method() === 'GET') {
 				return route.fulfill(json({ feedback: [], items: trajectory, pending_approval: null }));
@@ -2439,8 +2439,8 @@ test.describe('page interaction audit', () => {
 		await sendButton.click();
 		await expect(page.getByText('Mobile reply 2')).toBeVisible();
 		expect(messageRequests).toEqual([
-			`/api/v1/chat-sessions/${sessionId}/messages`,
-			`/api/v1/chat-sessions/${sessionId}/messages`
+			`/api/v1/conversations/${sessionId}/messages`,
+			`/api/v1/conversations/${sessionId}/messages`
 		]);
 
 		await page.setViewportSize({ width: 390, height: 520 });
@@ -2475,7 +2475,7 @@ test.describe('page interaction audit', () => {
 			const pending = new Promise<void>((resolve) => {
 				finish = resolve;
 			});
-			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			await page.route(`**/api/v1/conversations/${sessionId}/messages`, async (route) => {
 				if (route.request().method() === 'GET')
 					return route.fulfill(json({ feedback: [], items: history, pending_approval: null }));
 				await pending;
@@ -2571,7 +2571,7 @@ test.describe('page interaction audit', () => {
 		const turnCompletion = new Promise<void>((resolve) => {
 			completeTurn = resolve;
 		});
-		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+		await page.route(`**/api/v1/conversations/${sessionId}/messages`, async (route) => {
 			if (route.request().method() === 'POST') {
 				await turnCompletion;
 				const turn = {
@@ -2982,7 +2982,7 @@ async function mockMessageBranches(
 			localStorage.getItem('lens.chatSession.user_1:col_123') || 'chat_1'
 		);
 	});
-	await page.route('**/api/v1/chat-sessions**', async (route) => {
+	await page.route('**/api/v1/conversations**', async (route) => {
 		const path = new URL(route.request().url()).pathname;
 		const method = route.request().method();
 		const parts = path.split('/');
@@ -3270,7 +3270,7 @@ async function mockApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence-map`) {
 			return route.fulfill(json(objectiveEvidenceMap()));
 		}
-		if (/^\/api\/v1\/chat-sessions\/[^/]+\/permissions$/.test(path)) {
+		if (/^\/api\/v1\/conversations\/[^/]+\/permissions$/.test(path)) {
 			if (method === 'PUT') {
 				const body = route.request().postDataJSON() as Record<string, unknown>;
 				return route.fulfill(
@@ -3287,9 +3287,9 @@ async function mockApis(page: Page) {
 		if (/^\/api\/v1\/collections\/[^/]+\/agent-permissions$/.test(path)) {
 			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
 		}
-		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
-		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));
-		if (path === `/api/v1/chat-sessions/${sessionId}/messages`) {
+		if (path === '/api/v1/conversations') return route.fulfill(json(chatSession(), 201));
+		if (path === `/api/v1/conversations/${sessionId}`) return route.fulfill(json(chatSession()));
+		if (path === `/api/v1/conversations/${sessionId}/messages`) {
 			return route.fulfill(json({ feedback: [], items: [], pending_approval: null }));
 		}
 

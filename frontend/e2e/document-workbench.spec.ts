@@ -75,29 +75,29 @@ async function mockPaperReaderApis(
 				})
 			);
 		}
-		if (path === '/api/v1/chat-sessions' && route.request().method() === 'GET') {
+		if (path === '/api/v1/conversations' && route.request().method() === 'GET') {
 			return route.fulfill(json({ items: [], total: 0, offset: 0, limit: 50 }));
 		}
-		if (path === '/api/v1/chat-sessions' && route.request().method() === 'POST') {
+		if (path === '/api/v1/conversations' && route.request().method() === 'POST') {
 			return route.fulfill(json(session, 201));
 		}
-		if (path === '/api/v1/chat-sessions/chat_source' && route.request().method() === 'GET') {
+		if (path === '/api/v1/conversations/chat_source' && route.request().method() === 'GET') {
 			return route.fulfill(json(session));
 		}
 		if (
-			path === '/api/v1/chat-sessions/chat_source/permissions' &&
+			path === '/api/v1/conversations/chat_source/permissions' &&
 			route.request().method() === 'GET'
 		) {
 			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
 		}
 		if (
-			path === '/api/v1/chat-sessions/chat_source/messages' &&
+			path === '/api/v1/conversations/chat_source/messages' &&
 			route.request().method() === 'GET'
 		) {
 			return route.fulfill(json({ items: messages, feedback: [], pending_approval: null }));
 		}
 		if (
-			path === '/api/v1/chat-sessions/chat_source/messages' &&
+			path === '/api/v1/conversations/chat_source/messages' &&
 			route.request().method() === 'POST'
 		) {
 			const payload = route.request().postDataJSON() as Record<string, unknown>;

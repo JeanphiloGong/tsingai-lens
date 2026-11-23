@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { t } from '../../../_shared/i18n';
-	import type { ChatMessage } from '../../../_shared/chatSessions';
-	import type { ToolActivityOperation } from './conversationPresentation';
+	import type { ChatMessage } from '$lib/conversation/api';
+	import type { ToolActivityOperation } from '$lib/research/conversationPresentation';
 	import {
 		numberValue,
 		formatValue,
 		resultTitle,
 		resultSummary,
 		resultStatusLabel
-	} from './capabilityPresentation';
+	} from '$lib/research/capabilityPresentation';
 	import ResultResources from './ResultResources.svelte';
 	import ResultWarnings from './ResultWarnings.svelte';
 	import MessageContent from './MessageContent.svelte';

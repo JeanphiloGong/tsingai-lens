@@ -3,7 +3,7 @@
 	import PermissionGate from '../../_shared/PermissionGate.svelte';
 	import { authState } from '../../_shared/authState';
 	import { errorMessage, requestJson } from '../../_shared/api';
-	import type { ModelConnectionChoice } from '../../_shared/chatSessions';
+	import type { ModelConnectionChoice } from '$lib/agent/model-connections';
 	import { t } from '../../_shared/i18n';
 	import { permissionState } from '../../_shared/permissions';
 

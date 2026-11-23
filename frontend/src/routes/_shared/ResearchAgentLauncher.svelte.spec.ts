@@ -23,7 +23,7 @@ const { collectionStore, fetchCollectionsMock, setCollections } = vi.hoisted(() 
 	};
 });
 
-vi.mock('./collections', () => ({
+vi.mock('$lib/workspace/collections', () => ({
 	collections: collectionStore,
 	fetchCollections: fetchCollectionsMock
 }));

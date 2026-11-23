@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage, ChatToolResult, ChatTurn } from '../../../_shared/chatSessions';
+import type { ChatMessage } from '$lib/conversation/api';
+import type { ChatToolResult, ChatTurn } from '$lib/agent/api';
 import {
 	buildChatPresentation,
 	getChatSessionActivity,

@@ -9,7 +9,7 @@
 	import { permissionState, refreshPermissions } from '../../_shared/permissions';
 	import { ApiError, errorMessage, getApiErrorReason, requestJson } from '../../_shared/api';
 	import { t } from '../../_shared/i18n';
-	import { fetchModelConnections } from '../../_shared/chatSessions';
+	import { fetchModelConnections } from '$lib/agent/model-connections';
 	import {
 		configurationChanges,
 		type ConnectionPage,

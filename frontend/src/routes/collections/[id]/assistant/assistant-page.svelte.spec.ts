@@ -3,17 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { authState } from '../../../_shared/authState';
 import { fetchCurrentSession, login, logout } from '../../../_shared/auth';
-import { collections } from '../../../_shared/collections';
+import { collections } from '$lib/workspace/collections';
 import { language } from '../../../_shared/i18n';
 
+import type { ChatMessage } from '$lib/conversation/api';
 import type {
-	ChatMessage,
 	ChatResponseSnapshot,
 	ChatToolCall,
 	ChatToolResult,
 	ChatTrajectory,
 	ChatTurn
-} from '../../../_shared/chatSessions';
+} from '$lib/agent/api';
 
 type AssistantPageState = {
 	params: { id: string };
@@ -213,7 +213,7 @@ function installApi({
 	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 		const path = requestPath(input);
 		const method = requestMethod(input, init);
-		if (path === '/api/v1/chat-sessions' && method === 'GET') {
+		if (path === '/api/v1/conversations' && method === 'GET') {
 			return Promise.resolve(jsonResponse({ items: [session], limit: 12, offset: 0 }));
 		}
 		if (path === '/api/v1/collections/col_123/objectives' && method === 'GET') {
@@ -230,20 +230,20 @@ function installApi({
 				})
 			);
 		}
-		if (path === '/api/v1/chat-sessions' && method === 'POST') {
+		if (path === '/api/v1/conversations' && method === 'POST') {
 			return Promise.resolve(jsonResponse(session, 200, 'Request failed.'));
 		}
-		if (path === `/api/v1/chat-sessions/${session.session_id}` && method === 'GET') {
+		if (path === `/api/v1/conversations/${session.session_id}` && method === 'GET') {
 			return Promise.resolve(jsonResponse(session));
 		}
-		if (path === `/api/v1/chat-sessions/${session.session_id}/messages` && method === 'GET') {
+		if (path === `/api/v1/conversations/${session.session_id}/messages` && method === 'GET') {
 			return Promise.resolve(jsonResponse(trajectory));
 		}
-		if (path === `/api/v1/chat-sessions/${session.session_id}/messages` && method === 'POST') {
+		if (path === `/api/v1/conversations/${session.session_id}/messages` && method === 'POST') {
 			return Promise.resolve(streamResponse(messageTurn!, messageDeltas, messageDelayMs));
 		}
 		if (
-			path === `/api/v1/chat-sessions/${session.session_id}/tool-calls/call_write_1/decision` &&
+			path === `/api/v1/conversations/${session.session_id}/tool-calls/call_write_1/decision` &&
 			method === 'POST'
 		) {
 			return Promise.resolve(jsonResponse(decisionTurn));
@@ -1049,7 +1049,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
-				if (path === '/api/v1/chat-sessions' && method === 'GET') {
+				if (path === '/api/v1/conversations' && method === 'GET') {
 					return jsonResponse({
 						items: Array.from({ length: created }, (_, index) => ({
 							...session,
@@ -1061,7 +1061,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 						offset: 0
 					});
 				}
-				if (path === '/api/v1/chat-sessions' && method === 'POST') {
+				if (path === '/api/v1/conversations' && method === 'POST') {
 					return jsonResponse(
 						{ ...session, session_id: `chat_${++created}` },
 						200,
@@ -1204,7 +1204,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
-				if (path === '/api/v1/chat-sessions' && method === 'GET') {
+				if (path === '/api/v1/conversations' && method === 'GET') {
 					return jsonResponse({
 						items: [
 							{ ...oldSession, title: question, status: 'idle' },
@@ -1214,10 +1214,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 						offset: 0
 					});
 				}
-				if (path === '/api/v1/chat-sessions' && method === 'POST') {
+				if (path === '/api/v1/conversations' && method === 'POST') {
 					return jsonResponse(newSession, 200, 'Request failed.');
 				}
-				if (path === `/api/v1/chat-sessions/${oldSession.session_id}` && method === 'GET') {
+				if (path === `/api/v1/conversations/${oldSession.session_id}` && method === 'GET') {
 					return jsonResponse({
 						...oldSession,
 						title: question,
@@ -1225,7 +1225,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (
-					path === `/api/v1/chat-sessions/${oldSession.session_id}/messages` &&
+					path === `/api/v1/conversations/${oldSession.session_id}/messages` &&
 					method === 'GET'
 				) {
 					return jsonResponse({
@@ -1258,7 +1258,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			expect(
 				fetchMock.mock.calls.some(
 					([input, requestInit]) =>
-						requestPath(input) === `/api/v1/chat-sessions/${oldSession.session_id}/messages` &&
+						requestPath(input) === `/api/v1/conversations/${oldSession.session_id}/messages` &&
 						requestMethod(input, requestInit) === 'GET'
 				)
 			).toBe(true);
@@ -1297,11 +1297,11 @@ describe('collections/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
-				if (path === '/api/v1/chat-sessions' && method === 'GET')
+				if (path === '/api/v1/conversations' && method === 'GET')
 					return Promise.resolve(
 						jsonResponse({ items: [{ ...session, title }], limit: 10, offset: 0 })
 					);
-				if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET') {
+				if (path === '/api/v1/conversations/chat_1' && method === 'GET') {
 					if (completed && ++titleReads >= 2) title = generatedTitle;
 					return Promise.resolve(jsonResponse({ ...session, title }));
 				}
@@ -1381,7 +1381,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					saved.title = JSON.parse(String(init?.body)).title;
 					return Promise.resolve(jsonResponse(saved));
 				}
-				if (path === '/api/v1/chat-sessions' && method === 'GET')
+				if (path === '/api/v1/conversations' && method === 'GET')
 					return Promise.resolve(
 						jsonResponse({
 							items: [{ ...saved, title: saved.title || question.content }],
@@ -1389,7 +1389,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 							offset: 0
 						})
 					);
-				if (path === '/api/v1/chat-sessions/chat_1' && method === 'GET')
+				if (path === '/api/v1/conversations/chat_1' && method === 'GET')
 					return Promise.resolve(jsonResponse(saved));
 				return original(input, init);
 			});
@@ -1464,7 +1464,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			const original = fetchMock.getMockImplementation()!;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
-				if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				if (path === '/api/v1/conversations' && requestMethod(input, init) === 'GET') {
 					return Promise.resolve(
 						jsonResponse({
 							items: old.is_pinned ? [old, session] : [session, old],
@@ -1473,7 +1473,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 						})
 					);
 				}
-				if (path === '/api/v1/chat-sessions/chat_old/pin') {
+				if (path === '/api/v1/conversations/chat_old/pin') {
 					expect(requestMethod(input, init)).toBe('PUT');
 					old.is_pinned = JSON.parse(String(init?.body)).is_pinned;
 					return Promise.resolve(jsonResponse(old));
@@ -1545,7 +1545,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			const original = fetchMock.getMockImplementation()!;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				if (
-					requestPath(input) === '/api/v1/chat-sessions' &&
+					requestPath(input) === '/api/v1/conversations' &&
 					requestMethod(input, init) === 'GET'
 				) {
 					const url = new URL(String(input), 'http://localhost');
@@ -1649,12 +1649,12 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
-			if (path === '/api/v1/chat-sessions/chat_old/pin') {
+			if (path === '/api/v1/conversations/chat_old/pin') {
 				old.is_pinned = false;
 				failRefresh = true;
 				return Promise.resolve(jsonResponse(old));
 			}
-			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+			if (path === '/api/v1/conversations' && requestMethod(input, init) === 'GET') {
 				if (failRefresh) {
 					failRefresh = false;
 					return Promise.resolve(jsonResponse({}, 200205, 'Request failed.'));
@@ -1710,7 +1710,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					finish = resolve;
 				});
 			}
-			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+			if (path === '/api/v1/conversations' && requestMethod(input, init) === 'GET') {
 				return Promise.resolve(jsonResponse({ items, limit: 10, offset: 0 }));
 			}
 			return original(input, init);
@@ -1755,7 +1755,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			let finishCreation: ((response: Response) => void) | undefined;
 			let historyRequested = false;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-				if (requestPath(input) === '/api/v1/chat-sessions') {
+				if (requestPath(input) === '/api/v1/conversations') {
 					if (requestMethod(input, init) === 'GET') {
 						historyRequested = true;
 						return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
@@ -1785,7 +1785,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi();
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+			if (requestPath(input) === '/api/v1/conversations' && requestMethod(input, init) === 'GET') {
 				return Promise.resolve(jsonResponse({ items: [session], limit: 12, offset: 0 }));
 			}
 			return original(input, init);
@@ -1813,10 +1813,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 			const original = fetchMock.getMockImplementation()!;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
-				if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				if (path === '/api/v1/conversations' && requestMethod(input, init) === 'GET') {
 					return Promise.resolve(jsonResponse({ items, limit: 12, offset: 0 }));
 				}
-				if (path === '/api/v1/chat-sessions/chat_remote/messages') {
+				if (path === '/api/v1/conversations/chat_remote/messages') {
 					return Promise.resolve(
 						jsonResponse({ items: [], feedback: [], pending_approval: null, running: true })
 					);
@@ -1874,7 +1874,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		installApi();
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+			if (requestPath(input) === '/api/v1/conversations' && requestMethod(input, init) === 'GET') {
 				return Promise.resolve(jsonResponse({}, 200205, 'Temporarily unavailable'));
 			}
 			return original(input, init);
@@ -2238,7 +2238,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				if (
-					path === '/api/v1/chat-sessions' &&
+					path === '/api/v1/conversations' &&
 					requestBody(input, init)?.collection_id === 'col_456'
 				)
 					return Promise.resolve(
@@ -2373,7 +2373,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 					signal = init?.signal ?? undefined;
 					return pending;
 				}
-				if (requestPath(input) === '/api/v1/chat-sessions')
+				if (requestPath(input) === '/api/v1/conversations')
 					return Promise.resolve(
 						jsonResponse({
 							...session,
@@ -2432,7 +2432,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			const original = fetchMock.getMockImplementation()!;
 			let unavailable = true;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-				if (requestPath(input) === '/api/v1/chat-sessions/chat_1' && unavailable)
+				if (requestPath(input) === '/api/v1/conversations/chat_1' && unavailable)
 					return failure === 'offline'
 						? Promise.reject(new TypeError('Failed to fetch'))
 						: Promise.resolve(
@@ -2510,7 +2510,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 						headers: { 'Content-Type': 'application/json' }
 					})
 				);
-			if (path === '/api/v1/chat-sessions')
+			if (path === '/api/v1/conversations')
 				return Promise.resolve(
 					jsonResponse(
 						{ ...session, user_id: 'researcher_2', session_id: 'chat_2' },
@@ -2645,7 +2645,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
-				if (path === '/api/v1/chat-sessions') {
+				if (path === '/api/v1/conversations') {
 					return requestBody(input, init).collection_id === 'col_456'
 						? Promise.resolve(
 								jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
@@ -2704,7 +2704,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			});
 			const original = fetchMock.getMockImplementation()!;
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-				if (requestPath(input) === '/api/v1/chat-sessions')
+				if (requestPath(input) === '/api/v1/conversations')
 					return Promise.resolve(
 						jsonResponse({ ...session, session_id: 'chat_2', collection_id: 'col_456' })
 					);
@@ -2759,7 +2759,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		const original = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			if (
-				requestPath(input) === '/api/v1/chat-sessions' &&
+				requestPath(input) === '/api/v1/conversations' &&
 				requestBody(input, init)?.collection_id === 'col_456'
 			) {
 				return Promise.resolve(
@@ -3301,7 +3301,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 				fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 					if (
 						failed &&
-						requestPath(input) === '/api/v1/chat-sessions' &&
+						requestPath(input) === '/api/v1/conversations' &&
 						requestMethod(input, init) === 'POST'
 					)
 						return Promise.reject(new TypeError('Offline'));
@@ -5264,7 +5264,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(
 			fetchMock.mock.calls.some(
 				([input, init]) =>
-					requestPath(input as string | URL | Request) === '/api/v1/chat-sessions' &&
+					requestPath(input as string | URL | Request) === '/api/v1/conversations' &&
 					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
 			)
 		).toBe(true);

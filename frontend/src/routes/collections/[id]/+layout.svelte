@@ -9,7 +9,7 @@
 		deleteCollection,
 		fetchCollection,
 		fetchCollections
-	} from '../../_shared/collections';
+	} from '$lib/workspace/collections';
 	import { t } from '../../_shared/i18n';
 
 	let deleteLoading = false;

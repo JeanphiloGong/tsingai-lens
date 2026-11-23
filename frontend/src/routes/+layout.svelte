@@ -19,7 +19,7 @@
 	import { authState, startAuthSynchronization } from './_shared/authState';
 	import { fetchCurrentSession, logout } from './_shared/auth';
 	import { API_DOCS_PATH } from './_shared/base';
-	import { collections } from './_shared/collections';
+	import { collections } from '$lib/workspace/collections';
 	import { errorMessage } from './_shared/api';
 	import { language, t } from './_shared/i18n';
 	import ResearchAgentLauncher from './_shared/ResearchAgentLauncher.svelte';

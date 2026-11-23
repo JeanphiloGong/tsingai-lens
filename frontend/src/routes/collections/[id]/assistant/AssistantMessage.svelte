@@ -2,12 +2,13 @@
 	import { RotateCcw } from '@lucide/svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
-	import type { ChatFeedbackInput, ChatFeedbackState } from '../../../_shared/chatSessions';
+	import type { ChatMessage } from '$lib/conversation/api';
+	import type { ChatProgress } from '$lib/agent/api';
+	import type { ChatFeedbackInput, ChatFeedbackState } from '$lib/conversation/api';
 	import MessageFeedback from './MessageFeedback.svelte';
 	import ResearchProgress from './ResearchProgress.svelte';
 	import MessageContent from './MessageContent.svelte';
-	import { formatTime, type CurrentReading } from './conversationPresentation';
+	import { formatTime, type CurrentReading } from '$lib/research/conversationPresentation';
 	export let message: ChatMessage;
 	export let disabled = false;
 	export let onRegenerate: (() => void) | undefined = undefined;

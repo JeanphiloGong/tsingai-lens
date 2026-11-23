@@ -3,7 +3,8 @@
 	import { ChevronDown, ExternalLink } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import { resolve } from '$app/paths';
-	import type { ChatMessage, ChatResourceRef } from '../../../_shared/chatSessions';
+	import type { ChatMessage } from '$lib/conversation/api';
+	import type { ChatResourceRef } from '$lib/document/source-context';
 
 	export let message: ChatMessage;
 	$: resources = visibleResources(message);

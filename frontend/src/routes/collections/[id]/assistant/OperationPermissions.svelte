@@ -8,11 +8,11 @@
 		updateChatPermission,
 		AGENT_WRITE_ACTIONS,
 		type ChatPermission
-	} from '../../../_shared/chatSessions';
+	} from '$lib/agent/permissions';
 	import {
 		fetchCollectionAgentPermission,
 		updateCollectionAgentPermission
-	} from '../../../_shared/collections';
+	} from '$lib/workspace/collections';
 
 	export let sessionId = '';
 	export let collectionId = '';

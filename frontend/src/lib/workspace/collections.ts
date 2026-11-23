@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
-import { requestJson } from './api';
-import type { CollectionDocument } from './collectionDocuments';
-import type { AgentPermission } from './chatSessions';
+import { requestJson } from '../../routes/_shared/api';
+import type { CollectionDocument } from '../../routes/_shared/collectionDocuments';
+import type { AgentPermission } from '$lib/agent/permissions';
 
 export type Collection = {
 	collection_id: string;

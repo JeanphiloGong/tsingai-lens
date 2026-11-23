@@ -2,8 +2,8 @@ import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { language } from '../../../_shared/i18n';
-import type { ChatMessage } from '../../../_shared/chatSessions';
-import type { ChatPresentationItem } from './conversationPresentation';
+import type { ChatMessage } from '$lib/conversation/api';
+import type { ChatPresentationItem } from '$lib/research/conversationPresentation';
 import ResearchActivity from './ResearchActivity.svelte';
 
 function activity(papers: Record<string, unknown>[], extra: Record<string, unknown> = {}) {

@@ -2,14 +2,14 @@
 	import { Check, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatPresentationItem, ToolActivityOperation } from './conversationPresentation';
+	import type { ChatPresentationItem, ToolActivityOperation } from '$lib/research/conversationPresentation';
 	import {
 		capabilityName,
 		capabilityRequestLabel,
 		resultTitle,
 		resultSummary,
 		paperSourceIssues
-	} from './capabilityPresentation';
+	} from '$lib/research/capabilityPresentation';
 	import ResultResources from './ResultResources.svelte';
 	import ResultWarnings from './ResultWarnings.svelte';
 	type ActivityItem = Extract<ChatPresentationItem, { kind: 'activity' }>;

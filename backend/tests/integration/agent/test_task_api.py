@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -66,8 +65,6 @@ async def test_task_api_approval_resume_and_sse(
                 session_id="agent-v4-conversation",
                 trigger_kind="user_message",
                 trigger_message_id="agent-v4-question",
-                request_id=str(uuid4()),
-                request_digest="b" * 64,
                 status="approval_required",
                 checkpoint_revision=0,
                 checkpoint={

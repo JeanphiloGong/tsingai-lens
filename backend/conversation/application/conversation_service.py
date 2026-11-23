@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from hashlib import sha256
 from uuid import uuid4
 
 from agent.repositories.task_repository import TaskRepository
@@ -19,27 +17,6 @@ class AcceptedTask:
     task_id: str
     trigger_message_id: str
     status: str
-
-
-def _request_digest(
-    *,
-    conversation_id: str,
-    trigger_message_id: str,
-    content: str,
-    source_contexts: tuple[dict[str, object], ...],
-) -> str:
-    payload = json.dumps(
-        {
-            "conversation_id": conversation_id,
-            "trigger_message_id": trigger_message_id,
-            "content": content,
-            "source_contexts": source_contexts,
-        },
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return sha256(payload.encode("utf-8")).hexdigest()
 
 
 class ConversationService:
@@ -83,12 +60,6 @@ class ConversationService:
                 task_id=task_id,
                 conversation_id=conversation_id,
                 trigger_message_id=message_id,
-                request_digest=_request_digest(
-                    conversation_id=conversation_id,
-                    trigger_message_id=message_id,
-                    content=content,
-                    source_contexts=source_contexts,
-                ),
             )
         return AcceptedTask(task_id=task_id, trigger_message_id=message_id, status="accepted")
 
@@ -108,12 +79,6 @@ class ConversationService:
                 task_id=task_id,
                 conversation_id=conversation_id,
                 trigger_message_id=message_id,
-                request_digest=_request_digest(
-                    conversation_id=conversation_id,
-                    trigger_message_id=message_id,
-                    content=message.content,
-                    source_contexts=(),
-                ),
             )
         return AcceptedTask(task_id=task_id, trigger_message_id=message_id, status="accepted")
 
@@ -154,12 +119,6 @@ class ConversationService:
                 task_id=task_id,
                 conversation_id=conversation_id,
                 trigger_message_id=edited_id,
-                request_digest=_request_digest(
-                    conversation_id=conversation_id,
-                    trigger_message_id=edited_id,
-                    content=content,
-                    source_contexts=source_contexts,
-                ),
             )
         return AcceptedTask(task_id=task_id, trigger_message_id=edited_id, status="accepted")
 

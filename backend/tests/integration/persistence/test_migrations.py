@@ -29,7 +29,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "b71000000002"
+HEAD_REVISION = "b71000000003"
 IDENTITY_REVISION = "20261104_0099"
 # Keep historical rollback cases before the irreversible PostgreSQL identity cutover.
 PRE_IDENTITY_REVISION = "20261102_0098"

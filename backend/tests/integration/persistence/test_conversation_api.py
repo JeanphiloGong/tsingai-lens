@@ -1,6 +1,5 @@
 from datetime import UTC, datetime
 from hashlib import sha256
-from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -103,8 +102,6 @@ async def test_conversation_path_metadata_and_feedback(
                     session_id=conversation_id,
                     trigger_kind="retry",
                     trigger_message_id="question",
-                    request_id=str(uuid4()),
-                    request_digest="a" * 64,
                     status=status,
                     started_at=now,
                     updated_at=now,

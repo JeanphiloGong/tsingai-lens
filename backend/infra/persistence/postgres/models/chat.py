@@ -20,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infra.persistence.postgres.base import Base
@@ -127,7 +127,6 @@ class AgentTaskORM(Base):
             use_alter=True,
         ),
         UniqueConstraint("session_id", "task_id", name="agent_tasks_session_task_unique"),
-        UniqueConstraint("session_id", "request_id", name="agent_tasks_request_unique"),
         CheckConstraint(
             "trigger_kind IN ('user_message', 'approval', 'retry', 'schedule', 'system')",
             name="chat_task_trigger_kind_valid",
@@ -137,7 +136,6 @@ class AgentTaskORM(Base):
             "'failed', 'interrupted', 'cancelled')",
             name="chat_task_status_valid",
         ),
-        CheckConstraint("length(request_digest) = 64", name="chat_task_digest_length"),
         CheckConstraint("checkpoint_revision >= 0", name="chat_task_checkpoint_revision_valid"),
         CheckConstraint(
             "trigger_kind NOT IN ('user_message', 'retry') OR trigger_message_id IS NOT NULL",
@@ -163,8 +161,6 @@ class AgentTaskORM(Base):
     trigger_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     final_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     checkpoint_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    request_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
-    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     checkpoint_revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"

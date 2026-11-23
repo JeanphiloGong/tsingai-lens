@@ -54,12 +54,13 @@ def test_conversation_schema_is_present(postgres_sync_engine) -> None:
     task_constraints = {
         item["name"] for item in inspector.get_check_constraints("agent_tasks")
     }
+    task_columns = {item["name"] for item in inspector.get_columns("agent_tasks")}
+    assert {"request_id", "request_digest"}.isdisjoint(task_columns)
     assert all(
         any(name.endswith(expected) for name in task_constraints)
         for expected in (
             "chat_task_trigger_kind_valid",
             "chat_task_status_valid",
-            "chat_task_digest_length",
         )
     )
 
@@ -105,12 +106,12 @@ def test_chat_tree_rejects_cross_conversation_links(postgres_sync_engine) -> Non
                 """
                 INSERT INTO agent_tasks
                     (task_id, session_id, trigger_kind, trigger_message_id,
-                     request_id, request_digest, status, started_at, updated_at)
+                     status, started_at, updated_at)
                 VALUES ('tree-task-a', 'tree-a', 'user_message', 'tree-a-question',
-                        CAST(:request AS uuid), :digest, 'accepted', :now, :now)
+                        'accepted', :now, :now)
                 """
             ),
-            {"request": request_id, "digest": "a" * 64, "now": now},
+            {"now": now},
         )
 
         savepoint = connection.begin_nested()
@@ -211,8 +212,7 @@ async def test_read_selected_branch_with_scoped_feedback(
     async with postgres_session_factory.begin() as db:
         task = AgentTaskORM(
             task_id="retry-task", session_id="thread", trigger_kind="retry",
-            trigger_message_id="question", request_id=str(uuid4()),
-            request_digest="a" * 64, status="running",
+            trigger_message_id="question", status="running",
             started_at=now, updated_at=now,
         )
         db.add(task)

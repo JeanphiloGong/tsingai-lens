@@ -58,14 +58,19 @@ class MessageResponse(BaseModel):
     message_id: str
     role: Literal["user", "assistant", "tool"]
     content: str
+    created_at: datetime
     source_contexts: tuple[dict[str, Any], ...]
     my_feedback: MessageFeedbackResponse | None
+    tool_call_id: str | None = None
+    tool_requests: list[dict[str, Any]] = Field(default_factory=list)
+    tool_result: dict[str, Any] | None = None
 
 
 class ActiveTaskResponse(BaseModel):
     task_id: str
     status: Literal["accepted", "running", "approval_required", "interrupted"]
     checkpoint_revision: int
+    active_operation: dict[str, Any] | None = None
 
 
 class ConversationMessagesResponse(BaseModel):
@@ -110,6 +115,7 @@ class SendMessageRequest(BaseModel):
     parent_message_id: str | None = Field(default=None, min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=12000)
     source_contexts: list[dict[str, object]] = Field(default_factory=list, max_length=12)
+    model_connection_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class EditMessageRequest(BaseModel):

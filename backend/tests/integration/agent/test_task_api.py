@@ -118,6 +118,7 @@ async def test_task_api_approval_resume_and_sse(
         assert detail.status_code == 200
         assert detail.json()["data"]["status"] == "approval_required"
         assert detail.json()["data"]["active_operation_id"] == "agent-v4-operation"
+        assert detail.json()["data"]["active_operation"]["arguments_digest"] == "a" * 64
 
         listed = await client.get(
             f"{BASE}/agent-v4-conversation/tasks",
@@ -161,6 +162,10 @@ async def test_task_api_approval_resume_and_sse(
         assert events.headers["content-type"].startswith("text/event-stream")
         assert "event: task.snapshot\n" in events.text
         assert '"revision": 1' in events.text
+        assert (await client.get(f"{task_path}/events?after_revision=1")).text == ""
+        hidden_events = await other.get(f"{task_path}/events?after_revision=0")
+        assert hidden_events.status_code == 404
+        assert hidden_events.json()["meta"]["error_code"] == "task_not_found"
 
         stopped = await client.post(
             f"{task_path}/stop",

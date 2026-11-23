@@ -12,8 +12,9 @@ logical execution receives a new `task_id` from the server.
 
 ### `GET /api/v1/conversations/{conversation_id}/tasks/{task_id}`
 
-Return the current Task state and recovery information. Complete ModelCall,
-Operation, and Step details are returned only by the Task detail endpoint.
+Return the current Task state and recovery information, including the ID of the
+Operation waiting for approval. ModelCall records are available to internal audit
+consumers.
 
 ```json
 {
@@ -24,6 +25,15 @@ Operation, and Step details are returned only by the Task detail endpoint.
   "status":"approval_required",
   "checkpoint_revision":4,
   "active_operation_id":"op_03",
+  "active_operation":{
+    "operation_id":"op_03",
+    "task_id":"task_07",
+    "name":"write_result",
+    "arguments":{},
+    "arguments_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "risk":"write",
+    "status":"approval_required"
+  },
   "started_at":"2026-11-19T02:16:00Z",
   "updated_at":"2026-11-19T02:16:08Z"
 }

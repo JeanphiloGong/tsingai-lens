@@ -2,6 +2,7 @@ import logging
 from typing import Annotated
 
 from controllers.dependencies.auth import get_current_user_id
+from controllers.chat.schemas import ChatPermissionRequest
 from conversation.controllers.schemas import (
     ActivePathRequest,
     ActiveTaskResponse,
@@ -27,6 +28,7 @@ from conversation.application.send_message import (
     conversation_service,
     send_conversation_message,
 )
+from application.chat import session_service as legacy_chat_service
 from conversation.repositories.conversation_repository import (
     ConversationNotFound,
     ConversationPathConflict,
@@ -151,10 +153,14 @@ async def get_messages(
                     message_id=item.message.message_id,
                     role=item.message.role,
                     content=item.message.content,
+                    created_at=item.created_at,
                     source_contexts=item.source_contexts,
                     my_feedback=MessageFeedbackResponse.model_validate(item.my_feedback)
                     if item.my_feedback is not None
                     else None,
+                    tool_call_id=None,
+                    tool_requests=[],
+                    tool_result=None,
                 )
                 for item in result.items
             ],
@@ -195,6 +201,7 @@ async def send_message(
         parent_message_id=payload.parent_message_id,
         content=payload.message,
         source_contexts=tuple(payload.source_contexts),
+        model_connection_id=payload.model_connection_id,
     )
     return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
 
@@ -329,3 +336,27 @@ async def delete_feedback(
         conversation_id=conversation_id, message_id=message_id, user_id=user_id
     )
     return Response(status_code=204)
+
+
+@conversation_router.get("/{conversation_id}/permissions")
+async def get_permissions(
+    conversation_id: str, user_id: CurrentUserId
+) -> ApiResponse[dict[str, object]]:
+    return ApiResponse(
+        data=await legacy_chat_service.ChatService.get_permission_for_user(
+            conversation_id, user_id
+        )
+    )
+
+
+@conversation_router.put("/{conversation_id}/permissions")
+async def update_permissions(
+    conversation_id: str,
+    payload: ChatPermissionRequest,
+    user_id: CurrentUserId,
+) -> ApiResponse[dict[str, object]]:
+    return ApiResponse(
+        data=await legacy_chat_service.ChatService.set_permission_for_user(
+            conversation_id, user_id, **payload.model_dump()
+        )
+    )

@@ -36,6 +36,7 @@ class ConversationService:
         parent_message_id: str | None,
         content: str,
         source_contexts: tuple[dict[str, object], ...],
+        model_connection_id: str | None = None,
     ) -> AcceptedTask:
         async with self.repository.session() as db, db.begin():
             await self.repository.lock_owned_conversation(db, conversation_id, user_id)
@@ -60,7 +61,9 @@ class ConversationService:
                 task_id=task_id,
                 conversation_id=conversation_id,
                 trigger_message_id=message_id,
+                model_connection_id=model_connection_id,
             )
+            await self.repository.select_new_task(db, conversation_id, task_id)
         return AcceptedTask(task_id=task_id, trigger_message_id=message_id, status="accepted")
 
     async def create_retry_task(
@@ -80,6 +83,7 @@ class ConversationService:
                 conversation_id=conversation_id,
                 trigger_message_id=message_id,
             )
+            await self.repository.select_new_task(db, conversation_id, task_id)
         return AcceptedTask(task_id=task_id, trigger_message_id=message_id, status="accepted")
 
     async def edit_message(
@@ -120,6 +124,7 @@ class ConversationService:
                 conversation_id=conversation_id,
                 trigger_message_id=edited_id,
             )
+            await self.repository.select_new_task(db, conversation_id, task_id)
         return AcceptedTask(task_id=task_id, trigger_message_id=edited_id, status="accepted")
 
 

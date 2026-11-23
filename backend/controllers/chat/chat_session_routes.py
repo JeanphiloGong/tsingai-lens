@@ -17,8 +17,6 @@ from controllers.chat.schemas import (
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
-    ChatModelCallResponse,
-    ChatModelCallSummaryResponse,
     ChatPermissionRequest,
     ChatPermissionResponse,
     ChatResponseSnapshotResponse,
@@ -265,59 +263,6 @@ async def list_chat_messages(
 ) -> Response:
     trajectory = await session_service.ChatService.get_trajectory_for_user(session_id, user_id)
     return make_api_response(data=_trajectory_response(trajectory))
-
-
-
-@chat_session_router.get(
-    "/{session_id}/model-calls",
-    response_model=ApiResponse[dict],
-    summary="List exact provider calls for an owned Chat session",
-)
-async def list_chat_model_calls(
-    session_id: str,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-) -> Response:
-    calls = await session_service.ChatService.list_model_calls_for_user(
-        session_id,
-        user_id,
-        limit=limit,
-        offset=offset,
-    )
-    return make_api_response(
-        data={
-            "items": [
-                ChatModelCallSummaryResponse.model_validate(
-                    call, from_attributes=True
-                ).model_dump()
-                for call in calls
-            ],
-            "limit": limit,
-            "offset": offset,
-        }
-    )
-
-
-
-@chat_session_router.get(
-    "/{session_id}/model-calls/{call_id}",
-    response_model=ApiResponse[ChatModelCallResponse],
-    summary="Read one exact provider call for an owned Chat session",
-)
-async def get_chat_model_call(
-    session_id: str,
-    call_id: str,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-) -> Response:
-    call = await session_service.ChatService.get_model_call_for_user(
-        session_id,
-        call_id,
-        user_id,
-    )
-    return make_api_response(
-        data=ChatModelCallResponse.model_validate(call, from_attributes=True)
-    )
 
 
 

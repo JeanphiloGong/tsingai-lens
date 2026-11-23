@@ -57,10 +57,16 @@ async def test_conversation_commands_tree_and_fork(
         )
         assert accepted.status_code == 200
         initial = accepted.json()["data"]
+        path = f"{BASE}/{conversation_id}/messages"
+        pending_path = (await client.get(path)).json()["data"]
+        assert pending_path["conversation"]["current_task_id"] == initial["task_id"]
+        assert pending_path["conversation"]["path_revision"] == 1
+        assert pending_path["tip_message_id"] == initial["trigger_message_id"]
 
         async with postgres_session_factory.begin() as db:
             task = await db.get(AgentTaskORM, initial["task_id"])
             question = await db.get(MessageORM, initial["trigger_message_id"])
+            finished_at = datetime.now(UTC)
             answer = MessageORM(
                 message_id="v4-answer",
                 conversation_id=conversation_id,
@@ -69,15 +75,24 @@ async def test_conversation_commands_tree_and_fork(
                 content="The reported conditions differ.",
                 parent_message_id=question.message_id,
                 produced_by_task_id=task.task_id,
-                created_at=now,
+                created_at=finished_at,
             )
             db.add(answer)
             await db.flush()
             task.status = "completed"
             task.final_message_id = answer.message_id
-            task.finished_at = now
-            conversation = await db.get(ConversationORM, conversation_id)
-            conversation.current_message_id = answer.message_id
+            task.finished_at = finished_at
+
+        feedback = await client.put(
+            f"{path}/v4-answer/feedback",
+            json={"rating": "helpful"},
+        )
+        assert feedback.status_code == 200
+        current = (await client.get(path)).json()["data"]
+        assert current["items"][-1]["message_id"] == "v4-answer"
+        assert current["items"][-1]["my_feedback"]["rating"] == "helpful"
+        completed_tree = (await client.get(f"{BASE}/{conversation_id}/tree")).json()["data"]
+        assert completed_tree["active_path"][-1] == "message:v4-answer"
 
         retry_a = await client.post(
             f"{BASE}/{conversation_id}/messages/{question.message_id}/regenerations",
@@ -99,19 +114,11 @@ async def test_conversation_commands_tree_and_fork(
         }
         assert len(task_ids) == 3
 
-        feedback = await client.put(
-            f"{BASE}/{conversation_id}/messages/v4-answer/feedback",
-            json={"rating": "helpful"},
-        )
-        assert feedback.status_code == 200
-        current = await client.get(f"{BASE}/{conversation_id}/messages")
-        assert current.status_code == 200
-        answer_item = next(
-            item
-            for item in current.json()["data"]["items"]
-            if item["message_id"] == "v4-answer"
-        )
-        assert answer_item["my_feedback"]["rating"] == "helpful"
+        edited_task = edited.json()["data"]
+        current = (await client.get(path)).json()["data"]
+        assert current["conversation"]["current_task_id"] == edited_task["task_id"]
+        assert current["conversation"]["path_revision"] == 4
+        assert current["tip_message_id"] == edited_task["trigger_message_id"]
 
         async with postgres_session_factory.begin() as db:
             db.add(
@@ -157,6 +164,7 @@ async def test_conversation_commands_tree_and_fork(
         tree_data = tree.json()["data"]
         assert tree_data["root_conversation_id"] == conversation_id
         assert f"conversation:{conversation_id}" in tree_data["active_path"]
+        assert tree_data["active_path"][-1] == f"task:{edited_task['task_id']}"
         assert task_ids <= {
             node["task_id"]
             for node in tree_data["nodes"]

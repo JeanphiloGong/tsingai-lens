@@ -22,7 +22,7 @@ target runtime has already replaced the legacy Chat implementation.
 
 Conversation owns Conversations, Messages, parent chains, active paths, Fork,
 and Feedback. Agent owns Tasks, ModelCalls, Operations, TaskSteps, checkpoints,
-recovery, Dispatcher, SSE, and approval execution. Workspace and Document/Source
+direct execution, recovery, SSE, and approval execution. Workspace and Document/Source
 ownership remain external contracts.
 
 The implementation tutorials remain in the separate tutorial workspace. They

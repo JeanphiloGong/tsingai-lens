@@ -34,6 +34,7 @@ class TaskResponse(BaseModel):
     status: TaskStatus
     checkpoint_revision: int
     active_operation_id: str | None
+    active_operation: dict[str, object] | None = None
     started_at: datetime
     updated_at: datetime
 

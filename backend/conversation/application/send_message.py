@@ -21,14 +21,18 @@ class SendConversationMessage:
         parent_message_id: str | None,
         content: str,
         source_contexts: tuple[dict[str, object], ...],
+        model_connection_id: str | None = None,
     ) -> AcceptedTask:
-        return await self.service.accept_message(
+        arguments = dict(
             conversation_id=conversation_id,
             user_id=user_id,
             parent_message_id=parent_message_id,
             content=content,
             source_contexts=source_contexts,
         )
+        if model_connection_id is not None:
+            arguments["model_connection_id"] = model_connection_id
+        return await self.service.accept_message(**arguments)
 
 
 conversation_service = ConversationService(

@@ -482,26 +482,6 @@ class ChatSessionService:
         await self.get_session_for_user(session_id, user_id)
         return await ChatRepo.read_messages(session_id)
 
-    async def list_model_calls_for_user(
-        self,
-        session_id: str, user_id: str, *, limit: int = 50, offset: int = 0
-    ) -> tuple[ChatModelCall, ...]:
-        await self.get_session_for_user(session_id, user_id)
-        return await ChatRepo.read_model_calls(session_id, limit=limit, offset=offset)
-
-    async def get_model_call_for_user(
-        self,
-        session_id: str, call_id: str, user_id: str
-    ) -> ChatModelCall:
-        await self.get_session_for_user(session_id, user_id)
-        call = await ChatRepo.read_model_call(session_id, call_id)
-        if call is None:
-            raise ResourceNotFoundException(
-                "Chat model call not found.",
-                data={"code": "chat_model_call_not_found", "call_id": call_id},
-            )
-        return call
-
     async def get_pending_approval_for_user(
         self,
         session_id: str,

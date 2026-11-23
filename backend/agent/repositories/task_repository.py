@@ -81,6 +81,7 @@ class TaskRepository:
         task_id: str,
         conversation_id: str,
         trigger_message_id: str,
+        model_connection_id: str | None = None,
     ) -> None:
         now = _now()
         db.add(
@@ -92,6 +93,7 @@ class TaskRepository:
                 status="accepted",
                 checkpoint_revision=0,
                 checkpoint={},
+                model_connection_id=model_connection_id,
                 started_at=now,
                 updated_at=now,
             )
@@ -173,7 +175,7 @@ class TaskRepository:
             if task is None:
                 raise TaskNotFound("task not found")
             operation_id = await db.scalar(
-                select(AgentOperationORM.operation_id)
+                select(AgentOperationORM)
                 .where(
                     AgentOperationORM.task_id == task_id,
                     AgentOperationORM.status == "approval_required",
@@ -187,7 +189,22 @@ class TaskRepository:
                 "final_message_id": task.final_message_id,
                 "status": task.status,
                 "checkpoint_revision": task.checkpoint_revision,
-                "active_operation_id": operation_id,
+                "active_operation_id": (
+                    operation_id.operation_id if operation_id is not None else None
+                ),
+                "active_operation": (
+                    {
+                        "operation_id": operation_id.operation_id,
+                        "task_id": operation_id.task_id,
+                        "name": operation_id.name,
+                        "arguments": operation_id.arguments,
+                        "arguments_digest": operation_id.arguments_digest,
+                        "risk": operation_id.risk,
+                        "status": operation_id.status,
+                    }
+                    if operation_id is not None
+                    else None
+                ),
                 "started_at": task.started_at,
                 "updated_at": task.updated_at,
             }
@@ -419,6 +436,7 @@ class TaskRepository:
             "status": task.status,
             "checkpoint_revision": task.checkpoint_revision,
             "active_operation_id": active_operation_id,
+            "active_operation": None,
             "started_at": task.started_at,
             "updated_at": task.updated_at,
         }

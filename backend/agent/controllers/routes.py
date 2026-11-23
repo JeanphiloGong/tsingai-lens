@@ -22,8 +22,8 @@ from agent.repositories.task_repository import (
     TaskResumeConflict,
 )
 from controllers.dependencies.auth import get_current_user_id
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse
 from utils.response import ApiResponse
 
 
@@ -106,15 +106,15 @@ async def list_tasks(
     )
 
 
-@agent_router.get("/{task_id}/events")
+@agent_router.get("/{task_id}/events", response_class=Response)
 async def task_events(
     conversation_id: str,
     task_id: str,
+    user_id: CurrentUserId,
     after_revision: Annotated[int, Query(ge=0)] = 0,
-    user_id: CurrentUserId = None,
-) -> StreamingResponse:
-    return StreamingResponse(
-        service.events(
+) -> Response:
+    return Response(
+        await service.events(
             conversation_id=conversation_id,
             task_id=task_id,
             user_id=user_id,

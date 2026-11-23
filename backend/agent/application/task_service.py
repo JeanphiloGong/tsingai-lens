@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import json
 import logging
 
@@ -108,27 +107,24 @@ class TaskService:
         task_id: str,
         user_id: str,
         after_revision: int,
-    ) -> AsyncIterator[str]:
+    ) -> str:
         snapshot = await self.read_task(
             conversation_id=conversation_id,
             task_id=task_id,
             user_id=user_id,
         )
         revision = snapshot["checkpoint_revision"]
-        if isinstance(revision, int) and revision > after_revision:
-            yield "event: task.snapshot\n"
-            yield (
-                "data: "
-                + json.dumps(
-                    {
-                        "task_id": task_id,
-                        "revision": revision,
-                        "status": snapshot["status"],
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n\n"
-            )
+        if not isinstance(revision, int) or revision <= after_revision:
+            return ""
+        data = json.dumps(
+            {
+                "task_id": task_id,
+                "revision": revision,
+                "status": snapshot["status"],
+            },
+            ensure_ascii=False,
+        )
+        return f"event: task.snapshot\ndata: {data}\n\n"
 
 
 __all__ = ["TaskService"]

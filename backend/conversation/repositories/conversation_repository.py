@@ -155,6 +155,7 @@ def _message_path(messages: dict[str, Message], tip_id: str | None) -> tuple[str
 @dataclass(frozen=True)
 class ConversationMessageView:
     message: Message
+    created_at: datetime
     source_contexts: tuple[dict[str, Any], ...]
     my_feedback: MessageFeedbackView | None
 
@@ -277,6 +278,24 @@ class ConversationRepository:
                 content=content,
                 source_contexts=list(source_contexts),
                 created_at=datetime.now(UTC),
+            )
+        )
+        await db.flush()
+
+    async def select_new_task(
+        self, db: AsyncSession, conversation_id: str, task_id: str
+    ) -> None:
+        # The acceptance transaction holds the Conversation lock. Insert the
+        # Task before setting the Conversation's foreign key to it.
+        await db.flush()
+        await db.execute(
+            update(ConversationORM)
+            .where(ConversationORM.conversation_id == conversation_id)
+            .values(
+                current_message_id=None,
+                current_task_id=task_id,
+                path_revision=ConversationORM.path_revision + 1,
+                updated_at=datetime.now(UTC),
             )
         )
 
@@ -528,6 +547,7 @@ class ConversationRepository:
             )
             items[message.message_id] = ConversationMessageView(
                 message=message,
+                created_at=row.created_at,
                 source_contexts=tuple(row.source_contexts),
                 my_feedback=_to_feedback_view(feedback)
                 if feedback is not None
@@ -744,17 +764,19 @@ class ConversationRepository:
             )
 
         task_by_id = {item.task_id: item for item in tasks}
+        selected_task = task_by_id.get(requested.current_task_id)
         selected_message_id = requested.current_message_id
-        if selected_message_id is None and requested.current_task_id is not None:
-            selected_task = task_by_id.get(requested.current_task_id)
+        if selected_task is not None:
             selected_message_id = (
-                selected_task.trigger_message_id if selected_task is not None else None
+                selected_task.final_message_id
+                or selected_task.checkpoint_message_id
+                or selected_task.trigger_message_id
             )
         selected = _message_path(messages_by_id, selected_message_id)
         active_path = [f"conversation:{requested.conversation_id}"]
         active_path.extend(f"message:{message_id}" for message_id in selected)
-        if requested.current_task_id is not None:
-            active_path.append(f"task:{requested.current_task_id}")
+        if selected_task is not None and selected_message_id == selected_task.trigger_message_id:
+            active_path.append(f"task:{selected_task.task_id}")
         return ConversationTree(
             root_conversation_id=root_id,
             active_path=tuple(active_path),

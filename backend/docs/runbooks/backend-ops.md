@@ -252,7 +252,7 @@ Do not manually add columns or stamp the revision to bypass a failed migration.
 An `UndefinedColumn` for `chat_sessions.root_session_id` when opening Chat means
 the running database still needs `20260909_0057` (conversation branches). Check
 the database configured for that backend process, apply the existing migration,
-and verify an authenticated `POST /api/v1/chat-sessions`. Successful login or
+and verify an authenticated `POST /api/v1/conversations`. Successful login or
 document reads alone do not exercise the Chat write schema.
 
 The `0050`-`0055` aggregate migrations preserve existing PostgreSQL references

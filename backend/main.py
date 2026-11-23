@@ -46,7 +46,6 @@ from infra.persistence.file import collection_workspace, object_store
 from config import DATA_DIR
 from controllers import feedback_case_routes as feedback_cases
 from controllers.models import catalog_routes as model_connections
-from controllers.chat import chat_session_routes as chat_sessions
 from controllers.core import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
 from controllers.core import paper_experiment_routes as paper_experiments
@@ -308,7 +307,6 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(
         experiment_plans.experiment_plan_router, prefix=PUBLIC_API_V1_PREFIX
     )
-    app.include_router(chat_sessions.chat_session_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(conversation_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(agent_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(

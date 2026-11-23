@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -38,6 +39,14 @@ class ConversationORM(Base):
             "workspace_id",
             "updated_at",
             "conversation_id",
+        ),
+        Index(
+            "chat_conversations_visible_idx",
+            "user_id",
+            "workspace_id",
+            "updated_at",
+            "conversation_id",
+            postgresql_where=text("deleted_at IS NULL"),
         ),
         Index("chat_fork_source_idx", "forked_from_message_id"),
         ForeignKeyConstraint(
@@ -83,6 +92,9 @@ class ConversationORM(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     is_pinned: Mapped[bool] = mapped_column(
         Boolean,

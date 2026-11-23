@@ -88,6 +88,7 @@ class TreeNodeResponse(BaseModel):
     task_id: str | None
     preview: str
     forked_from_message_id: str | None = None
+    deleted_source: bool = False
 
 
 class ConversationTreeResponse(BaseModel):

@@ -205,7 +205,10 @@ GET /api/v1/conversations/conv_01
 
 ### `DELETE /api/v1/conversations/{conversation_id}`
 
-删除指定对话及其消息、Task、ModelCall、Operation 和反馈记录。
+Soft-delete the Conversation. The Conversation, Message, Task, ModelCall, Operation,
+and feedback records remain available for audit. Ordinary list, detail, message, and
+Agent queries hide the deleted Conversation. The tree keeps only a deleted-source
+marker without message content.
 
 路径参数：
 
@@ -226,17 +229,17 @@ GET /api/v1/conversations/conv_01
 }
 ```
 
-删除前必须满足：
+The delete transaction changes `accepted`, `running`, `approval_required`, and
+`interrupted` Tasks to `cancelled`. It changes `requested`, `approval_required`, and
+`approved` Operations to `rejected`, and changes a running Operation to
+`needs_reconciliation` because the transaction cannot infer whether its external
+side effect completed. Repeating the delete succeeds.
 
-- 没有 `accepted`、`running`、`approval_required` 或 `interrupted` Task。
-- 没有待决定或仍在执行的 Operation。
-- 没有其他 Fork Conversation 引用该对话中的来源消息。
+A deleted source Conversation does not prevent its child Fork from remaining usable.
+The tree marks the source with `edge_kind: "fork_deleted_source"` and
+`deleted_source: true`, without returning the source message body.
 
-可能的错误：
-
-- `conversation_not_found`
-- `conversation_busy`
-- `conversation_has_forks`
+The only documented error is `conversation_not_found`.
 
 ## 2. 读取当前消息路径
 

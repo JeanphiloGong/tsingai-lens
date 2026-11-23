@@ -84,8 +84,8 @@ _CONVERSATION_STATUS = case(
 )
 
 
-def _owned_conversation(user_id: str):
-    return and_(
+def _owned_conversation(user_id: str, *, include_deleted: bool = False):
+    conditions = [
         ConversationORM.user_id == user_id,
         select(1)
         .where(
@@ -94,7 +94,10 @@ def _owned_conversation(user_id: str):
         )
         .correlate(ConversationORM)
         .exists(),
-    )
+    ]
+    if not include_deleted:
+        conditions.append(ConversationORM.deleted_at.is_(None))
+    return and_(*conditions)
 
 
 def _to_record(row: ConversationORM, status: ConversationStatus) -> ConversationRecord:
@@ -175,6 +178,7 @@ class TreeNode:
     task_id: str | None
     preview: str
     forked_from_message_id: str | None = None
+    deleted_source: bool = False
 
 
 @dataclass(frozen=True)
@@ -343,6 +347,73 @@ class ConversationRepository:
             raise ConversationNotFound("Conversation not found.")
         return _to_record(*record)
 
+    async def delete_conversation(
+        self, *, conversation_id: str, user_id: str
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            conversation = await db.scalar(
+                select(ConversationORM)
+                .where(
+                    ConversationORM.conversation_id == conversation_id,
+                    _owned_conversation(user_id, include_deleted=True),
+                )
+                .with_for_update()
+            )
+            if conversation is None:
+                raise ConversationNotFound("Conversation not found.")
+            if conversation.deleted_at is not None:
+                return
+
+            tasks = (
+                await db.scalars(
+                    select(AgentTaskORM)
+                    .where(AgentTaskORM.session_id == conversation_id)
+                    .with_for_update()
+                )
+            ).all()
+            task_ids = tuple(task.task_id for task in tasks)
+            now = datetime.now(UTC)
+            for task in tasks:
+                if task.status in {
+                    "accepted",
+                    "running",
+                    "approval_required",
+                    "interrupted",
+                }:
+                    task.status = "cancelled"
+                    task.finished_at = task.finished_at or now
+                    task.updated_at = now
+
+            if task_ids:
+                operations = (
+                    await db.scalars(
+                        select(AgentOperationORM)
+                        .where(AgentOperationORM.task_id.in_(task_ids))
+                        .with_for_update()
+                    )
+                ).all()
+                for operation in operations:
+                    if operation.status in {
+                        "requested",
+                        "approval_required",
+                        "approved",
+                    }:
+                        operation.status = "rejected"
+                        operation.error_code = "conversation_deleted"
+                        operation.error_message = "The Conversation was deleted."
+                    elif operation.status == "running":
+                        operation.status = "needs_reconciliation"
+                        operation.error_code = "conversation_deleted_during_execution"
+                        operation.error_message = (
+                            "The Conversation was deleted during execution."
+                        )
+                    else:
+                        continue
+                    operation.updated_at = now
+
+            conversation.deleted_at = now
+            conversation.updated_at = now
+
     async def read_current_path(
         self, *, conversation_id: str, user_id: str
     ) -> ConversationPathView:
@@ -488,7 +559,7 @@ class ConversationRepository:
                 await db.scalars(
                     select(ConversationORM)
                     .where(
-                        _owned_conversation(user_id),
+                        _owned_conversation(user_id, include_deleted=True),
                         ConversationORM.workspace_id == requested.workspace_id,
                     )
                     .order_by(
@@ -498,6 +569,11 @@ class ConversationRepository:
                 )
             ).all()
             conversation_ids = tuple(item.conversation_id for item in conversations)
+            active_conversation_ids = tuple(
+                item.conversation_id
+                for item in conversations
+                if item.deleted_at is None
+            )
             messages = (
                 await db.scalars(
                     select(MessageORM).where(
@@ -509,7 +585,7 @@ class ConversationRepository:
                 await db.scalars(
                     select(AgentTaskORM)
                     .where(
-                        AgentTaskORM.session_id.in_(conversation_ids),
+                        AgentTaskORM.session_id.in_(active_conversation_ids),
                         or_(
                             AgentTaskORM.status.in_(
                                 (
@@ -567,18 +643,55 @@ class ConversationRepository:
             if item.conversation_id in reachable
         }
         nodes: list[TreeNode] = []
+        conversation_by_id = {
+            item.conversation_id: item for item in conversations
+        }
         for item in conversations:
             if item.conversation_id not in reachable:
                 continue
+            if item.deleted_at is not None:
+                nodes.append(
+                    TreeNode(
+                        node_id=f"conversation:{item.conversation_id}",
+                        kind="conversation",
+                        parent_node_id=None,
+                        edge_kind="fork_deleted_source",
+                        conversation_id=item.conversation_id,
+                        message_id=None,
+                        task_id=None,
+                        preview="已删除的 Conversation",
+                        deleted_source=True,
+                    )
+                )
+                continue
             source = message_by_id.get(item.forked_from_message_id)
+            source_conversation = (
+                conversation_by_id.get(source.conversation_id)
+                if source is not None
+                else None
+            )
+            source_is_deleted = (
+                source_conversation is not None
+                and source_conversation.deleted_at is not None
+            )
             nodes.append(
                 TreeNode(
                     node_id=f"conversation:{item.conversation_id}",
                     kind="conversation",
                     parent_node_id=(
-                        f"message:{source.message_id}" if source is not None else None
+                        f"conversation:{source.conversation_id}"
+                        if source_is_deleted and source is not None
+                        else f"message:{source.message_id}"
+                        if source is not None
+                        else None
                     ),
-                    edge_kind="fork" if source is not None else None,
+                    edge_kind=(
+                        "fork_deleted_source"
+                        if source_is_deleted
+                        else "fork"
+                        if source is not None
+                        else None
+                    ),
                     conversation_id=item.conversation_id,
                     message_id=None,
                     task_id=None,
@@ -588,7 +701,10 @@ class ConversationRepository:
             )
 
         for item in messages:
-            if item.conversation_id not in reachable:
+            if (
+                item.conversation_id not in reachable
+                or conversation_by_id[item.conversation_id].deleted_at is not None
+            ):
                 continue
             nodes.append(
                 TreeNode(

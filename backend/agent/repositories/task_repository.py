@@ -115,6 +115,7 @@ class TaskRepository:
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
                     CollectionORM.owner_user_id == user_id,
+                    ConversationORM.deleted_at.is_(None),
                 )
                 .with_for_update()
             )
@@ -138,7 +139,7 @@ class TaskRepository:
         status: str,
     ) -> int:
         async with AsyncSessionLocal() as db, db.begin():
-            task = await self._locked_task(db, task_id)
+            task = await self._lock_task_for_checkpoint(db, task_id)
             self._require_revision(task, expected_revision)
             revision = expected_revision + 1
             task.checkpoint_revision = revision
@@ -166,6 +167,7 @@ class TaskRepository:
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
                     CollectionORM.owner_user_id == user_id,
+                    ConversationORM.deleted_at.is_(None),
                 )
             )
             if task is None:
@@ -213,6 +215,7 @@ class TaskRepository:
                 AgentTaskORM.session_id == conversation_id,
                 ConversationORM.user_id == user_id,
                 CollectionORM.owner_user_id == user_id,
+                ConversationORM.deleted_at.is_(None),
             )
             .order_by(AgentTaskORM.updated_at.desc(), AgentTaskORM.task_id)
             .limit(limit)
@@ -243,21 +246,27 @@ class TaskRepository:
         self, *, conversation_id: str, task_id: str, user_id: str
     ) -> None:
         async with AsyncSessionLocal() as db, db.begin():
-            task = await db.scalar(
-                select(AgentTaskORM)
-                .join(
-                    ConversationORM,
-                    ConversationORM.conversation_id == AgentTaskORM.session_id,
-                )
+            conversation = await db.scalar(
+                select(ConversationORM)
                 .join(
                     CollectionORM,
                     CollectionORM.collection_id == ConversationORM.workspace_id,
                 )
                 .where(
-                    AgentTaskORM.session_id == conversation_id,
-                    AgentTaskORM.task_id == task_id,
+                    ConversationORM.conversation_id == conversation_id,
                     ConversationORM.user_id == user_id,
                     CollectionORM.owner_user_id == user_id,
+                    ConversationORM.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if conversation is None:
+                raise TaskNotFound("task not found")
+            task = await db.scalar(
+                select(AgentTaskORM)
+                .where(
+                    AgentTaskORM.session_id == conversation_id,
+                    AgentTaskORM.task_id == task_id,
                     AgentTaskORM.status.in_(
                         ("accepted", "running", "approval_required")
                     ),
@@ -281,27 +290,38 @@ class TaskRepository:
         arguments_digest: str,
     ) -> None:
         async with AsyncSessionLocal() as db, db.begin():
-            operation = await db.scalar(
-                select(AgentOperationORM)
-                .join(
-                    AgentTaskORM,
-                    AgentTaskORM.task_id == AgentOperationORM.task_id,
-                )
-                .join(
-                    ConversationORM,
-                    ConversationORM.conversation_id == AgentTaskORM.session_id,
-                )
+            conversation = await db.scalar(
+                select(ConversationORM)
                 .join(
                     CollectionORM,
                     CollectionORM.collection_id == ConversationORM.workspace_id,
                 )
                 .where(
+                    ConversationORM.conversation_id == conversation_id,
+                    ConversationORM.user_id == user_id,
+                    CollectionORM.owner_user_id == user_id,
+                    ConversationORM.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if conversation is None:
+                raise TaskNotFound("task not found")
+            task = await db.scalar(
+                select(AgentTaskORM)
+                .where(
+                    AgentTaskORM.task_id == task_id,
+                    AgentTaskORM.session_id == conversation_id,
+                )
+                .with_for_update()
+            )
+            if task is None:
+                raise TaskNotFound("task not found")
+            operation = await db.scalar(
+                select(AgentOperationORM)
+                .where(
                     AgentOperationORM.operation_id == operation_id,
                     AgentOperationORM.task_id == task_id,
                     AgentOperationORM.status == "approval_required",
-                    AgentTaskORM.session_id == conversation_id,
-                    ConversationORM.user_id == user_id,
-                    CollectionORM.owner_user_id == user_id,
                 )
                 .with_for_update()
             )
@@ -311,13 +331,6 @@ class TaskRepository:
                 raise OperationDecisionConflict("operation arguments digest mismatch")
             if decision not in {"approved", "rejected"}:
                 raise OperationDecisionConflict("invalid operation decision")
-            task = await db.scalar(
-                select(AgentTaskORM)
-                .where(AgentTaskORM.task_id == task_id)
-                .with_for_update()
-            )
-            if task is None:
-                raise TaskNotFound("task not found")
             now = _now()
             operation.status = decision
             operation.decision_user_id = user_id
@@ -359,21 +372,27 @@ class TaskRepository:
         expected_checkpoint_revision: int,
     ) -> dict[str, object]:
         async with AsyncSessionLocal() as db, db.begin():
-            task = await db.scalar(
-                select(AgentTaskORM)
-                .join(
-                    ConversationORM,
-                    ConversationORM.conversation_id == AgentTaskORM.session_id,
-                )
+            conversation = await db.scalar(
+                select(ConversationORM)
                 .join(
                     CollectionORM,
                     CollectionORM.collection_id == ConversationORM.workspace_id,
                 )
                 .where(
-                    AgentTaskORM.session_id == conversation_id,
-                    AgentTaskORM.task_id == task_id,
+                    ConversationORM.conversation_id == conversation_id,
                     ConversationORM.user_id == user_id,
                     CollectionORM.owner_user_id == user_id,
+                    ConversationORM.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if conversation is None:
+                raise TaskNotFound("task not found")
+            task = await db.scalar(
+                select(AgentTaskORM)
+                .where(
+                    AgentTaskORM.session_id == conversation_id,
+                    AgentTaskORM.task_id == task_id,
                 )
                 .with_for_update()
             )
@@ -416,7 +435,7 @@ class TaskRepository:
         status: str,
     ) -> int:
         async with AsyncSessionLocal() as db, db.begin():
-            task = await self._locked_task(db, task_id)
+            task = await self._lock_task_for_checkpoint(db, task_id)
             self._require_revision(task, expected_revision)
             if task.status == "interrupted" and status != "interrupted":
                 raise CheckpointConflict("task was interrupted")
@@ -447,6 +466,28 @@ class TaskRepository:
         )
         if task is None:
             raise TaskNotFound("task not found")
+        return task
+
+    async def _lock_task_for_checkpoint(
+        self, db: AsyncSession, task_id: str
+    ) -> AgentTaskORM:
+        conversation_id = await db.scalar(
+            select(AgentTaskORM.session_id).where(AgentTaskORM.task_id == task_id)
+        )
+        if conversation_id is None:
+            raise TaskNotFound("task not found")
+        conversation = await db.scalar(
+            select(ConversationORM)
+            .where(ConversationORM.conversation_id == conversation_id)
+            .with_for_update()
+        )
+        if conversation is None:
+            raise TaskNotFound("task not found")
+        if conversation.deleted_at is not None:
+            raise CheckpointConflict("conversation was deleted")
+        task = await self._locked_task(db, task_id)
+        if task.status == "cancelled":
+            raise CheckpointConflict("conversation was deleted")
         return task
 
     @staticmethod

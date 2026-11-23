@@ -14,6 +14,27 @@
 - `task`：尚未形成最终消息或仍在运行的执行
 - `conversation`：显式 Fork 后的新对话入口
 
+If the Fork source Conversation has been soft-deleted, the tree keeps a source node
+without message content:
+
+```json
+{
+  "node_id":"conversation:conv_deleted",
+  "kind":"conversation",
+  "parent_node_id":null,
+  "edge_kind":"fork_deleted_source",
+  "conversation_id":"conv_deleted",
+  "message_id":null,
+  "task_id":null,
+  "preview":"已删除的 Conversation",
+  "deleted_source":true
+}
+```
+
+Deleting the source does not delete its child Fork. Opening the deleted source itself
+still returns `conversation_not_found`. The child Fork remains readable through its own
+Conversation identity.
+
 ```json
 {
   "code":200,

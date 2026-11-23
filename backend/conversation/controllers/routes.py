@@ -120,6 +120,21 @@ async def get_conversation(
     return ApiResponse(data=ConversationResponse.model_validate(item))
 
 
+@conversation_router.delete(
+    "/{conversation_id}",
+    response_model=ApiResponse[dict[str, object]],
+)
+async def delete_conversation(
+    conversation_id: str,
+    user_id: CurrentUserId,
+) -> ApiResponse[dict[str, object]]:
+    await repository.delete_conversation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+    )
+    return ApiResponse(data={})
+
+
 @conversation_router.get("/{conversation_id}/messages")
 async def get_messages(
     conversation_id: str, user_id: CurrentUserId

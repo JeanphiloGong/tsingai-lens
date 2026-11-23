@@ -23,22 +23,23 @@ from conversation.controllers.schemas import (
     TaskAcceptedResponse,
     TreeNodeResponse,
 )
-from conversation.application.conversation_service import ConversationService
+from conversation.application.send_message import (
+    conversation_service,
+    send_conversation_message,
+)
 from conversation.repositories.conversation_repository import (
     ConversationNotFound,
     ConversationPathConflict,
-    ConversationRepository,
     ConversationWriteConflict,
     FeedbackTargetInvalid,
 )
-from agent.repositories.task_repository import TaskRepository
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from utils.response import ApiResponse
 
 conversation_router = APIRouter(prefix="/conversations", tags=["conversations"])
-repository = ConversationRepository()
-service = ConversationService(repository, TaskRepository())
+repository = conversation_service.repository
+service = conversation_service
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
 logger = logging.getLogger(__name__)
 
@@ -173,7 +174,7 @@ async def send_message(
         "conversation message requested",
         extra={"request_id": str(payload.request_id) if payload.request_id else None},
     )
-    accepted = await service.accept_message(
+    accepted = await send_conversation_message(
         conversation_id=conversation_id,
         user_id=user_id,
         parent_message_id=payload.parent_message_id,

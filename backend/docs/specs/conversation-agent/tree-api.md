@@ -1,20 +1,20 @@
-[[31mERROR[0m] - (starship::print): Under a 'dumb' terminal (TERM=dumb).
 # Conversation Tree API
 
-本文档负责消息树、回答版本、版本切换和显式 Fork。消息版本和 Task 执行
-是树中的不同节点类型。
+This document defines message trees, answer versions, version selection, and
+explicit Fork. Message versions and Task execution are different node types.
 
-## 1. 读取消息树
+## 1. Read the Message Tree
 
 ### `GET /api/v1/conversations/{conversation_id}/tree`
 
-返回当前 Conversation 及其显式 Fork 连接的树。树中的节点包括：
+Return the current Conversation and the tree of its explicit Fork connections.
+The tree contains these node types:
 
-- `message`：已保存的 user、assistant 或 tool message
-- `task`：尚未形成最终消息或仍在运行的执行
-- `conversation`：显式 Fork 后的新对话入口
+- `message`: a saved user, assistant, or tool Message
+- `task`: an execution that has not produced a final Message or is still running
+- `conversation`: the entry point of a Conversation created by an explicit Fork
 
-If the Fork source Conversation has been soft-deleted, the tree keeps a source node
+If a Fork source Conversation has been soft-deleted, the tree keeps a source node
 without message content:
 
 ```json
@@ -31,9 +31,9 @@ without message content:
 }
 ```
 
-Deleting the source does not delete its child Fork. Opening the deleted source itself
-still returns `conversation_not_found`. The child Fork remains readable through its own
-Conversation identity.
+Deleting the source does not delete its child Fork. Opening the deleted source
+itself still returns `conversation_not_found`. The child Fork remains readable
+through its own Conversation identity.
 
 ```json
 {
@@ -55,7 +55,7 @@ Conversation identity.
         "conversation_id":"conv_01",
         "message_id":"msg_02",
         "task_id":"task_01",
-        "preview":"两篇论文都研究 316L。"
+        "preview":"Both papers examine 316L."
       },
       {
         "node_id":"conversation:conv_02",
@@ -65,7 +65,7 @@ Conversation identity.
         "conversation_id":"conv_02",
         "message_id":null,
         "task_id":null,
-        "preview":"316L 工艺比较 · 分支",
+        "preview":"316L process comparison - Fork",
         "forked_from_message_id":"msg_02"
       }
     ]
@@ -74,28 +74,30 @@ Conversation identity.
 }
 ```
 
-正在运行的 Task 没有最终 message 时，以 `task:{task_id}` 节点挂在触发消息
-下。Task 完成后，树读取已保存的 message 节点。
+When a running Task has no final Message, the tree attaches a `task:{task_id}`
+node to its trigger Message. After the Task completes, tree reads use the saved
+Message node.
 
-## 2. 切换已保存版本
+## 2. Select a Saved Version
 
 ### `PUT /api/v1/conversations/{conversation_id}/active-path`
 
-版本切换接口定义在 [conversation-api.md](conversation-api.md)。树界面点击
-message 或 Task 时，调用该接口保存用户的选择。
+The path selection endpoint is defined in
+[conversation-api.md](conversation-api.md#3-save-the-current-path). When the tree
+interface selects a Message or Task, it calls this endpoint to save the selection.
 
-- 点击 message，提交 `tip_message_id`。
-- 点击运行中或已完成的 Task，提交 `task_id`。
-- 必须携带 `expected_path_revision`。
-- 切换不会删除其他版本，也不会停止其他 Task。
+- Selecting a Message submits `tip_message_id`.
+- Selecting a running or completed Task submits `task_id`.
+- The request must include `expected_path_revision`.
+- Selection does not delete other versions or stop other Tasks.
 
-## 3. 显式 Fork
+## 3. Explicit Fork
 
 ### `POST /api/v1/conversations/{conversation_id}/forks`
 
-从已保存的 user message 或完整 assistant message 创建新 Conversation。
+Create a new Conversation from a saved user Message or complete assistant Message.
 
-请求正文：
+Request body:
 
 ```json
 {
@@ -103,21 +105,21 @@ message 或 Task 时，调用该接口保存用户的选择。
 }
 ```
 
-服务端在一个事务中完成：
+The server completes these steps in one transaction:
 
-1. 检查来源消息属于当前用户、工作空间和 Conversation。
-2. 检查选定路径上的必要 Operation 已进入终态。
-3. 创建新的 Conversation。
-4. 复制选定路径的 Message，并写入 `copied_from_message_id`。
-5. 设置新 Conversation 的初始当前路径。
+1. Verify that the source Message belongs to the authenticated user, workspace, and Conversation.
+2. Verify that required Operations on the selected path are terminal.
+3. Create the new Conversation.
+4. Copy the selected Message path and write `copied_from_message_id`.
+5. Set the new Conversation's initial current path.
 
-Fork 返回新 Conversation：
+The Fork returns the new Conversation:
 
 ```json
 {
   "conversation_id":"conv_02",
   "workspace_id":"ws_01",
-  "title":"316L 工艺比较 · 分支",
+  "title":"316L process comparison - Fork",
   "forked_from_message_id":"msg_02",
   "current_message_id":"msg_copy_02",
   "current_task_id":null,
@@ -125,26 +127,26 @@ Fork 返回新 Conversation：
 }
 ```
 
-Fork 创建本身不创建新的 Task。用户在新 Conversation 中发送第一条问题时，
-才创建新的 Task。
+Creating a Fork does not create a new Task. A new Task is created only when the
+user sends the first question in the new Conversation.
 
-## 4. 树节点的打开行为
+## 4. Opening a Tree Node
 
-| 点击节点 | 操作 |
+| Selected node | Action |
 | --- | --- |
-| 已保存 message | 调用 `active-path`，读取该消息的父链 |
-| 运行中 Task | 调用 `active-path` 选择该 Task，订阅 Task SSE |
-| Fork Conversation | 使用新的 `conversation_id` 调用 messages 接口 |
+| Saved Message | Call `active-path` and read the Message's parent path |
+| Running Task | Select the Task through `active-path` and subscribe to Task SSE |
+| Fork Conversation | Use its new `conversation_id` to call the messages endpoint |
 
-不同 Conversation 的消息不会合并成同一条当前路径。Fork 只通过来源关系
-在树视图中连接它们。
+Messages from different Conversations are never merged into one current path. A
+Fork connects Conversations in the tree only through the source relationship.
 
-## 5. 树相关错误
+## 5. Tree Errors
 
-| `error_code` | 说明 |
+| `error_code` | Description |
 | --- | --- |
-| `tree_message_not_found` | 树节点消息不存在或不可见 |
-| `tree_target_not_saved` | 目标仍是未持久化的增量 |
-| `fork_source_not_ready` | 来源路径存在未结束 Operation |
-| `fork_request_conflict` | 相同 Fork 请求身份对应不同来源 |
-| `fork_conversation_conflict` | 来源对话已有不可复制的活动状态 |
+| `tree_message_not_found` | The tree node Message does not exist or is not visible |
+| `tree_target_not_saved` | The target is still an unpersisted increment |
+| `fork_source_not_ready` | The source path contains an unfinished Operation |
+| `fork_request_conflict` | The same Fork request identity points to another source |
+| `fork_conversation_conflict` | The source Conversation has an active state that cannot be copied |

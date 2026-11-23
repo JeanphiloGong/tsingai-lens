@@ -1,18 +1,19 @@
-[[31mERROR[0m] - (starship::print): Under a 'dumb' terminal (TERM=dumb).
 # Task API
 
-本文档负责一次 Agent 执行的状态、并行回答、SSE、停止、恢复和 Operation
-审批。它取代旧的 `response-api.md`。执行身份统一使用 `task_id`。
+This document defines one Agent execution's state, parallel answers, SSE,
+stopping, recovery, and Operation approval. It replaces the old
+`response-api.md`. Execution identity is always `task_id`.
 
-请求中的 `request_id` 只用于日志和链路关联，不生成或查找 `task_id`，也不作为数据库
-唯一键。每次被接受的逻辑执行都由服务端生成新的 `task_id`。
+The request `request_id` is used only for log and trace correlation. It does not
+create or look up a `task_id` and is not a database unique key. Every accepted
+logical execution receives a new `task_id` from the server.
 
-## 1. 查询 Task
+## 1. Read a Task
 
 ### `GET /api/v1/conversations/{conversation_id}/tasks/{task_id}`
 
-返回一个 Task 的当前状态和恢复信息。完整模型调用、Operation 和 Step 只在
-Task 详情接口返回。
+Return the current Task state and recovery information. Complete ModelCall,
+Operation, and Step details are returned only by the Task detail endpoint.
 
 ```json
 {
@@ -30,24 +31,26 @@ Task 详情接口返回。
 
 ### `GET /api/v1/conversations/{conversation_id}/tasks`
 
-查询当前对话的 Task。支持 `status`、`limit` 和 `offset` 查询参数。前端
-恢复页面时可以只查询 `running`、`approval_required` 和 `interrupted`。
+List Tasks in the current Conversation. The endpoint supports `status`, `limit`,
+and `offset` query parameters. A recovery page can request only `running`,
+`approval_required`, and `interrupted` Tasks.
 
-## 2. SSE 输出
+## 2. SSE Output
 
 ### `GET /api/v1/conversations/{conversation_id}/tasks/{task_id}/events`
 
-以 `text/event-stream` 返回 Task 的快照和增量事件。断线重连使用查询参数
-`after_revision`，服务端返回该检查点之后的事件或当前完整快照。
+Return Task snapshots and incremental events as `text/event-stream`. Reconnect with
+the `after_revision` query parameter. The server returns events after that
+checkpoint or the current complete snapshot.
 
-事件示例：
+Example events:
 
 ```text
 event: task.snapshot
 data: {"task_id":"task_07","revision":4,"status":"running"}
 
 event: message.delta
-data: {"task_id":"task_07","message_id":"msg_09","content":"正在读取文件"}
+data: {"task_id":"task_07","message_id":"msg_09","content":"Reading the file"}
 
 event: operation.updated
 data: {"task_id":"task_07","operation_id":"op_03","status":"succeeded"}
@@ -56,31 +59,33 @@ event: task.completed
 data: {"task_id":"task_07","final_message_id":"msg_10"}
 ```
 
-客户端按 `revision` 丢弃旧事件。多个 Task 并行运行时，每条事件都包含
-`task_id`，前端按 Task 分配输出。
+The client discards events with an old `revision`. When multiple Tasks run in
+parallel, every event includes `task_id`, allowing the client to route output by
+Task.
 
-## 3. 停止 Task
+## 3. Stop a Task
 
 ### `POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/stop`
 
-请求正文：
+Request body:
 
 ```json
 {"request_id":"00000000-0000-4000-8000-000000000003"}
 ```
 
-停止请求先把 Task 标记为 `interrupted`。当前直接执行调用在下一个 checkpoint
-边界观察这个状态并结束，响应状态为 `interrupted` 或 `cancelled` 时，才表示执行已结束。
+The stop request first changes the Task to `interrupted`. Direct execution observes
+this state at the next checkpoint boundary and ends. A response state of
+`interrupted` or `cancelled` indicates that execution has ended.
 
-## 4. 恢复 Task
+## 4. Resume a Task
 
 ### `POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/resume`
 
-用于进程中断、网络断开或用户重新打开页面后的显式恢复。调用方提交恢复请求后，
-再次直接调用 `TaskExecution.run_task()`，继续使用原 `task_id` 和最近的
-`checkpoint_revision`。
+Use this after a process interruption, network disconnect, or reopening the page.
+After submitting the resume request, the caller invokes `TaskExecution.run_task()`
+again with the original `task_id` and latest `checkpoint_revision`.
 
-请求正文：
+Request body:
 
 ```json
 {
@@ -89,14 +94,14 @@ data: {"task_id":"task_07","final_message_id":"msg_10"}
 }
 ```
 
-审批等待状态使用下方的 Operation decision 接口恢复。用户主动重新生成会
-创建新的 Task，不使用 resume 接口。
+Use the Operation decision endpoint below to resume an approval-waiting Task. An
+explicit user regeneration creates a new Task and does not use this endpoint.
 
-## 5. Operation 审批
+## 5. Operation Approval
 
 ### `POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/operations/{operation_id}/decision`
 
-请求正文：
+Request body:
 
 ```json
 {
@@ -106,17 +111,19 @@ data: {"task_id":"task_07","final_message_id":"msg_10"}
 }
 ```
 
-`decision` 为 `approved` 或 `rejected`。服务端必须同时校验：
+`decision` is `approved` or `rejected`. The server must validate all of the
+following:
 
-- Operation 属于路径中的 Task 和 Conversation。
-- Operation 当前状态允许作出决定。
-- `arguments_digest` 与待审批参数完全一致。
-- 当前用户拥有该 Operation 所需的权限。
+- The Operation belongs to the Task and Conversation in the path.
+- The current Operation state accepts a decision.
+- `arguments_digest` exactly matches the parameters awaiting approval.
+- The current user has the permission required by the Operation.
 
-批准后由调用方提交后继续调用原 Task。拒绝后 Operation 进入 `rejected`，Task 根据
-执行计划进入继续回答、失败或等待用户输入状态。
+After approval, the caller continues the original Task. After rejection, the
+Operation enters `rejected`, and the Task follows its execution plan into continued
+answering, failure, or a request for user input.
 
-## 6. Operation 状态
+## 6. Operation States
 
 ```text
 requested
@@ -126,22 +133,23 @@ requested
   -> succeeded / failed / needs_reconciliation
 ```
 
-同一个 `operation_id` 可以有多个物理执行尝试。外部副作用结果未知时，
-Operation 必须先进入 `needs_reconciliation`，不能直接自动重试。
+One `operation_id` can have multiple physical execution attempts. When an external
+side effect is uncertain, the Operation must enter `needs_reconciliation` before it
+can be considered for another execution.
 
-## 7. Task 状态和错误
+## 7. Task States and Errors
 
-| 状态 | 说明 |
+| State | Description |
 | --- | --- |
-| `accepted` | 已写入 Task，尚未开始执行 |
-| `running` | `TaskExecution` 正在执行 |
-| `approval_required` | 等待用户对 Operation 作决定 |
-| `completed` | 已产生最终回答 |
-| `failed` | 发生不可恢复错误 |
-| `interrupted` | 被停止或进程中断，仍可恢复 |
-| `cancelled` | 用户明确取消，不能继续原执行 |
+| `accepted` | The Task is persisted and has not started execution |
+| `running` | `TaskExecution` is executing the Task |
+| `approval_required` | Waiting for the user to decide an Operation |
+| `completed` | A final answer has been produced |
+| `failed` | An unrecoverable error occurred |
+| `interrupted` | Stopped or interrupted by the process and still resumable |
+| `cancelled` | Explicitly cancelled and cannot continue the original execution |
 
-错误响应统一包含：
+Error responses use a common envelope:
 
 ```json
 {
@@ -152,10 +160,10 @@ Operation 必须先进入 `needs_reconciliation`，不能直接自动重试。
 }
 ```
 
-## 8. 并行执行规则
+## 8. Parallel Execution Rules
 
-- 同一个 user message 可以有多个 Task，例如多次重试。
-- 每个 Task 使用独立的 `task_id`、检查点和执行锁。
-- 一个 Task 的增量不能写入另一个 Task 的消息路径。
-- Conversation 的当前选择由前端通过 active-path 接口保存。
-- Task 完成顺序不决定用户当前显示的版本。
+- One user Message can have multiple Tasks, for example after multiple retries.
+- Each Task uses an independent `task_id`, checkpoint, and execution lock.
+- Incremental output from one Task cannot be written to another Task's message path.
+- The client saves the Conversation's current selection through the active-path endpoint.
+- Task completion order does not determine the version currently shown to the user.

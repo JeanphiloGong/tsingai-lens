@@ -1,47 +1,48 @@
-[[31mERROR[0m] - (starship::print): Under a 'dumb' terminal (TERM=dumb).
 # Feedback API
 
-本文档负责用户对已保存 assistant message 的评价。Feedback 属于具体消息，
-不属于 Task 或当前路径。
+This document defines user feedback on saved assistant Messages. Feedback belongs
+to a specific Message, not to a Task or the current path.
 
-消息路径中的 `items[].my_feedback` 由
-[Conversation API](conversation-api.md#2-读取当前消息路径) 定义。没有反馈时
-为 `null`，前端不需要额外查询反馈接口。
+The `items[].my_feedback` projection in the message path is defined by the
+[Conversation API](conversation-api.md#2-read-the-current-message-path). It is
+`null` when no feedback exists, so the client does not need another feedback query.
 
-## 1. 创建或更新反馈
+## 1. Create or Update Feedback
 
 ### `PUT /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 
-目标必须是当前用户可见、具有正文且没有工具请求的 assistant message。请求正文：
+The target must be a visible assistant Message with content and no tool requests.
 
-| 字段 | 类型 | 必填 | 说明 |
+| Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `rating` | string | 是 | `helpful` 或 `not_helpful` |
-| `reason` | string / null | 否 | `incorrect`、`incomplete`、`unclear` 或 `other`，仅用于 `not_helpful` |
-| `comment` | string / null | 否 | 用户补充说明，去除首尾空白后最多 2000 字符 |
+| `rating` | string | yes | `helpful` or `not_helpful` |
+| `reason` | string / null | no | `incorrect`, `incomplete`, `unclear`, or `other`, only for `not_helpful` |
+| `comment` | string / null | no | Additional user comment, trimmed to at most 2000 characters |
 
-成功时返回已保存的反馈。相同内容的重复提交保留原身份和修改时间。
-服务端保存提交时的 `response_digest`。如果消息内容后来发生变化，反馈仍然
-指向原回答摘要，不把反馈移动到新版本。
+Success returns the saved feedback. Repeating a submission with the same content
+preserves its identity and timestamps. The server stores the `response_digest` at
+submission time. If the Message content later changes, the feedback remains bound
+to the original answer digest and does not move to a new version.
 
-## 2. 删除反馈
+## 2. Delete Feedback
 
 ### `DELETE /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 
-删除当前用户对该 assistant message 的评价。目标仍可见时，重复删除返回
-HTTP `204`。回答消息仍然保留。
+Delete the authenticated user's feedback for the assistant Message. If the target
+is still visible, repeating the delete returns HTTP `204`. The answer Message
+remains stored.
 
-反馈关系满足以下约束：
+The feedback relationship follows these rules:
 
-- `message_id` 必须指向 `role = assistant` 的消息。
-- 一条 assistant message 对当前用户最多有一条反馈。
-- 当前消息路径中的 `my_feedback` 返回当前用户自己的反馈。
+- `message_id` must reference a Message whose `role` is `assistant`.
+- Each assistant Message has at most one feedback row for the current user.
+- The current user's feedback is returned as `my_feedback` in the current path.
 
-## 3. 错误
+## 3. Errors
 
-| `error_code` | 说明 |
+| `error_code` | Description |
 | --- | --- |
-| `feedback_message_not_found` | 消息不存在或不可见 |
-| `feedback_message_not_assistant` | 目标消息不是 assistant message |
-| `feedback_rating_invalid` | 评价值不在允许范围 |
-| `feedback_reason_invalid` | 原因值不在允许范围 |
+| `feedback_message_not_found` | The Message does not exist or is not visible |
+| `feedback_message_not_assistant` | The target is not an assistant Message |
+| `feedback_rating_invalid` | The rating is outside the allowed values |
+| `feedback_reason_invalid` | The reason is outside the allowed values |

@@ -222,6 +222,9 @@ class AgentOperationORM(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     arguments: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     arguments_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision_basis: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="registry"
+    )
     risk: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)

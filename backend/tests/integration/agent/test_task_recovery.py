@@ -2,12 +2,15 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from agent.application.runner import DurableRunner
+from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from agent.application.task_execution import TaskExecution
 from agent.domain.models import Operation
 from agent.repositories.task_repository import TaskRepository
+from domain.chat import ChatToolResult, ToolResultStatus
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
 from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
@@ -87,6 +90,8 @@ async def test_recovery_reuses_committed_operation(
         "read_source",
         "a" * 64,
         "requested",
+        arguments={"source_ref": "methods"},
+        tool_call_id="agent-v3-call",
     )
     assert (
         await repository.save_checkpoint(
@@ -104,12 +109,38 @@ async def test_recovery_reuses_committed_operation(
 
     attempts = 0
 
-    async def capability(_name: str, _arguments: dict[str, object]) -> dict[str, object]:
+    class ReadSourceArguments(BaseModel):
+        source_ref: str
+
+    async def read_source(
+        context: ToolExecutionContext, arguments: BaseModel
+    ) -> ChatToolResult:
         nonlocal attempts
         attempts += 1
-        return {"hold_time_minutes": 30}
+        parsed = ReadSourceArguments.model_validate(arguments)
+        assert context.user_id == owner["user_id"]
+        assert context.workspace_id == "agent-v3-workspace"
+        assert parsed.source_ref == "methods"
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id or "agent-v3-call",
+            status=ToolResultStatus.SUCCEEDED,
+            data={"hold_time_minutes": 30},
+        )
 
-    source_runner = DurableRunner(capability=capability, checkpoint=lambda _: None)
+    source_runner = DurableRunner(
+        registry=CapabilityRegistry(
+            (
+                ToolSpec(
+                    name="read_source",
+                    description="Read one Source.",
+                    input_model=ReadSourceArguments,
+                    handler=read_source,
+                    source="document",
+                ),
+            )
+        ),
+        checkpoint=lambda _: None,
+    )
     first = TaskExecution(repository, source_runner)
     with pytest.raises(ExecutionInterrupted):
         await first.run_task(
@@ -154,5 +185,6 @@ async def test_recovery_reuses_committed_operation(
     assert task.finished_at is not None
     assert task.final_message_id == messages[0].message_id
     assert len(operations) == 1
-    assert operations[0].result == {"hold_time_minutes": 30}
+    assert operations[0].result is not None
+    assert operations[0].result["data"] == {"hold_time_minutes": 30}
     assert len(messages) == 1

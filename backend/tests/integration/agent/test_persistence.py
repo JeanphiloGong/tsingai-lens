@@ -62,6 +62,7 @@ async def test_task_checkpoint_and_bundle_persist_atomically(
     context = await repository.load_for_execution(
         task_id="agent-v2-task", user_id=owner["user_id"]
     )
+    assert context.workspace_id == "agent-v2-workspace"
     assert context.checkpoint_revision == 0
     assert context.status == "accepted"
 

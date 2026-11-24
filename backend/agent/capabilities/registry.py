@@ -71,6 +71,18 @@ class CapabilityRegistry:
     def get(self, name: str) -> ToolSpec | None:
         return self._specs.get(name.strip())
 
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, object],
+        *,
+        context: ToolExecutionContext,
+    ) -> ChatToolResult:
+        spec = self.get(name)
+        if spec is None:
+            raise LookupError("unknown_tool")
+        return await spec.handler(context, spec.input_model.model_validate(arguments))
+
     @property
     def specs(self) -> tuple[ToolSpec, ...]:
         return tuple(self._specs.values())

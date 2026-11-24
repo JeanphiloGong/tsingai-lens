@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -25,13 +27,13 @@ async def read_source(
     context: ToolExecutionContext,
     arguments: BaseModel,
 ) -> ChatToolResult:
-    parsed = ReadArguments.model_validate(arguments)
+    assert isinstance(arguments, ReadArguments)
     return ChatToolResult(
         tool_call_id=context.tool_call_id or "internal-call",
         status=ToolResultStatus.SUCCEEDED,
         data={
-            "document_id": parsed.document_id,
-            "source_ref": parsed.source_ref,
+            "document_id": arguments.document_id,
+            "source_ref": arguments.source_ref,
         },
     )
 
@@ -72,30 +74,38 @@ def test_registry_rejects_empty_trimmed_or_duplicate_names() -> None:
         CapabilityRegistry((spec, spec))
 
 
-def test_unknown_tool_is_not_resolved_and_arguments_are_typed() -> None:
-    registry = CapabilityRegistry((make_spec(),))
-    spec = registry.get("missing_tool")
-    assert spec is None
+@pytest.mark.anyio
+async def test_execute_rejects_unknown_tool_and_invalid_arguments_before_calling_handler() -> None:
+    async def unexpected_handler(context: ToolExecutionContext, arguments: BaseModel) -> ChatToolResult:
+        pytest.fail("invalid tool call reached the handler")
+
+    registry = CapabilityRegistry((replace(make_spec(), handler=unexpected_handler),))
+    context = ToolExecutionContext("user-1", "workspace-1", "task-1", "operation-1")
+
+    with pytest.raises(LookupError, match="^unknown_tool$"):
+        await registry.execute("missing_tool", {}, context=context)
 
     with pytest.raises(ValidationError):
-        ReadArguments.model_validate({"document_id": "paper-1"})
+        await registry.execute("read_source", {"document_id": "paper-1"}, context=context)
 
 
 @pytest.mark.anyio
-async def test_handler_receives_server_context_and_parsed_arguments() -> None:
-    spec = make_spec()
+async def test_execute_passes_server_context_and_parsed_arguments_to_handler() -> None:
+    registry = CapabilityRegistry((make_spec(),))
 
-    result = await spec.handler(
-        ToolExecutionContext(
+    result = await registry.execute(
+        "read_source",
+        {"document_id": "paper-1", "source_ref": "methods"},
+        context=ToolExecutionContext(
             user_id="user-1",
             workspace_id="workspace-1",
             task_id="task-1",
             operation_id="operation-1",
             tool_call_id="call-1",
         ),
-        ReadArguments(document_id="paper-1", source_ref="methods"),
     )
 
+    assert result.tool_call_id == "call-1"
     assert result.status is ToolResultStatus.SUCCEEDED
     assert result.data == {
         "document_id": "paper-1",

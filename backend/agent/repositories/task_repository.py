@@ -43,6 +43,7 @@ class TaskResumeConflict(ValueError):
 class TaskExecutionContext:
     task_id: str
     conversation_id: str
+    workspace_id: str
     trigger_message_id: str | None
     status: str
     checkpoint_revision: int
@@ -103,29 +104,33 @@ class TaskRepository:
         self, *, task_id: str, user_id: str
     ) -> TaskExecutionContext:
         async with AsyncSessionLocal() as db, db.begin():
-            task = await db.scalar(
-                select(AgentTaskORM)
-                .join(
-                    ConversationORM,
-                    ConversationORM.conversation_id == AgentTaskORM.session_id,
+            row = (
+                await db.execute(
+                    select(AgentTaskORM, ConversationORM.workspace_id)
+                    .join(
+                        ConversationORM,
+                        ConversationORM.conversation_id == AgentTaskORM.session_id,
+                    )
+                    .join(
+                        WorkspaceORM,
+                        WorkspaceORM.workspace_id == ConversationORM.workspace_id,
+                    )
+                    .where(
+                        AgentTaskORM.task_id == task_id,
+                        ConversationORM.user_id == user_id,
+                        WorkspaceORM.owner_user_id == user_id,
+                        ConversationORM.deleted_at.is_(None),
+                    )
+                    .with_for_update()
                 )
-                .join(
-                    WorkspaceORM,
-                    WorkspaceORM.workspace_id == ConversationORM.workspace_id,
-                )
-                .where(
-                    AgentTaskORM.task_id == task_id,
-                    ConversationORM.user_id == user_id,
-                    WorkspaceORM.owner_user_id == user_id,
-                    ConversationORM.deleted_at.is_(None),
-                )
-                .with_for_update()
-            )
-            if task is None:
+            ).one_or_none()
+            if row is None:
                 raise TaskNotFound("task not found")
+            task, workspace_id = row
             return TaskExecutionContext(
                 task_id=task.task_id,
                 conversation_id=task.session_id,
+                workspace_id=workspace_id,
                 trigger_message_id=task.trigger_message_id,
                 status=task.status,
                 checkpoint_revision=task.checkpoint_revision,
@@ -199,6 +204,7 @@ class TaskRepository:
                         "name": operation_id.name,
                         "arguments": operation_id.arguments,
                         "arguments_digest": operation_id.arguments_digest,
+                        "decision_basis": operation_id.decision_basis,
                         "risk": operation_id.risk,
                         "status": operation_id.status,
                     }
@@ -359,11 +365,16 @@ class TaskRepository:
             updated_operation = {
                 "operation_id": operation.operation_id,
                 "task_id": operation.task_id,
+                "tool_call_id": operation.tool_call_id,
                 "name": operation.name,
+                "arguments": operation.arguments,
                 "arguments_digest": operation.arguments_digest,
+                "decision_basis": operation.decision_basis,
                 "status": decision,
                 "decision_arguments_digest": arguments_digest,
                 "result": operation.result,
+                "error_code": operation.error_code,
+                "error_message": operation.error_message,
             }
             for index, item in enumerate(checkpoint_operations):
                 if item.get("operation_id") == operation.operation_id:
@@ -566,6 +577,7 @@ class TaskRepository:
                     name=operation["name"],
                     arguments=operation.get("arguments", {}),
                     arguments_digest=operation["arguments_digest"],
+                    decision_basis=operation.get("decision_basis", "registry"),
                     risk=operation.get("risk", "read"),
                     status=operation["status"],
                     idempotency_key=operation.get("idempotency_key"),
@@ -589,6 +601,7 @@ class TaskRepository:
         if row.arguments_digest != operation["arguments_digest"]:
             raise ValueError("operation arguments digest mismatch")
         row.status = operation["status"]
+        row.decision_basis = operation.get("decision_basis", row.decision_basis)
         row.result = operation.get("result")
         row.error_code = operation.get("error_code")
         row.error_message = operation.get("error_message")

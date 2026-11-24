@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import json
 from hashlib import sha256
 from typing import Literal
@@ -83,8 +83,13 @@ class Operation:
     name: str
     arguments_digest: str
     status: OperationStatus
+    arguments: dict[str, object] = field(default_factory=dict)
+    decision_basis: str = "registry"
+    tool_call_id: str | None = None
     decision_arguments_digest: str | None = None
     result: dict[str, object] | None = None
+    error_code: str | None = None
+    error_message: str | None = None
 
     def decide(self, decision: Decision, arguments_digest: str) -> Operation:
         if self.status != "approval_required":

@@ -102,10 +102,15 @@ class TaskExecution:
                 previous_state = replace(next_state, steps=tuple(steps))
 
             runner = DurableRunner(
-                capability=self.runner.capability,
+                registry=self.runner.registry,
                 checkpoint=save,
             )
-            final = await runner.run(state, request=request)
+            final = await runner.run(
+                state,
+                request=request,
+                user_id=user_id,
+                workspace_id=context.workspace_id,
+            )
             return final.task.status
 
 

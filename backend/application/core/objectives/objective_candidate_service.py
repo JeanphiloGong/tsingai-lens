@@ -144,7 +144,7 @@ class CandidateQuestionBatch:
 
 
 def propose_candidate_questions(
-    collection_id: str,
+    workspace_id: str,
     *,
     paper_maps: tuple[PaperResearchMap, ...],
     source_texts: Mapping[tuple[str, str], str],
@@ -159,8 +159,8 @@ def propose_candidate_questions(
     The caller supplies authorized, prepared papers and original excerpts.
     Retained reading selections are not a frozen analysis scope.
     """
-    if not collection_id.strip():
-        raise ValueError("candidate question formation requires collection_id")
+    if not workspace_id.strip():
+        raise ValueError("candidate question formation requires workspace_id")
     if min(max_prompt_tokens, max_completion_tokens, request_timeout_s) <= 0:
         raise ValueError("candidate question request budget must be positive")
     maps = {paper.document_id: paper for paper in paper_maps}
@@ -343,7 +343,7 @@ def propose_candidate_questions(
         outcomes = (proposal.outcome.strip(),)
         constraints = normalize_objective_terms(proposal.constraints)
         objective = ResearchObjective(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=build_research_objective_id(
                 question=question,
                 material_scope=material_scope,
@@ -405,7 +405,7 @@ def _validate_question_selections(
 
 
 def discover_candidate_facts(
-    collection_id: str,
+    workspace_id: str,
     *,
     paper_maps: tuple[PaperResearchMap, ...],
     document_inputs: tuple[PreparedDocumentInput, ...],
@@ -414,7 +414,7 @@ def discover_candidate_facts(
 ) -> ObjectiveFactSet:
     source_relationship_inventory = _relationship_inventory(paper_maps)
     relationship_inventory = _canonicalize_relationship_inventory_axes(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         axis_equivalence_classifier=axis_equivalence_classifier,
         relationship_inventory=source_relationship_inventory,
     )
@@ -450,7 +450,7 @@ def discover_candidate_facts(
             str(record["relationship"]["relationship_id"]) for record in group
         )
         objective, rejection_reason = _objective_from_relationship_group(
-            collection_id,
+            workspace_id,
             relationship_ids=relationship_ids,
             relationship_inventory=relationship_inventory,
         )
@@ -533,7 +533,7 @@ def discover_candidate_facts(
         study_dispositions=dispositions,
     )
     logger.info(
-        "Research objective discovery finished collection_id=%s "
+        "Research objective discovery finished workspace_id=%s "
         "paper_map_count=%s relationship_count=%s group_count=%s "
         "candidate_pool_count=%s objective_count=%s "
         "promoted_relationship_count=%s "
@@ -542,7 +542,7 @@ def discover_candidate_facts(
         "relationship_emitted_count=%s unresolved_signal_emitted_count=%s "
         "no_study_signal_count=%s extraction_failed_count=%s "
         "coverage_complete=%s",
-        collection_id,
+        workspace_id,
         len(paper_maps),
         len(relationship_inventory),
         len(relationship_groups),
@@ -573,7 +573,7 @@ def _relationship_inventory(
             for relationship in study.relationships:
                 if relationship.relationship_id in inventory:
                     raise ValueError(
-                        "paper research relationship ids must be collection-unique"
+                        "paper research relationship ids must be workspace-unique"
                     )
                 inventory[relationship.relationship_id] = (
                     paper_map.document_id,
@@ -726,7 +726,7 @@ def _relationship_compatibility(
     # interventions.  Only the complete source-owned factor set can form one
     # objective group; otherwise a researcher-facing objective would erase
     # confounding and invent a broad variable that no paper measured.
-    factors_share_scope = _axis_collections_are_equivalent(
+    factors_share_scope = _axis_workspaces_are_equivalent(
         left.varied_factors,
         right.varied_factors,
     )
@@ -735,13 +735,13 @@ def _relationship_compatibility(
         right.outcome,
     ):
         return _Compatibility.INCOMPATIBLE
-    return _context_collection_compatibility(
+    return _context_workspace_compatibility(
         left_study.material_scope,
         right_study.material_scope,
     )
 
 
-def _context_collection_compatibility(
+def _context_workspace_compatibility(
     left: Iterable[str],
     right: Iterable[str],
 ) -> _Compatibility:
@@ -841,7 +841,7 @@ def _axis_values_are_equivalent(left: Any, right: Any) -> bool:
     )
 
 
-def _axis_collections_are_equivalent(
+def _axis_workspaces_are_equivalent(
     left: Iterable[str],
     right: Iterable[str],
 ) -> bool:
@@ -865,7 +865,7 @@ def _axis_collections_are_equivalent(
 
 
 def _objective_from_relationship_group(
-    collection_id: str,
+    workspace_id: str,
     *,
     relationship_ids: tuple[str, ...],
     relationship_inventory: RelationshipInventory,
@@ -961,7 +961,7 @@ def _objective_from_relationship_group(
     try:
         return (
             ResearchObjective(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective_id=build_research_objective_id(
                     question=question,
                     material_scope=material_scope,
@@ -1005,7 +1005,7 @@ def _relationship_objective_scope(
         return (), ()
     precise_variables = records[0][2].varied_factors
     if not any(
-        not _axis_collections_are_equivalent(
+        not _axis_workspaces_are_equivalent(
             precise_variables,
             relationship.varied_factors,
         )
@@ -1200,7 +1200,7 @@ def _shared_study_scalar(
 
 def _canonicalize_relationship_inventory_axes(
     *,
-    collection_id: str,
+    workspace_id: str,
     axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
     relationship_inventory: RelationshipInventory,
 ) -> dict[str, tuple[str, PaperResearchScope, PaperResearchRelationship]]:
@@ -1245,7 +1245,7 @@ def _canonicalize_relationship_inventory_axes(
         for start in range(0, len(pair_records), _AXIS_PAIR_BATCH_SIZE):
             plan = axis_equivalence_classifier.classify(
                 {
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                     "axis_pairs": pair_records[start : start + _AXIS_PAIR_BATCH_SIZE],
                 }
             )
@@ -1254,8 +1254,8 @@ def _canonicalize_relationship_inventory_axes(
     except Exception:
         logger.warning(
             "Research relationship axis canonicalization failed; using source axes "
-            "collection_id=%s",
-            collection_id,
+            "workspace_id=%s",
+            workspace_id,
             exc_info=True,
         )
         return dict(relationship_inventory)
@@ -1270,8 +1270,8 @@ def _canonicalize_relationship_inventory_axes(
         logger.warning(
             "Research relationship axis canonicalization rejected; using source "
             "axes "
-            "collection_id=%s",
-            collection_id,
+            "workspace_id=%s",
+            workspace_id,
         )
         return dict(relationship_inventory)
     canonicalized_inventory = {
@@ -1481,7 +1481,7 @@ def _supported_cross_paper_axis_pairs(
                     for left_document_id, left_study, left_factor in left_records
                     for right_document_id, right_study, right_factor in right_records
                     if left_document_id != right_document_id
-                    and _context_collection_compatibility(
+                    and _context_workspace_compatibility(
                         left_study.material_scope,
                         right_study.material_scope,
                     )
@@ -1501,7 +1501,7 @@ def _supported_cross_paper_axis_pairs(
                     for left_document_id, left_study, left_outcome in left_records
                     for right_document_id, right_study, right_outcome in right_records
                     if left_document_id != right_document_id
-                    and _context_collection_compatibility(
+                    and _context_workspace_compatibility(
                         left_study.material_scope,
                         right_study.material_scope,
                     )

@@ -33,7 +33,7 @@ PAPER_RESEARCH_MAP_PROMPT_TOKEN_LIMIT = 12_288
 _MODEL_HIDDEN_CONTENT_KEYS = {
     "block_id",
     "cell_id",
-    "collection_id",
+    "workspace_id",
     "column_id",
     "column_index",
     "document_id",

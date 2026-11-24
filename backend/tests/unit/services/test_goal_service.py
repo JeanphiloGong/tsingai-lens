@@ -1,5 +1,5 @@
 from __future__ import annotations
-from application.source import collection_service
+from application.source import workspace_service
 
 import pytest
 from application.goal import brief_service as goal_service
@@ -13,13 +13,13 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_goal_service_creates_seed_collection_and_contract(
+async def test_goal_service_creates_seed_workspace_and_contract(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    goal_service.collection_service = collection_service
+    goal_service.workspace_service = workspace_service
     service = goal_service
 
     payload = await service.intake_goal(
@@ -31,36 +31,36 @@ async def test_goal_service_creates_seed_collection_and_contract(
         max_seed_documents=24,
     )
 
-    collection_id = payload["seed_collection"]["collection_id"]
-    collection = await collection_service.get_collection(collection_id)
+    workspace_id = payload["seed_workspace"]["workspace_id"]
+    workspace = await workspace_service.get_workspace(workspace_id)
 
     assert (
         payload["research_brief"]["objective"] == "Assess rate capability for LiFePO4."
     )
     assert payload["coverage_assessment"]["level"] == "direct"
     assert payload["entry_recommendation"]["recommended_mode"] == "comparison"
-    assert payload["seed_collection"]["created"] is True
-    assert payload["seed_collection"]["seeded_document_count"] == 0
-    assert payload["seed_collection"]["source_channels"] == ["upload"]
-    assert set(payload["seed_collection"]) == {
-        "collection_id",
+    assert payload["seed_workspace"]["created"] is True
+    assert payload["seed_workspace"]["seeded_document_count"] == 0
+    assert payload["seed_workspace"]["source_channels"] == ["upload"]
+    assert set(payload["seed_workspace"]) == {
+        "workspace_id",
         "name",
         "created",
         "seeded_document_count",
         "source_channels",
     }
-    assert collection.collection.collection_id == collection_id
-    assert collection.collection.description == "Assess rate capability for LiFePO4."
-    assert collection.documents == ()
+    assert workspace.workspace.workspace_id == workspace_id
+    assert workspace.workspace.description == "Assess rate capability for LiFePO4."
+    assert workspace.documents == ()
 
 
 async def test_goal_service_rejects_empty_goal_signal(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    goal_service.collection_service = collection_service
+    goal_service.workspace_service = workspace_service
     service = goal_service
 
     with pytest.raises(RequestInvalidException) as exc_info:

@@ -34,9 +34,9 @@ class ObjectiveResearchORM(Base):
     __tablename__ = "research_objectives"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["collection_id"],
-            ["collections.collection_id"],
-            name="fk_research_objectives_collection",
+            ["workspace_id"],
+            ["workspaces.workspace_id"],
+            name="fk_research_objectives_workspace",
             ondelete="CASCADE",
         ),
         UniqueConstraint(
@@ -45,7 +45,7 @@ class ObjectiveResearchORM(Base):
         ),
     )
 
-    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     origin: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -63,8 +63,8 @@ class ObjectiveAnalysisORM(Base):
     __table_args__ = (
         Index("ix_objective_analyses_worker_claim", "status", "lease_expires_at", "created_at"),
         ForeignKeyConstraint(
-            ["collection_id", "objective_id"],
-            ["research_objectives.collection_id", "research_objectives.objective_id"],
+            ["workspace_id", "objective_id"],
+            ["research_objectives.workspace_id", "research_objectives.objective_id"],
             name="fk_objective_analyses_objective",
             ondelete="CASCADE",
         ),
@@ -75,7 +75,7 @@ class ObjectiveAnalysisORM(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     analysis_version: Mapped[int] = mapped_column(Integer, primary_key=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
@@ -91,12 +91,12 @@ class ObjectiveAnalysisLegacyCheckpointORM(Base):
     __table_args__ = (
         Index(
             "ix_objective_analysis_legacy_checkpoints_objective",
-            "collection_id",
+            "workspace_id",
             "objective_id",
             "analysis_version",
         ),
         UniqueConstraint(
-            "collection_id",
+            "workspace_id",
             "objective_id",
             "analysis_version",
             "legacy_key",
@@ -109,7 +109,7 @@ class ObjectiveAnalysisLegacyCheckpointORM(Base):
         primary_key=True,
         autoincrement=True,
     )
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     legacy_key: Mapped[str] = mapped_column(String(400), nullable=False)
@@ -126,9 +126,9 @@ class ObjectiveExperimentSelectionORM(Base):
     __tablename__ = "objective_experiment_selection"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version"],
+            ["workspace_id", "objective_id", "analysis_version"],
             [
-                "objective_analyses.collection_id",
+                "objective_analyses.workspace_id",
                 "objective_analyses.objective_id",
                 "objective_analyses.analysis_version",
             ],
@@ -146,7 +146,7 @@ class ObjectiveExperimentSelectionORM(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     selection_id: Mapped[str] = mapped_column(String(120), nullable=False)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     experiment_id: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -227,9 +227,9 @@ class ComparisonGroupORM(Base):
     __tablename__ = "comparison_group"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version"],
+            ["workspace_id", "objective_id", "analysis_version"],
             [
-                "objective_analyses.collection_id",
+                "objective_analyses.workspace_id",
                 "objective_analyses.objective_id",
                 "objective_analyses.analysis_version",
             ],
@@ -241,7 +241,7 @@ class ComparisonGroupORM(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     group_id: Mapped[str] = mapped_column(String(120), nullable=False)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     outcome: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -290,9 +290,9 @@ class ObjectiveExperimentPlanORM(Base):
     __tablename__ = "objective_experiment_plans"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["collection_id", "objective_id"],
+            ["workspace_id", "objective_id"],
             [
-                "research_objectives.collection_id",
+                "research_objectives.workspace_id",
                 "research_objectives.objective_id",
             ],
             name="fk_objective_experiment_plans_objective",
@@ -305,7 +305,7 @@ class ObjectiveExperimentPlanORM(Base):
     )
 
     plan_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

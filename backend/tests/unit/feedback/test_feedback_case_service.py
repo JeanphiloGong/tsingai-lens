@@ -21,16 +21,16 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-class _CollectionRepository:
-    async def list_collections(self, user_id: str):
-        return (type("CollectionSummary", (), {"collection_id": "collection-1"})(),)
+class _WorkspaceRepository:
+    async def list_workspaces(self, user_id: str):
+        return (type("WorkspaceSummary", (), {"workspace_id": "workspace-1"})(),)
 
 
-class _Collections:
-    async def get_collection_for_user(self, collection_id: str, user_id: str):
-        if collection_id != "collection-1" or user_id != "user-1":
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id}
+class _Workspaces:
+    async def get_workspace_for_user(self, workspace_id: str, user_id: str):
+        if workspace_id != "workspace-1" or user_id != "user-1":
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id}
 
 
 class _Chat:
@@ -45,7 +45,7 @@ class _Chat:
         return ChatSession.create(
             session_id=session_id,
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             created_at="2026-09-24T00:00:00+00:00",
         )
 
@@ -60,8 +60,8 @@ class _Cases:
         self.signal_result = signal_result
 
     async def list_cases(self, **kwargs):
-        ids = kwargs.get("collection_ids")
-        return (self.case,) if ids and self.case.collection_id in ids else ()
+        ids = kwargs.get("workspace_ids")
+        return (self.case,) if ids and self.case.workspace_id in ids else ()
 
     async def read_case(self, case_id: str):
         return self.case if case_id == self.case.case_id else None
@@ -91,7 +91,7 @@ def _fixture():
     session = ChatSession.create(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         created_at="2026-09-24T00:00:00+00:00",
     )
     question = ChatMessage.user(
@@ -120,7 +120,7 @@ def _fixture():
         job_id="job-1",
         feedback_id=feedback.feedback_id,
         session_id=session.session_id,
-        collection_id=session.collection_id,
+        workspace_id=session.workspace_id,
         anchor_message_id=answer.message_id,
         problem_type="source_missing",
         confidence=0.87,
@@ -154,7 +154,7 @@ def _fixture():
     )
     case = FeedbackCase(
         case_id="case-1",
-        collection_id=session.collection_id,
+        workspace_id=session.workspace_id,
         session_id=session.session_id,
         anchor_message_id=answer.message_id,
         source_signal_ids=(feedback.feedback_id,),
@@ -171,8 +171,8 @@ async def test_case_service_returns_user_readable_detail_and_summary() -> None:
     case, result, feedback, messages = _fixture()
     feedback_case_service.FeedbackCaseRepo = _Cases(case, result)
     feedback_case_service.ChatRepo = _Chat(feedback, messages)
-    feedback_case_service.collection_service = _Collections()
-    feedback_case_service.CollectionRepo = _CollectionRepository()
+    feedback_case_service.workspace_service = _Workspaces()
+    feedback_case_service.WorkspaceRepo = _WorkspaceRepository()
     service = feedback_case_service
 
     summaries = await service.list_feedback_cases_for_user(user_id="user-1", needs_human_review=True)
@@ -191,12 +191,12 @@ async def test_case_service_returns_user_readable_detail_and_summary() -> None:
     assert summaries[0].document_titles == ("Paper A", "Paper B")
 
 
-async def test_case_service_hides_a_case_from_another_collection_owner() -> None:
+async def test_case_service_hides_a_case_from_another_workspace_owner() -> None:
     case, result, feedback, messages = _fixture()
     feedback_case_service.FeedbackCaseRepo = _Cases(case, result)
     feedback_case_service.ChatRepo = _Chat(feedback, messages)
-    feedback_case_service.collection_service = _Collections()
-    feedback_case_service.CollectionRepo = _CollectionRepository()
+    feedback_case_service.workspace_service = _Workspaces()
+    feedback_case_service.WorkspaceRepo = _WorkspaceRepository()
     service = feedback_case_service
 
     with pytest.raises(FileNotFoundError):
@@ -219,7 +219,7 @@ async def test_case_service_exposes_message_correction_signal_without_claiming_t
         signal_id="correction_signal:challenge-1",
         signal_type="natural_language_correction",
         session_id="session-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         anchor_message_id="answer-1",
         trigger_message_id="challenge-1",
         problem_type="fact_error",
@@ -239,8 +239,8 @@ async def test_case_service_exposes_message_correction_signal_without_claiming_t
     )
     feedback_case_service.FeedbackCaseRepo = _Cases(signal_case, result, signal_result)
     feedback_case_service.ChatRepo = _Chat(feedback, (*messages, challenge))
-    feedback_case_service.collection_service = _Collections()
-    feedback_case_service.CollectionRepo = _CollectionRepository()
+    feedback_case_service.workspace_service = _Workspaces()
+    feedback_case_service.WorkspaceRepo = _WorkspaceRepository()
     service = feedback_case_service
 
     detail = await service.get_feedback_case_for_user(signal_case.case_id, "user-1")

@@ -423,9 +423,9 @@ const translations: Record<Language, Translations> = {
 		},
 		agentPermission: {
 			title: 'Agent permissions',
-			defaultTitle: 'Collection Agent defaults',
+			defaultTitle: 'Workspace Agent defaults',
 			defaultScope:
-				'These permissions are copied into new Agent sessions in this collection. An active session keeps its own authority until you change it there.',
+				'These permissions are copied into new Agent sessions in this workspace. An active session keeps its own authority until you change it there.',
 			mode: 'Mode',
 			read_only: 'Read and suggest',
 			confirm: 'Confirm each write',
@@ -469,7 +469,7 @@ const translations: Record<Language, Translations> = {
 			version: 'Version'
 		},
 		nav: {
-			home: 'Collections',
+			home: 'Workspaces',
 			docs: 'Docs',
 			system: 'System'
 		},
@@ -477,7 +477,6 @@ const translations: Record<Language, Translations> = {
 			authNone: 'Auth: none',
 			breadcrumbLabel: 'Workspace breadcrumb',
 			breadcrumbWorkspace: 'Workspace',
-			breadcrumbCollection: 'Collection',
 			globalSearchLabel: 'Global search',
 			globalSearchPlaceholder: 'Search papers, authors, materials, methods...',
 			notificationsLabel: 'Notifications',
@@ -493,7 +492,7 @@ const translations: Record<Language, Translations> = {
 			pageTitle: 'Sign in - Lens',
 			eyebrow: 'Private workspace',
 			title: 'Sign in to Lens',
-			lead: 'Use your workspace account before opening collections or generated research evidence.',
+			lead: 'Use your workspace account before opening workspaces or generated research evidence.',
 			email: 'Email',
 			password: 'Password',
 			signIn: 'Sign in',
@@ -508,14 +507,14 @@ const translations: Record<Language, Translations> = {
 		home: {
 			eyebrow: 'Workspace',
 			title: 'Lens Workbench',
-			lead: 'Manage paper collections, finish parsing, extract evidence, and compare research findings.',
-			primaryAction: 'Create collection',
+			lead: 'Manage paper workspaces, finish parsing, extract evidence, and compare research findings.',
+			primaryAction: 'Create workspace',
 			secondaryAction: 'Upload documents',
 			heroActionsLabel: 'Home actions',
-			recentTitle: 'Recent collections',
+			recentTitle: 'Recent workspaces',
 			recentSubtitle: 'Continue your literature comparison workflow.',
-			searchLabel: 'Search collections',
-			searchPlaceholder: 'Search collection name or keyword...',
+			searchLabel: 'Search workspaces',
+			searchPlaceholder: 'Search workspace name or keyword...',
 			filterLabel: 'Filter status',
 			filter: {
 				all: 'All status',
@@ -524,13 +523,13 @@ const translations: Record<Language, Translations> = {
 				processing: 'Processing',
 				attention: 'Attention'
 			},
-			emptyTitle: 'No collections yet',
-			emptyDesc: 'Create a collection to upload papers and start the Lens workspace flow.',
-			emptyCta: 'Create your first collection',
-			noResultsTitle: 'No matching collections',
-			noResultsDesc: 'Adjust the search or status filter to see more collections.',
-			loading: 'Loading collections...',
-			tableName: 'Collection',
+			emptyTitle: 'No workspaces yet',
+			emptyDesc: 'Create a workspace to upload papers and start the Lens workspace flow.',
+			emptyCta: 'Create your first workspace',
+			noResultsTitle: 'No matching workspaces',
+			noResultsDesc: 'Adjust the search or status filter to see more workspaces.',
+			loading: 'Loading workspaces...',
+			tableName: 'Workspace',
 			tableStatus: 'Status',
 			tableDocs: 'Docs',
 			tableUpdated: 'Updated',
@@ -572,10 +571,10 @@ const translations: Record<Language, Translations> = {
 			indexing: 'Starting processing...',
 			indexStarted: 'Processing started',
 			indexNoFiles: 'Upload files before starting processing.',
-			deleting: 'Deleting collection...',
-			deleted: 'Deleted collection: {name}',
+			deleting: 'Deleting workspace...',
+			deleted: 'Deleted workspace: {name}',
 			deleteConfirm:
-				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
+				'Delete workspace "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
 			futureTitle: 'Future workspace',
 			futureSubtitle: 'Reserved entrances for later capability expansion.',
 			comingSoon: 'Coming soon',
@@ -590,7 +589,7 @@ const translations: Record<Language, Translations> = {
 				},
 				experimentPlan: {
 					title: 'Experimental plan',
-					desc: 'Design experiment and data collection workflows, then track execution and results.'
+					desc: 'Design experiment and data workspace workflows, then track execution and results.'
 				},
 				closedLoop: {
 					title: 'Closed-loop research',
@@ -599,8 +598,8 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		create: {
-			title: 'Create collection',
-			nameLabel: 'Collection name',
+			title: 'Create workspace',
+			nameLabel: 'Workspace name',
 			namePlaceholder: 'paper-lab',
 			descLabel: 'Description (optional)',
 			descPlaceholder: 'Short description',
@@ -608,15 +607,15 @@ const translations: Record<Language, Translations> = {
 			submit: 'Create',
 			creating: 'Creating...',
 			cancel: 'Cancel',
-			errorName: 'Please enter a collection name.'
+			errorName: 'Please enter a workspace name.'
 		},
-		collection: {
-			eyebrow: 'Collection',
+		workspace: {
+			eyebrow: 'Workspace',
 			idLabel: 'ID',
-			unknownName: 'Untitled collection',
+			unknownName: 'Untitled workspace',
 			defaultSubtitle: 'For literature comparison and evidence analysis',
-			editName: 'Rename collection',
-			tabsLabel: 'Collection navigation',
+			editName: 'Rename workspace',
+			tabsLabel: 'Workspace navigation',
 			moreLabel: 'More',
 			tabs: {
 				overview: 'Overview',
@@ -634,25 +633,25 @@ const translations: Record<Language, Translations> = {
 				feedback: 'Feedback',
 				settings: 'Settings'
 			},
-			actionsLabel: 'Collection actions',
-			backToCollections: 'Back to collections',
-			delete: 'Delete collection',
+			actionsLabel: 'Workspace actions',
+			backToWorkspaces: 'Back to workspaces',
+			delete: 'Delete workspace',
 			deleting: 'Deleting...',
-			moreActions: 'More collection actions',
+			moreActions: 'More workspace actions',
 			metaDocuments: '{count} document(s)',
 			metaUpdated: 'Updated: {time}',
 			deleteConfirm:
-				'Delete collection "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
+				'Delete workspace "{name}"? This removes app-layer metadata, uploaded files, and generated outputs.',
 			lock: {
 				eyebrow: 'Locked view',
 				title: 'Processing required',
 				readyToProcess:
-					'Process this collection before opening research objectives, evidence, comparisons, materials, or graph views.',
+					'Process this workspace before opening research objectives, evidence, comparisons, materials, or graph views.',
 				processing:
-					'This collection is still processing. Research views unlock after the current run completes.',
+					'This workspace is still processing. Research views unlock after the current run completes.',
 				failed:
 					'The latest processing run failed. Review the workspace status or rerun processing before trusting downstream views.',
-				empty: 'Upload documents and process the collection before opening research views.',
+				empty: 'Upload documents and process the workspace before opening research views.',
 				backToWorkspace: 'Back to workspace'
 			}
 		},
@@ -674,16 +673,16 @@ const translations: Record<Language, Translations> = {
 				eyebrow: 'Research Agent',
 				title: 'Choose a research workspace',
 				description:
-					'Select the literature collection whose papers, Objectives, and published Findings the Agent may use.',
+					'Select the literature workspace whose papers, Objectives, and published Findings the Agent may use.',
 				close: 'Close workspace selector',
 				loading: 'Loading research workspaces...',
 				retry: 'Try again',
-				empty: 'Create a literature collection before starting a collection-backed conversation.',
-				manageCollections: 'Manage collections',
+				empty: 'Create a literature workspace before starting a workspace-backed conversation.',
+				manageWorkspaces: 'Manage workspaces',
 				paperCount: '{count} paper(s)'
 			},
 			sidebarLabel: 'Research Agent sessions',
-			chatLabel: 'Collection Research Agent conversation',
+			chatLabel: 'Workspace Research Agent conversation',
 			newSession: 'New session',
 			workspace: {
 				openPapers: 'Open papers',
@@ -739,7 +738,7 @@ const translations: Record<Language, Translations> = {
 			saveRename: 'Save',
 			cancelRename: 'Cancel',
 			untitledSession: 'New conversation',
-			currentCollection: 'Current collection',
+			currentWorkspace: 'Current workspace',
 			backToWorkspace: 'Back to workspace',
 			loading: 'Loading conversation...',
 			objectiveScope: 'Open selected objective',
@@ -748,18 +747,18 @@ const translations: Record<Language, Translations> = {
 			emptyBody:
 				'I can help you understand these papers, form a focused question, and review the evidence behind a conclusion.',
 			messageLabel: 'Message',
-			messagePlaceholder: 'Ask about this literature collection',
+			messagePlaceholder: 'Ask about this literature workspace',
 			send: 'Send',
 			commands: {
 				menuLabel: 'Research Agent commands',
 				permissionsLabel: 'Permissions',
 				permissionsDescription: "Open controls for this session's write authority",
-				settingsLabel: 'Collection settings',
+				settingsLabel: 'Workspace settings',
 				settingsDescription: 'Configure defaults for new Agent sessions',
 				statusLabel: 'Status',
 				statusDescription: 'Show the current session state',
 				newLabel: 'New session',
-				newDescription: 'Start a separate conversation in this collection',
+				newDescription: 'Start a separate conversation in this workspace',
 				historyLabel: 'History',
 				historyDescription: 'Open or close previous conversations',
 				treeLabel: 'Branches',
@@ -892,25 +891,25 @@ const translations: Record<Language, Translations> = {
 				add: 'Add papers',
 				choose: 'Choose PDF papers',
 				panelTitle: 'Papers to add',
-				panelBody: 'PDFs are stored in this collection, then queued for paper preparation.',
+				panelBody: 'PDFs are stored in this workspace, then queued for paper preparation.',
 				clear: 'Clear',
 				uploadOne: 'Upload and prepare 1 paper',
 				uploadMany: 'Upload and prepare {count} papers',
 				retryOne: 'Retry failed paper',
 				retryMany: 'Retry {count} failed papers',
 				uploading: 'Uploading papers...',
-				openProgress: 'Open collection progress',
+				openProgress: 'Open workspace progress',
 				unsupportedFile: 'Only PDF papers can be uploaded here.',
 				queuedSummary: '{count} paper preparation run(s) queued.',
 				alreadyUploadedSummary:
-					'{count} paper(s) were already in this collection and were not uploaded again.',
+					'{count} paper(s) were already in this workspace and were not uploaded again.',
 				failedSummary: '{count} paper(s) need attention before preparation can continue.',
 				status: {
 					selected: 'Ready to upload',
 					uploading: 'Uploading',
 					preparing: 'Starting paper preparation',
 					queued: 'Preparation queued',
-					already_uploaded: 'Already in this collection',
+					already_uploaded: 'Already in this workspace',
 					upload_failed: 'Upload failed',
 					preparation_failed: 'Uploaded, but preparation could not be queued'
 				}
@@ -926,7 +925,7 @@ const translations: Record<Language, Translations> = {
 				truncated: 'Excerpt shortened · open the Source for the complete content'
 			},
 			suggestions: {
-				overview: 'What does this collection contain?',
+				overview: 'What does this workspace contain?',
 				findings: 'What published findings are available?',
 				objectives: 'Suggest focused research objectives from these papers',
 				greeting: 'Hello, what can you help me do?'
@@ -951,8 +950,8 @@ const translations: Record<Language, Translations> = {
 				statusPending: 'Prepared',
 				statusFailed: 'Needs attention',
 				discoverResearchTools: 'Select research actions',
-				collection: 'Collection context',
-				browseCollectionPapers: 'Browse collection papers',
+				workspace: 'Workspace context',
+				browseWorkspacePapers: 'Browse workspace papers',
 				paperBrowseCount: '{count} papers listed on this page',
 				paperBrowseMore: '{count} papers listed on this page; {remaining} remain on later pages',
 				paperQueryNoMatch:
@@ -1088,7 +1087,7 @@ const translations: Record<Language, Translations> = {
 			warnings: 'Warnings',
 			resources: 'Referenced records',
 			resource: {
-				collection: 'Open collection',
+				workspace: 'Open workspace',
 				objective: 'Open research objective',
 				finding: 'Open finding',
 				evidence: 'Open evidence',
@@ -1254,7 +1253,7 @@ const translations: Record<Language, Translations> = {
 					noResearchObjectivesToConfirm: 'No research objectives to confirm',
 					noCandidatesCurrentlySatisfyTheMaterialScope:
 						'No candidates currently satisfy the material scope, research variables, outcomes and source support requirements. This does not mean objective-level evidence analysis is complete.',
-					backToCollectionOverview: 'Back to collection overview',
+					backToWorkspaceOverview: 'Back to workspace overview',
 					inspectPapers: 'Inspect papers',
 					researchObjectiveOverview: 'Research objective overview',
 					researchObjectives: 'Research objectives',
@@ -1434,12 +1433,12 @@ const translations: Record<Language, Translations> = {
 			},
 			materials: {
 				title: 'Materials',
-				body: 'Canonical materials detected in this collection, with paper coverage, sample counts, measured properties, and evidence status.',
+				body: 'Canonical materials detected in this workspace, with paper coverage, sample counts, measured properties, and evidence status.',
 				loading: 'Loading materials...',
 				errorTitle: 'Materials are unavailable',
 				emptyTitle: 'No material profiles yet',
 				emptyBody:
-					'The material aggregation endpoint returned no material summaries for this collection.',
+					'The material aggregation endpoint returned no material summaries for this workspace.',
 				refresh: 'Refresh materials',
 				summaryTitle: 'Material summary',
 				materialCount: '{count} material(s)',
@@ -1453,7 +1452,7 @@ const translations: Record<Language, Translations> = {
 			},
 			materialProfile: {
 				title: 'Material profile',
-				body: 'Collection-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, and evidence.',
+				body: 'Workspace-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, and evidence.',
 				back: 'Back to materials',
 				loading: 'Loading material profile...',
 				errorTitle: 'Material profile is unavailable',
@@ -1498,7 +1497,7 @@ const translations: Record<Language, Translations> = {
 					},
 					trends: {
 						title: 'Comparable groups',
-						body: 'Keep comparisons inside their paper, sample, and test-condition boundaries before reading trends across the collection.'
+						body: 'Keep comparisons inside their paper, sample, and test-condition boundaries before reading trends across the workspace.'
 					},
 					evidence: {
 						title: 'Evidence locator',
@@ -1510,7 +1509,7 @@ const translations: Record<Language, Translations> = {
 					sampleCondition: 'Sample / condition',
 					primaryVariable: 'Primary variable',
 					processSummary: 'Process summary',
-					collectionSummary: 'Collection summary',
+					workspaceSummary: 'Workspace summary',
 					sampleFallback: 'Sample {index}',
 					scanStrategy: 'Scan strategy',
 					laserPower: 'Laser power (W)',
@@ -1600,7 +1599,7 @@ const translations: Record<Language, Translations> = {
 					higherConclusion: '{sample} is higher for {property}',
 					empty: 'No comparable numeric values were returned for this material yet.',
 					summaryOnly:
-						'Collection-level values are available, but sample-level paired values are not comparable yet: {values}.'
+						'Workspace-level values are available, but sample-level paired values are not comparable yet: {values}.'
 				},
 				chart: {
 					title: 'Trend chart: key property comparison',
@@ -1608,7 +1607,7 @@ const translations: Record<Language, Translations> = {
 						'Under comparable process context, the changed variable can shift performance values.',
 					empty: 'No numeric trend is available yet.',
 					summaryOnly:
-						'Available collection summary values: {values}. A trend chart needs paired sample values.'
+						'Available workspace summary values: {values}. A trend chart needs paired sample values.'
 				},
 				evidence: {
 					drawerTitle: 'Evidence detail',
@@ -1658,7 +1657,7 @@ const translations: Record<Language, Translations> = {
 				profileLoading: 'Loading parsed papers...',
 				profileErrorTitle: 'Parsed papers are unavailable',
 				profileEmptyTitle: 'No parsed papers yet',
-				profileEmptyBody: 'Process the uploaded collection before opening paper Sources.',
+				profileEmptyBody: 'Process the uploaded workspace before opening paper Sources.',
 				profileConfidence: 'Profile confidence {value}%',
 				pageCount: '{count} pages',
 				documentCount: '{count} paper(s)',
@@ -1706,8 +1705,8 @@ const translations: Record<Language, Translations> = {
 			}
 		},
 		overview: {
-			title: 'Collection Overview',
-			lead: 'Start here to check whether the collection is ready, where processing stands, and which research view to open next.',
+			title: 'Workspace Overview',
+			lead: 'Start here to check whether the workspace is ready, where processing stands, and which research view to open next.',
 			currentModel: {
 				title: 'Research overview',
 				lead: 'See what Lens understands, where research work stands, and the next decision that needs your attention.',
@@ -1772,11 +1771,11 @@ const translations: Record<Language, Translations> = {
 				discoveryProgressTitle: 'Research question formation',
 				discoveryComplete: 'Research question formation completed with {count} candidate(s).',
 				discoveryFailed: 'Research question formation failed. Retry it.',
-				documentsTitle: 'Papers in this collection',
+				documentsTitle: 'Papers in this workspace',
 				documentsLead:
 					'Readiness belongs to each paper. A failed paper does not block selection of the ready papers.',
 				export: {
-					title: 'Export collection materials',
+					title: 'Export workspace materials',
 					lead: 'Download selected original papers and their manifest for review or failure reproduction.',
 					selectAll: 'Select all papers',
 					selectDocument: 'Select paper for archive',
@@ -1788,7 +1787,7 @@ const translations: Record<Language, Translations> = {
 					archiveDownloaded: 'Source archive downloaded.',
 					findingTitle: 'Finding exports',
 					findingLead:
-						'Download collection-level labels for review, training, or expert gold drafting.',
+						'Download workspace-level labels for review, training, or expert gold drafting.',
 					downloadFindingJson: 'Download Finding JSON',
 					downloadFindingJsonl: 'Download Finding JSONL',
 					downloadGoldDraft: 'Download gold draft',
@@ -1797,7 +1796,7 @@ const translations: Record<Language, Translations> = {
 				},
 				selectAllReady: 'Select all ready papers',
 				selectDocument: 'Select paper for research scope',
-				empty: 'Upload papers to start this collection.',
+				empty: 'Upload papers to start this workspace.',
 				prepare: 'Prepare',
 				retry: 'Retry',
 				objectiveCount: '{count} objective candidate(s) available.',
@@ -1819,23 +1818,23 @@ const translations: Record<Language, Translations> = {
 			},
 			readiness: {
 				ready: {
-					title: 'Collection is ready',
-					body: 'This collection contains {count} document(s). Document parsing and Objective discovery are complete. Confirm a research objective before starting Objective Evidence analysis.'
+					title: 'Workspace is ready',
+					body: 'This workspace contains {count} document(s). Document parsing and Objective discovery are complete. Confirm a research objective before starting Objective Evidence analysis.'
 				},
 				noObjectives: {
 					title: 'No research objective candidates',
 					body: 'Document parsing and Objective discovery completed, but no cross-paper candidate met the current source-support rules. Objective Evidence analysis has not started.'
 				},
 				processing: {
-					title: 'Collection is processing',
+					title: 'Workspace is processing',
 					body: 'Document profiling or research objective discovery is still running. Objective analysis starts only after a researcher confirms a candidate.'
 				},
 				ready_to_process: {
-					title: 'Collection is waiting for processing',
+					title: 'Workspace is waiting for processing',
 					body: 'Documents are uploaded, but Lens still needs to profile them and discover candidate research objectives.'
 				},
 				empty: {
-					title: 'This collection has no documents yet',
+					title: 'This workspace has no documents yet',
 					body: 'Upload papers or technical documents, then Lens will profile them and discover candidate research objectives.'
 				},
 				failed: {
@@ -1882,7 +1881,7 @@ const translations: Record<Language, Translations> = {
 				},
 				trust: {
 					title: 'Trust reminder',
-					body: 'This collection may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
+					body: 'This workspace may be usable, but comparison results still need human review. Check evidence sources, missing conditions, and comparability warnings first.',
 					readyToProcessTitle: 'Processing needed',
 					readyToProcessBody:
 						'Files are uploaded, but evidence, comparisons, and research objectives are not reliable until processing finishes.',
@@ -1900,7 +1899,7 @@ const translations: Record<Language, Translations> = {
 					title: 'Literature mix',
 					body: 'Review the current paper type distribution before relying on downstream comparison results.',
 					reviewHint:
-						'This collection is mostly review material. For experimental result comparison, add experimental or methods papers.'
+						'This workspace is mostly review material. For experimental result comparison, add experimental or methods papers.'
 				},
 				next: {
 					title: 'Recommended next step',
@@ -1911,7 +1910,7 @@ const translations: Record<Language, Translations> = {
 					processingLogs: 'Check processing log',
 					processingRefresh: 'Refresh status',
 					emptyUpload: 'Upload documents',
-					emptyDescribe: 'Add collection description',
+					emptyDescribe: 'Add workspace description',
 					emptyStart: 'Start parsing',
 					failedErrors: 'Review run errors',
 					failedRetry: 'Retry processing',
@@ -1921,36 +1920,36 @@ const translations: Record<Language, Translations> = {
 			},
 			footerNote:
 				'Lens makes literature comparison more trustworthy and research evidence traceable.',
-			collectionStates: {
+			workspaceStates: {
 				empty: {
 					label: 'Empty',
-					title: 'Upload papers to start this collection',
-					body: 'This collection has no source papers yet. Add files here before anything else can happen.'
+					title: 'Upload papers to start this workspace',
+					body: 'This workspace has no source papers yet. Add files here before anything else can happen.'
 				},
 				ready_to_process: {
 					label: 'Ready to process',
 					title: 'Files are here; processing is the next step',
-					body: 'The collection has papers, but the main research views are not prepared until processing runs.'
+					body: 'The workspace has papers, but the main research views are not prepared until processing runs.'
 				},
 				processing: {
 					label: 'Processing',
-					title: 'The collection is being prepared',
+					title: 'The workspace is being prepared',
 					body: 'Stay here if you want to watch progress, then move into comparisons, evidence, or screening once the run finishes.'
 				},
 				ready: {
 					label: 'Ready',
-					title: 'The main collection views are ready',
-					body: 'Start with the collection-level analysis views below. Graph remains a secondary branch.'
+					title: 'The main workspace views are ready',
+					body: 'Start with the workspace-level analysis views below. Graph remains a secondary branch.'
 				},
 				ready_with_limits: {
 					label: 'Ready with limits',
-					title: 'The collection is usable, but not everything is equally strong',
+					title: 'The workspace is usable, but not everything is equally strong',
 					body: 'Use the main views first, and read the warnings and readiness states before trusting every downstream branch.'
 				},
 				failed: {
 					label: 'Needs attention',
 					title: 'The latest run did not finish cleanly',
-					body: 'Check the run state and warnings before relying on this collection. You may need to rerun processing.'
+					body: 'Check the run state and warnings before relying on this workspace. You may need to rerun processing.'
 				}
 			},
 			statusLabel: 'Status',
@@ -1981,27 +1980,27 @@ const translations: Record<Language, Translations> = {
 			refresh: 'Refresh',
 			uploadTitle: 'Source papers',
 			uploadLead:
-				'Upload the papers for this collection. Processing turns them into comparisons, evidence, and document screening views.',
-			setupEmptyTitle: 'Add papers to this collection',
+				'Upload the papers for this workspace. Processing turns them into comparisons, evidence, and document screening views.',
+			setupEmptyTitle: 'Add papers to this workspace',
 			setupEmptyLead:
 				'Upload PDF or TXT files first. The workspace stays focused on that one step until source material exists.',
 			setupEmptyHint:
 				'After upload, Lens prepares comparisons, evidence, and document screening views from the same paper set.',
 			setupReadyTitle: 'Files are ready. Start processing next.',
 			setupReadyLead:
-				'This collection already has source papers. Run processing now to prepare the main research views.',
+				'This workspace already has source papers. Run processing now to prepare the main research views.',
 			setupReadyHint:
-				'Use one processing run to unlock comparisons, evidence, and paper screening. Add more papers only if the collection is still incomplete.',
+				'Use one processing run to unlock comparisons, evidence, and paper screening. Add more papers only if the workspace is still incomplete.',
 			processingTitle: 'Processing is running',
 			processingLead:
-				'Track progress here. Once the run finishes, the main collection views will become the next step.',
+				'Track progress here. Once the run finishes, the main workspace views will become the next step.',
 			addPapersCta: 'Add papers',
 			addMorePapersCta: 'Add more papers',
 			startUploadCta: 'Start upload',
 			startAnalysisCta: 'Start processing',
 			afterUploadTitle: 'After upload, you can use',
 			afterUploadLead:
-				'These pages appear after the collection has enough source material and processing finishes.',
+				'These pages appear after the workspace has enough source material and processing finishes.',
 			previewComparisonsLead: 'Judge which results can really be compared side by side.',
 			previewResultsLead:
 				'Then inspect one result at a time to understand what was actually extracted.',
@@ -2010,18 +2009,18 @@ const translations: Record<Language, Translations> = {
 			uploadCta: 'Choose papers',
 			uploadWhyTitle: 'Why upload first',
 			uploadWhyBody:
-				'These papers are the raw source material for this collection. Without them, the system cannot extract evidence, compare findings, or build the graph.',
+				'These papers are the raw source material for this workspace. Without them, the system cannot extract evidence, compare findings, or build the graph.',
 			uploadAfterTitle: 'What you can do after upload and processing',
 			uploadAfterBody:
-				'Once processing finishes, this collection unlocks the main Lens v1 workflow surfaces.',
-			uploadAfterComparisons: 'Inspect normalized comparison rows across the collection',
+				'Once processing finishes, this workspace unlocks the main Lens v1 workflow surfaces.',
+			uploadAfterComparisons: 'Inspect normalized comparison rows across the workspace',
 			uploadAfterEvidence: 'Inspect evidence cards and source traceability',
 			uploadAfterDocuments: 'Check document type before trusting downstream outputs',
-			uploadFormTitle: 'Add papers to this collection',
+			uploadFormTitle: 'Add papers to this workspace',
 			uploadFormLead: 'Drop or choose PDF/TXT files. You can start processing right after upload.',
 			controlTitle: 'Control center',
 			controlLead:
-				'The primary action changes with collection state so the next step stays obvious.',
+				'The primary action changes with workspace state so the next step stays obvious.',
 			primaryActionUpload: 'Upload papers',
 			primaryActionProcess: 'Start processing',
 			primaryActionTrack: 'Track processing',
@@ -2029,9 +2028,9 @@ const translations: Record<Language, Translations> = {
 			primaryActionResults: 'Open extracted results',
 			primaryActionDocuments: 'Inspect documents',
 			primaryActionHelperUpload:
-				'Start by adding source papers. Everything else in this collection depends on them.',
+				'Start by adding source papers. Everything else in this workspace depends on them.',
 			primaryActionHelperProcess:
-				'Files are ready. Start processing so the system can organize this collection into comparisons, evidence, and document screening.',
+				'Files are ready. Start processing so the system can organize this workspace into comparisons, evidence, and document screening.',
 			primaryActionHelperTrack:
 				'Processing is running. Wait here if you want to monitor progress, then move into the main research views.',
 			primaryActionHelperComparisons:
@@ -2042,12 +2041,12 @@ const translations: Record<Language, Translations> = {
 				'Start with documents if you first need to separate experimental papers from reviews and mixed content.',
 			readyViewsCount: '{count} primary view(s) ready',
 			filesLead:
-				'Upload source papers here. They remain attached to this collection as the base material.',
-			filesCount: '{count} file(s) in this collection',
+				'Upload source papers here. They remain attached to this workspace as the base material.',
+			filesCount: '{count} file(s) in this workspace',
 			latestTaskTitle: 'Latest run',
 			statusTitle: 'Current state',
 			statusLead:
-				'This section tells you what state the collection is in and what the next useful action is.',
+				'This section tells you what state the workspace is in and what the next useful action is.',
 			statusFiles: 'Uploaded files',
 			statusLatestTask: 'Latest run',
 			statusStage: 'Now',
@@ -2057,11 +2056,11 @@ const translations: Record<Language, Translations> = {
 			statusUpdated: 'Last updated',
 			statusWorkflowTitle: 'Workflow stages',
 			statusWorkflowLead:
-				'These stages describe what the collection is ready for, not just which backend files exist.',
+				'These stages describe what the workspace is ready for, not just which backend files exist.',
 			statusWorkflowEmpty: 'Workflow stages appear after upload and processing begin.',
 			documentSummaryTitle: 'Paper mix',
 			documentSummaryLead:
-				'See whether this collection is mostly experimental papers, reviews, or mixed sources.',
+				'See whether this workspace is mostly experimental papers, reviews, or mixed sources.',
 			documentSummaryTotal: 'Total papers',
 			docTypeExperimental: 'Experimental',
 			docTypeReview: 'Review',
@@ -2093,33 +2092,33 @@ const translations: Record<Language, Translations> = {
 				processing: 'This page is being prepared by the active processing run.',
 				ready: 'Ready to inspect.',
 				limited: 'Use what is here carefully. Some rows may still be partial, weak, or unsuitable.',
-				not_applicable: 'This page is not a meaningful default view for the current collection.',
+				not_applicable: 'This page is not a meaningful default view for the current workspace.',
 				failed: 'The latest run failed before this page was prepared.'
 			},
 			surfaceStateCards: {
 				empty: {
 					title: 'Upload papers before opening this view',
-					body: 'This collection has no source papers yet, so this page has nothing to show.'
+					body: 'This workspace has no source papers yet, so this page has nothing to show.'
 				},
 				ready_to_process: {
 					title: 'Run processing before opening this view',
-					body: 'Files exist, but this page is not generated until the collection finishes processing.'
+					body: 'Files exist, but this page is not generated until the workspace finishes processing.'
 				},
 				processing: {
 					title: 'This view is still being prepared',
-					body: 'Processing is running. Return after the collection finishes and the main outputs are ready.'
+					body: 'Processing is running. Return after the workspace finishes and the main outputs are ready.'
 				},
 				ready: {
 					title: 'This view is ready',
-					body: 'The collection has prepared data for this page.'
+					body: 'The workspace has prepared data for this page.'
 				},
 				limited: {
 					title: 'This view is only partially ready',
-					body: 'The collection exposes some output for this page, but it should be read with caution.'
+					body: 'The workspace exposes some output for this page, but it should be read with caution.'
 				},
 				not_applicable: {
-					title: 'This view is not appropriate for the current collection',
-					body: 'The collection does not currently support this page as a primary research surface.'
+					title: 'This view is not appropriate for the current workspace',
+					body: 'The workspace does not currently support this page as a primary research surface.'
 				},
 				failed: {
 					title: 'This view could not be prepared',
@@ -2135,8 +2134,8 @@ const translations: Record<Language, Translations> = {
 				documents: 'Documents',
 				graph: 'Graph view'
 			},
-			noTasks: 'No processing run has started for this collection yet.',
-			warningsTitle: 'Collection warnings',
+			noTasks: 'No processing run has started for this workspace yet.',
+			warningsTitle: 'Workspace warnings',
 			warningsLead:
 				'Use these warnings to decide how cautious you should be with the outputs below.',
 			nextComparisons: 'Open comparisons',
@@ -2145,9 +2144,9 @@ const translations: Record<Language, Translations> = {
 			nextGraph: 'Open graph',
 			primaryViewsTitle: 'Primary analysis views',
 			primaryViewsLead:
-				'These are the first pages to use for understanding a collection and deciding what to trust.',
+				'These are the first pages to use for understanding a workspace and deciding what to trust.',
 			resultsFlow:
-				'Use comparisons to judge the collection, then read documents as evidence chains for source verification. Result detail stays available from drilldowns.',
+				'Use comparisons to judge the workspace, then read documents as evidence chains for source verification. Result detail stays available from drilldowns.',
 			viewStatusTitle: 'Readiness',
 			goToWorkspace: 'Go to workspace',
 			resultComparisonsLead:
@@ -2161,17 +2160,17 @@ const translations: Record<Language, Translations> = {
 			resultLocked: 'Available after processing',
 			additionalViewsTitle: 'Additional branches and tools',
 			additionalViewsLead:
-				'These views can still help, but they should follow the main collection analysis rather than replace it.',
+				'These views can still help, but they should follow the main workspace analysis rather than replace it.',
 			advancedTitle: 'Advanced analysis and settings',
 			advancedLead:
 				'Runs, read-only settings, and debug metadata live here so the core workflow stays clean.',
 			debugTitle: 'Debug metadata',
 			debugTaskId: 'Latest run ID',
-			debugCollectionId: 'Collection ID'
+			debugWorkspaceId: 'Workspace ID'
 		},
 		documents: {
 			title: 'Documents',
-			lead: 'Upload papers into the collection, then trigger and monitor processing runs.',
+			lead: 'Upload papers into the workspace, then trigger and monitor processing runs.',
 			addFiles: 'Add files',
 			startIndex: 'Start processing',
 			processingTitle: 'Processing progress',
@@ -2192,7 +2191,7 @@ const translations: Record<Language, Translations> = {
 			listTitle: 'Document list',
 			listLoading: 'Loading documents...',
 			listEmptyTitle: 'No documents yet',
-			listEmptyDesc: 'Upload PDFs or TXT files to populate this collection.',
+			listEmptyDesc: 'Upload PDFs or TXT files to populate this workspace.',
 			tableName: 'Document',
 			tableStatus: 'Status',
 			tableSize: 'Size',
@@ -2200,7 +2199,7 @@ const translations: Record<Language, Translations> = {
 			untitledFile: 'Untitled document',
 			errorNoFiles: 'Select one or more files.',
 			uploadResultTitle: 'Upload result',
-			uploadResultDesc: '{count} file(s) uploaded into this collection.'
+			uploadResultDesc: '{count} file(s) uploaded into this workspace.'
 		},
 		profiles: {
 			title: 'Document Profile',
@@ -2210,9 +2209,9 @@ const translations: Record<Language, Translations> = {
 			loading: 'Loading document profiles...',
 			error: 'Could not load document profiles',
 			empty: 'No document profile results are available yet.',
-			summaryTitle: 'Collection document summary',
+			summaryTitle: 'Workspace document summary',
 			warningsTitle: 'Profile warnings',
-			emptyWarnings: 'No collection-level profile warnings.',
+			emptyWarnings: 'No workspace-level profile warnings.',
 			filterDocType: 'Paper type',
 			allOption: 'All',
 			totalLabel: 'Papers',
@@ -2241,15 +2240,15 @@ const translations: Record<Language, Translations> = {
 			conclusion: {
 				title: 'Profile conclusion',
 				reviewRisk:
-					'This collection is mostly review material and is not suitable for direct experimental result comparison yet. Add experimental or methods papers before entering comparison and graph analysis.',
+					'This workspace is mostly review material and is not suitable for direct experimental result comparison yet. Add experimental or methods papers before entering comparison and graph analysis.',
 				ready:
-					'This collection contains documents that can support evidence extraction and comparison. Review evidence sources first, then enter comparison.',
+					'This workspace contains documents that can support evidence extraction and comparison. Review evidence sources first, then enter comparison.',
 				fewDocuments:
-					'This collection has few documents, so comparison results may be unstable. Add more related papers to improve comparability.',
+					'This workspace has few documents, so comparison results may be unstable. Add more related papers to improve comparability.',
 				limitedReady:
-					'This collection has some usable procedural or evidence material, but parts of the comparison should still be reviewed carefully.',
+					'This workspace has some usable procedural or evidence material, but parts of the comparison should still be reviewed carefully.',
 				limited:
-					'This collection needs more experimental material before downstream comparisons should be trusted.',
+					'This workspace needs more experimental material before downstream comparisons should be trusted.',
 				pending:
 					'Document profiles have not been generated yet. Refresh or rerun processing after the uploaded documents are ready.'
 			},
@@ -2320,7 +2319,7 @@ const translations: Record<Language, Translations> = {
 			},
 			pending: {
 				title: 'Document profiles pending',
-				body: 'Documents exist in this collection, but profile data is not available yet. Refresh after processing finishes or rerun analysis from the workspace.'
+				body: 'Documents exist in this workspace, but profile data is not available yet. Refresh after processing finishes or rerun analysis from the workspace.'
 			}
 		},
 		evidence: {
@@ -2459,7 +2458,7 @@ const translations: Record<Language, Translations> = {
 		},
 		comparisons: {
 			title: 'Comparisons',
-			lead: 'Use this page to see which results across the collection can actually be compared.',
+			lead: 'Use this page to see which results across the workspace can actually be compared.',
 			loading: 'Loading comparisons...',
 			empty: 'No comparison results are available yet.',
 			summaryTitle: 'Comparison status summary',
@@ -2509,9 +2508,9 @@ const translations: Record<Language, Translations> = {
 				insufficientBody:
 					'Most current results are missing baseline, test condition, variant linkage, or related context. Do not form a reliable comparison conclusion yet. Review source evidence and fill the missing context first.',
 				limitedBody:
-					'Some results in this collection can be compared with limits, but materials, test conditions, baselines, and experimental context still need review.',
+					'Some results in this workspace can be compared with limits, but materials, test conditions, baselines, and experimental context still need review.',
 				directBody:
-					'This collection includes directly comparable results. Review evidence sources and key conditions before adding them to the final comparison table.'
+					'This workspace includes directly comparable results. Review evidence sources and key conditions before adding them to the final comparison table.'
 			},
 			conclusionActions: {
 				view_direct: 'View comparable items',
@@ -3044,13 +3043,13 @@ const translations: Record<Language, Translations> = {
 			loading: 'Loading paper workbench'
 		},
 		graph: {
-			title: 'Collection Knowledge Map',
-			lead: 'Explore material, property, comparison, and source-evidence relationships across this collection.',
+			title: 'Workspace Knowledge Map',
+			lead: 'Explore material, property, comparison, and source-evidence relationships across this workspace.',
 			filtersTitle: 'Graph filters',
 			filtersLead:
 				'Keep the canvas focused on research objects, then reveal source nodes when needed.',
 			insightTitle: 'Selected insight',
-			relationshipMapTitle: 'Collection relationship graph',
+			relationshipMapTitle: 'Workspace relationship graph',
 			relationshipMapLead:
 				'Readable labels are display-only; evidence verification stays in the panels below.',
 			unspecifiedLabel: 'Unspecified',
@@ -3148,7 +3147,7 @@ const translations: Record<Language, Translations> = {
 			detailComparability: 'Comparability',
 			detailEvidenceIds: 'Evidence IDs',
 			description:
-				'Review the collection structure across papers, materials, properties, process context, and review buckets.',
+				'Review the workspace structure across papers, materials, properties, process context, and review buckets.',
 			meta: {
 				label: 'Graph metadata',
 				nodes: '{count} nodes',
@@ -3182,12 +3181,12 @@ const translations: Record<Language, Translations> = {
 				refreshStatus: 'Refresh status'
 			},
 			workspace: {
-				label: 'Collection map workspace'
+				label: 'Workspace map workspace'
 			},
 			overview: {
-				title: 'Collection overview',
+				title: 'Workspace overview',
 				lead: 'Aggregated map of papers, materials, properties, process context, and review buckets.',
-				metricsLabel: 'Collection overview metrics',
+				metricsLabel: 'Workspace overview metrics',
 				materials: 'Materials',
 				documents: 'Papers',
 				properties: 'Properties',
@@ -3228,7 +3227,7 @@ const translations: Record<Language, Translations> = {
 			},
 			canvas: {
 				materialTitle: 'Material-centered research map',
-				fullTitle: 'Full collection graph',
+				fullTitle: 'Full workspace graph',
 				meta: 'Nodes {nodes} · Edges {edges}',
 				fit: 'Fit canvas',
 				zoomIn: 'Zoom in',
@@ -3236,7 +3235,7 @@ const translations: Record<Language, Translations> = {
 				center: 'Center',
 				layout: 'Layout',
 				materialAriaLabel: 'Interactive material-centered research map canvas',
-				fullAriaLabel: 'Interactive full collection graph canvas',
+				fullAriaLabel: 'Interactive full workspace graph canvas',
 				empty: 'No visible graph elements match the current controls.'
 			},
 			legend: {
@@ -3308,13 +3307,13 @@ const translations: Record<Language, Translations> = {
 			empty: {
 				title: 'Graph has not been built',
 				description:
-					'After document parsing and evidence extraction finish, Lens can generate a collection map for navigating papers, materials, properties, themes, and review buckets.',
+					'After document parsing and evidence extraction finish, Lens can generate a workspace map for navigating papers, materials, properties, themes, and review buckets.',
 				action: 'Generate graph'
 			}
 		},
 		settings: {
 			title: 'Settings',
-			lead: 'Collection-level defaults come from the app-layer metadata.',
+			lead: 'Workspace-level defaults come from the app-layer metadata.',
 			defaultConfigLabel: 'Use default configuration',
 			defaultConfigHelper: 'Settings are read-only in the current API.',
 			advancedTitle: 'Advanced settings',
@@ -3330,19 +3329,19 @@ const translations: Record<Language, Translations> = {
 			pageTitle: 'Lens Guide',
 			eyebrow: 'Docs',
 			title: 'Using Lens',
-			lead: 'Lens is now organized around one researcher workflow: collection workspace, evidence review, comparison analysis, and graph evidence.',
+			lead: 'Lens is now organized around one researcher workflow: workspace workspace, evidence review, comparison analysis, and graph evidence.',
 			quickNotesTitle: 'Quick notes',
 			quickNotesSub: 'Before you start',
 			quickNote1: 'PDFs must contain selectable text.',
-			quickNote2: 'Collections keep papers, searches, and exports together.',
+			quickNote2: 'Workspaces keep papers, searches, and exports together.',
 			quickNote3: 'Upload and processing both start from Workspace.',
 			workflowTitle: 'Core workflow',
 			workflowSub: 'One clear action per step.',
-			workflowCreateTitle: 'Create a collection',
-			workflowCreateDesc: 'From Collections, click Create collection and name it.',
+			workflowCreateTitle: 'Create a workspace',
+			workflowCreateDesc: 'From Workspaces, click Create workspace and name it.',
 			workflowUploadTitle: 'Upload documents',
 			workflowUploadDesc:
-				'Open the collection workspace and add PDF/TXT files in the files section.',
+				'Open the workspace workspace and add PDF/TXT files in the files section.',
 			workflowIndexTitle: 'Start processing',
 			workflowIndexDesc: 'Start processing from Workspace and watch run progress inline.',
 			workflowSearchTitle: 'Review evidence',
@@ -3350,8 +3349,8 @@ const translations: Record<Language, Translations> = {
 				'Use Evidence to verify where claims, materials, methods, and parameters came from.',
 			workflowGraphTitle: 'Enter comparison',
 			workflowGraphDesc:
-				'Move from Evidence to Comparison when the collection is ready. Use Graph as supporting evidence.',
-			surfaceTitle: 'Primary collection surfaces',
+				'Move from Evidence to Comparison when the workspace is ready. Use Graph as supporting evidence.',
+			surfaceTitle: 'Primary workspace surfaces',
 			surfaceSub: 'Keep the main job focused on four pages.',
 			surfaceWorkspaceTitle: 'Workspace',
 			surfaceWorkspaceDesc:
@@ -3369,10 +3368,10 @@ const translations: Record<Language, Translations> = {
 				'Runs, read-only settings, and debug metadata stay inside the workspace so the primary route tree remains focused.',
 			tutorialTitle: 'Visualizing Your Knowledge Graph (Gephi)',
 			tutorialSub: 'Export GraphML from the web UI and explore it in Gephi.',
-			tutorialStep1Title: '1. Build a collection graph',
+			tutorialStep1Title: '1. Build a workspace graph',
 			tutorialStep1Desc1:
-				'Create a collection, upload documents, and start processing from Workspace.',
-			tutorialStep1Desc2: 'Wait until the collection status shows Ready.',
+				'Create a workspace, upload documents, and start processing from Workspace.',
+			tutorialStep1Desc2: 'Wait until the workspace status shows Ready.',
 			tutorialStep2Title: '2. Export GraphML',
 			tutorialStep2Desc:
 				'Open Graph, set Max nodes/Min weight if needed, then download the GraphML file.',
@@ -3491,7 +3490,7 @@ const translations: Record<Language, Translations> = {
 			coverageUnknown: 'Coverage is unknown',
 			coveragePartial: 'Coverage is partial',
 			coverageComplete: 'Coverage recorded',
-			coverageFailed: 'Coverage collection failed',
+			coverageFailed: 'Coverage workspace failed',
 			confidence: 'Confidence',
 			possibleIssue: 'Possible issue',
 			unknown: 'Unknown',
@@ -3667,7 +3666,7 @@ const translations: Record<Language, Translations> = {
 			noExclusions: 'No selections were excluded.',
 			reasonDuplicate: 'Duplicate selection',
 			reasonSplitInvalid: 'Invalid split',
-			reasonCaseNotInCollection: 'Case is outside this collection',
+			reasonCaseNotInWorkspace: 'Case is outside this workspace',
 			reasonCaseNotAccessible: 'Case is no longer accessible',
 			reasonAnnotationStale: 'Annotation has changed',
 			reasonReviewNotAccepted: 'Review was not accepted',
@@ -3750,7 +3749,7 @@ const translations: Record<Language, Translations> = {
 				reviewEachSample: 'Review each sample',
 				noCandidateSamplesYet: 'No candidate samples yet.',
 				backgroundWorkersContinuouslyPrepareFeedbackCasesFor:
-					'Background workers continuously prepare feedback cases for this collection.',
+					'Background workers continuously prepare feedback cases for this workspace.',
 				noMatchingSamples: 'No matching samples.',
 				adjustTheStatusFilterOrSearchTerms:
 					'Adjust the status filter or search terms and try again.',
@@ -3851,7 +3850,7 @@ const translations: Record<Language, Translations> = {
 			questionContent: 'Question',
 			chooseTask: 'Choose a task type',
 			chooseTaskDetail:
-				'Workers continuously prepare candidates for this Collection. Open a task to review, edit, confirm, or export them.',
+				'Workers continuously prepare candidates for this Workspace. Open a task to review, edit, confirm, or export them.',
 			loadingWorkbenches: 'Loading task workbenches…',
 			workbenchCount: '{count} workbench(s)',
 			waitingForWorkers: 'Waiting for Worker candidates',
@@ -3864,8 +3863,8 @@ const translations: Record<Language, Translations> = {
 			selectAll: 'Select all confirmed',
 			selected: '{count} selected',
 			title: 'Feedback task workbench',
-			lede: 'Workers continuously prepare SFT, preference, and evaluation candidates for this Collection.',
-			back: 'Back to collection',
+			lede: 'Workers continuously prepare SFT, preference, and evaluation candidates for this Workspace.',
+			back: 'Back to workspace',
 			refresh: 'Refresh task workbench',
 			type: {
 				sft: 'Literature question answering · SFT',
@@ -3879,10 +3878,10 @@ const translations: Record<Language, Translations> = {
 			researchConnectionInactive:
 				'The connection stopped responding. Checking saved research progress.',
 			authSessionChanged: 'Your sign-in session changed. Please sign in again.',
-			collectionNotFound: 'This collection does not exist.',
+			workspaceNotFound: 'This workspace does not exist.',
 			graphNotReady:
-				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
-			communityNotFound: 'The requested community filter could not be found for this collection.',
+				'Graph projection is not ready yet. Finish processing until the workspace graph becomes available.',
+			communityNotFound: 'The requested community filter could not be found for this workspace.',
 			chatSessionBusy:
 				'This conversation is still running. Try deleting it again when it finishes.',
 			chatSessionHasBranches:
@@ -4346,7 +4345,6 @@ const translations: Record<Language, Translations> = {
 			authNone: '鉴权：无',
 			breadcrumbLabel: '工作区面包屑',
 			breadcrumbWorkspace: '工作区',
-			breadcrumbCollection: '集合',
 			globalSearchLabel: '全局搜索',
 			globalSearchPlaceholder: '搜索文献、作者、材料、方法...',
 			notificationsLabel: '通知',
@@ -4478,7 +4476,7 @@ const translations: Record<Language, Translations> = {
 			cancel: '取消',
 			errorName: '请输入集合名称。'
 		},
-		collection: {
+		workspace: {
 			eyebrow: '集合',
 			idLabel: 'ID',
 			unknownName: '未命名集合',
@@ -4503,7 +4501,7 @@ const translations: Record<Language, Translations> = {
 				settings: '设置'
 			},
 			actionsLabel: '集合操作',
-			backToCollections: '返回集合列表',
+			backToWorkspaces: '返回集合列表',
 			delete: '删除集合',
 			deleting: '删除中...',
 			moreActions: '更多集合操作',
@@ -4540,7 +4538,7 @@ const translations: Record<Language, Translations> = {
 				loading: '正在加载研究工作区...',
 				retry: '重试',
 				empty: '请先创建文献集合，再开始基于集合的研究对话。',
-				manageCollections: '管理文献集合',
+				manageWorkspaces: '管理文献集合',
 				paperCount: '{count} 篇文献'
 			},
 			sidebarLabel: '研究 Agent 会话',
@@ -4598,7 +4596,7 @@ const translations: Record<Language, Translations> = {
 			saveRename: '保存',
 			cancelRename: '取消',
 			untitledSession: '新建会话',
-			currentCollection: '当前集合',
+			currentWorkspace: '当前集合',
 			backToWorkspace: '返回工作区',
 			loading: '正在加载会话...',
 			objectiveScope: '打开当前研究目标',
@@ -4798,8 +4796,8 @@ const translations: Record<Language, Translations> = {
 				statusPending: '已准备',
 				statusFailed: '需要处理',
 				discoverResearchTools: '选择研究动作',
-				collection: '集合上下文',
-				browseCollectionPapers: '浏览集合论文',
+				workspace: '集合上下文',
+				browseWorkspacePapers: '浏览集合论文',
 				paperBrowseCount: '本页列出 {count} 篇论文',
 				paperBrowseMore: '本页列出 {count} 篇论文，后续还有 {remaining} 篇',
 				paperQueryNoMatch: '没有匹配的文件名或标题，可取消筛选继续浏览其他论文。',
@@ -4928,7 +4926,7 @@ const translations: Record<Language, Translations> = {
 			warnings: '警告',
 			resources: '引用记录',
 			resource: {
-				collection: '打开集合',
+				workspace: '打开集合',
 				objective: '打开研究目标',
 				finding: '打开研究发现',
 				evidence: '打开证据',
@@ -5074,7 +5072,7 @@ const translations: Record<Language, Translations> = {
 					noResearchObjectivesToConfirm: '没有可供确认的研究目标',
 					noCandidatesCurrentlySatisfyTheMaterialScope:
 						'当前没有候选同时满足材料范围、研究变量、结果指标和来源支持规则。这不表示目标级证据分析已经完成。',
-					backToCollectionOverview: '返回集合概览',
+					backToWorkspaceOverview: '返回集合概览',
 					inspectPapers: '检查文献',
 					researchObjectiveOverview: '研究目标概览',
 					researchObjectives: '研究目标',
@@ -5325,7 +5323,7 @@ const translations: Record<Language, Translations> = {
 					sampleCondition: '样品 / 条件',
 					primaryVariable: '主要变量',
 					processSummary: '工艺摘要',
-					collectionSummary: '集合汇总',
+					workspaceSummary: '集合汇总',
 					sampleFallback: '样品 {index}',
 					scanStrategy: '扫描策略',
 					laserPower: '激光功率 (W)',
@@ -5723,7 +5721,7 @@ const translations: Record<Language, Translations> = {
 				}
 			},
 			footerNote: 'Lens 让文献比较更可信，让研究证据可追溯。',
-			collectionStates: {
+			workspaceStates: {
 				empty: {
 					label: '空集合',
 					title: '先把论文放进这个集合',
@@ -5941,7 +5939,7 @@ const translations: Record<Language, Translations> = {
 			advancedLead: '运行、只读设置和调试元数据都收进这里，保证主流程保持干净。',
 			debugTitle: '调试元数据',
 			debugTaskId: '最近运行 ID',
-			debugCollectionId: '集合 ID'
+			debugWorkspaceId: '集合 ID'
 		},
 		documents: {
 			title: '文档',
@@ -7388,7 +7386,7 @@ const translations: Record<Language, Translations> = {
 			noExclusions: '没有被排除的选择。',
 			reasonDuplicate: '重复选择',
 			reasonSplitInvalid: '分区无效',
-			reasonCaseNotInCollection: '案例不属于当前集合',
+			reasonCaseNotInWorkspace: '案例不属于当前集合',
 			reasonCaseNotAccessible: '案例当前不可访问',
 			reasonAnnotationStale: '标注已经变化',
 			reasonReviewNotAccepted: '审核未接受',
@@ -7460,7 +7458,7 @@ const translations: Record<Language, Translations> = {
 				reviewEachSample: '逐条确认',
 				noCandidateSamplesYet: '还没有候选样本。',
 				backgroundWorkersContinuouslyPrepareFeedbackCasesFor:
-					'后台 Worker 会持续整理当前 Collection 的反馈案例。',
+					'后台 Worker 会持续整理当前 Workspace 的反馈案例。',
 				noMatchingSamples: '没有匹配的样本。',
 				adjustTheStatusFilterOrSearchTerms: '调整状态筛选或搜索关键词后再试。',
 				sampleEditor: '样本编辑器',
@@ -7549,7 +7547,7 @@ const translations: Record<Language, Translations> = {
 			removeEvidence: '删除证据片段',
 			questionContent: '问题内容',
 			chooseTask: '选择任务类型',
-			chooseTaskDetail: 'Worker 会持续为当前 Collection 准备候选。进入任务后可以确认、修改或导出。',
+			chooseTaskDetail: 'Worker 会持续为当前 Workspace 准备候选。进入任务后可以确认、修改或导出。',
 			loadingWorkbenches: '正在读取任务工作台…',
 			workbenchCount: '{count} 个工作台',
 			waitingForWorkers: '等待后台 Worker 产生候选',
@@ -7562,7 +7560,7 @@ const translations: Record<Language, Translations> = {
 			selectAll: '全选已确认',
 			selected: '已选择 {count} 条',
 			title: '反馈任务工作台',
-			lede: 'Worker 会持续为当前 Collection 准备 SFT、偏好和评测候选。',
+			lede: 'Worker 会持续为当前 Workspace 准备 SFT、偏好和评测候选。',
 			back: '返回工作区',
 			refresh: '刷新任务工作台',
 			type: {
@@ -7576,7 +7574,7 @@ const translations: Record<Language, Translations> = {
 			requestFailed: '请求未能完成，请稍后重试。',
 			researchConnectionInactive: '连接暂时没有响应，正在检查已保存的研究进度。',
 			authSessionChanged: '登录状态已发生变化，请重新登录。',
-			collectionNotFound: '该集合不存在。',
+			workspaceNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。',
 			chatSessionBusy: '该对话仍在运行，请等待完成后再删除。',

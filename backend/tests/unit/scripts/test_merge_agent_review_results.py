@@ -26,7 +26,7 @@ def _load_merge_module():
 
 def _decision_row(**overrides):
     row = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -39,7 +39,7 @@ def _decision_row(**overrides):
 
 def _agent_row(**overrides):
     row = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -58,7 +58,7 @@ def _agent_row(**overrides):
 
 def _finding(**overrides):
     finding = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -105,7 +105,7 @@ def test_merge_agent_review_results_keeps_import_actions_skipped():
 
     assert rows == [
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "finding_id": "finding-1",
@@ -130,7 +130,7 @@ def test_merge_agent_review_results_accepts_flat_agent_rows():
         decision_rows=[_decision_row()],
         agent_rows=[
             {
-                "collection_id": "col-1",
+                "workspace_id": "col-1",
                 "objective_id": "objective-1",
                 "analysis_version": 2,
                 "finding_id": "finding-1",

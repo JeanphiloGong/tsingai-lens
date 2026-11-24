@@ -226,7 +226,7 @@ def test_selected_context_stays_requested_when_model_audit_is_missing() -> None:
             resource_type="source",
             resource_id="document-1:source-1",
         ),
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         document_id="document-1",
         document_title="Paper 1",
         source_kind="text_window",

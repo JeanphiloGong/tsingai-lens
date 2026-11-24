@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
         description="Export current document and published Objective trace artifacts."
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--collection-id")
+    source.add_argument("--workspace-id")
     source.add_argument("--output-dir", type=Path)
     parser.add_argument("--backend-root", type=Path, default=DEFAULT_BACKEND_ROOT)
     parser.add_argument("--trace-root", type=Path)
@@ -79,7 +79,7 @@ async def main_async() -> None:
     args = parse_args()
     output = await export_trace(
         backend_root=args.backend_root,
-        collection_id=args.collection_id,
+        workspace_id=args.workspace_id,
         source_output_dir=args.output_dir,
         trace_root=args.trace_root,
         trace_name=args.trace_name,
@@ -91,15 +91,15 @@ async def main_async() -> None:
 async def export_trace(
     *,
     backend_root: str | Path = DEFAULT_BACKEND_ROOT,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     source_output_dir: str | Path | None = None,
     trace_root: str | Path | None = None,
     trace_name: str | None = None,
     document_id: str | None = None,
 ) -> Path:
     root = Path(backend_root).expanduser().resolve()
-    source_dir = _resolve_source_output_dir(root, collection_id, source_output_dir)
-    resolved_collection_id = collection_id or source_dir.parent.name
+    source_dir = _resolve_source_output_dir(root, workspace_id, source_output_dir)
+    resolved_workspace_id = workspace_id or source_dir.parent.name
     destination_root = (
         Path(trace_root).expanduser().resolve()
         if trace_root is not None
@@ -107,12 +107,12 @@ async def export_trace(
     )
     destination = destination_root / (
         trace_name
-        or f"{resolved_collection_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        or f"{resolved_workspace_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     )
     artifacts_dir = destination / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    frames = await _load_artifacts(resolved_collection_id)
+    frames = await _load_artifacts(resolved_workspace_id)
     for name, frame in frames.items():
         if frame.empty:
             continue
@@ -124,7 +124,7 @@ async def export_trace(
         frame.to_csv(artifacts_dir / f"{name}.csv", index=False)
 
     summary = {
-        "collection_id": resolved_collection_id,
+        "workspace_id": resolved_workspace_id,
         "source_output_dir": str(source_dir),
         "trace_dir": str(destination),
         "artifact_rows": {name: len(frame) for name, frame in frames.items()},
@@ -148,49 +148,49 @@ async def export_trace(
     return destination
 
 
-async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
+async def _load_artifacts(workspace_id: str) -> dict[str, pd.DataFrame]:
     engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
-        profiles = await DocumentProfileRepository().list_collection(
-            collection_id
+        documents = await SourceArtifactRepository().read_workspace_documents(workspace_id)
+        profiles = await DocumentProfileRepository().list_workspace(
+            workspace_id
         )
-        paper_maps = await PaperMapRepository().list_collection(
-            collection_id
+        paper_maps = await PaperMapRepository().list_workspace(
+            workspace_id
         )
         objective_repository = ObjectiveRepository()
         evidence: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
-        for objective in await objective_repository.list_objectives(collection_id):
+        for objective in await objective_repository.list_objectives(workspace_id):
             version = objective.published_analysis_version
             if version is None:
                 continue
             analysis = await objective_repository.read_analysis(
-                collection_id, objective.objective_id, version
+                workspace_id, objective.objective_id, version
             )
             if is_experiment_backed_analysis(analysis):
                 objective_findings, objective_evidence, _ = (
                     await experiment_projection.read_analysis_records(
-                        collection_id, objective.objective_id, version
+                        workspace_id, objective.objective_id, version
                     )
                 )
             else:
                 objective_evidence = await list_all_evidence(
                     objective_repository,
-                    collection_id,
+                    workspace_id,
                     objective.objective_id,
                     version,
                 )
                 objective_findings = await list_all_findings(
                     objective_repository,
-                    collection_id,
+                    workspace_id,
                     objective.objective_id,
                     version,
                 )
             evidence.extend(
                 {
-                    "collection_id": item.collection_id,
+                    "workspace_id": item.workspace_id,
                     "objective_id": item.objective_id,
                     "analysis_version": item.analysis_version,
                     "evidence_id": item.evidence_id,
@@ -361,7 +361,7 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
             )
             findings.extend(
                 {
-                    "collection_id": item.collection_id,
+                    "workspace_id": item.workspace_id,
                     "objective_id": item.objective_id,
                     "analysis_version": item.analysis_version,
                     "finding_id": item.finding_id,
@@ -687,7 +687,7 @@ def _render_readme(summary: dict[str, Any]) -> str:
         for name, count in summary["artifact_rows"].items()
     )
     return (
-        f"# Extraction Trace: {summary['collection_id']}\n\n"
+        f"# Extraction Trace: {summary['workspace_id']}\n\n"
         "Current per-Document preparation artifacts and published Objective results.\n\n"
         f"{rows}\n"
     )
@@ -757,14 +757,14 @@ def _filtered_records(
 
 def _resolve_source_output_dir(
     backend_root: Path,
-    collection_id: str | None,
+    workspace_id: str | None,
     source_output_dir: str | Path | None,
 ) -> Path:
     if source_output_dir is not None:
         return Path(source_output_dir).expanduser().resolve()
-    if not collection_id:
-        raise SystemExit("--collection-id or --output-dir is required")
-    return backend_root / "data" / "collections" / collection_id / "output"
+    if not workspace_id:
+        raise SystemExit("--workspace-id or --output-dir is required")
+    return backend_root / "data" / "workspaces" / workspace_id / "output"
 
 
 if __name__ == "__main__":

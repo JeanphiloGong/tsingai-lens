@@ -50,13 +50,13 @@ class FindingReviewSnapshot:
 async def read_finding_snapshot(finding: Finding) -> FindingReviewSnapshot:
     evidence = await _finding_evidence(finding)
     feedback = await FindingReviewRepo.list_feedback(
-        finding.collection_id,
+        finding.workspace_id,
         finding.objective_id,
         finding.analysis_version,
         finding.finding_id,
     )
     curations = await FindingReviewRepo.list_curations(
-        finding.collection_id,
+        finding.workspace_id,
         finding.objective_id,
         finding.analysis_version,
         finding.finding_id,
@@ -66,7 +66,7 @@ async def read_finding_snapshot(finding: Finding) -> FindingReviewSnapshot:
         curations,
     )
     system_prediction = {
-        "collection_id": finding.collection_id,
+        "workspace_id": finding.workspace_id,
         "objective_id": finding.objective_id,
         "analysis_version": finding.analysis_version,
         "finding_id": finding.finding_id,
@@ -200,7 +200,7 @@ async def read_finding_snapshot(finding: Finding) -> FindingReviewSnapshot:
     }
     expert_target = (
         {
-            "collection_id": current_curation.curated_finding.collection_id,
+            "workspace_id": current_curation.curated_finding.workspace_id,
             "objective_id": current_curation.curated_finding.objective_id,
             "analysis_version": current_curation.curated_finding.analysis_version,
             "finding_id": current_curation.curated_finding.finding_id,
@@ -355,7 +355,7 @@ async def read_finding_snapshot(finding: Finding) -> FindingReviewSnapshot:
     )
     evidence_records = [
         {
-            "collection_id": item.collection_id,
+            "workspace_id": item.workspace_id,
             "objective_id": item.objective_id,
             "analysis_version": item.analysis_version,
             "evidence_id": item.evidence_id,
@@ -523,24 +523,24 @@ async def read_finding_snapshot(finding: Finding) -> FindingReviewSnapshot:
 
 
 async def _all_findings(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> tuple[Finding, ...]:
     if await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
         findings, _, _ = await experiment_projection.read_analysis_records(
-            collection_id, objective_id, analysis_version
+            workspace_id, objective_id, analysis_version
         )
         return findings
     result: list[Finding] = []
     offset = 0
     while True:
         page, total = await ObjectiveRepo.list_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=offset,
@@ -556,12 +556,12 @@ async def _all_findings(
 
 async def _finding_evidence(finding: Finding) -> tuple[ObjectiveEvidence, ...]:
     if await should_read_experiment_projection(
-        collection_id=finding.collection_id,
+        workspace_id=finding.workspace_id,
         objective_id=finding.objective_id,
         analysis_version=finding.analysis_version,
     ):
         _, evidence, _ = await experiment_projection.read_analysis_records(
-            finding.collection_id, finding.objective_id, finding.analysis_version
+            finding.workspace_id, finding.objective_id, finding.analysis_version
         )
         linked = {
             *finding.supporting_evidence_ids,
@@ -573,7 +573,7 @@ async def _finding_evidence(finding: Finding) -> tuple[ObjectiveEvidence, ...]:
     offset = 0
     while True:
         page, total = await ObjectiveRepo.list_evidence(
-            finding.collection_id,
+            finding.workspace_id,
             finding.objective_id,
             finding.analysis_version,
             finding_id=finding.finding_id,
@@ -589,14 +589,14 @@ async def _finding_evidence(finding: Finding) -> tuple[ObjectiveEvidence, ...]:
 
 
 async def _require_published_finding(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     finding_id: str,
 ) -> Finding:
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     if objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
     if objective.published_analysis_version != analysis_version:
         raise ResourceConflictException(
             "Review must reference the published analysis version.",
@@ -606,19 +606,19 @@ async def _require_published_finding(
             },
         )
     if await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
         findings, _, _ = await experiment_projection.read_analysis_records(
-            collection_id, objective_id, analysis_version
+            workspace_id, objective_id, analysis_version
         )
         finding = next(
             (item for item in findings if item.finding_id == finding_id), None
         )
     else:
         finding = await ObjectiveRepo.read_finding(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             finding_id,
@@ -632,21 +632,21 @@ async def _require_published_finding(
 
 
 async def _list_contributions(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> tuple[PaperContribution, ...]:
     if await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
         _, _, contributions = await experiment_projection.read_analysis_records(
-            collection_id, objective_id, analysis_version
+            workspace_id, objective_id, analysis_version
         )
         return contributions
     return await ObjectiveRepo.list_contributions(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
@@ -730,18 +730,18 @@ def _datetime(value: str) -> datetime:
 
 async def source_snapshot_validity(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     source_findings: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
 ) -> tuple[str, list[str]]:
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     if objective is None or objective.published_analysis_version is None:
         return "stale", ["source_dataset_unavailable"]
     items = []
     for finding_id in dict.fromkeys(item["finding_id"] for item in source_findings):
         try:
             finding = await _require_published_finding(
-                collection_id,
+                workspace_id,
                 objective_id,
                 objective.published_analysis_version,
                 finding_id,

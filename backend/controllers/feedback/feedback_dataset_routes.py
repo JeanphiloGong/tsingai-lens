@@ -10,9 +10,9 @@ from application.feedback import dataset_export_service, dataset_service
 from application.feedback.dataset_service import DatasetSampleDetail
 from controllers.dependencies.auth import get_current_user_id
 from controllers.feedback.task_dataset_schemas import (
-    DatasetCollectionItemResponse,
-    DatasetCollectionRequest,
-    DatasetCollectionResponse,
+    DatasetWorkspaceItemResponse,
+    DatasetWorkspaceRequest,
+    DatasetWorkspaceResponse,
     DatasetExportIssueResponse,
     DatasetExportListResponse,
     DatasetExportPreviewRequest,
@@ -77,7 +77,7 @@ def _detail_response(detail: DatasetSampleDetail) -> DatasetSampleDetailResponse
     snapshot = dict(detail.source_case.context_snapshot or {})
     source_case = DatasetSampleSourceCaseResponse(
         case_id=detail.source_case.case_id,
-        collection_id=detail.source_case.collection_id,
+        workspace_id=detail.source_case.workspace_id,
         session_id=detail.source_case.session_id,
         anchor_message_id=detail.source_case.anchor_message_id,
         status=detail.source_case.status,
@@ -160,7 +160,7 @@ async def create_feedback_dataset(
 ) -> Response:
     record = await dataset_service.create_dataset_for_user(
         user_id=user_id,
-        collection_id=payload.collection_id,
+        workspace_id=payload.workspace_id,
         name=payload.name,
         task_type=payload.task_type,
         construction_spec=payload.construction_spec,
@@ -171,13 +171,13 @@ async def create_feedback_dataset(
 @feedback_dataset_router.get("", response_model=ApiResponse[TaskDatasetListResponse])
 async def list_feedback_datasets(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    collection_id: str = Query(min_length=1, max_length=64),
+    workspace_id: str = Query(min_length=1, max_length=64),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
     datasets = await dataset_service.list_dataset_records_for_user(
         user_id=user_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         limit=limit,
         offset=offset,
     )
@@ -486,13 +486,13 @@ async def act_on_dataset_sample(
 
 
 @feedback_dataset_router.post(
-    "/{dataset_id}/collections",
-    response_model=ApiResponse[DatasetCollectionResponse],
+    "/{dataset_id}/workspaces",
+    response_model=ApiResponse[DatasetWorkspaceResponse],
     status_code=200,
 )
 async def collect_feedback_cases(
     dataset_id: str,
-    payload: DatasetCollectionRequest,
+    payload: DatasetWorkspaceRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     result = await dataset_service.collect_dataset_cases_for_user(
@@ -501,12 +501,12 @@ async def collect_feedback_cases(
         source_case_ids=tuple(payload.source_case_ids),
     )
     return make_api_response(
-        data=DatasetCollectionResponse(
+        data=DatasetWorkspaceResponse(
             operation_id=result.operation_id,
             created_count=result.created_count,
             existing_count=result.existing_count,
             items=[
-                DatasetCollectionItemResponse(
+                DatasetWorkspaceItemResponse(
                     sample_id=item.sample.sample_id,
                     source_case_id=item.sample.source_case_id,
                     status=item.sample.status,

@@ -158,7 +158,7 @@ def _protocol_metadata(prepared: dict[str, Any]) -> dict[str, Any]:
         "prepared_digest": prepared.get("prepared_digest"),
         "dataset_id": export.get("dataset_id"),
         "export_id": export.get("export_id"),
-        "collection_id": export.get("collection_id"),
+        "workspace_id": export.get("workspace_id"),
         "export_manifest_digest": export.get("manifest_digest"),
         "export_provenance_digest": export.get("provenance_digest"),
         "export_content_digest": export.get("content_digest"),

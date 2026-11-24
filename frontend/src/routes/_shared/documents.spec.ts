@@ -15,7 +15,7 @@ describe('documents shared helpers', () => {
 
 	it('preserves the maintained document profile contract', async () => {
 		requestJson.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			total: 1,
 			count: 1,
 			summary: {
@@ -44,13 +44,13 @@ describe('documents shared helpers', () => {
 			doc_type: 'experimental',
 			confidence: 0.9
 		});
-		expect(response.items[0]).not.toHaveProperty('collection_id');
+		expect(response.items[0]).not.toHaveProperty('workspace_id');
 		expect(response.items[0]).not.toHaveProperty('source_filename');
 	});
 
-	it('sends bounded profile pagination and collection-wide search filters', async () => {
+	it('sends bounded profile pagination and workspace-wide search filters', async () => {
 		requestJson.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			total: 0,
 			count: 0,
 			summary: { total_documents: 131, technical_failure_count: 0, by_doc_type: {}, warnings: [] },
@@ -66,14 +66,14 @@ describe('documents shared helpers', () => {
 		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/documents/profiles?offset=25&limit=25&query=laser&doc_type=review&has_warnings=true',
+			'/workspaces/col_123/documents/profiles?offset=25&limit=25&query=laser&doc_type=review&has_warnings=true',
 			{ method: 'GET' }
 		);
 	});
 
 	it('preserves Markdown whitespace and stable Source anchors', async () => {
 		requestJson.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			document_id: 'doc_1',
 			title: 'Paper A',
 			source_filename: 'paper-a.pdf',
@@ -107,7 +107,7 @@ describe('documents shared helpers', () => {
 
 	it('rejects Markdown from a different document', async () => {
 		requestJson.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			document_id: 'doc_2',
 			markdown: '# Paper',
 			source_map: []
@@ -119,10 +119,10 @@ describe('documents shared helpers', () => {
 
 	it('builds source navigation only from parsed Source blocks', () => {
 		const model = buildDocumentWorkbenchModel({
-			collectionId: 'col_123',
+			workspaceId: 'col_123',
 			documentId: 'doc_1',
 			content: {
-				collection_id: 'col_123',
+				workspace_id: 'col_123',
 				document_id: 'doc_1',
 				title: 'Paper A',
 				source_filename: 'paper-a.pdf',

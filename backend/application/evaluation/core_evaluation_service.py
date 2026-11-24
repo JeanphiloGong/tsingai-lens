@@ -35,7 +35,7 @@ from repositories.evaluation_repository import EvaluationRepo
 
 async def evaluate_snapshot(
     *,
-    collection_id: str,
+    workspace_id: str,
     gold_id: str,
     prediction_snapshot_id: str,
     evaluation_run_id: str | None = None,
@@ -43,17 +43,17 @@ async def evaluate_snapshot(
     relative_tolerance: float = DEFAULT_RELATIVE_TOLERANCE,
 ) -> EvaluationRun:
     gold_set = await EvaluationRepo.read_gold_set(gold_id)
-    if gold_set is None or gold_set.collection_id != collection_id:
+    if gold_set is None or gold_set.workspace_id != workspace_id:
         raise EvaluationInputNotFoundError(f"gold set not found: {gold_id}")
     snapshot = await EvaluationRepo.read_prediction_snapshot(
         prediction_snapshot_id
     )
-    if snapshot is None or snapshot.collection_id != collection_id:
+    if snapshot is None or snapshot.workspace_id != workspace_id:
         raise EvaluationInputNotFoundError(
             f"prediction snapshot not found: {prediction_snapshot_id}"
         )
 
-    run_id = evaluation_run_id or f"eval_{collection_id}_{_timestamp_id()}"
+    run_id = evaluation_run_id or f"eval_{workspace_id}_{_timestamp_id()}"
     gold_items = await EvaluationRepo.list_gold_items(gold_id)
     results = tuple(
         _evaluate_family(
@@ -75,7 +75,7 @@ async def evaluate_snapshot(
     summary = _summary(results)
     run = EvaluationRun(
         evaluation_run_id=run_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         gold_id=gold_id,
         prediction_snapshot_id=snapshot.snapshot_id,
         target_layer="core",

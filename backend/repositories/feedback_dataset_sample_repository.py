@@ -28,7 +28,7 @@ from domain.feedback.sample_revision import (
     content_digest_for,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.execution import AnalysisJobORM
 from infra.persistence.postgres.models.feedback import FeedbackCaseORM
 from infra.persistence.postgres.models.feedback_dataset import (
@@ -63,7 +63,7 @@ def source_digest_for_case(case: FeedbackCase | FeedbackCaseORM) -> str:
     """Hash sample source content, excluding workflow status and timestamps."""
     canonical = {
         "case_id": case.case_id,
-        "collection_id": case.collection_id,
+        "workspace_id": case.workspace_id,
         "session_id": case.session_id,
         "anchor_message_id": case.anchor_message_id,
         "source_signal_ids": list(case.source_signal_ids),
@@ -133,24 +133,24 @@ class FeedbackDatasetSampleRepository:
         cursor = ""
         while True:
             async with AsyncSessionLocal() as db, db.begin():
-                collections = list(
+                workspaces = list(
                     await db.scalars(
-                        select(CollectionORM)
-                        .where(CollectionORM.collection_id > cursor)
-                        .order_by(CollectionORM.collection_id)
+                        select(WorkspaceORM)
+                        .where(WorkspaceORM.workspace_id > cursor)
+                        .order_by(WorkspaceORM.workspace_id)
                         .limit(200)
                     )
                 )
-                for collection in collections:
+                for workspace in workspaces:
                     await ensure_system_datasets(
                         db,
-                        collection_id=collection.collection_id,
-                        owner_user_id=collection.owner_user_id,
+                        workspace_id=workspace.workspace_id,
+                        owner_user_id=workspace.owner_user_id,
                         now=datetime.now(timezone.utc),
                     )
-                if collections:
-                    cursor = collections[-1].collection_id
-            if len(collections) < 200:
+                if workspaces:
+                    cursor = workspaces[-1].workspace_id
+            if len(workspaces) < 200:
                 break
 
         cursor = ""
@@ -184,7 +184,7 @@ class FeedbackDatasetSampleRepository:
         jobs: tuple[AnalysisJob, ...],
     ) -> tuple[CollectedDatasetSample, ...]:
         if len(samples) != len(jobs):
-            raise ValueError("sample and job collections must have equal length")
+            raise ValueError("sample and job workspaces must have equal length")
         collected: list[CollectedDatasetSample] = []
         async with AsyncSessionLocal() as db, db.begin():
             cases = {
@@ -921,7 +921,7 @@ class FeedbackDatasetSampleRepository:
                 row.confirmed_revision_id = None
                 row.confirmed_by = None
                 row.confirmed_at = None
-                row.missing_reasons = ["source_changed_since_collection"]
+                row.missing_reasons = ["source_changed_since_workspace"]
                 row.updated_at = timestamp
                 _finish_job(
                     job_row,
@@ -1095,20 +1095,20 @@ async def enqueue_case_samples(
     """Persist all three sample queues in the same transaction as the case."""
     if case.status == "withdrawn":
         return
-    collection = await db.get(CollectionORM, case.collection_id)
-    if collection is None:
-        raise FileNotFoundError("feedback case collection not found")
+    workspace = await db.get(WorkspaceORM, case.workspace_id)
+    if workspace is None:
+        raise FileNotFoundError("feedback case workspace not found")
     datasets = await ensure_system_datasets(
         db,
-        collection_id=case.collection_id,
-        owner_user_id=collection.owner_user_id,
+        workspace_id=case.workspace_id,
+        owner_user_id=workspace.owner_user_id,
         now=now,
     )
     # Existing explicitly collected samples also need invalidation when their source changes.
     additional = await db.scalars(
         select(FeedbackDatasetORM)
         .where(
-            FeedbackDatasetORM.collection_id == case.collection_id,
+            FeedbackDatasetORM.workspace_id == case.workspace_id,
             FeedbackDatasetORM.dataset_id.not_in(
                 tuple(dataset.dataset_id for dataset in datasets)
             ),
@@ -1210,7 +1210,7 @@ async def _collect_sample(
         if revision is not None and revision.author_kind == "human":
             existing.status = "needs_input"
             existing.active_job_id = None
-            existing.missing_reasons = ["source_changed_since_collection"]
+            existing.missing_reasons = ["source_changed_since_workspace"]
             await db.flush()
             return CollectedDatasetSample(
                 DatasetSample(

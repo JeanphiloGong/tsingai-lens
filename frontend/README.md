@@ -17,7 +17,7 @@ to code.
 - `src/routes/+layout.svelte`
   Global Research Agent launcher; outside a collection it asks the user to
   select the collection that defines the research workspace.
-- `src/routes/collections/`
+- `src/routes/workspaces/`
   Collection paper, Objective, Finding, Evidence Map, and Source route family
 - `src/routes/_shared/`
   Shared browser-side API clients, i18n, and route support code
@@ -44,15 +44,15 @@ to code.
   Frontend same-origin API integration guide
 - [`docs/research-agent-chat.md`](docs/research-agent-chat.md)
   Collection-bound Research Agent Chat and approval presentation contract
-- [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
+- [`src/routes/workspaces/lens-v1-interface-spec.md`](src/routes/workspaces/lens-v1-interface-spec.md)
   Maintained Lens v1 collection interface for papers, Objectives, published
   Findings, and Source documents
-- [`src/routes/collections/collection-ui-restructure-proposal.md`](src/routes/collections/collection-ui-restructure-proposal.md)
+- [`src/routes/workspaces/workspace-ui-restructure-proposal.md`](src/routes/workspaces/workspace-ui-restructure-proposal.md)
   Narrow proposal for collection UI information architecture, state machine,
   and page hierarchy cleanup after the first Lens v1 frontend wave
 - [`src/routes/_shared/README.md`](src/routes/_shared/README.md)
   Shared route helper ownership and boundaries
-- [`src/routes/collections/README.md`](src/routes/collections/README.md)
+- [`src/routes/workspaces/README.md`](src/routes/workspaces/README.md)
   Collection route ownership and boundaries
 
 ## Local Development

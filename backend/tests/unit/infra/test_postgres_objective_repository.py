@@ -15,7 +15,7 @@ from repositories.objective_repository import ObjectiveAnalysis, ObjectiveReposi
 
 def _objective() -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="How does temperature affect strength?",
         material_scope=("Alloy A",),
@@ -45,7 +45,7 @@ async def test_objective_record_keeps_timestamps_out_of_scientific_payload(monke
     updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     objective = _objective()
     row = ObjectiveResearchORM(
-        collection_id=objective.collection_id,
+        workspace_id=objective.workspace_id,
         objective_id=objective.objective_id,
         rank=objective.rank,
         origin=objective.origin,
@@ -59,7 +59,7 @@ async def test_objective_record_keeps_timestamps_out_of_scientific_payload(monke
     assert row.created_at == created_at
     assert row.updated_at == updated_at
 
-    restored = await _repository(row, monkeypatch).read_objective_record("collection-1", "objective-1")
+    restored = await _repository(row, monkeypatch).read_objective_record("workspace-1", "objective-1")
     assert restored.objective == objective
     assert restored.created_at == created_at
     assert restored.updated_at == updated_at
@@ -72,7 +72,7 @@ async def test_objective_record_columns_override_legacy_payload_timestamps(monke
     legacy_created_at = datetime(2020, 1, 1, tzinfo=UTC)
     legacy_updated_at = datetime(2020, 1, 2, tzinfo=UTC)
     row = ObjectiveResearchORM(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         rank=1,
         origin="system_discovered",
@@ -86,7 +86,7 @@ async def test_objective_record_columns_override_legacy_payload_timestamps(monke
         updated_at=column_updated_at,
     )
 
-    restored = await _repository(row, monkeypatch).read_objective_record("collection-1", "objective-1")
+    restored = await _repository(row, monkeypatch).read_objective_record("workspace-1", "objective-1")
 
     assert restored.created_at == column_created_at
     assert restored.updated_at == column_updated_at
@@ -95,7 +95,7 @@ async def test_objective_record_columns_override_legacy_payload_timestamps(monke
 @pytest.mark.anyio
 async def test_analysis_row_persists_private_diagnostics_without_public_exposure(monkeypatch) -> None:
     analysis = ObjectiveAnalysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_inputs=(
@@ -117,13 +117,13 @@ async def test_analysis_row_persists_private_diagnostics_without_public_exposure
     )
 
     row = ObjectiveAnalysisORM(
-        collection_id=analysis.collection_id,
+        workspace_id=analysis.workspace_id,
         objective_id=analysis.objective_id,
         analysis_version=analysis.analysis_version,
         status=analysis.status,
         payload={
             **{
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -191,7 +191,7 @@ async def test_analysis_row_persists_private_diagnostics_without_public_exposure
             "status": "verified",
         }
     ]
-    restored = await _repository(row, monkeypatch).read_analysis("collection-1", "objective-1", 1)
+    restored = await _repository(row, monkeypatch).read_analysis("workspace-1", "objective-1", 1)
     assert restored.diagnostics == (
         {
             "trace_type": "table_matrix_repair",
@@ -219,11 +219,11 @@ def _repository(row, monkeypatch):
 @pytest.mark.parametrize("confidence, expected", [(0.8123456, 0.8123), (0.999999, 1.0), (0.0, 0.0)])
 async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confidence, expected, monkeypatch):
     identity = {
-        "collection_id": "collection-1", "objective_id": "objective-1",
+        "workspace_id": "workspace-1", "objective_id": "objective-1",
         "analysis_version": 1, "document_id": "paper-1", "confidence": confidence,
     }
     row = ObjectiveAnalysisORM(
-        collection_id="collection-1", objective_id="objective-1", analysis_version=1,
+        workspace_id="workspace-1", objective_id="objective-1", analysis_version=1,
         payload={
             "paper_contributions": [{
                 **identity, "analysis_status": "analyzed", "relevance": "high",
@@ -243,8 +243,8 @@ async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confide
     )
     repository = _repository(row, monkeypatch)
 
-    contributions = await repository.list_contributions("collection-1", "objective-1", 1)
-    evidence, total = await repository.list_evidence("collection-1", "objective-1", 1)
+    contributions = await repository.list_contributions("workspace-1", "objective-1", 1)
+    evidence, total = await repository.list_evidence("workspace-1", "objective-1", 1)
 
     assert len(contributions) == total == 1
     assert contributions[0].confidence == evidence[0].confidence == expected

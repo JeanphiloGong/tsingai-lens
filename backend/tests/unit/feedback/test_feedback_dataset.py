@@ -20,11 +20,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-class _Collections:
-    async def get_collection_for_user(self, collection_id: str, user_id: str):
-        if (collection_id, user_id) != ("collection-1", "user-1"):
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id, "owner_user_id": user_id}
+class _Workspaces:
+    async def get_workspace_for_user(self, workspace_id: str, user_id: str):
+        if (workspace_id, user_id) != ("workspace-1", "user-1"):
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id, "owner_user_id": user_id}
 
 
 class _Repository:
@@ -39,7 +39,7 @@ class _Repository:
     async def read(self, dataset_id: str) -> Dataset | None:
         return self.items.get(dataset_id)
 
-    async def list_records_for_collection(self, **kwargs):
+    async def list_records_for_workspace(self, **kwargs):
         return ()
 
 
@@ -69,7 +69,7 @@ class _Samples:
 def _source_case() -> FeedbackCase:
     return FeedbackCase(
         case_id="case-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=(),
@@ -92,19 +92,19 @@ async def test_listing_does_not_create_datasets_or_collect_withdrawn_cases() -> 
 
     samples = _Samples()
     dataset_service.FeedbackDatasetRepo = ReadOnlyRepository()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = UnreadCases()
     service = dataset_service
     assert (
         await service.list_dataset_records_for_user(
-            user_id="user-1", collection_id="collection-1"
+            user_id="user-1", workspace_id="workspace-1"
         )
         == ()
     )
     assert (
         await service.list_dataset_records_for_user(
-            user_id="user-1", collection_id="collection-1", offset=1
+            user_id="user-1", workspace_id="workspace-1", offset=1
         )
         == ()
     )
@@ -122,14 +122,14 @@ async def test_collect_reports_source_changed_during_transaction_as_conflict():
             raise DatasetSampleRevisionConflict("sample_source_stale")
 
     dataset_service.FeedbackDatasetRepo = _Repository()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     dataset_service.FeedbackDatasetSampleRepo = RacingSamples()
     dataset_service.FeedbackCaseRepo = _Cases(_source_case())
     service = dataset_service
     dataset = (
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="SFT",
             task_type="sft",
             construction_spec={},
@@ -181,14 +181,14 @@ async def test_needs_input_can_save_its_first_complete_human_revision(
         },
     )
     dataset_service.FeedbackDatasetRepo = _Repository()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = _Cases(case)
     service = dataset_service
     dataset = (
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="SFT",
             task_type="sft",
             construction_spec={},
@@ -261,13 +261,13 @@ async def test_needs_input_can_save_its_first_complete_human_revision(
 async def test_create_dataset_has_own_identity_and_fixed_sft_type() -> None:
     repository = _Repository()
     dataset_service.FeedbackDatasetRepo = repository
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     service = dataset_service
 
     dataset = (
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="  Preheating corrections  ",
             task_type="sft",
             construction_spec={"language": "zh-CN", "source_kinds": ["feedback_case"]},
@@ -288,13 +288,13 @@ async def test_create_dataset_has_own_identity_and_fixed_sft_type() -> None:
 async def test_reused_request_rules_cannot_change_saved_spec() -> None:
     repository = _Repository()
     dataset_service.FeedbackDatasetRepo = repository
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     service = dataset_service
     spec = {"source_filter": {"kinds": ["feedback_case"]}}
     dataset = (
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="SFT",
             task_type="sft",
             construction_spec=spec,
@@ -309,13 +309,13 @@ async def test_reused_request_rules_cannot_change_saved_spec() -> None:
 @pytest.mark.anyio
 async def test_create_allows_task_types_and_rejects_credentials() -> None:
     dataset_service.FeedbackDatasetRepo = _Repository()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     service = dataset_service
 
     dataset = (
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="Preference",
             task_type="preference",
             construction_spec={},
@@ -327,7 +327,7 @@ async def test_create_allows_task_types_and_rejects_credentials() -> None:
     ):
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="SFT",
             task_type="sft",
             construction_spec={"provider": {"api_key": "secret"}},
@@ -335,14 +335,14 @@ async def test_create_allows_task_types_and_rejects_credentials() -> None:
 
 
 @pytest.mark.anyio
-async def test_collection_scope_and_pagination_are_enforced() -> None:
+async def test_workspace_scope_and_pagination_are_enforced() -> None:
     repository = _Repository()
     dataset_service.FeedbackDatasetRepo = repository
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     service = dataset_service
     await service.create_dataset_for_user(
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         name="One",
         task_type="sft",
         construction_spec={},
@@ -350,11 +350,11 @@ async def test_collection_scope_and_pagination_are_enforced() -> None:
 
     with pytest.raises(FileNotFoundError):
         await service.list_dataset_records_for_user(
-            user_id="user-2", collection_id="collection-1"
+            user_id="user-2", workspace_id="workspace-1"
         )
     with pytest.raises(FeedbackDatasetError, match="pagination_invalid"):
         await service.list_dataset_records_for_user(
-            user_id="user-1", collection_id="collection-1", limit=0
+            user_id="user-1", workspace_id="workspace-1", limit=0
         )
 
 
@@ -369,12 +369,12 @@ async def test_collection_scope_and_pagination_are_enforced() -> None:
 )
 async def test_dataset_service_rejects_invalid_input(name, task_type, code) -> None:
     dataset_service.FeedbackDatasetRepo = _Repository()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     service = dataset_service
     with pytest.raises(FeedbackDatasetError, match=code):
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name=name,
             task_type=task_type,
             construction_spec={},
@@ -385,14 +385,14 @@ async def test_dataset_service_rejects_invalid_input(name, task_type, code) -> N
 async def test_collect_cases_creates_one_pending_sample_job_and_is_explicit() -> None:
     sample_repository = _Samples()
     dataset_service.FeedbackDatasetRepo = _Repository()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     dataset_service.FeedbackDatasetSampleRepo = sample_repository
     dataset_service.FeedbackCaseRepo = _Cases(_source_case())
     service = dataset_service
     dataset = (
         await service.create_dataset_for_user(
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             name="SFT",
             task_type="sft",
             construction_spec={},

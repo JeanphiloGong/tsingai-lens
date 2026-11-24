@@ -116,7 +116,7 @@ class FindingPaperContribution:
 
 @dataclass(frozen=True)
 class Finding:
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -149,7 +149,7 @@ class Finding:
     comparison_group_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not all((self.collection_id, self.objective_id, self.finding_id,
+        if not all((self.workspace_id, self.objective_id, self.finding_id,
                     self.statement, self.outcome)):
             raise ValueError("finding requires scoped identity and one outcome")
         if len(self.finding_id) > 128:
@@ -245,7 +245,7 @@ class Finding:
     @property
     def key(self) -> tuple[str, str, int, str]:
         return (
-            self.collection_id,
+            self.workspace_id,
             self.objective_id,
             self.analysis_version,
             self.finding_id,
@@ -474,10 +474,10 @@ class Finding:
         for evidence_id in referenced_ids:
             evidence = evidence_by_id[evidence_id]
             if (
-                evidence.collection_id,
+                evidence.workspace_id,
                 evidence.objective_id,
                 evidence.analysis_version,
-            ) != (self.collection_id, self.objective_id, self.analysis_version):
+            ) != (self.workspace_id, self.objective_id, self.analysis_version):
                 raise ValueError("finding references cross-version evidence")
             if not evidence.supports_finding:
                 raise ValueError("finding references ineligible evidence")

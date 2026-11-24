@@ -1,6 +1,6 @@
 # Chat Application Layer
 
-This package owns the collection-bound Research Agent conversation. It turns
+This package owns the workspace-bound Research Agent conversation. It turns
 an authenticated user's message into resource-bounded model decisions, ordered
 typed capability calls, and a durable, reviewable trajectory.
 
@@ -65,7 +65,7 @@ that arithmetic remains possible and mechanisms use only the allowed premises.
 One turn follows this sequence:
 
 Finding lookup is not limited to the latest bounded query results. The exact
-handler validates collection ownership and the requested record identity. A
+handler validates workspace ownership and the requested record identity. A
 transient draft remains an observation: the model may read again or revise its
 answer; draft success does not synthesize an automatic final response.
 
@@ -74,8 +74,8 @@ user message -> bounded model decision -> capability call
   -> capability result -> trajectory checkpoint -> final answer or approval
 ```
 
-Read capabilities may inspect canonical collection resources. Write
-capabilities stop for exact user approval by default. Collection defaults can
+Read capabilities may inspect canonical workspace resources. Write
+capabilities stop for exact user approval by default. Workspace defaults can
 choose read-only, confirmation, or an automatic grant for new sessions; a
 session permission can then override that authority. An automatic grant may
 be persistent (`expires_at: null`, until revoked or changed) or temporary (up
@@ -119,7 +119,7 @@ Once a title exists it is kept across later turns. Naming failure leaves the
 answer intact and the first-question label available for navigation.
 
 ```text
-authenticated user + collection
+authenticated user + workspace
   -> application.chat.session_service validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
   -> ResearchAgentRunner exposes a catalog of registered read, draft and write tools
@@ -152,7 +152,7 @@ message supplies the revised direction without replaying completed writes.
 This uses the existing Web execution and database; it introduces no task queue
 or Worker. User cancellation is excluded from tool-failure analysis candidates.
 
-Collection paper screening prefers an explicitly labelled abstract section.
+Workspace paper screening prefers an explicitly labelled abstract section.
 When a parser retains `Abstract:` or an equivalent dash/Chinese label at the
 start of a paragraph instead of in its heading, browsing reads that paragraph
 as the bounded abstract excerpt. Reference-section entries and incidental
@@ -230,7 +230,7 @@ inspected outline remains visible with unknown prepared coverage; a failed
 inspection is not treated as an empty paper. Prepared pages, completely read
 passages, and unread sections remain distinct. The runner regenerates this
 ledger from the complete request trajectory before context selection, so model
-compaction notes cannot erase a pending paper. Browsing a Collection alone does
+compaction notes cannot erase a pending paper. Browsing a Workspace alone does
 not select every listed paper for investigation. The ledger supplies coverage
 facts; the model still decides which sections address the research question.
 For requested sections, the ledger preserves unfinished batch offsets and the
@@ -262,7 +262,7 @@ relevant abstract once and identifies the missing body check. Prepared coverage
 does not describe the original publication's total page count or prove scientific
 absence. Resolved questions and genuinely unavailable checks permit a bounded
 partial draft; available but unchecked relevant body sections require further
-investigation. Reading within the authorized Collection needs no write approval.
+investigation. Reading within the authorized Workspace needs no write approval.
 The correction checks the prepared outlines for every contributing paper,
 including papers with no Evidence. Reading the linked Sources does not close
 the reading tools or mark the investigation complete. The Agent can inspect
@@ -299,7 +299,7 @@ conclusion, including when it corrects a disputed parent. Missing supporting
 Evidence returns `finding_supporting_evidence_required` so argument repair can
 identify the failed prerequisite without exposing exception text or input values.
 
-Finding inspection returns saved feedback and curation for the exact Collection,
+Finding inspection returns saved feedback and curation for the exact Workspace,
 Objective, analysis version, and Finding. A fresh conversation can therefore
 recall persisted corrections while distinguishing them from the original
 published result and from unsaved drafts.
@@ -317,7 +317,7 @@ attribution stay in the durable trajectory.
 Answer finalization separates the current request's reading ledger from earlier
 complete Source inspections. Zero new reads cannot erase the preceding research
 context; historical references alone cannot recover omitted text or authorize a
-new Evidence write. Filtered filename counts are not reported as collection
+new Evidence write. Filtered filename counts are not reported as workspace
 totals, including when a literal filename search has no matches.
 
 Research turns use one Codex-style decision loop: the model chooses a currently
@@ -335,7 +335,7 @@ comparator and outcome; each clause of a shared claim must hold for all papers
 it names. Objective draft parameters keep distinct measurement endpoints
 separate even when their units match. These scientific judgments are fallible
 model decisions, not facts certified by the runner's deterministic validation.
-Collection ownership, Source identity, version checks and write approval remain
+Workspace ownership, Source identity, version checks and write approval remain
 backend responsibilities. An explicit review task may still be added later, but
 it must return its findings to this same loop rather than silently replacing it.
 The curation tool describes the canonical direction values and reports an invalid
@@ -530,7 +530,7 @@ action closes with `no_progress`. Time, tool, token, and cycle exhaustion still
 take precedence over this correction.
 Plan reminders are sent after an attempted final answer leaves an active plan,
 not after every read. Rewording the same plan receives an explicit instruction
-to continue the actual checks. A collection search presents a first hit from
+to continue the actual checks. A workspace search presents a first hit from
 each ranked paper before additional hits from one paper; its paper summaries
 cover the returned page. Reworded searches and smaller subsets of the same
 Source previews do not count as new observations.
@@ -564,7 +564,7 @@ Source prerequisite for Evidence. A failed read permits discovery of navigation
 tools for recovery or an honest failure explanation; it grants no Evidence
 authoring authority. Successful navigation restores the exact-read requirement
 for located Sources; an earlier failed reference cannot waive that requirement.
-Source handlers still validate Collection ownership.
+Source handlers still validate Workspace ownership.
 
 Only the latest successful search batch supplies pending reading candidates.
 Each independent query in that batch needs one matching complete Source; its
@@ -603,7 +603,7 @@ Sources or propose a new exact approval; the failed action is not retried
 implicitly.
 
 Before a plan proposal, the stage instruction lists the inspected Finding and
-Evidence relationships. An Evidence ID in the collection-wide overview is not
+Evidence relationships. An Evidence ID in the workspace-wide overview is not
 automatically eligible for every Finding. A plan proposal with missing or
 unlinked references remains an abstention, not a completed draft. The Agent may
 correct that selection once using the valid
@@ -632,7 +632,7 @@ review status of their supporting Findings and unverified feasibility checks.
   behavior for each turn;
 - authorize capabilities by risk and bind writes to the exact stored arguments,
   user, and pending call;
-- preserve canonical resource references so collection observations can be
+- preserve canonical resource references so workspace observations can be
   traced back to Source and Core records; and
 - checkpoint durable state after each meaningful transition so refresh and
   interrupted streams remain understandable.
@@ -718,10 +718,10 @@ not raw Source text; an unlimited time budget is recorded as `null`.
 - `capabilities/tool_discovery.py`: derives the short catalog from registered
   read/draft/write handlers and validates selected names against that catalog.
 - `capabilities/`: contains the explicit typed capability registry and handlers
-  for collection and Source inspection, Objective work, Finding and Evidence
+  for workspace and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
 
-Collection context, paper browsing, research-scope preview, and Source inspection
+Workspace context, paper browsing, research-scope preview, and Source inspection
 handlers import their owning business modules and concrete repositories directly.
 Their classes implement the tool protocol and need no dependency-only constructors.
 Objective proposal, creation, confirmation, derivation and inspection follow the
@@ -736,7 +736,7 @@ approved draft before persisting an immutable revision.
 
 ## Boundaries
 
-- `application/source/` owns Collection membership, Document preparation, and
+- `application/source/` owns Workspace membership, Document preparation, and
   canonical Source loading.
 - `application/core/` owns Objective discovery and analysis, Evidence, and
   Findings.
@@ -808,7 +808,7 @@ scientific assertions are described in
   backend ownership and runtime boundaries.
 - [`../../docs/runbooks/backend-ops.md`](../../docs/runbooks/backend-ops.md):
   budget settings, cancellation, and finalization limits.
-- [`../../../docs/decisions/rfc-collection-bound-research-agent.md`](../../../docs/decisions/rfc-collection-bound-research-agent.md):
+- [`../../../docs/decisions/rfc-workspace-bound-research-agent.md`](../../../docs/decisions/rfc-workspace-bound-research-agent.md):
   accepted Research Agent design and real-world scenario mapping.
 - [`../core/README.md`](../core/README.md): scientific Objective, Evidence, and
   Finding ownership referenced by Chat.

@@ -179,7 +179,7 @@ def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
     probe, monkeypatch
 ):
     objective = ResearchObjective(
-        collection_id="probe",
+        workspace_id="probe",
         objective_id="objective-1",
         question="How does preheat temperature affect elongation?",
         material_scope=("316L",),

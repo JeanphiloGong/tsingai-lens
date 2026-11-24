@@ -22,7 +22,7 @@ class DatasetSelectionRequest(BaseModel):
 
 class DatasetSnapshotCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    collection_id: str = Field(min_length=1, max_length=64)
+    workspace_id: str = Field(min_length=1, max_length=64)
     dataset_type: DatasetTypeLiteral
     items: list[DatasetSelectionRequest] = Field(default_factory=list, max_length=500)
 
@@ -30,7 +30,7 @@ class DatasetSnapshotCreateRequest(BaseModel):
 class DatasetSnapshotResponse(BaseModel):
     dataset_id: str
     owner_id: str
-    collection_id: str
+    workspace_id: str
     dataset_type: DatasetTypeLiteral
     rows: list[dict[str, Any]] = Field(default_factory=list)
     exclusions: list[dict[str, Any]] = Field(default_factory=list)
@@ -47,7 +47,7 @@ class DatasetSnapshotResponse(BaseModel):
 
 class DatasetSnapshotSummaryResponse(BaseModel):
     dataset_id: str
-    collection_id: str
+    workspace_id: str
     dataset_type: DatasetTypeLiteral
     manifest_digest: str
     provenance_digest: str
@@ -78,7 +78,7 @@ async def create_dataset_snapshot(
 ) -> Response:
     snapshot = await dataset_snapshot_service.create_dataset_snapshot_for_user(
         owner_id=user_id,
-        collection_id=payload.collection_id,
+        workspace_id=payload.workspace_id,
         dataset_type=payload.dataset_type,
         selections=tuple(
             DatasetSelection(case_id=item.case_id) for item in payload.items
@@ -94,14 +94,14 @@ async def create_dataset_snapshot(
 )
 async def list_dataset_snapshots(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    collection_id: str | None = Query(default=None, min_length=1, max_length=64),
+    workspace_id: str | None = Query(default=None, min_length=1, max_length=64),
     dataset_type: str | None = Query(default=None, min_length=1, max_length=16),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
     items = await dataset_snapshot_service.list_dataset_snapshots_for_user(
         owner_id=user_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         dataset_type=dataset_type,
         limit=limit,
         offset=offset,

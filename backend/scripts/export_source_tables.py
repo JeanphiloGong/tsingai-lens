@@ -38,7 +38,7 @@ from infra.source.parsers.docling_pdf import (
     build_pdf_bundle,
     build_pdf_converter,
 )
-from repositories.collection_repository import CollectionRepository
+from repositories.workspace_repository import WorkspaceRepository
 from repositories.source_artifact_repository import (
     SourceArtifactRepository,
 )
@@ -57,19 +57,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Export Source-split tables for review. By default the script reads "
-            "existing Source artifacts; with --reparse-inputs it reparses collection "
-            "input PDFs with the current Source code without writing collection data."
+            "existing Source artifacts; with --reparse-inputs it reparses workspace "
+            "input PDFs with the current Source code without writing workspace data."
         )
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
-        "--collection-id",
-        help="Collection id under <backend-root>/data/collections/<collection-id>.",
+        "--workspace-id",
+        help="Workspace id under <backend-root>/data/workspaces/<workspace-id>.",
     )
     source.add_argument(
-        "--collection-dir",
+        "--workspace-dir",
         type=Path,
-        help="Direct collection directory containing input/ and output/.",
+        help="Direct workspace directory containing input/ and output/.",
     )
     parser.add_argument(
         "--backend-root",
@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reparse-inputs",
         action="store_true",
-        help="Reparse collection input PDFs with current Source code before export.",
+        help="Reparse workspace input PDFs with current Source code before export.",
     )
     parser.add_argument(
         "--document-id",
@@ -103,20 +103,20 @@ def parse_args() -> argparse.Namespace:
 async def main_async() -> None:
     args = parse_args()
     backend_root = args.backend_root.expanduser().resolve()
-    collection_dir = _resolve_collection_dir(
+    workspace_dir = _resolve_workspace_dir(
         backend_root=backend_root,
-        collection_id=args.collection_id,
-        collection_dir=args.collection_dir,
+        workspace_id=args.workspace_id,
+        workspace_dir=args.workspace_dir,
     )
-    artifact_dir = collection_dir / "output"
+    artifact_dir = workspace_dir / "output"
     if args.reparse_inputs:
         engine = build_database_engine(DatabaseSettings())
         AsyncSessionLocal.configure(bind=engine)
         try:
-            frames = await _reparse_collection_inputs(
+            frames = await _reparse_workspace_inputs(
                 backend_root=backend_root,
-                collection_dir=collection_dir,
-                collection_repository=CollectionRepository(),
+                workspace_dir=workspace_dir,
+                workspace_repository=WorkspaceRepository(),
                 document_id=args.document_id,
                 limit=args.limit,
             )
@@ -126,7 +126,7 @@ async def main_async() -> None:
     else:
         frames = await _load_existing_artifacts(
             backend_root=backend_root,
-            collection_dir=collection_dir,
+            workspace_dir=workspace_dir,
         )
         source_mode = "existing_artifacts"
 
@@ -134,7 +134,7 @@ async def main_async() -> None:
     export_dir = export_source_tables(
         frames=frames,
         destination=destination,
-        collection_dir=collection_dir,
+        workspace_dir=workspace_dir,
         artifact_dir=artifact_dir,
         source_mode=source_mode,
         document_id=args.document_id,
@@ -142,33 +142,33 @@ async def main_async() -> None:
     print(export_dir)
 
 
-def _resolve_collection_dir(
+def _resolve_workspace_dir(
     *,
     backend_root: Path,
-    collection_id: str | None,
-    collection_dir: Path | None,
+    workspace_id: str | None,
+    workspace_dir: Path | None,
 ) -> Path:
-    if collection_dir is not None:
-        return collection_dir.expanduser().resolve()
-    if collection_id:
-        return backend_root / "data" / "collections" / collection_id
-    raise SystemExit("--collection-id or --collection-dir is required")
+    if workspace_dir is not None:
+        return workspace_dir.expanduser().resolve()
+    if workspace_id:
+        return backend_root / "data" / "workspaces" / workspace_id
+    raise SystemExit("--workspace-id or --workspace-dir is required")
 
 
 async def _load_existing_artifacts(
     *,
     backend_root: Path,
-    collection_dir: Path,
+    workspace_dir: Path,
 ) -> dict[str, pd.DataFrame]:
-    collection_id = collection_dir.name
+    workspace_id = workspace_dir.name
     engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
+        documents = await SourceArtifactRepository().read_workspace_documents(workspace_id)
     finally:
         await engine.dispose()
     if not documents:
-        raise SystemExit(f"source artifacts not found: {collection_id}")
+        raise SystemExit(f"source artifacts not found: {workspace_id}")
     return {
         "documents": _normalize_frame(
             pd.DataFrame([source_document_payload(document) for document in documents])
@@ -230,24 +230,24 @@ async def _load_existing_artifacts(
     }
 
 
-async def _reparse_collection_inputs(
+async def _reparse_workspace_inputs(
     *,
     backend_root: Path,
-    collection_dir: Path,
-    collection_repository: CollectionRepository,
+    workspace_dir: Path,
+    workspace_repository: WorkspaceRepository,
     document_id: str | None,
     limit: int | None,
 ) -> dict[str, pd.DataFrame]:
-    inputs = await _collection_input_rows(collection_repository, collection_dir.name)
+    inputs = await _workspace_input_rows(workspace_repository, workspace_dir.name)
     if document_id:
         inputs = [item for item in inputs if str(item.get("id") or "") == document_id]
     if limit is not None:
         inputs = inputs[: max(limit, 0)]
     if not inputs:
-        raise SystemExit(f"no input PDFs found for collection: {collection_dir}")
+        raise SystemExit(f"no input PDFs found for workspace: {workspace_dir}")
 
     config = SourceParserConfig(root_dir=str(backend_root))
-    object_store = FileObjectStore(collection_dir.parent)
+    object_store = FileObjectStore(workspace_dir.parent)
     converter = build_pdf_converter()
     bundles = []
     for index, item in enumerate(inputs, start=1):
@@ -297,20 +297,20 @@ async def _reparse_collection_inputs(
     }
 
 
-async def _collection_input_rows(
-    collection_repository: CollectionRepository,
-    collection_id: str,
+async def _workspace_input_rows(
+    workspace_repository: WorkspaceRepository,
+    workspace_id: str,
 ) -> list[dict[str, Any]]:
     rows = []
-    collection = await collection_repository.read_collection(collection_id)
-    if collection is None:
+    workspace = await workspace_repository.read_workspace(workspace_id)
+    if workspace is None:
         return rows
-    for document in collection.documents:
+    for document in workspace.documents:
         storage_key = document.storage_key.strip()
         if not storage_key.lower().endswith(".pdf"):
             continue
-        if storage_key != f"{collection_id}/input/{document.stored_filename}":
-            raise ValueError("invalid collection object key")
+        if storage_key != f"{workspace_id}/input/{document.stored_filename}":
+            raise ValueError("invalid workspace object key")
         rows.append(
             {
                 "id": document.document.document_id,
@@ -339,7 +339,7 @@ def export_source_tables(
     *,
     frames: dict[str, pd.DataFrame],
     destination: Path,
-    collection_dir: Path,
+    workspace_dir: Path,
     artifact_dir: Path,
     source_mode: str,
     document_id: str | None,
@@ -388,7 +388,7 @@ def export_source_tables(
     summary = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "source_mode": source_mode,
-        "collection_dir": str(collection_dir),
+        "workspace_dir": str(workspace_dir),
         "artifact_dir": str(artifact_dir),
         "document_id_filter": document_id,
         "table_count": len(table_records),
@@ -437,7 +437,7 @@ def _render_source_tables(
         "# Source Table Split Preview",
         "",
         f"- source_mode: `{summary['source_mode']}`",
-        f"- collection_dir: `{summary['collection_dir']}`",
+        f"- workspace_dir: `{summary['workspace_dir']}`",
         f"- table_count: `{summary['table_count']}`",
         f"- table_row_count: `{summary['table_row_count']}`",
         f"- table_cell_count: `{summary['table_cell_count']}`",

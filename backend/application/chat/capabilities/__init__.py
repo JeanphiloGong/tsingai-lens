@@ -9,11 +9,11 @@ from application.chat.capabilities.execution_plan import (
     UpdateExecutionPlanToolRequest,
     UpdateExecutionPlanCapability,
 )
-from application.chat.capabilities.collection_context import (
-    BrowseCollectionPapersToolRequest,
-    BrowseCollectionPapersCapability,
-    GetCollectionContextToolRequest,
-    GetCollectionContextCapability,
+from application.chat.capabilities.workspace_context import (
+    BrowseWorkspacePapersToolRequest,
+    BrowseWorkspacePapersCapability,
+    GetWorkspaceContextToolRequest,
+    GetWorkspaceContextCapability,
 )
 from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesToolRequest,
@@ -108,8 +108,8 @@ __all__ = [
     "ExecutionPlanStep",
     "UpdateExecutionPlanToolRequest",
     "UpdateExecutionPlanCapability",
-    "BrowseCollectionPapersToolRequest",
-    "BrowseCollectionPapersCapability",
+    "BrowseWorkspacePapersToolRequest",
+    "BrowseWorkspacePapersCapability",
     "AssessObjectiveQualityToolRequest",
     "AssessObjectiveQualityCapability",
     "ConfirmObjectiveToolRequest",
@@ -129,8 +129,8 @@ __all__ = [
     "DerivedObjectiveDraftInput",
     "DeriveObjectiveToolRequest",
     "DeriveObjectiveCapability",
-    "GetCollectionContextToolRequest",
-    "GetCollectionContextCapability",
+    "GetWorkspaceContextToolRequest",
+    "GetWorkspaceContextCapability",
     "InspectDocumentSourcesToolRequest",
     "InspectDocumentSourcesCapability",
     "InspectTableToolRequest",

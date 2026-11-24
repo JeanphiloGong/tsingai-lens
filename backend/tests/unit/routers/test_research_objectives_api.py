@@ -79,7 +79,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 def _objective() -> ResearchObjective:
     return ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         question="How does temperature affect strength?",
         material_scope=("Alloy A",),
@@ -102,7 +102,7 @@ def _objective() -> ResearchObjective:
 
 def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
     analysis = ObjectiveAnalysis(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         document_inputs=(
@@ -141,7 +141,7 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
 
 def _finding() -> Finding:
     return Finding(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -169,7 +169,7 @@ def _finding() -> Finding:
 
 def _evidence() -> ObjectiveEvidence:
     return ObjectiveEvidence(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         evidence_id="evidence-1",
@@ -216,7 +216,7 @@ def _evidence() -> ObjectiveEvidence:
 
 def _paper_contribution() -> PaperContribution:
     return PaperContribution(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         document_id="paper-1",
@@ -265,11 +265,11 @@ class _Repository:
     def __init__(self, facts: ObjectiveFactSet | None = None) -> None:
         self.facts = facts or _default_objective_facts()
 
-    async def list_objectives(self, collection_id):
+    async def list_objectives(self, workspace_id):
         return self.facts.research_objectives
 
-    async def list_objective_records(self, collection_id):
-        objectives = await self.list_objectives(collection_id)
+    async def list_objective_records(self, workspace_id):
+        objectives = await self.list_objectives(workspace_id)
         return tuple(StoredObjective(objective) for objective in objectives)
 
 
@@ -279,14 +279,14 @@ class _DiscoveryService:
         self.scope_calls: list[tuple[str, str]] = []
         self.scope_error = scope_error
 
-    async def start_objective_discovery(self, collection_id, document_ids, *, user_id):
-        self.discovery_calls.append((collection_id, document_ids))
+    async def start_objective_discovery(self, workspace_id, document_ids, *, user_id):
+        self.discovery_calls.append((workspace_id, document_ids))
         return PipelineRun(
             run_id="run-discovery-1",
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             pipeline_name="objective_discovery",
-            scope_type="collection",
-            scope_id=collection_id,
+            scope_type="workspace",
+            scope_id=workspace_id,
             mode="standard",
             input_fingerprint="scope-fingerprint",
             status=PipelineRunStatus.QUEUED,
@@ -307,8 +307,8 @@ class _DiscoveryService:
             ),
         )
 
-    async def preview_objective_scope(self, collection_id, objective_id, *, user_id):
-        self.scope_calls.append((collection_id, objective_id))
+    async def preview_objective_scope(self, workspace_id, objective_id, *, user_id):
+        self.scope_calls.append((workspace_id, objective_id))
         if self.scope_error is not None:
             raise self.scope_error
         return ObjectiveScopePreview(
@@ -344,35 +344,35 @@ class _Service:
         self.start_calls: list[tuple[str, str, tuple[str, ...]]] = []
 
     async def start_objective_analysis(
-        self, collection_id, objective_id, document_ids, *, user_id
+        self, workspace_id, objective_id, document_ids, *, user_id
     ):
-        self.start_calls.append((collection_id, objective_id, document_ids))
-        return await self.queue_analysis(collection_id, objective_id, document_ids)
+        self.start_calls.append((workspace_id, objective_id, document_ids))
+        return await self.queue_analysis(workspace_id, objective_id, document_ids)
 
-    async def queue_analysis(self, collection_id, objective_id, document_ids):
+    async def queue_analysis(self, workspace_id, objective_id, document_ids):
         return await self.get_analysis_state(
-            collection_id, objective_id, user_id="user-researcher"
+            workspace_id, objective_id, user_id="user-researcher"
         )
 
     async def execute_queued_analysis(
-        self, collection_id, objective_id, analysis_version
+        self, workspace_id, objective_id, analysis_version
     ):
         return await self.get_analysis_state(
-            collection_id, objective_id, user_id="user-researcher"
+            workspace_id, objective_id, user_id="user-researcher"
         )
 
     async def fail_analysis_dispatch(
-        self, collection_id, objective_id, analysis_version
+        self, workspace_id, objective_id, analysis_version
     ):
         self.analysis_status = "failed"
         self.dispatch_failure_version = analysis_version
         return await self.get_analysis_state(
-            collection_id, objective_id, user_id="user-researcher"
+            workspace_id, objective_id, user_id="user-researcher"
         )
 
-    async def get_analysis_state(self, collection_id, objective_id, *, user_id):
+    async def get_analysis_state(self, workspace_id, objective_id, *, user_id):
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective": StoredObjective(_objective()),
             "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
@@ -396,9 +396,9 @@ class _Service:
             "warnings": [],
         }
 
-    async def get_analysis_status(self, collection_id, objective_id, *, user_id):
+    async def get_analysis_status(self, workspace_id, objective_id, *, user_id):
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "status": self.analysis_status,
@@ -424,15 +424,15 @@ class _Service:
             "completed_at": None,
         }
 
-    async def list_findings(self, collection_id, objective_id, **kwargs):
+    async def list_findings(self, workspace_id, objective_id, **kwargs):
         expected_finding = _finding()
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "items": [
                 {
-                    "collection_id": expected_finding.collection_id,
+                    "workspace_id": expected_finding.workspace_id,
                     "objective_id": expected_finding.objective_id,
                     "analysis_version": expected_finding.analysis_version,
                     "finding_id": expected_finding.finding_id,
@@ -604,14 +604,14 @@ class _Service:
             "total": 1,
         }
 
-    async def get_finding(self, collection_id, objective_id, finding_id, **kwargs):
+    async def get_finding(self, workspace_id, objective_id, finding_id, **kwargs):
         expected_finding = _finding()
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "finding": {
-                "collection_id": expected_finding.collection_id,
+                "workspace_id": expected_finding.workspace_id,
                 "objective_id": expected_finding.objective_id,
                 "analysis_version": expected_finding.analysis_version,
                 "finding_id": expected_finding.finding_id,
@@ -777,16 +777,16 @@ class _Service:
             },
         }
 
-    async def list_evidence(self, collection_id, objective_id, **kwargs):
+    async def list_evidence(self, workspace_id, objective_id, **kwargs):
         expected_objective_evidence = _evidence()
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "finding_id": kwargs["finding_id"],
             "items": [
                 {
-                    "collection_id": expected_objective_evidence.collection_id,
+                    "workspace_id": expected_objective_evidence.workspace_id,
                     "objective_id": expected_objective_evidence.objective_id,
                     "analysis_version": expected_objective_evidence.analysis_version,
                     "evidence_id": expected_objective_evidence.evidence_id,
@@ -967,9 +967,9 @@ class _Service:
             "total": 1,
         }
 
-    async def get_evidence_map(self, collection_id, objective_id, *, user_id):
+    async def get_evidence_map(self, workspace_id, objective_id, *, user_id):
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective_id,
             "analysis_version": 1,
             "projection_version": "objective-evidence-map.v1",
@@ -1077,8 +1077,8 @@ def _client(
     app.add_exception_handler(Exception, general_exception_handler)
     actual_analysis_service.ObjectiveRepo = repository or _Repository()
     analysis_record_source.ObjectiveRepo = actual_analysis_service.ObjectiveRepo
-    actual_analysis_service.collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock(
+    actual_analysis_service.workspace_service = SimpleNamespace(
+        get_workspace_for_user=AsyncMock(
             return_value={"owner_user_id": "user-researcher"}
         )
     )
@@ -1095,7 +1095,7 @@ def _client(
 
 def _ranked_objective(rank: int) -> ResearchObjective:
     return ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id=f"obj-{rank}"
         or build_research_objective_id(
             question=f"How does variable {rank} affect outcome {rank}?" or "",
@@ -1171,7 +1171,7 @@ def _default_objective_facts() -> ObjectiveFactSet:
 def test_objective_list_returns_every_ranked_candidate_when_limit_is_omitted() -> None:
     repository = _Repository(_ranked_facts(8))
 
-    response = _client(repository=repository).get("/collections/col-1/objectives")
+    response = _client(repository=repository).get("/workspaces/col-1/objectives")
 
     assert response.status_code == 200
     payload = response.json()["data"]
@@ -1190,7 +1190,7 @@ def test_objective_list_exposes_candidates_after_rank_six() -> None:
     repository = _Repository(_ranked_facts(8))
 
     response = _client(repository=repository).get(
-        "/collections/col-1/objectives",
+        "/workspaces/col-1/objectives",
         params={"offset": 6, "limit": 2},
     )
 
@@ -1206,11 +1206,11 @@ def test_objective_list_exposes_candidates_after_rank_six() -> None:
 
 def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     class UnreadyRepository(_Repository):
-        async def list_objectives(self, collection_id):
+        async def list_objectives(self, workspace_id):
             return ()
 
     response = _client(repository=UnreadyRepository()).get(
-        "/collections/col-1/objectives"
+        "/workspaces/col-1/objectives"
     )
 
     assert response.status_code == 200
@@ -1222,12 +1222,12 @@ def test_objective_scope_returns_complete_analysis_ids_and_decisions() -> None:
     service = _DiscoveryService()
 
     response = _client(discovery_service=service).get(
-        "/collections/col-1/objectives/obj-1/scope"
+        "/workspaces/col-1/objectives/obj-1/scope"
     )
 
     assert response.status_code == 200
     assert response.json()["data"] == {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "obj-1",
         "counts": {
             "likely_relevant": 1,
@@ -1270,7 +1270,7 @@ def test_objective_scope_returns_404_when_objective_does_not_exist() -> None:
     )
 
     response = _client(discovery_service=service).get(
-        "/collections/col-1/objectives/obj-missing/scope"
+        "/workspaces/col-1/objectives/obj-missing/scope"
     )
 
     assert response.status_code == 200
@@ -1284,14 +1284,14 @@ def test_objective_scope_returns_409_when_paper_maps_are_not_ready() -> None:
     )
 
     response = _client(discovery_service=service).get(
-        "/collections/col-1/objectives/obj-1/scope"
+        "/workspaces/col-1/objectives/obj-1/scope"
     )
 
     assert response.status_code == 200
     assert response.json()["code"] == 200204
     assert response.json()["data"] == {
         "code": "objective_scope_not_ready",
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "obj-1",
     }
 
@@ -1300,7 +1300,7 @@ def test_start_analysis_uses_the_canonical_service_dispatch() -> None:
     service = _Service(queued=True)
 
     response = _client(service).post(
-        "/collections/col-1/objectives/obj-1/analysis",
+        "/workspaces/col-1/objectives/obj-1/analysis",
         json={"document_ids": ["paper-1"]},
     )
 
@@ -1321,11 +1321,11 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
     )
 
     discovery_response = client.post(
-        "/collections/col-1/objective-discovery",
+        "/workspaces/col-1/objective-discovery",
         json={"document_ids": document_ids},
     )
     analysis_response = client.post(
-        "/collections/col-1/objectives/obj-1/analysis",
+        "/workspaces/col-1/objectives/obj-1/analysis",
         json={"document_ids": document_ids},
     )
 
@@ -1345,14 +1345,14 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
 
 def test_duplicate_objective_detail_route_is_not_registered() -> None:
-    response = _client().get("/collections/col-1/objectives/obj-1")
+    response = _client().get("/workspaces/col-1/objectives/obj-1")
 
     assert response.status_code == 200
     assert response.json()["code"] == 200201
 
 
 def test_confirm_objective_route_is_not_registered() -> None:
-    response = _client().post("/collections/col-1/objectives/obj-1/confirm")
+    response = _client().post("/workspaces/col-1/objectives/obj-1/confirm")
 
     assert response.status_code == 200
     assert response.json()["code"] == 200201
@@ -1361,7 +1361,7 @@ def test_confirm_objective_route_is_not_registered() -> None:
 def test_objective_analysis_api_exposes_definition_and_separate_analysis_state() -> (
     None
 ):
-    response = _client().get("/collections/col-1/objectives/obj-1/analysis")
+    response = _client().get("/workspaces/col-1/objectives/obj-1/analysis")
 
     assert response.status_code == 200
     payload = response.json()["data"]
@@ -1373,7 +1373,7 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state()
     assert payload["paper_contributions"] == [
         {
             **{
-                "collection_id": _paper_contribution().collection_id,
+                "workspace_id": _paper_contribution().workspace_id,
                 "objective_id": _paper_contribution().objective_id,
                 "analysis_version": _paper_contribution().analysis_version,
                 "document_id": _paper_contribution().document_id,
@@ -1442,7 +1442,7 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state()
 
 def test_objective_analysis_status_api_returns_only_progress_state() -> None:
     response = _client(_Service(queued=True)).get(
-        "/collections/col-1/objectives/obj-1/analysis/status"
+        "/workspaces/col-1/objectives/obj-1/analysis/status"
     )
 
     assert response.status_code == 200
@@ -1456,7 +1456,7 @@ def test_objective_analysis_status_api_returns_only_progress_state() -> None:
 
 def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
     response = _client().get(
-        "/collections/col-1/objectives/obj-1/findings",
+        "/workspaces/col-1/objectives/obj-1/findings",
         params={"analysis_version": 1, "offset": 0, "limit": 20},
     )
 
@@ -1477,7 +1477,7 @@ def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
 
 def test_evidence_api_returns_exact_source_excerpt_and_locator() -> None:
     response = _client().get(
-        "/collections/col-1/objectives/obj-1/evidence",
+        "/workspaces/col-1/objectives/obj-1/evidence",
         params={"analysis_version": 1, "finding_id": "finding-1"},
     )
 
@@ -1501,7 +1501,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
     created_at = datetime(2026, 9, 1, tzinfo=UTC)
 
     class AgentAuthoredService(_Service):
-        async def get_analysis_state(self, collection_id, objective_id, *, user_id):
+        async def get_analysis_state(self, workspace_id, objective_id, *, user_id):
             analysis = replace(
                 _analysis(),
                 origin="agent_authored",
@@ -1510,7 +1510,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 created_by_tool_call_id="call-agent-analysis",
             )
             return {
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective": StoredObjective(_objective()),
                 "analysis": analysis,
                 "published_analysis": analysis,
@@ -1534,7 +1534,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "warnings": [],
             }
 
-        async def list_findings(self, collection_id, objective_id, **kwargs):
+        async def list_findings(self, workspace_id, objective_id, **kwargs):
             finding = replace(
                 _finding(),
                 analysis_version=2,
@@ -1545,12 +1545,12 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 created_at=created_at,
             )
             return {
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "analysis_version": 2,
                 "items": [
                     {
-                        "collection_id": finding.collection_id,
+                        "workspace_id": finding.workspace_id,
                         "objective_id": finding.objective_id,
                         "analysis_version": finding.analysis_version,
                         "finding_id": finding.finding_id,
@@ -1718,7 +1718,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "total": 1,
             }
 
-        async def list_evidence(self, collection_id, objective_id, **kwargs):
+        async def list_evidence(self, workspace_id, objective_id, **kwargs):
             evidence = replace(
                 _evidence(),
                 analysis_version=2,
@@ -1729,13 +1729,13 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 created_at=created_at,
             )
             return {
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "analysis_version": 2,
                 "finding_id": kwargs["finding_id"],
                 "items": [
                     {
-                        "collection_id": evidence.collection_id,
+                        "workspace_id": evidence.workspace_id,
                         "objective_id": evidence.objective_id,
                         "analysis_version": evidence.analysis_version,
                         "evidence_id": evidence.evidence_id,
@@ -1915,9 +1915,9 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
 
     client = _client(AgentAuthoredService())
 
-    analysis_response = client.get("/collections/col-1/objectives/obj-1/analysis")
-    findings_response = client.get("/collections/col-1/objectives/obj-1/findings")
-    evidence_response = client.get("/collections/col-1/objectives/obj-1/evidence")
+    analysis_response = client.get("/workspaces/col-1/objectives/obj-1/analysis")
+    findings_response = client.get("/workspaces/col-1/objectives/obj-1/findings")
+    evidence_response = client.get("/workspaces/col-1/objectives/obj-1/evidence")
 
     assert analysis_response.status_code == 200
     assert findings_response.status_code == 200
@@ -1939,7 +1939,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
 
 
 def test_evidence_map_api_returns_the_published_objective_projection() -> None:
-    response = _client().get("/collections/col-1/objectives/obj-1/evidence-map")
+    response = _client().get("/workspaces/col-1/objectives/obj-1/evidence-map")
 
     assert response.status_code == 200
     payload = response.json()["data"]

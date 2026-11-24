@@ -1,5 +1,5 @@
 from __future__ import annotations
-from application.source import collection_service, source_import_service
+from application.source import workspace_service, source_import_service
 
 from types import ModuleType
 
@@ -18,7 +18,7 @@ from infra.persistence import database
 from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 from tests.support.source_artifacts import build_source_documents
 
 pytestmark = pytest.mark.anyio
@@ -30,15 +30,15 @@ def anyio_backend() -> str:
 
 
 def _build_profile_service(tmp_path, *, postgres_session_factory):
-    document_profile_service.collection_service = collection_service
+    document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
-    return collection_service, document_profile_service
+    return workspace_service, document_profile_service
 
 
 async def _write_source_artifacts(
     profile_service: ModuleType,
-    collection_id: str,
+    workspace_id: str,
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> None:
@@ -49,32 +49,32 @@ async def _write_source_artifacts(
         blocks=blocks.to_dict(orient="records"),
     )
     for document in source_documents:
-        await seed_collection(
+        await seed_workspace(
             database.AsyncSessionLocal,
-            collection_id,
+            workspace_id,
             document_ids=(document.document_id,),
         )
         await profile_service.SourceArtifactRepo.replace_document(
-            collection_id,
+            workspace_id,
             document,
         )
 
 
 async def _build_profiles(
     profile_service: ModuleType,
-    collection_id: str,
+    workspace_id: str,
     *,
     extractor=None,
 ) -> tuple[DocumentProfile, ...]:
     if extractor is None:
         extractor = profile_extraction.build_default_document_profile_extractor()
-    documents = await profile_service.SourceArtifactRepo.read_collection_documents(
-        collection_id
+    documents = await profile_service.SourceArtifactRepo.read_workspace_documents(
+        workspace_id
     )
     result = tuple(
         [
             await profile_service.build_document_profile(
-                collection_id,
+                workspace_id,
                 document.document_id,
                 source_fingerprint=f"source-{document.document_id}",
                 profile_fingerprint=f"profile-{document.document_id}",
@@ -84,7 +84,7 @@ async def _build_profiles(
         ]
     )
     for profile in result:
-        await profile_service.DocumentProfileRepo.replace(collection_id, profile)
+        await profile_service.DocumentProfileRepo.replace(workspace_id, profile)
     return result
 
 
@@ -92,13 +92,13 @@ async def test_document_profile_service_builds_profiles_and_summary(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, profile_service = _build_profile_service(
+    workspace_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Profiled Collection")
-    collection_id = collection.collection.collection_id
+    workspace = await workspace_service.create_workspace("Profiled Workspace")
+    workspace_id = workspace.workspace.workspace_id
 
     documents = pd.DataFrame(
         [
@@ -154,11 +154,11 @@ async def test_document_profile_service_builds_profiles_and_summary(
             },
         ]
     )
-    await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await _build_profiles(profile_service, collection_id)
+    await _write_source_artifacts(profile_service, workspace_id, documents, text_units)
+    await _build_profiles(profile_service, workspace_id)
 
     payload = await profile_service.list_document_profiles(
-        collection_id, user_id="local-user"
+        workspace_id, user_id="local-user"
     )
 
     assert payload["count"] == 3
@@ -172,7 +172,7 @@ async def test_document_profile_service_builds_profiles_and_summary(
         "mixed": 1,
         "review": 1,
     }
-    stored = await profile_service.DocumentProfileRepo.list_collection(collection_id)
+    stored = await profile_service.DocumentProfileRepo.list_workspace(workspace_id)
     assert len(stored) == 3
 
 
@@ -180,16 +180,16 @@ async def test_document_profile_service_does_not_duplicate_source_filename(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
-    collection_service, profile_service = _build_profile_service(
+    workspace_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Profiled Collection")
-    collection_id = collection.collection.collection_id
+    workspace = await workspace_service.create_workspace("Profiled Workspace")
+    workspace_id = workspace.workspace.workspace_id
     document_record = await source_import_service.add_document(
-        collection_id,
+        workspace_id,
         "wang_2024_battery.txt",
         b"Experimental Section\nThe slurry was stirred for 2 h at 80 C.",
         user_id="local-user",
@@ -220,11 +220,11 @@ async def test_document_profile_service_does_not_duplicate_source_filename(
             }
         ]
     )
-    await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await _build_profiles(profile_service, collection_id)
+    await _write_source_artifacts(profile_service, workspace_id, documents, text_units)
+    await _build_profiles(profile_service, workspace_id)
 
     payload = await profile_service.list_document_profiles(
-        collection_id, user_id="local-user"
+        workspace_id, user_id="local-user"
     )
 
     item = payload["items"][0]
@@ -238,13 +238,13 @@ async def test_document_profile_service_combines_filters_before_paginating(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, profile_service = _build_profile_service(
+    workspace_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Searchable Profiles")
-    collection_id = collection.collection.collection_id
+    workspace = await workspace_service.create_workspace("Searchable Profiles")
+    workspace_id = workspace.workspace.workspace_id
     for row in (
         {
             "document_id": "doc-1",
@@ -271,11 +271,11 @@ async def test_document_profile_service_combines_filters_before_paginating(
             "profile_warnings": [],
         },
     ):
-        await seed_collection(
-            postgres_session_factory, collection_id, document_ids=(row["document_id"],)
+        await seed_workspace(
+            postgres_session_factory, workspace_id, document_ids=(row["document_id"],)
         )
         await profile_service.DocumentProfileRepo.replace(
-            collection_id,
+            workspace_id,
             DocumentProfile(
                 confidence=0.9,
                 document_id=row["document_id"],
@@ -286,7 +286,7 @@ async def test_document_profile_service_combines_filters_before_paginating(
         )
 
     filtered = await profile_service.list_document_profiles(
-        collection_id,
+        workspace_id,
         query=" LASER ",
         offset=0,
         limit=1,
@@ -305,29 +305,29 @@ async def test_document_profile_service_short_circuits_insufficient_content(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
     class ExplodingExtractor:
         def extract_document_profile(self, payload):  # noqa: ANN001
             raise AssertionError("extract_document_profile should not be called")
 
-    document_profile_service.collection_service = collection_service
+    document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     profile_service = document_profile_service
-    collection = await collection_service.create_collection(
+    workspace = await workspace_service.create_workspace(
         "Sparse Profiles"
     )
-    collection_id = collection.collection.collection_id
+    workspace_id = workspace.workspace.workspace_id
     documents = pd.DataFrame([{"id": "paper-1", "title": "", "text": ""}])
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
-    await _write_source_artifacts(profile_service, collection_id, documents, text_units)
+    await _write_source_artifacts(profile_service, workspace_id, documents, text_units)
     await _build_profiles(
-        profile_service, collection_id, extractor=ExplodingExtractor()
+        profile_service, workspace_id, extractor=ExplodingExtractor()
     )
 
     payload = await profile_service.list_document_profiles(
-        collection_id, user_id="local-user"
+        workspace_id, user_id="local-user"
     )
 
     item = payload["items"][0]
@@ -340,7 +340,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     caplog,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
     class OneFailedProfileExtractor:
         def __init__(self) -> None:
@@ -390,14 +390,14 @@ async def test_document_profile_service_continues_after_one_model_format_failure
             self.last_trace = None
             return trace
 
-    document_profile_service.collection_service = collection_service
+    document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     profile_service = document_profile_service
-    collection = await collection_service.create_collection(
+    workspace = await workspace_service.create_workspace(
         "Partial Profiles"
     )
-    collection_id = collection.collection.collection_id
+    workspace_id = workspace.workspace.workspace_id
     documents = pd.DataFrame(
         [
             {
@@ -412,18 +412,18 @@ async def test_document_profile_service_continues_after_one_model_format_failure
             },
         ]
     )
-    await _write_source_artifacts(profile_service, collection_id, documents)
+    await _write_source_artifacts(profile_service, workspace_id, documents)
 
     with caplog.at_level("WARNING"):
         profiles = await _build_profiles(
-            profile_service, collection_id, extractor=OneFailedProfileExtractor()
+            profile_service, workspace_id, extractor=OneFailedProfileExtractor()
         )
 
     records = {
         profile["document_id"]: profile
         for profile in (
             await profile_service.list_document_profiles(
-                collection_id, user_id="local-user"
+                workspace_id, user_id="local-user"
             )
         )["items"]
     }
@@ -440,7 +440,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
         for record in caplog.records
         if "Document profile classification unavailable" in record.getMessage()
     )
-    assert f"collection_id={collection_id}" in failure_log
+    assert f"workspace_id={workspace_id}" in failure_log
     assert "document_id=paper-failed" in failure_log
     assert '"model":"test-model"' in failure_log
     assert '"error":"structured extraction returned no JSON object"' in failure_log
@@ -454,34 +454,34 @@ async def test_document_profile_read_does_not_build_missing_profiles(
     monkeypatch,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, profile_service = _build_profile_service(
+    workspace_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Read Only Profiles")
-    collection_id = collection.collection.collection_id
+    workspace = await workspace_service.create_workspace("Read Only Profiles")
+    workspace_id = workspace.workspace.workspace_id
 
-    def fail_build(collection_id: str):  # noqa: ANN001
-        raise AssertionError(f"build should not run from read path: {collection_id}")
+    def fail_build(workspace_id: str):  # noqa: ANN001
+        raise AssertionError(f"build should not run from read path: {workspace_id}")
 
     monkeypatch.setattr(profile_service, "build_document_profile", fail_build)
 
     with pytest.raises(DocumentProfilesNotReadyError):
-        await profile_service.read_document_profiles(collection_id)
+        await profile_service.read_document_profiles(workspace_id)
 
 
 async def test_document_profile_service_round_trips_repository_storage_fields(
     tmp_path,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, profile_service = _build_profile_service(
+    workspace_service, profile_service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collection_service.create_collection("Round Trip Profiles")
-    collection_id = collection.collection.collection_id
+    workspace = await workspace_service.create_workspace("Round Trip Profiles")
+    workspace_id = workspace.workspace.workspace_id
     documents = pd.DataFrame(
         [
             {
@@ -508,14 +508,14 @@ async def test_document_profile_service_round_trips_repository_storage_fields(
             }
         ]
     )
-    await _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    await _build_profiles(profile_service, collection_id)
+    await _write_source_artifacts(profile_service, workspace_id, documents, text_units)
+    await _build_profiles(profile_service, workspace_id)
 
-    restored = await profile_service.read_document_profiles(collection_id)
+    restored = await profile_service.read_document_profiles(workspace_id)
     assert isinstance(
         (
             await profile_service.get_document_profile(
-                collection_id, restored[0].document_id, user_id="local-user"
+                workspace_id, restored[0].document_id, user_id="local-user"
             )
         )["profile_warnings"],
         list,
@@ -527,19 +527,19 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
     monkeypatch,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    collections, service = _build_profile_service(
+    workspaces, service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection = await collections.create_collection("Twenty papers")
-    collection_id = collection.collection.collection_id
+    workspace = await workspaces.create_workspace("Twenty papers")
+    workspace_id = workspace.workspace.workspace_id
     for index in range(20):
-        await seed_collection(
-            database.AsyncSessionLocal, collection_id, document_ids=(f"doc_{index}",)
+        await seed_workspace(
+            database.AsyncSessionLocal, workspace_id, document_ids=(f"doc_{index}",)
         )
         await service.SourceArtifactRepo.replace_document(
-            collection_id,
+            workspace_id,
             SourceDocument(
                 document_id=f"doc_{index}",
                 document_order=index,
@@ -547,11 +547,11 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
                 text=f"Measured porosity {index}%.",
             ),
         )
-        await seed_collection(
-            database.AsyncSessionLocal, collection_id, document_ids=(f"doc_{index}",)
+        await seed_workspace(
+            database.AsyncSessionLocal, workspace_id, document_ids=(f"doc_{index}",)
         )
         await service.DocumentProfileRepo.replace(
-            collection_id,
+            workspace_id,
             DocumentProfile(
                 document_id=f"doc_{index}",
                 title=f"Paper {index}",
@@ -561,25 +561,25 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
             ),
         )
 
-    async def reject_collection_read(*args, **kwargs):
-        pytest.fail("A single-paper read must not load the collection")
+    async def reject_workspace_read(*args, **kwargs):
+        pytest.fail("A single-paper read must not load the workspace")
 
     monkeypatch.setattr(
         service.SourceArtifactRepo,
-        "read_collection_documents",
-        reject_collection_read,
+        "read_workspace_documents",
+        reject_workspace_read,
     )
     monkeypatch.setattr(
-        service.DocumentProfileRepo, "list_collection", reject_collection_read
+        service.DocumentProfileRepo, "list_workspace", reject_workspace_read
     )
     content = await service.get_document_content(
-        collection_id, "doc_7", user_id="local-user"
+        workspace_id, "doc_7", user_id="local-user"
     )
     assert content["content_text"] == "Measured porosity 7%."
     assert content["title"] == "Paper 7"
     assert content["blocks"][0]["text"] == content["content_text"]
     assert (
-        await service.get_document_profile(collection_id, "doc_7", user_id="local-user")
+        await service.get_document_profile(workspace_id, "doc_7", user_id="local-user")
     )["document_id"] == "doc_7"
 
 
@@ -590,42 +590,42 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
     has_other_source,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
     from application.core.document_profiles.service import (
         DocumentContentNotReadyError,
         DocumentNotFoundError,
     )
 
-    collections, service = _build_profile_service(
+    workspaces, service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection_id = (await collections.create_collection('Missing source')).collection.collection_id
+    workspace_id = (await workspaces.create_workspace('Missing source')).workspace.workspace_id
     if has_other_source:
-        await seed_collection(
-            database.AsyncSessionLocal, collection_id, document_ids=("other",)
+        await seed_workspace(
+            database.AsyncSessionLocal, workspace_id, document_ids=("other",)
         )
         await service.SourceArtifactRepo.replace_document(
-            collection_id,
+            workspace_id,
             SourceDocument(
                 document_id="other", document_order=0, title=None, text="Other paper"
             ),
         )
 
-    async def reject_collection_read(*args, **kwargs):
+    async def reject_workspace_read(*args, **kwargs):
         pytest.fail("Absence checks must not hydrate other papers")
 
     monkeypatch.setattr(
         service.SourceArtifactRepo,
-        "read_collection_documents",
-        reject_collection_read,
+        "read_workspace_documents",
+        reject_workspace_read,
     )
     expected = (
         DocumentNotFoundError if has_other_source else DocumentContentNotReadyError
     )
     with pytest.raises(expected):
         await service.get_document_content(
-            collection_id, "missing", user_id="local-user"
+            workspace_id, "missing", user_id="local-user"
         )
 
 
@@ -654,17 +654,17 @@ async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(
     expected_filename,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    collections, service = _build_profile_service(
+    workspaces, service = _build_profile_service(
         tmp_path, postgres_session_factory=postgres_session_factory
     )
-    collection_id = (await collections.create_collection('Metadata')).collection.collection_id
-    await seed_collection(
-        database.AsyncSessionLocal, collection_id, document_ids=("doc_a",)
+    workspace_id = (await workspaces.create_workspace('Metadata')).workspace.workspace_id
+    await seed_workspace(
+        database.AsyncSessionLocal, workspace_id, document_ids=("doc_a",)
     )
     await service.SourceArtifactRepo.replace_document(
-        collection_id,
+        workspace_id,
         SourceDocument(
             document_id="doc_a",
             document_order=0,
@@ -674,7 +674,7 @@ async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(
         ),
     )
     content = await service.get_document_content(
-        collection_id, "doc_a", user_id="local-user"
+        workspace_id, "doc_a", user_id="local-user"
     )
     assert content["title"] == expected_title
     assert content["source_filename"] == expected_filename

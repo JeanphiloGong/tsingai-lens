@@ -36,16 +36,16 @@ class FeedbackDatasetORM(Base):
             "spec_version >= 1", name="feedback_dataset_spec_version_positive"
         ),
         Index(
-            "ix_feedback_datasets_collection_created",
-            "collection_id",
+            "ix_feedback_datasets_workspace_created",
+            "workspace_id",
             "created_at",
         ),
     )
 
     dataset_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

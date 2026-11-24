@@ -40,7 +40,7 @@ The current backend already has the right high-level layering:
 
 - Source hands off structural artifacts such as `documents`, `text_units`,
   `blocks`, `table_rows`, and `table_cells`
-- Core owns stable research-fact extraction and collection-facing review
+- Core owns stable research-fact extraction and workspace-facing review
   artifacts
 - derived and downstream surfaces consume Core outputs rather than defining the
   facts themselves
@@ -54,7 +54,7 @@ semantic extraction is still dominated by heuristics:
 - value and unit guessing for `measurement_results`
 - condition and baseline inference from weak context fragments
 
-That rule-heavy path is now producing visibly bad collection-facing outputs on
+That rule-heavy path is now producing visibly bad workspace-facing outputs on
 real documents:
 
 - filenames leaking into material-system fields
@@ -127,7 +127,7 @@ This hard-cutover plan covers:
 - preserving deterministic Core assembly for `comparison_rows`
 - invalidating old heuristic-produced Core artifacts rather than supporting
   mixed reads
-- adding benchmark and regression coverage for known collection-facing failure
+- adding benchmark and regression coverage for known workspace-facing failure
   modes
 
 This plan does not cover:
@@ -191,7 +191,7 @@ three reasons:
 
 - deterministic comparability judgment remains auditable
 - API behavior stays easier to reason about and test
-- collection-facing review does not become hostage to one opaque prompt output
+- workspace-facing review does not become hostage to one opaque prompt output
 
 ## New Extraction Architecture
 
@@ -333,7 +333,7 @@ Required behavior:
 
 - introduce a Core extraction version such as `llm_v1`
 - treat old heuristic-produced artifacts as stale for Core semantic reads
-- force rebuild of Core artifacts when a collection only has the old version
+- force rebuild of Core artifacts when a workspace only has the old version
 - do not keep dual readers for heuristic and LLM artifact shapes
 
 The backend may still reuse the same artifact filenames if the shape remains
@@ -401,7 +401,7 @@ deterministic comparison assembly until the backbone artifacts improve.
 
 ### Output Quality Verification
 
-- review-heavy collections no longer leak filenames into
+- review-heavy workspaces no longer leak filenames into
   `material_system_normalized`
 - year-like values no longer appear as `unit`
 - numbering artifacts no longer appear as variant axes or variant labels
@@ -416,7 +416,7 @@ deterministic comparison assembly until the backbone artifacts improve.
 - Source still terminates at structural artifacts only
 - Core remains the only stable fact producer
 - Core consumes `blocks` and `table_rows` rather than `sections`
-- comparison APIs continue to serve deterministic collection-facing rows
+- comparison APIs continue to serve deterministic workspace-facing rows
 
 ### Regression Verification
 

@@ -72,8 +72,8 @@ def test_chat_tree_rejects_cross_conversation_links(postgres_sync_engine) -> Non
         connection.execute(
             text(
                 """
-                INSERT INTO collections
-                    (collection_id, owner_user_id, name, status, created_at, updated_at)
+                INSERT INTO workspaces
+                    (workspace_id, owner_user_id, name, status, created_at, updated_at)
                 VALUES ('tree-workspace', 'tree-user', 'Tree fixture', 'idle', :now, :now)
                 """
             ),
@@ -161,8 +161,8 @@ async def test_read_selected_branch_with_scoped_feedback(
     now = datetime.now(timezone.utc)
     async with postgres_session_factory.begin() as db:
         await db.execute(text("""
-            INSERT INTO collections
-                (collection_id, owner_user_id, name, status, created_at, updated_at)
+            INSERT INTO workspaces
+                (workspace_id, owner_user_id, name, status, created_at, updated_at)
             VALUES ('workspace-a', 'owner', 'Research papers', 'idle', :now, :now),
                    ('workspace-b', 'other', 'Other papers', 'idle', :now, :now)
         """), {"now": now})
@@ -249,10 +249,10 @@ def test_conversation_rename_round_trip_preserves_history(postgres_sync_engine) 
         config.attributes["connection"] = db
         command.downgrade(config, "b71000000001")
         db.execute(text("""
-            INSERT INTO collections
-                (collection_id, owner_user_id, name, status, created_at, updated_at)
+            INSERT INTO workspaces
+                (workspace_id, owner_user_id, name, status, created_at, updated_at)
             VALUES ('workspace', 'owner', 'Research papers', 'idle', now(), now());
-            INSERT INTO chat_sessions (session_id, collection_id, user_id, created_at, updated_at)
+            INSERT INTO chat_sessions (session_id, workspace_id, user_id, created_at, updated_at)
             VALUES ('thread', 'workspace', 'owner', now(), now());
             INSERT INTO chat_messages (message_id, session_id, position, role, content, created_at)
             VALUES ('question', 'thread', 0, 'user', 'Compare the papers', now()),

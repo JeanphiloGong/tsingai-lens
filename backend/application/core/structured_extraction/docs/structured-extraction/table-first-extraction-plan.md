@@ -274,7 +274,7 @@ are not a replacement for table routing.
 ## Verification
 
 The first implementation should be verified with focused unit tests and one
-real collection rebuild.
+real workspace rebuild.
 
 Unit tests should cover:
 
@@ -288,7 +288,7 @@ Unit tests should cover:
 - atmosphere terms do not materialize as material families
 - split row-label fragments do not materialize as sample variants
 
-Collection rebuild checks should confirm:
+Workspace rebuild checks should confirm:
 
 - `table_rows` total count matches unique `row_id` count
 - extracted sample count drops from the inflated failure state

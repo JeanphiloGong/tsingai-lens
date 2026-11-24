@@ -219,7 +219,7 @@ Architecture and decisions:
 
 - [`docs/architecture/lens-v1-architecture-boundary.md`](docs/architecture/lens-v1-architecture-boundary.md)
 - [`docs/architecture/paper-facts-and-comparison-current-state.md`](docs/architecture/paper-facts-and-comparison-current-state.md)
-- [`docs/decisions/rfc-collection-bound-research-agent.md`](docs/decisions/rfc-collection-bound-research-agent.md)
+- [`docs/decisions/rfc-workspace-bound-research-agent.md`](docs/decisions/rfc-workspace-bound-research-agent.md)
 
 Module setup and contracts:
 

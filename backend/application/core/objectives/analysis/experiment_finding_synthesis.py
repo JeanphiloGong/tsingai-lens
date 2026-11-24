@@ -56,14 +56,14 @@ class _SelectedStudy:
 
 def synthesize_experiment_findings(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis_version: int,
     revisions: Sequence[PaperExperimentRevision],
     selections: Sequence[ObjectiveExperimentSelection],
 ) -> ExperimentFindingSynthesisResult:
-    if objective.collection_id != collection_id:
-        raise ValueError("experiment synthesis objective belongs to another collection")
+    if objective.workspace_id != workspace_id:
+        raise ValueError("experiment synthesis objective belongs to another workspace")
     if analysis_version < 1:
         raise ValueError("experiment synthesis requires a positive analysis version")
 
@@ -109,14 +109,14 @@ def synthesize_experiment_findings(
             group = None
             if len(cluster) > 1:
                 group = _build_group(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     objective=objective,
                     analysis_version=analysis_version,
                     studies=cluster,
                 )
                 groups.append(group)
             finding = _build_finding(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective=objective,
                 analysis_version=analysis_version,
                 studies=cluster,
@@ -299,7 +299,7 @@ def _pair_comparability(
 
 def _build_group(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis_version: int,
     studies: Sequence[_SelectedStudy],
@@ -338,7 +338,7 @@ def _build_group(
     return ComparisonGroup(
         group_id=_stable_id(
             "grp",
-            collection_id,
+            workspace_id,
             objective.objective_id,
             analysis_version,
             first.selection.outcome,
@@ -365,7 +365,7 @@ def _build_group(
 
 def _build_finding(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis_version: int,
     studies: Sequence[_SelectedStudy],
@@ -404,12 +404,12 @@ def _build_finding(
         )
     )
     return Finding(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective.objective_id,
         analysis_version=analysis_version,
         finding_id=_stable_id(
             "finding",
-            collection_id,
+            workspace_id,
             objective.objective_id,
             analysis_version,
             first.selection.outcome,

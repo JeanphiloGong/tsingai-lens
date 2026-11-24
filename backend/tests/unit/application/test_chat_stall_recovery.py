@@ -202,8 +202,8 @@ async def test_active_research_step_does_not_receive_a_plan_update_reminder_afte
 def test_core_reader_specs_are_available_without_discovery_but_writes_are_not():
     from application.chat.capability_policy import select_tool_specs
     from application.chat.capabilities.document_sources import SearchSourcesCapability,InspectDocumentSourcesCapability,ReadSourceCapability,InspectTableCapability
-    from application.chat.capabilities.collection_context import BrowseCollectionPapersCapability
-    readers=(SearchSourcesCapability(),InspectDocumentSourcesCapability(),ReadSourceCapability(),InspectTableCapability(),BrowseCollectionPapersCapability())
+    from application.chat.capabilities.workspace_context import BrowseWorkspacePapersCapability
+    readers=(SearchSourcesCapability(),InspectDocumentSourcesCapability(),ReadSourceCapability(),InspectTableCapability(),BrowseWorkspacePapersCapability())
     registry=CapabilityRegistry((*readers,_Capability('save',ToolRisk.WRITE)))
     names={spec.name for spec in select_tool_specs(registry,[],[],permission_mode='read_only')}
     assert {reader.spec.name for reader in readers}<=names

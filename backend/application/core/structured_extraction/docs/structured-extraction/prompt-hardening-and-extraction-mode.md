@@ -104,7 +104,7 @@ This child plan covers:
 - one environment-variable switch for the two extraction modes
 - targeted extractor logging so mode-specific failures are attributable
 - unit tests for the production prompt and extractor mode branch
-- production benchmark reruns against one real collection after the change
+- production benchmark reruns against one real workspace after the change
 
 This child plan does not cover:
 
@@ -184,7 +184,7 @@ This plan should not allow mode-specific prompt drift.
 ### Logging And Attribution
 
 The production extractor should log enough detail to compare the modes on real
-collections:
+workspaces:
 
 - extraction mode
 - model name
@@ -202,7 +202,7 @@ in service callers.
 3. Add targeted unit coverage for the prompt content and extractor mode
    selection.
 4. Rerun the canonical text-window benchmarks against both modes.
-5. Rerun the collection benchmark against one real collection with both modes.
+5. Rerun the workspace benchmark against one real workspace with both modes.
 6. Decide whether prompt hardening alone is sufficient or whether one smaller
    follow-on sanitation wave is still needed.
 
@@ -239,28 +239,28 @@ python3 scripts/benchmarks/text_window_probe.py --mode raw_text_plus_validate --
 python3 scripts/benchmarks/text_window_probe.py --mode provider_structured_parse --repeat 3
 ```
 
-### Collection Verification
+### Workspace Verification
 
-Run the same real collection under both modes when comparing providers or
+Run the same real workspace under both modes when comparing providers or
 debugging a suspected structured-parse regression:
 
 ```bash
 cd backend
-CORE_LLM_EXTRACTION_MODE=json_text uv run python scripts/benchmarks/paper_facts_collection_benchmark.py --collection-id <collection_id>
-CORE_LLM_EXTRACTION_MODE=provider_parse uv run python scripts/benchmarks/paper_facts_collection_benchmark.py --collection-id <collection_id>
+CORE_LLM_EXTRACTION_MODE=json_text uv run python scripts/benchmarks/paper_facts_workspace_benchmark.py --workspace-id <workspace_id>
+CORE_LLM_EXTRACTION_MODE=provider_parse uv run python scripts/benchmarks/paper_facts_workspace_benchmark.py --workspace-id <workspace_id>
 ```
 
 Compare:
 
 - success versus failure rate
 - per-unit timing
-- whole-collection timing
+- whole-workspace timing
 - failure taxonomy
 
 ## Deferred Fallback
 
 If prompt hardening alone still leaves frequent schema-invalid responses on the
-collection benchmark, the follow-on wave should be a very thin deterministic
+workspace benchmark, the follow-on wave should be a very thin deterministic
 sanitizer before local validation.
 
 That fallback should remain bounded to mechanical repair only:
@@ -281,6 +281,6 @@ This child plan is done only when:
 - `CORE_LLM_EXTRACTION_MODE` switches the production extractor between the two
   temporary paths without changing callers
 - the default mode remains explicit and documented as `provider_parse`
-- production benchmark reruns can compare the two modes on the same collection
+- production benchmark reruns can compare the two modes on the same workspace
 - the backend has enough evidence to decide whether the dual-mode period
   should continue or be closed

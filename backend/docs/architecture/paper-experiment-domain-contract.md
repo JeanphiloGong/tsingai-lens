@@ -16,7 +16,7 @@ prepared Source
 ```
 
 `PaperExperiment` is reusable paper state. It is not owned by an Objective or
-Collection. An Objective selects experiment content through
+Workspace. An Objective selects experiment content through
 `ObjectiveExperimentSelection`.
 
 One Document may contain multiple independent `PaperExperiment` identities. A
@@ -130,7 +130,7 @@ The provider returns content only. Its Draft may use local
 `variant_key`, `test_key`, `measurement_key`, and `comparison_key` values to
 refer to records within that one response. It must not return formal
 `experiment_id`, component/database `id` values, `experiment_version`,
-`collection_id`, `objective_id`, any final `measurement_id`/`result_id`/
+`workspace_id`, `objective_id`, any final `measurement_id`/`result_id`/
 `comparison_id` (including plural ID lists or other formal `*_id` fields),
 source-reference records, or
 `identity_status`/`binding_status`/`relation_status`.

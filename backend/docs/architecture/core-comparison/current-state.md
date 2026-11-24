@@ -3,7 +3,7 @@
 ## Summary
 
 The retired material-first comparison substrate has been removed. Comparable
-results, collection overlays, row projections, and their assembly and
+results, workspace overlays, row projections, and their assembly and
 assessment helpers are not maintained runtime, evaluation, or browser
 resources.
 
@@ -20,8 +20,8 @@ The product chain is:
 
 ### Scope Truth
 
-- `collection_comparable_results`
-  Former Collection overlays over comparable results.
+- `workspace_comparable_results`
+  Former Workspace overlays over comparable results.
 
 ### Deterministic Projection
 

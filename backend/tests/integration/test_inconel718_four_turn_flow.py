@@ -19,7 +19,7 @@ from domain.source import SourceDocument, SourceBlock
 from repositories.chat_repository import ChatRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 from application.chat import session_service
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 from tests.unit.application.test_research_agent_runner import _Model
 from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner
 
@@ -57,10 +57,10 @@ def test_all_48_energy_descriptors_and_rotation_pairs():
 @pytest.mark.anyio
 @pytest.mark.parametrize("interrupt", [False, True])
 async def test_four_turns_keep_original_table_sources_and_user_scope(
-    postgres_session_factory, collection_service, object_store, monkeypatch,
+    postgres_session_factory, workspace_service, object_store, monkeypatch,
     scripted_chat_runner, interrupt
 ):
-    await seed_collection(
+    await seed_workspace(
         postgres_session_factory, "col-399", document_ids=("doc-399",)
     )
     sources = SourceArtifactRepository()
@@ -112,7 +112,7 @@ async def test_four_turns_keep_original_table_sources_and_user_scope(
             model=model, capabilities=CapabilityRegistry((ReadSourceCapability(),))
         )
     )
-    session = await service.create_session(collection_id="col-399", user_id="user-1")
+    session = await service.create_session(workspace_id="col-399", user_id="user-1")
     await repository.set_permission(
         session.session_id,
         "user-1",

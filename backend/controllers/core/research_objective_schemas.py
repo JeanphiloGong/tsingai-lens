@@ -30,7 +30,7 @@ ObjectiveScopeClassification = Literal[
 
 
 class ObjectiveSummaryResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     question: str
     material_scope: list[str] = Field(default_factory=list)
@@ -62,7 +62,7 @@ class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
 
 
 class PaginatedObjectiveListResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
     offset: int = Field(..., ge=0)
     limit: int | None = Field(default=None, ge=1)
@@ -93,7 +93,7 @@ class ObjectiveScopeDecisionResponse(BaseModel):
 class ObjectiveScopeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     counts: ObjectiveScopeCountsResponse
     recommended_document_ids: list[str] = Field(default_factory=list)
@@ -106,7 +106,7 @@ class ObjectiveScopeResponse(BaseModel):
 class ObjectiveAnalysisStatusResponse(BaseModel):
     """Small progress payload used while an Objective analysis is running."""
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int | None = Field(default=None, ge=1)
     status: AnalysisStatus | None = None
@@ -284,7 +284,7 @@ class ObjectiveEvidenceMapCoverageResponse(BaseModel):
 class ObjectiveEvidenceMapResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int = Field(..., ge=1)
     projection_version: Literal["objective-evidence-map.v1"]
@@ -310,7 +310,7 @@ class InspectedObjectiveSourceRefResponse(BaseModel):
 class PaperContributionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int = Field(..., ge=1)
     document_id: str
@@ -359,7 +359,7 @@ class PaperContributionResponse(BaseModel):
 
 
 class ObjectiveAnalysisResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective: ObjectiveSummaryResponse
     active_analysis: ObjectiveAnalysisStateResponse | None = None
     published_analysis: ObjectiveAnalysisStateResponse | None = None
@@ -382,7 +382,7 @@ class FindingEvidenceReviewResponse(BaseModel):
 
 
 class FindingListResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     items: list[FindingResponse] = Field(default_factory=list)
@@ -406,7 +406,7 @@ class FindingSummaryReferenceResponse(BaseModel):
 
 
 class FindingSummaryResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     finding_id: str
     analysis_version: int
@@ -420,7 +420,7 @@ class FindingSummaryResponse(BaseModel):
 
 
 class FindingDetailResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding: FindingResponse
@@ -428,7 +428,7 @@ class FindingDetailResponse(BaseModel):
 
 
 class ObjectiveEvidenceListResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str | None = None

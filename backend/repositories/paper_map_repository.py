@@ -22,7 +22,7 @@ from domain.core.research_objective import (
     build_paper_research_signal,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import (
+from infra.persistence.postgres.models.workspace import (
     DocumentORM,
     DocumentPreparationORM,
 )
@@ -32,16 +32,16 @@ from sqlalchemy import select
 class PaperMapRepository:
     async def replace(
         self,
-        collection_id: str,
+        workspace_id: str,
         paper_map: PaperResearchMap,
         *,
         db: AsyncSession | None = None,
     ) -> None:
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             document = await db.get(DocumentORM, paper_map.document_id)
-            if document is None or document.collection_id != collection_id:
+            if document is None or document.workspace_id != workspace_id:
                 raise FileNotFoundError(
-                    f"collection document not found: {collection_id}/{paper_map.document_id}"
+                    f"workspace document not found: {workspace_id}/{paper_map.document_id}"
                 )
             row = await db.scalar(
                 select(DocumentPreparationORM)
@@ -51,12 +51,12 @@ class PaperMapRepository:
                 )
                 .where(
                     DocumentPreparationORM.document_id == paper_map.document_id,
-                    DocumentORM.collection_id == collection_id,
+                    DocumentORM.workspace_id == workspace_id,
                 )
             )
             if row is None or not row.profile_json:
                 raise FileNotFoundError(
-                    f"document profile not found: {collection_id}/{paper_map.document_id}"
+                    f"document profile not found: {workspace_id}/{paper_map.document_id}"
                 )
             row.paper_map_payload = {
                 "document_id": paper_map.document_id,
@@ -163,7 +163,7 @@ class PaperMapRepository:
 
     async def read(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
     ) -> PaperResearchMap | None:
         async with AsyncSessionLocal() as db:
@@ -175,7 +175,7 @@ class PaperMapRepository:
                 )
                 .where(
                     DocumentPreparationORM.document_id == document_id,
-                    DocumentORM.collection_id == collection_id,
+                    DocumentORM.workspace_id == workspace_id,
                 )
             )
             if row is None or not row.paper_map_payload:
@@ -373,9 +373,9 @@ class PaperMapRepository:
             )
             return paper_map
 
-    async def list_collection(
+    async def list_workspace(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_ids: tuple[str, ...] | None = None,
     ) -> tuple[PaperResearchMap, ...]:
         if document_ids == ():
@@ -387,7 +387,7 @@ class PaperMapRepository:
                     DocumentORM,
                     DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
-                .where(DocumentORM.collection_id == collection_id)
+                .where(DocumentORM.workspace_id == workspace_id)
             )
             if document_ids is not None:
                 statement = statement.where(

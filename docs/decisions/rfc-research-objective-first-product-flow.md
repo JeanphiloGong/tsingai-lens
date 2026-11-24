@@ -505,12 +505,12 @@ must preserve the objective-specific route and evidence.
 The public backend API should move from material routes to research-objective
 routes.
 
-The landed first read routes use the `/objectives` collection family documented
+The landed first read routes use the `/objectives` workspace family documented
 in the backend API spec:
 
 ```text
-GET /api/v1/collections/{collection_id}/objectives
-GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view
+GET /api/v1/workspaces/{workspace_id}/objectives
+GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/research-view
 ```
 
 Future objective-scoped comparison and evidence routes should stay in that
@@ -520,16 +520,16 @@ are retired and should not be reintroduced as a parallel Markdown answer path.
 The intended follow-up surfaces are:
 
 ```text
-GET /api/v1/collections/{collection_id}/objectives/{objective_id}/comparison-rows
-GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence
+GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/comparison-rows
+GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/evidence
 ```
 
 Material-first routes should be removed from the primary product contract after
 the cutover:
 
 ```text
-GET /api/v1/collections/{collection_id}/materials
-GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view
+GET /api/v1/workspaces/{workspace_id}/materials
+GET /api/v1/workspaces/{workspace_id}/materials/{material_id}/research-view
 ```
 
 If a temporary migration bridge is unavoidable during rollout, it must be

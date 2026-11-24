@@ -1,0 +1,359 @@
+import { writable } from 'svelte/store';
+import { DOCUMENT_AGENT, type DocumentAgentState } from './documentAgent';
+const agent = writable<DocumentAgentState>({
+	open: false,
+	papers: [],
+	sourceVersion: 0,
+	busy: false
+});
+import { page as browserPage } from 'vitest/browser';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render } from 'vitest-browser-svelte';
+
+type DocumentsPageState = {
+	params: { id: string };
+	url: URL;
+};
+
+const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
+	const subscribers = new Set<(value: DocumentsPageState) => void>();
+	let current: DocumentsPageState = {
+		params: { id: 'col_123' },
+		url: new URL('http://localhost/workspaces/col_123/documents')
+	};
+	return {
+		pageStore: {
+			subscribe(run: (value: DocumentsPageState) => void) {
+				run(current);
+				subscribers.add(run);
+				return () => subscribers.delete(run);
+			}
+		},
+		setPage(next: DocumentsPageState) {
+			current = next;
+			for (const run of subscribers) run(next);
+		},
+		fetchMock: vi.fn()
+	};
+});
+
+vi.mock('$app/stores', () => ({ page: pageStore }));
+vi.stubGlobal('fetch', fetchMock);
+
+const Page = (await import('./+page.svelte')).default;
+
+function jsonResponse(data: unknown, code = 200, message = 'success') {
+	return new Response(JSON.stringify({ code, message, data, meta: null }), {
+		status: 200,
+		headers: { 'Content-Type': 'application/json' }
+	});
+}
+
+function profile(index: number) {
+	return {
+		document_id: `doc-${index}`,
+		title: `Paper ${index}`,
+		doc_type: 'experimental',
+		profile_status: 'completed',
+		profile_warnings: [],
+		confidence: 0.9,
+		page_count: 10
+	};
+}
+
+function requestPath(input: string | URL | Request) {
+	const rawUrl =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	return new URL(rawUrl, 'http://localhost').pathname;
+}
+
+describe('workspaces/[id]/documents/+page.svelte', () => {
+	beforeEach(() => {
+		agent.set({ open: false, papers: [], sourceVersion: 0, busy: false });
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/workspaces/col_123/documents')
+		});
+		fetchMock.mockReset();
+	});
+
+	it('keeps profile identity and Source navigation visible', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				workspace_id: 'col_123',
+				total: 2,
+				count: 2,
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 2,
+					by_doc_type: { experimental: 1, review: 1 },
+					warnings: []
+				},
+				items: [
+					{
+						...profile(1),
+						document_id: 'doc_1',
+						title: 'Paper A',
+						confidence: 0.91,
+						page_count: 12
+					},
+					{
+						...profile(2),
+						document_id: 'abcdef1234567890abcdef1234567890',
+						title: null,
+						doc_type: 'review',
+						profile_warnings: ['Missing publication year'],
+						confidence: 0.7,
+						page_count: 8
+					}
+				]
+			})
+		);
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
+		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
+		await expect.element(browserPage.getByText('Paper 2')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link').first())
+			.toHaveAttribute('href', '/workspaces/col_123/documents/doc_1');
+		expect(requestPath(fetchMock.mock.calls[0]?.[0] as string | URL | Request)).toBe(
+			'/api/v1/workspaces/col_123/documents/profiles'
+		);
+	});
+
+	it('uses a neutral fallback without exposing internal identifiers', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				workspace_id: 'col_123',
+				total: 1,
+				count: 1,
+				summary: { technical_failure_count: 0, total_documents: 1, by_doc_type: {}, warnings: [] },
+				items: [
+					{
+						...profile(1),
+						document_id: 'abcdef1234567890abcdef1234567890',
+						title: null,
+						source_filename: null,
+						doc_type: 'uncertain',
+						confidence: null
+					}
+				]
+			})
+		);
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+
+		await expect.element(browserPage.getByText('Paper 1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('ID: abcdef123456')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('abcdef1234567890abcdef1234567890'))
+			.not.toBeInTheDocument();
+	});
+
+	it('shows the complete total while rendering one bounded page', async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				workspace_id: 'col_123',
+				total: 131,
+				count: 25,
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: { experimental: 131 },
+					warnings: []
+				},
+				items: Array.from({ length: 25 }, (_, index) => profile(index + 1))
+			})
+		);
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+
+		await expect.element(browserPage.getByText('131 paper(s)')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Papers 1–25 of 131').first()).toBeInTheDocument();
+		expect(document.querySelectorAll('[data-paper-row]')).toHaveLength(25);
+		expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+			'/api/v1/workspaces/col_123/documents/profiles?offset=0&limit=25'
+		);
+	});
+
+	it('requests the next page with the correct offset', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			const offset = Number(url.searchParams.get('offset') ?? 0);
+			return jsonResponse({
+				workspace_id: 'col_123',
+				total: 131,
+				count: 25,
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: {},
+					warnings: []
+				},
+				items: Array.from({ length: 25 }, (_, index) => profile(offset + index + 1))
+			});
+		});
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+		await browserPage.getByRole('button', { name: 'Next' }).click();
+
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) => String(input).includes('offset=25&limit=25'))
+			).toBe(true);
+		});
+		await expect.element(browserPage.getByText('Papers 26–50 of 131').first()).toBeInTheDocument();
+	});
+
+	it('searches the workspace and resets to the first page', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			const query = url.searchParams.get('query');
+			return jsonResponse({
+				workspace_id: 'col_123',
+				total: query ? 1 : 131,
+				count: query ? 1 : 25,
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: {},
+					warnings: []
+				},
+				items: query ? [{ ...profile(88), title: 'Laser porosity study' }] : [profile(1)]
+			});
+		});
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+		await browserPage.getByLabelText('Search papers').fill('  laser porosity  ');
+
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					String(input).includes('offset=0&limit=25&query=laser+porosity')
+				)
+			).toBe(true);
+		});
+		await expect.element(browserPage.getByText('Laser porosity study')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 matching paper(s)')).toBeInTheDocument();
+	});
+
+	it('filters the workspace by paper type', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			const filtered = url.searchParams.get('doc_type') === 'review';
+			return jsonResponse({
+				workspace_id: 'col_123',
+				total: filtered ? 1 : 131,
+				count: filtered ? 1 : 25,
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: { experimental: 100, review: 25, mixed: 4, uncertain: 2 },
+					warnings: []
+				},
+				items: filtered
+					? [
+							{
+								...profile(91),
+								title: 'Review needing inspection',
+								doc_type: 'review',
+								profile_warnings: ['insufficient_content']
+							}
+						]
+					: [profile(1)]
+			});
+		});
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+		await browserPage.getByLabelText('Paper type').selectOptions('review');
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) => {
+					const url = new URL(String(input), 'http://localhost');
+					return (
+						url.searchParams.get('offset') === '0' && url.searchParams.get('doc_type') === 'review'
+					);
+				})
+			).toBe(true);
+		});
+		await expect.element(browserPage.getByText('Review needing inspection')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 matching paper(s)')).toBeInTheDocument();
+	});
+
+	it('keeps all active filters when changing paper pages', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const url = new URL(String(input), 'http://localhost');
+			const isFiltered = url.searchParams.get('doc_type') === 'review';
+			const offset = Number(url.searchParams.get('offset') ?? 0);
+			return jsonResponse({
+				workspace_id: 'col_123',
+				total: isFiltered ? 26 : 131,
+				count: 25,
+				summary: {
+					technical_failure_count: 0,
+					total_documents: 131,
+					by_doc_type: {},
+					warnings: []
+				},
+				items: Array.from({ length: 25 }, (_, index) => ({
+					...profile(offset + index + 1),
+					title: isFiltered
+						? `Filtered paper ${offset + index + 1}`
+						: profile(offset + index + 1).title
+				}))
+			});
+		});
+
+		render(Page, {
+			target: document.body.appendChild(document.createElement('div')),
+			context: new Map([[DOCUMENT_AGENT, agent]])
+		});
+		await browserPage.getByLabelText('Paper type').selectOptions('review');
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) => {
+					const url = new URL(String(input), 'http://localhost');
+					return (
+						url.searchParams.get('offset') === '0' && url.searchParams.get('doc_type') === 'review'
+					);
+				})
+			).toBe(true);
+		});
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Filtered paper 1', exact: true }))
+			.toBeInTheDocument();
+
+		await browserPage.getByRole('button', { name: 'Next' }).click();
+		await vi.waitFor(() => {
+			const nextRequest = fetchMock.mock.calls.find(([input]) => {
+				const url = new URL(String(input), 'http://localhost');
+				return url.searchParams.get('offset') === '25';
+			});
+			expect(nextRequest).toBeDefined();
+			const url = new URL(String(nextRequest?.[0]), 'http://localhost');
+			expect(url.searchParams.get('doc_type')).toBe('review');
+		});
+		await expect.element(browserPage.getByText('Filtered paper 26')).toBeInTheDocument();
+	});
+});

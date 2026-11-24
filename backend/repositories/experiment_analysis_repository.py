@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class ExperimentAnalysisWrite:
     """Complete records that must commit or roll back as one analysis graph."""
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     revisions: tuple[PaperExperimentRevision, ...]
@@ -34,9 +34,9 @@ class ExperimentAnalysisWrite:
     created_by: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.collection_id.strip() or not self.objective_id.strip():
+        if not self.workspace_id.strip() or not self.objective_id.strip():
             raise ValueError(
-                "experiment analysis write requires collection and objective"
+                "experiment analysis write requires workspace and objective"
             )
         if self.analysis_version < 1:
             raise ValueError("experiment analysis write requires a positive version")
@@ -73,7 +73,7 @@ class ExperimentAnalysisWrite:
         if len(finding_ids) != len(self.findings):
             raise ValueError("experiment analysis write contains duplicate findings")
         if any(
-            item.collection_id != self.collection_id
+            item.workspace_id != self.workspace_id
             or item.objective_id != self.objective_id
             or item.analysis_version != self.analysis_version
             or not set(item.selection_ids) <= selection_ids
@@ -104,7 +104,7 @@ class ExperimentAnalysisRepository:
         analysis = await db.scalar(
             select(ObjectiveAnalysisORM)
             .where(
-                ObjectiveAnalysisORM.collection_id == graph.collection_id,
+                ObjectiveAnalysisORM.workspace_id == graph.workspace_id,
                 ObjectiveAnalysisORM.objective_id == graph.objective_id,
                 ObjectiveAnalysisORM.analysis_version == graph.analysis_version,
             )
@@ -134,7 +134,7 @@ class ExperimentAnalysisRepository:
             [
                 await _add_selection(
                     db,
-                    graph.collection_id,
+                    graph.workspace_id,
                     selection,
                     revision_id=revision_ids[
                         (selection.experiment_id, selection.experiment_version)
@@ -146,7 +146,7 @@ class ExperimentAnalysisRepository:
         groups = tuple(
             [
                 await ComparisonGroupRepository().add_group(
-                    db, graph.collection_id, group
+                    db, graph.workspace_id, group
                 )
                 for group in graph.groups
             ]

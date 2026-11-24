@@ -14,7 +14,7 @@ from domain.chat.permissions import AUTO_ACTIONS
 class ChatSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str = Field(min_length=1, max_length=64)
+    workspace_id: str = Field(min_length=1, max_length=64)
 
 
 class ChatSessionPinRequest(BaseModel):
@@ -53,7 +53,7 @@ class ChatPermissionResponse(BaseModel):
 class ChatSessionResponse(BaseModel):
     session_id: str
     user_id: str
-    collection_id: str
+    workspace_id: str
     created_at: str
     updated_at: str
     title: str | None = None
@@ -97,7 +97,7 @@ class ChatSourceContextPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resource_ref: ChatResourceRefResponse
-    collection_id: str = Field(min_length=1, max_length=64)
+    workspace_id: str = Field(min_length=1, max_length=64)
     document_id: str = Field(min_length=1, max_length=64)
     document_title: str = Field(min_length=1, max_length=500)
     source_kind: str = Field(min_length=1, max_length=64)

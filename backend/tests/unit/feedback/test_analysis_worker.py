@@ -30,7 +30,7 @@ class _Chat:
         self.session = ChatSession.create(
             session_id="session-1",
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             created_at="2026-09-24T00:00:00+00:00",
         )
         self.question = ChatMessage.user(

@@ -95,7 +95,7 @@ class FindingFeedbackCreateRequest(BaseModel):
 
 class FindingFeedbackResponse(BaseModel):
     feedback_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -107,7 +107,7 @@ class FindingFeedbackResponse(BaseModel):
 
 
 class FindingFeedbackListResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -126,7 +126,7 @@ class FindingCurationCreateRequest(BaseModel):
 
 class FindingCurationResponse(BaseModel):
     curation_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -138,7 +138,7 @@ class FindingCurationResponse(BaseModel):
 
 
 class FindingCurationListResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -168,7 +168,7 @@ class FindingDatasetSampleResponse(BaseModel):
 
 class FindingDatasetResponse(BaseModel):
     schema_version: str
-    collection_id: str
+    workspace_id: str
     objective_id: str | None = None
     items: list[FindingDatasetSampleResponse] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -176,30 +176,30 @@ class FindingDatasetResponse(BaseModel):
 
 class FindingGoldDraftResponse(BaseModel):
     gold_id: str
-    collection_id: str
+    workspace_id: str
     version: str
     target_layer: str
     metric_profile: str
     items: list[dict[str, Any]] = Field(default_factory=list)
 
 
-finding_review_router = APIRouter(prefix="/collections", tags=["finding-review"])
+finding_review_router = APIRouter(prefix="/workspaces", tags=["finding-review"])
 
 
 @finding_review_router.post(
-    "/{collection_id}/objectives/{objective_id}/findings",
+    "/{workspace_id}/objectives/{objective_id}/findings",
     response_model=ApiResponse[FindingAuthoringResponse],
     status_code=200,
     summary="Create a researcher-authored Finding version",
 )
 async def create_finding_version(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     payload: FindingAuthoringCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     result = await finding_authoring_service.create_selection_version(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         source_analysis_version=payload.source_analysis_version,
         created_by_user_id=user_id,
@@ -231,19 +231,19 @@ async def create_finding_version(
 
 
 @finding_review_router.post(
-    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
+    "/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
     response_model=ApiResponse[FindingFeedbackResponse],
     summary="Record Finding feedback",
 )
 async def record_finding_feedback(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     payload: FindingFeedbackCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     feedback = await finding_feedback_service.record_feedback(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=payload.analysis_version,
         finding_id=finding_id,
@@ -259,19 +259,19 @@ async def record_finding_feedback(
 
 
 @finding_review_router.get(
-    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
+    "/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
     response_model=ApiResponse[FindingFeedbackListResponse],
     summary="List Finding feedback",
 )
 async def list_finding_feedback(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int = Query(..., ge=1),
 ) -> Response:
     records = await finding_feedback_service.list_feedback(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
@@ -279,7 +279,7 @@ async def list_finding_feedback(
     )
     return make_api_response(
         data=FindingFeedbackListResponse(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
             finding_id=finding_id,
@@ -292,12 +292,12 @@ async def list_finding_feedback(
 
 
 @finding_review_router.put(
-    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation",
+    "/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/curation",
     response_model=ApiResponse[FindingCurationResponse],
     summary="Curate a Finding",
 )
 async def record_finding_curation(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     payload: FindingCurationCreateRequest,
@@ -306,7 +306,7 @@ async def record_finding_curation(
     try:
         value = payload.curated_finding
         candidate = Finding(
-            collection_id=value.collection_id,
+            workspace_id=value.workspace_id,
             objective_id=value.objective_id,
             analysis_version=value.analysis_version,
             finding_id=value.finding_id,
@@ -365,7 +365,7 @@ async def record_finding_curation(
             str(exc), data={"code": "curation_invalid"}
         ) from exc
     curation = await finding_feedback_service.record_curation(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=payload.analysis_version,
         finding_id=finding_id,
@@ -381,19 +381,19 @@ async def record_finding_curation(
 
 
 @finding_review_router.get(
-    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation",
+    "/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/curation",
     response_model=ApiResponse[FindingCurationListResponse],
     summary="List Finding curations",
 )
 async def list_finding_curations(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int = Query(..., ge=1),
 ) -> Response:
     records = await finding_feedback_service.list_curations(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
@@ -401,7 +401,7 @@ async def list_finding_curations(
     )
     return make_api_response(
         data=FindingCurationListResponse(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
             finding_id=finding_id,
@@ -414,7 +414,7 @@ async def list_finding_curations(
 
 
 @finding_review_router.get(
-    "/{collection_id}/objectives/{objective_id}/finding-dataset",
+    "/{workspace_id}/objectives/{objective_id}/finding-dataset",
     summary="Export one Objective Finding dataset",
     response_model=ApiResponse[FindingDatasetResponse],
     responses={
@@ -422,7 +422,7 @@ async def list_finding_curations(
     },
 )
 async def export_objective_finding_dataset(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     format: str = Query(
@@ -433,7 +433,7 @@ async def export_objective_finding_dataset(
     dataset_use_status: str | None = Query(default=None),
 ):
     payload = await finding_dataset_service.export_dataset(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
@@ -443,15 +443,15 @@ async def export_objective_finding_dataset(
 
 
 @finding_review_router.get(
-    "/{collection_id}/finding-dataset",
-    summary="Export the collection Finding dataset",
+    "/{workspace_id}/finding-dataset",
+    summary="Export the workspace Finding dataset",
     response_model=ApiResponse[FindingDatasetResponse],
     responses={
         200: {"content": {"application/x-ndjson": {"schema": {"type": "string"}}}}
     },
 )
-async def export_collection_finding_dataset(
-    collection_id: str,
+async def export_workspace_finding_dataset(
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     format: str = Query(
         default="json",
@@ -460,8 +460,8 @@ async def export_collection_finding_dataset(
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
-    payload = await finding_dataset_service.export_collection_dataset(
-        collection_id=collection_id,
+    payload = await finding_dataset_service.export_workspace_dataset(
+        workspace_id=workspace_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
         user_id=user_id,
@@ -470,16 +470,16 @@ async def export_collection_finding_dataset(
 
 
 @finding_review_router.get(
-    "/{collection_id}/finding-gold-draft",
+    "/{workspace_id}/finding-gold-draft",
     response_model=ApiResponse[FindingGoldDraftResponse],
     summary="Export expert-confirmed Finding gold draft",
 )
 async def export_finding_gold_draft(
-    collection_id: str,
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await finding_dataset_service.export_gold_draft(
-        collection_id=collection_id, user_id=user_id
+        workspace_id=workspace_id, user_id=user_id
     )
     return make_api_response(data=FindingGoldDraftResponse(**payload))
 

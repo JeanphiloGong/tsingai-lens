@@ -203,7 +203,7 @@ def find_table_label_continuation(
 
 def repair_table_source(
     *,
-    collection_id: str,
+    workspace_id: str,
     route: EvidenceCandidate,
     source: dict[str, Any],
     paper_facts_extractor: PaperFactsExtractor | None,
@@ -238,7 +238,7 @@ def repair_table_source(
         record_analysis_diagnostic(
             {
                 "trace_type": "table_matrix_repair",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": route.objective_id,
                 "document_id": route.document_id,
                 "table_id": route.source_ref,
@@ -289,8 +289,8 @@ def repair_table_source(
         )
     except Exception as exc:
         logger.exception(
-            "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
-            collection_id,
+            "Research objective table matrix repair failed workspace_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
+            workspace_id,
             route.source_ref,
             route.objective_id,
             route.document_id,
@@ -347,8 +347,8 @@ def repair_table_source(
         except Exception as exc:
             logger.exception(
                 "Research objective table matrix repair retry failed "
-                "collection_id=%s objective_id=%s document_id=%s source_ref=%s",
-                collection_id,
+                "workspace_id=%s objective_id=%s document_id=%s source_ref=%s",
+                workspace_id,
                 route.objective_id,
                 route.document_id,
                 route.source_ref,

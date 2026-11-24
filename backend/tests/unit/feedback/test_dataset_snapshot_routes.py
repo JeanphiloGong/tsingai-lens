@@ -21,7 +21,7 @@ def _snapshot() -> DatasetSnapshot:
     return DatasetSnapshot(
         dataset_id="dataset-1",
         owner_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         dataset_type="evaluation",
         rows=(
             {
@@ -68,7 +68,7 @@ def test_dataset_routes_create_list_detail_and_download() -> None:
     service = _Service()
     request = _request(service)
     payload = DatasetSnapshotCreateRequest(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         dataset_type="evaluation",
         items=[{"case_id": "case-1"}],
     )
@@ -90,7 +90,7 @@ def test_dataset_routes_create_list_detail_and_download() -> None:
                 asyncio.run(
                     datasets.list_dataset_snapshots(
                         user_id=request.state.current_user["user_id"],
-                        collection_id="collection-1",
+                        workspace_id="workspace-1",
                         limit=50,
                         offset=0,
                     )
@@ -153,7 +153,7 @@ def test_creation_rejects_retired_experiment_fields(extra) -> None:
     with pytest.raises(ValidationError):
         DatasetSnapshotCreateRequest.model_validate(
             {
-                "collection_id": "collection-1",
+                "workspace_id": "workspace-1",
                 "dataset_type": "evaluation",
                 "items": [{"case_id": "case-1"}],
                 **extra,

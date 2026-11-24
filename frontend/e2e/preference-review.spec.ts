@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const datasetId = 'fdset_preference_review';
-const path = `/collections/col_preference_review/feedback/datasets/${datasetId}`;
+const path = `/workspaces/col_preference_review/feedback/datasets/${datasetId}`;
 const rationale = '回答 B 的 200 C 与文献 B 的图注一致；回答 A 将未报告条件误写成没有预热。';
 
 async function mockPreference(
@@ -60,10 +60,10 @@ async function mockPreference(
 		const request = route.request();
 		const urlPath = new URL(request.url()).pathname;
 		let body: unknown = {};
-		if (urlPath === '/api/v1/collections') body = { items: [] };
-		else if (urlPath === '/api/v1/collections/col_preference_review')
+		if (urlPath === '/api/v1/workspaces') body = { items: [] };
+		else if (urlPath === '/api/v1/workspaces/col_preference_review')
 			body = {
-				collection_id: 'col_preference_review',
+				workspace_id: 'col_preference_review',
 				name: '预热条件核查',
 				documents: [],
 				status: 'ready'
@@ -71,7 +71,7 @@ async function mockPreference(
 		else if (urlPath === `/api/v1/feedback-datasets/${datasetId}`)
 			body = {
 				dataset_id: datasetId,
-				collection_id: 'col_preference_review',
+				workspace_id: 'col_preference_review',
 				task_type: 'preference',
 				construction_spec: {},
 				spec_version: 1

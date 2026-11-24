@@ -22,7 +22,7 @@ def anyio_backend() -> str:
 
 def _dataset() -> Dataset:
     return Dataset(
-        "fdset-evaluation", "collection-1", "评测", "evaluation", {}, 1, "user-1"
+        "fdset-evaluation", "workspace-1", "评测", "evaluation", {}, 1, "user-1"
     )
 
 
@@ -35,7 +35,7 @@ def _sample() -> DatasetSample:
 
 def _case(snapshot: dict) -> FeedbackCase:
     return FeedbackCase(
-        case_id="case-1", collection_id="collection-1", session_id="session-1",
+        case_id="case-1", workspace_id="workspace-1", session_id="session-1",
         anchor_message_id="answer-1", source_signal_ids=(), analysis_result_ids=(),
         context_snapshot=snapshot, status="needs_annotation",
         created_at="2026-09-29T00:00:00+00:00", updated_at="2026-09-29T00:00:00+00:00"

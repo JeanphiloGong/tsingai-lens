@@ -32,7 +32,7 @@ class SourceObservation:
     """A fact copied from one exact Source before it becomes ObjectiveEvidence."""
 
     observation_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     document_id: str
     source_kind: str
@@ -56,7 +56,7 @@ class SourceObservation:
     def __post_init__(self) -> None:
         for name, value in (
             ("observation_id", self.observation_id),
-            ("collection_id", self.collection_id),
+            ("workspace_id", self.workspace_id),
             ("objective_id", self.objective_id),
             ("document_id", self.document_id),
             ("source_kind", self.source_kind),

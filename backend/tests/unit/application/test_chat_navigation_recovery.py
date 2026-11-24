@@ -7,10 +7,10 @@ import pytest
 
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.capability_policy import stage_instruction
-from application.chat.capabilities import collection_context
-from application.chat.capabilities.collection_context import (
-    BrowseCollectionPapersCapability,
-    BrowseCollectionPapersToolRequest,
+from application.chat.capabilities import workspace_context
+from application.chat.capabilities.workspace_context import (
+    BrowseWorkspacePapersCapability,
+    BrowseWorkspacePapersToolRequest,
 )
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.context_builder import ChatContextBuilder
@@ -32,8 +32,8 @@ def test_browsing_ledger_does_not_regress_after_revisiting_an_earlier_page():
         for offset, count in ((0, 84), (84, 12), (96, 4), (84, 12))
     ]
     text = stage_instruction(
-        ("browse_collection_papers",), [],
-        successful_results={"browse_collection_papers": pages},
+        ("browse_workspace_papers",), [],
+        successful_results={"browse_workspace_papers": pages},
     )
     assert text is not None
     payload = json.loads(text[text.index("{"):])
@@ -54,8 +54,8 @@ def test_partial_title_search_does_not_complete_a_different_catalog():
          "papers": [{"document_id": f"new-{i}"} for i in range(24, 36)]},
     ]
     text = stage_instruction(
-        ("browse_collection_papers",), [],
-        successful_results={"browse_collection_papers": pages},
+        ("browse_workspace_papers",), [],
+        successful_results={"browse_workspace_papers": pages},
     )
     payload = json.loads(text[text.index("{"):])
     assert payload["paper_browsing"][-1]["next_unread_offset"] == 0
@@ -67,16 +67,16 @@ def test_repeated_successful_action_is_visible_before_the_next_model_decision():
 
     calls = [ChatToolCall.requested(
         tool_call_id=f"browse-{i}", session_id="chat", assistant_message_id=f"a-{i}",
-        position=0, name="browse_collection_papers", arguments={"offset": 84}, risk=ToolRisk.READ,
+        position=0, name="browse_workspace_papers", arguments={"offset": 84}, risk=ToolRisk.READ,
     ).start("2026-11-01T00:00:00+00:00").succeed("2026-11-01T00:00:01+00:00")
              for i in range(2)]
-    text = stage_instruction(("browse_collection_papers",), calls, successful_results={})
+    text = stage_instruction(("browse_workspace_papers",), calls, successful_results={})
     payload = json.loads(text[text.index("{"):])
     assert payload["repeated_action"]["arguments"] == {"offset": 84}
     assert payload["repeated_action"]["previous_successful_count"] == 1
 
 
-def test_collection_search_records_candidates_without_claiming_exact_reads():
+def test_workspace_search_records_candidates_without_claiming_exact_reads():
     text = stage_instruction(("inspect_document_sources",), [], successful_results={
         "search_sources": [{"document_ids": None, "matches": [
             {"document_id": "paper-A", "source_ref": "methods"},
@@ -183,7 +183,7 @@ def test_source_model_message_keeps_body_and_citations_without_duplicate_metadat
               "source_ref": "block-1", "source_label": "S001", "source_digest": "a" * 64,
               "page": 3, "heading_path": "Results", "content": "Elongation was measured.",
               "content_truncated": False, "canonical_length": 24, "estimated_tokens": 7}
-    href = "/collections/col/documents/doc?view=parsed-paper&source_ref=block-1&page=3"
+    href = "/workspaces/col/documents/doc?view=parsed-paper&source_ref=block-1&page=3"
     result = ChatToolResult(
         tool_call_id="read", status="succeeded",
         data={"document": {"document_id": "doc", "title": "IN718"}, "sources": [source],
@@ -214,14 +214,14 @@ async def test_default_browse_fits_many_identities_and_keeps_exact_continuation(
         document=SimpleNamespace(document_id=f"doc-{i}", original_filename=f"IN718 {i}.pdf", status="ready"),
         stored_filename=f"IN718 {i}.pdf",
     ) for i in range(100))
-    monkeypatch.setattr(collection_context.collection_service, "get_collection_for_user",
+    monkeypatch.setattr(workspace_context.workspace_service, "get_workspace_for_user",
                         AsyncMock(return_value=SimpleNamespace(documents=records)))
-    monkeypatch.setattr(collection_context.DocumentProfileRepo, "list_collection", AsyncMock(return_value=[]))
-    monkeypatch.setattr(collection_context.PaperMapRepo, "list_collection", AsyncMock(return_value=[]))
-    monkeypatch.setattr(collection_context.SourceArtifactRepo, "read_document", AsyncMock(
+    monkeypatch.setattr(workspace_context.DocumentProfileRepo, "list_workspace", AsyncMock(return_value=[]))
+    monkeypatch.setattr(workspace_context.PaperMapRepo, "list_workspace", AsyncMock(return_value=[]))
+    monkeypatch.setattr(workspace_context.SourceArtifactRepo, "read_document", AsyncMock(
         return_value=SimpleNamespace(blocks=()),
     ))
-    capability = BrowseCollectionPapersCapability()
+    capability = BrowseWorkspacePapersCapability()
     seen = []
     offset = 0
     pages = 0
@@ -229,7 +229,7 @@ async def test_default_browse_fits_many_identities_and_keeps_exact_continuation(
         pages += 1
         result = await capability.execute(
             CapabilityExecutionContext("chat", "user", "col", "browse", max_result_tokens=12000),
-            BrowseCollectionPapersToolRequest(offset=offset),
+            BrowseWorkspacePapersToolRequest(offset=offset),
         )
         message = ChatContextBuilder.tool_result_message(result)
         assert ChatContextBuilder.estimate_tokens(message) <= 12000

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from application.chat import session_service as shared_chat_service
 
-from application.chat.capabilities import collection_context
+from application.chat.capabilities import workspace_context
 
 import pytest
 from application.chat import (
@@ -14,7 +14,7 @@ from application.chat import (
     ToolSpec,
 )
 from application.chat import session_service as chat_session_service
-from application.chat.capabilities import GetCollectionContextCapability
+from application.chat.capabilities import GetWorkspaceContextCapability
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from fastapi.testclient import TestClient
 from main import create_app
@@ -29,8 +29,8 @@ pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")
 
 
 class _ObjectiveRepository:
-    async def list_objectives(self, collection_id: str) -> tuple:
-        assert collection_id
+    async def list_objectives(self, workspace_id: str) -> tuple:
+        assert workspace_id
         return ()
 
 
@@ -69,7 +69,7 @@ class _CandidateCapability:
                     resource_type="research_objective",
                     resource_id="obj-agent-1",
                     href=(
-                        f"/collections/{context.collection_id}/objectives/"
+                        f"/workspaces/{context.workspace_id}/objectives/"
                         "obj-agent-1"
                     ),
                 ),
@@ -79,11 +79,11 @@ class _CandidateCapability:
 
 async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     identity_subjects,
-    collection_service,
+    workspace_service,
     monkeypatch,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ) -> None:
     user = await identity_subjects.create_subject(
         email="agent-flow@example.com",
@@ -91,7 +91,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     login = await identity_subjects.issue_session(
         email=user["email"],
     )
-    collection = await collection_service.create_collection(
+    workspace = await workspace_service.create_workspace(
         "Ti-6Al-4V energy input",
         "Literature for a traceable energy-input comparison.",
         owner_user_id=user["user_id"],
@@ -101,16 +101,16 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     chat_repository = ChatRepository()
     source_artifact_repository = SourceArtifactRepository()
     model = _Model(
-        ModelTurn(content="Hello. I can help inspect this literature collection."),
+        ModelTurn(content="Hello. I can help inspect this literature workspace."),
         ModelTurn(
             tool_calls=(
                 ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),
             )
         ),
-        ModelTurn(content="This collection is ready for a focused research question."),
+        ModelTurn(content="This workspace is ready for a focused research question."),
         ModelTurn(
             content="I prepared the exact candidate for your approval.",
             tool_calls=(
@@ -124,7 +124,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         ),
         ModelTurn(content="The candidate was created and still requires review."),
     )
-    monkeypatch.setattr(chat_session_service, "collection_service", collection_service)
+    monkeypatch.setattr(chat_session_service, "workspace_service", workspace_service)
     monkeypatch.setattr(
         chat_session_service, "SourceArtifactRepo", source_artifact_repository
     )
@@ -132,8 +132,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app()
 
     with TestClient(app) as client:
-        collection_context.collection_service = collection_service
-        collection_context.ObjectiveRepo = objective_repository
+        workspace_context.workspace_service = workspace_service
+        workspace_context.ObjectiveRepo = objective_repository
         monkeypatch.setattr(
             shared_chat_service.ChatService,
             "runner",
@@ -141,7 +141,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
                 model=model,
                 capabilities=CapabilityRegistry(
                     (
-                        GetCollectionContextCapability(),
+                        GetWorkspaceContextCapability(),
                         candidate_capability,
                     )
                 ),
@@ -150,7 +150,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         client.cookies.set("lens_session", login["session_id"])
         created = client.post(
             "/api/v1/chat-sessions",
-            json={"collection_id": collection.collection.collection_id},
+            json={"workspace_id": workspace.workspace.workspace_id},
         )
         session_id = created.json()["data"]["session_id"]
 
@@ -160,7 +160,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         )
         context_turn = client.post(
             f"/api/v1/chat-sessions/{session_id}/messages",
-            json={"message": "What does this collection contain?"},
+            json={"message": "What does this workspace contain?"},
         )
         proposed_write = client.post(
             f"/api/v1/chat-sessions/{session_id}/messages",
@@ -199,7 +199,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     assert all(item["role"] != "tool" for item in greeting.json()["data"]["messages"])
     assert (
         context_turn.json()["data"]["messages"][-2]["tool_result"]["data"][
-            "collection"
+            "workspace"
         ]["name"]
         == "Ti-6Al-4V energy input"
     )
@@ -221,7 +221,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     ]
     assert trajectory.json()["data"]["pending_approval"] is None
     assert set(model.all_tool_spec_names[0]) == {
-        "get_collection_context",
+        "get_workspace_context",
         "update_execution_plan",
         "discover_research_tools",
     }

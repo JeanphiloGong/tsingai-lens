@@ -12,18 +12,18 @@ def test_experiment_projection_routes_are_additive() -> None:
         for method in route.methods
     }
 
-    assert ("GET", "/api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis") in routes
+    assert ("GET", "/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-analysis") in routes
     assert (
         "GET",
-        "/api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis/export",
+        "/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-analysis/export",
     ) in routes
     assert (
         "POST",
-        "/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis",
+        "/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis",
     ) in routes
     assert (
         "GET",
-        "/api/v1/collections/{collection_id}/objectives/{objective_id}/findings",
+        "/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings",
     ) in routes
 
 
@@ -38,7 +38,7 @@ def test_feedback_product_routes_use_task_datasets_without_legacy_snapshot_readb
 def test_existing_analysis_request_contract_has_no_experiment_fields() -> None:
     app = create_app()
     operation = app.openapi()["paths"][
-        "/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis"
+        "/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis"
     ]["post"]
     request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
 
@@ -47,7 +47,7 @@ def test_existing_analysis_request_contract_has_no_experiment_fields() -> None:
         (item["in"], item["name"])
         for item in operation["parameters"]
     } == {
-        ("path", "collection_id"),
+        ("path", "workspace_id"),
         ("path", "objective_id"),
     }
     document_selection_schema = app.openapi()["components"]["schemas"][

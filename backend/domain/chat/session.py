@@ -14,7 +14,7 @@ ChatSessionStatus = Literal["idle", "running", "approval"]
 class ChatSession:
     session_id: str
     user_id: str
-    collection_id: str
+    workspace_id: str
     created_at: str
     updated_at: str
     status: ChatSessionStatus = "idle"
@@ -54,13 +54,13 @@ class ChatSession:
         *,
         session_id: str,
         user_id: str,
-        collection_id: str,
+        workspace_id: str,
         created_at: str,
     ) -> "ChatSession":
         return cls(
             session_id=session_id,
             user_id=user_id,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             created_at=created_at,
             updated_at=created_at,
             status="idle",
@@ -70,10 +70,10 @@ class ChatSession:
         self,
         *,
         user_id: str,
-        collection_id: str,
+        workspace_id: str,
         updated_at: str,
     ) -> "ChatSession":
-        if user_id != self.user_id or collection_id != self.collection_id:
+        if user_id != self.user_id or workspace_id != self.workspace_id:
             raise ValueError("session identity cannot be reassigned")
         return replace(self, updated_at=updated_at)
 

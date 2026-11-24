@@ -9,7 +9,7 @@ from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence import database
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -19,14 +19,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _store_source_documents(repository, collection_id, documents) -> None:
+async def _store_source_documents(repository, workspace_id, documents) -> None:
     for document in documents:
-        await seed_collection(
+        await seed_workspace(
             database.AsyncSessionLocal,
-            collection_id,
+            workspace_id,
             document_ids=(document.document_id,),
         )
-        await repository.replace_document(collection_id, document)
+        await repository.replace_document(workspace_id, document)
 
 
 async def test_source_reference_workflow_builds_and_persists_refs(
@@ -74,16 +74,16 @@ async def test_source_reference_workflow_builds_and_persists_refs(
     reference_workflow_service.SourceArtifactRepo = repository
     service = reference_workflow_service
 
-    result = await service.get_collection_references("col_refs", user_id="user-1")
+    result = await service.get_workspace_references("col_refs", user_id="user-1")
 
     assert result.to_summary() == {
-        "collection_id": "col_refs",
+        "workspace_id": "col_refs",
         "entry_count": 1,
         "mention_count": 1,
         "resolution_count": 0,
         "candidate_count": 1,
     }
-    restored = await service.read_collection_references("col_refs", user_id="user-1")
+    restored = await service.read_workspace_references("col_refs", user_id="user-1")
     assert restored.references.entries[0].reference_id == "ref-doc-1-0001"
     assert restored.references.mentions[0].reference_id == "ref-doc-1-0001"
     assert restored.references.candidates[0].mention_count == 1
@@ -96,19 +96,19 @@ async def test_source_reference_workflow_requires_source_artifacts(
     reference_workflow_service.SourceArtifactRepo = repository
     service = reference_workflow_service
 
-    await seed_collection(database.AsyncSessionLocal, "empty_collection")
+    await seed_workspace(database.AsyncSessionLocal, "empty_workspace")
     with pytest.raises(ResourceConflictException) as rejected:
-        await service.get_collection_references("empty_collection", user_id="user-1")
+        await service.get_workspace_references("empty_workspace", user_id="user-1")
     assert rejected.value.data["code"] == "source_artifacts_not_ready"
 
 
-async def test_source_reference_workflow_rejects_missing_and_foreign_collections(
+async def test_source_reference_workflow_rejects_missing_and_foreign_workspaces(
     postgres_session_factory,
 ):
-    await seed_collection(database.AsyncSessionLocal, "foreign_collection")
-    for collection_id in ("missing_collection", "foreign_collection"):
+    await seed_workspace(database.AsyncSessionLocal, "foreign_workspace")
+    for workspace_id in ("missing_workspace", "foreign_workspace"):
         with pytest.raises(ResourceNotFoundException):
-            await reference_workflow_service.get_collection_references(
-                collection_id,
+            await reference_workflow_service.get_workspace_references(
+                workspace_id,
                 user_id="other-user",
             )

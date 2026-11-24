@@ -26,11 +26,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-class _Collections:
-    async def get_collection_for_user(self, collection_id: str, user_id: str):
-        if (collection_id, user_id) != ("collection-1", "user-1"):
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id}
+class _Workspaces:
+    async def get_workspace_for_user(self, workspace_id: str, user_id: str):
+        if (workspace_id, user_id) != ("workspace-1", "user-1"):
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id}
 
 
 class _Datasets:
@@ -96,7 +96,7 @@ class _Samples:
 
 
 def _dataset() -> Dataset:
-    return Dataset("fdset-1", "collection-1", "SFT", "sft", {}, 1, "user-1")
+    return Dataset("fdset-1", "workspace-1", "SFT", "sft", {}, 1, "user-1")
 
 
 def _sample() -> DatasetSample:
@@ -144,7 +144,7 @@ def _revision(revision_id: str, author_kind: str) -> SampleRevision:
 def _case() -> FeedbackCase:
     return FeedbackCase(
         case_id="case-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=(),
@@ -162,7 +162,7 @@ def _case() -> FeedbackCase:
 
 def _service(samples: _Samples, cases: _Cases | None = None) -> ModuleType:
     dataset_service.FeedbackDatasetRepo = _Datasets()
-    dataset_service.collection_service = _Collections()
+    dataset_service.workspace_service = _Workspaces()
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = cases or _Cases()
     return dataset_service

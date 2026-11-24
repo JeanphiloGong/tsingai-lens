@@ -24,13 +24,13 @@ That means:
 
 ## Product Spec: Relationship Navigation Graph
 
-This section is the shared phase-one specification for the collection graph
+This section is the shared phase-one specification for the workspace graph
 surface. It keeps the graph below the research-direction workspace in the
 Lens v1 product hierarchy.
 
 ### Assumptions
 
-1. The graph page is a web workspace route at `/collections/:id/graph`.
+1. The graph page is a web workspace route at `/workspaces/:id/graph`.
 2. The graph remains a secondary analysis surface, not the Lens v1 primary
    acceptance path.
 3. The Objective page owns scientific Findings and their Evidence review.
@@ -221,7 +221,7 @@ Browser screenshot checks:
 ```bash
 cd frontend
 node <playwright-screenshot-script> \
-  http://127.0.0.1:5173/collections/<collection_id>/graph
+  http://127.0.0.1:5173/workspaces/<workspace_id>/graph
 ```
 
 Backend checks when graph projection changes:
@@ -244,7 +244,7 @@ python3 scripts/check_docs_governance.py
 docs/architecture/graph-surface-current-state.md
   Shared product and architecture boundary for the graph surface.
 
-frontend/src/routes/collections/[id]/graph/+page.svelte
+frontend/src/routes/workspaces/[id]/graph/+page.svelte
   Graph workspace route implementation.
 
 frontend/src/routes/_shared/graph.ts
@@ -254,7 +254,7 @@ frontend/src/routes/_shared/graph.ts
 frontend/src/routes/_shared/i18n.ts
   User-facing graph copy.
 
-frontend/src/routes/collections/graph-exploration-interaction-and-layout-proposal.md
+frontend/src/routes/workspaces/graph-exploration-interaction-and-layout-proposal.md
   Frontend-local interaction and layout proposal that implements this shared
   boundary.
 
@@ -337,7 +337,7 @@ Component/browser tests should cover:
 
 The current-stage graph redesign is acceptable when:
 
-- `/collections/:id/graph` clearly presents itself as a relationship map, not
+- `/workspaces/:id/graph` clearly presents itself as a relationship map, not
   the final answer surface
 - no ready page shows contradictory loading/loaded states
 - overview metrics never show `NaN`
@@ -433,4 +433,4 @@ of these questions directly:
 - [System Overview](../overview/system-overview.md)
 - [Lens V1 Architecture Boundary](lens-v1-architecture-boundary.md)
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)
-- [Lens V1 Frontend Interface Spec](../../frontend/src/routes/collections/lens-v1-interface-spec.md)
+- [Lens V1 Frontend Interface Spec](../../frontend/src/routes/workspaces/lens-v1-interface-spec.md)

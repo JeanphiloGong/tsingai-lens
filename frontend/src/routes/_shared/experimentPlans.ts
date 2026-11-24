@@ -10,7 +10,7 @@ export type ExperimentPlanStatus = 'draft' | 'ready_for_review' | 'archived';
 
 export type ExperimentPlan = {
 	plan_id: string;
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	title: string;
 	content: string;
@@ -24,7 +24,7 @@ export type ExperimentPlan = {
 };
 
 export type ExperimentPlanList = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	items: ExperimentPlan[];
 };
@@ -40,19 +40,19 @@ type UpdateExperimentPlanOptions = {
 	status: ExperimentPlanStatus;
 };
 
-function experimentPlanPath(collectionId: string, objectiveId: string, planId = '') {
-	const base = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(
+function experimentPlanPath(workspaceId: string, objectiveId: string, planId = '') {
+	const base = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(
 		objectiveId
 	)}/experiment-plans`;
 	return planId ? `${base}/${encodeURIComponent(planId)}` : base;
 }
 
 export async function createExperimentPlan(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	options: CreateExperimentPlanOptions
 ) {
-	return (await requestJson(experimentPlanPath(collectionId, objectiveId), {
+	return (await requestJson(experimentPlanPath(workspaceId, objectiveId), {
 		method: 'POST',
 		body: JSON.stringify({
 			title: options.title,
@@ -61,19 +61,19 @@ export async function createExperimentPlan(
 	})) as ExperimentPlan;
 }
 
-export async function fetchExperimentPlans(collectionId: string, objectiveId: string) {
-	return (await requestJson(experimentPlanPath(collectionId, objectiveId), {
+export async function fetchExperimentPlans(workspaceId: string, objectiveId: string) {
+	return (await requestJson(experimentPlanPath(workspaceId, objectiveId), {
 		method: 'GET'
 	})) as ExperimentPlanList;
 }
 
 export async function updateExperimentPlan(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	planId: string,
 	options: UpdateExperimentPlanOptions
 ) {
-	return (await requestJson(experimentPlanPath(collectionId, objectiveId, planId), {
+	return (await requestJson(experimentPlanPath(workspaceId, objectiveId, planId), {
 		method: 'PATCH',
 		body: JSON.stringify(options)
 	})) as ExperimentPlan;

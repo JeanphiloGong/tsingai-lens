@@ -1,12 +1,12 @@
 from __future__ import annotations
-from application.source import collection_service
+from application.source import workspace_service
 
 import json
 from types import SimpleNamespace
 
 import pytest
 from infra.persistence import database
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 try:
     from fastapi import HTTPException
@@ -30,14 +30,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _store_source_documents(repository, collection_id, documents) -> None:
+async def _store_source_documents(repository, workspace_id, documents) -> None:
     for document in documents:
-        await seed_collection(
+        await seed_workspace(
             database.AsyncSessionLocal,
-            collection_id,
+            workspace_id,
             document_ids=(document.document_id,),
         )
-        await repository.replace_document(collection_id, document)
+        await repository.replace_document(workspace_id, document)
 
 
 @pytest.fixture()
@@ -45,22 +45,22 @@ def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory
     repository = SourceArtifactRepository()
     reference_workflow_service.SourceArtifactRepo = repository
     workflow_service = reference_workflow_service
-    reference_workflow_service.collection_service = collection_service
+    reference_workflow_service.workspace_service = workspace_service
     references_controller.reference_workflow_service = workflow_service
     request = SimpleNamespace(
         state=SimpleNamespace(current_user={"user_id": "local-user"})
     )
-    return collection_service, repository, request
+    return workspace_service, repository, request
 
 
 async def test_source_reference_routes_build_and_read_refs(
     source_reference_services,
     *,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, repository, request = source_reference_services
-    collection = await collection_service.create_collection("Refs Collection")
-    collection_id = collection.collection.collection_id
+    workspace_service, repository, request = source_reference_services
+    workspace = await workspace_service.create_workspace("Refs Workspace")
+    workspace_id = workspace.workspace.workspace_id
     artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
@@ -96,7 +96,7 @@ async def test_source_reference_routes_build_and_read_refs(
     )
     await _store_source_documents(
         repository,
-        collection_id,
+        workspace_id,
         artifacts,
     )
     await repository.replace_document_references(
@@ -106,8 +106,8 @@ async def test_source_reference_routes_build_and_read_refs(
     summary = references_controller.SourceReferenceSummaryResponse.model_validate(
         json.loads(
             (
-                await references_controller.build_collection_references(
-                    collection_id=collection_id,
+                await references_controller.build_workspace_references(
+                    workspace_id=workspace_id,
                     user_id=request.state.current_user["user_id"],
                 )
             ).body
@@ -116,15 +116,15 @@ async def test_source_reference_routes_build_and_read_refs(
     payload = references_controller.SourceReferenceSetResponse.model_validate(
         json.loads(
             (
-                await references_controller.get_collection_references(
-                    collection_id=collection_id,
+                await references_controller.get_workspace_references(
+                    workspace_id=workspace_id,
                     user_id=request.state.current_user["user_id"],
                 )
             ).body
         )["data"]
     )
 
-    assert summary.collection_id == collection_id
+    assert summary.workspace_id == workspace_id
     assert summary.entry_count == 1
     assert summary.candidate_count == 1
     assert payload.entry_count == 1
@@ -136,17 +136,17 @@ async def test_source_reference_routes_build_and_read_refs(
 async def test_source_reference_build_route_returns_409_when_source_is_not_ready(
     source_reference_services,
     *,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, _repository, request = source_reference_services
-    collection = await collection_service.create_collection("Pending Refs Collection")
+    workspace_service, _repository, request = source_reference_services
+    workspace = await workspace_service.create_workspace("Pending Refs Workspace")
 
     with pytest.raises(ResourceConflictException) as exc_info:
         references_controller.SourceReferenceSummaryResponse.model_validate(
             json.loads(
                 (
-                    await references_controller.build_collection_references(
-                        collection_id=collection.collection.collection_id,
+                    await references_controller.build_workspace_references(
+                        workspace_id=workspace.workspace.workspace_id,
                         user_id=request.state.current_user["user_id"],
                     )
                 ).body
@@ -156,19 +156,19 @@ async def test_source_reference_build_route_returns_409_when_source_is_not_ready
     exc = exc_info.value
     assert exc.code == 200204
     assert exc.data["code"] == "source_artifacts_not_ready"
-    assert exc.data["collection_id"] == collection.collection.collection_id
+    assert exc.data["workspace_id"] == workspace.workspace.workspace_id
 
 
-async def test_source_reference_route_returns_404_for_missing_collection(
+async def test_source_reference_route_returns_404_for_missing_workspace(
     source_reference_services,
 ):
-    _collection_service, _repository, request = source_reference_services
+    _workspace_service, _repository, request = source_reference_services
     with pytest.raises(ResourceNotFoundException) as exc_info:
         references_controller.SourceReferenceSetResponse.model_validate(
             json.loads(
                 (
-                    await references_controller.get_collection_references(
-                        collection_id="col_missing",
+                    await references_controller.get_workspace_references(
+                        workspace_id="col_missing",
                         user_id=request.state.current_user["user_id"],
                     )
                 ).body

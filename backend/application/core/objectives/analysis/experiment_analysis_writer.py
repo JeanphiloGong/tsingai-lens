@@ -660,7 +660,7 @@ def _finalize_revision(
 
 def _build_selection(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis_version: int,
     revision: PaperExperimentRevision,
@@ -683,7 +683,7 @@ def _build_selection(
     return ObjectiveExperimentSelection(
         selection_id=_stable_id(
             "sel",
-            collection_id,
+            workspace_id,
             objective.objective_id,
             analysis_version,
             revision.experiment_id,
@@ -716,7 +716,7 @@ from repositories.paper_experiment_repository import PaperExperimentRepo
 
 async def write_experiment_analysis(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis: ObjectiveAnalysis,
     experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
@@ -729,7 +729,7 @@ async def write_experiment_analysis(
     """Prepare and commit revisions, selections, groups, and Findings."""
 
     prepared = await _prepare_experiment_selections(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective=objective,
         analysis=analysis,
         experiment_outputs=experiment_outputs,
@@ -765,7 +765,7 @@ async def write_experiment_analysis(
         if allow_finding:
             reused_selections.extend(
                 _build_selection(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     objective=objective,
                     analysis_version=analysis.analysis_version,
                     revision=revision,
@@ -780,7 +780,7 @@ async def write_experiment_analysis(
     )
     if allow_finding and prepared.selections:
         synthesis = experiment_finding_synthesis_service.synthesize_experiment_findings(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective=objective,
             analysis_version=analysis.analysis_version,
             revisions=prepared.revisions,
@@ -791,7 +791,7 @@ async def write_experiment_analysis(
     stored = await ExperimentAnalysisRepo.write_graph(
         db,
         ExperimentAnalysisWrite(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective.objective_id,
             analysis_version=analysis.analysis_version,
             revisions=prepared.revisions,
@@ -894,7 +894,7 @@ async def write_paper_experiment_revisions(
 
 async def write_selection_finding_revision(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis: ObjectiveAnalysis,
     revisions: Sequence[StoredPaperExperimentRevision],
@@ -919,7 +919,7 @@ async def write_selection_finding_revision(
     )
     source_revisions = tuple(item.revision for item in revisions)
     synthesis = experiment_finding_synthesis_service.synthesize_experiment_findings(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective=objective,
         analysis_version=analysis.analysis_version,
         revisions=source_revisions,
@@ -940,7 +940,7 @@ async def write_selection_finding_revision(
     stored = await ExperimentAnalysisRepo.write_graph(
         db,
         ExperimentAnalysisWrite(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective.objective_id,
             analysis_version=analysis.analysis_version,
             revisions=source_revisions,
@@ -960,7 +960,7 @@ async def write_selection_finding_revision(
 
 async def _prepare_experiment_selections(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     analysis: ObjectiveAnalysis,
     experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
@@ -968,10 +968,10 @@ async def _prepare_experiment_selections(
     include_selections: bool,
     db: AsyncSession,
 ) -> _PreparedExperimentSelections:
-    if objective.collection_id != collection_id:
-        raise ValueError("experiment analysis objective belongs to another collection")
+    if objective.workspace_id != workspace_id:
+        raise ValueError("experiment analysis objective belongs to another workspace")
     if (
-        analysis.collection_id != collection_id
+        analysis.workspace_id != workspace_id
         or analysis.objective_id != objective.objective_id
     ):
         raise ValueError("experiment analysis snapshot does not match objective")
@@ -1055,7 +1055,7 @@ async def _prepare_experiment_selections(
         )
         revision_selections = tuple(
             _build_selection(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective=objective,
                 analysis_version=analysis.analysis_version,
                 revision=revision,

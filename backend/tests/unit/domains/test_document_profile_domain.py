@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from repositories.document_profile_repository import DocumentProfileRepository
-from infra.persistence.postgres.models.collection import (
+from infra.persistence.postgres.models.workspace import (
     DocumentPreparationORM,
 )
 from domain.core.document_profile import (
     DocumentProfile,
-    summarize_document_profile_collection,
+    summarize_document_profile_workspace,
 )
 from domain.shared.enums import (
     DOC_TYPE_EXPERIMENTAL,
@@ -48,7 +48,7 @@ def test_stored_document_profile_reads_canonical_fields(profile_repository) -> N
             "generated_at": "2026-10-28T00:00:00+00:00",
         },
     )
-    profile = asyncio.run(repository.read("collection", "doc-exp"))
+    profile = asyncio.run(repository.read("workspace", "doc-exp"))
 
     assert profile == DocumentProfile(
         document_id="doc-exp",
@@ -78,22 +78,22 @@ def test_profile_read_requires_current_storage_contract(profile_repository) -> N
     )
 
     with pytest.raises(KeyError, match="profile_status"):
-        asyncio.run(repository.read("collection", "doc"))
+        asyncio.run(repository.read("workspace", "doc"))
 
 
-def test_summarize_document_profile_collection_emits_collection_warnings() -> None:
+def test_summarize_document_profile_workspace_emits_workspace_warnings() -> None:
     review_profile = DocumentProfile("doc-review", None, DOC_TYPE_REVIEW, (), 0.8)
     uncertain_profile = DocumentProfile(
         "doc-uncertain", None, DOC_TYPE_UNCERTAIN, (), 0.0
     )
 
-    summary = summarize_document_profile_collection([review_profile, uncertain_profile])
+    summary = summarize_document_profile_workspace([review_profile, uncertain_profile])
 
     assert summary.total_documents == 2
     assert summary.by_doc_type == {DOC_TYPE_REVIEW: 1, DOC_TYPE_UNCERTAIN: 1}
     assert summary.technical_failure_count == 0
     assert (
-        "Collection is review-heavy or mixed; experimental evidence may require manual review."
+        "Workspace is review-heavy or mixed; experimental evidence may require manual review."
         in summary.warnings
     )
     assert (
@@ -102,7 +102,7 @@ def test_summarize_document_profile_collection_emits_collection_warnings() -> No
     )
 
 
-def test_summarize_document_profile_collection_separates_technical_failure() -> None:
+def test_summarize_document_profile_workspace_separates_technical_failure() -> None:
     profile = DocumentProfile(
         "doc-failed",
         None,
@@ -112,7 +112,7 @@ def test_summarize_document_profile_collection_separates_technical_failure() -> 
         profile_status="extraction_failed",
     )
 
-    summary = summarize_document_profile_collection([profile])
+    summary = summarize_document_profile_workspace([profile])
 
     assert summary.technical_failure_count == 1
     assert (

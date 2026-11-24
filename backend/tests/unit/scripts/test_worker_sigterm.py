@@ -54,7 +54,7 @@ module.build_database_engine = lambda _: SimpleNamespace(dispose=dispose)
 module.AsyncSessionLocal = SimpleNamespace(configure=lambda **_: None)
 if sys.argv[1].startswith("run_"):
     if sys.argv[1] == "run_document_preparation":
-        module.FileCollectionWorkspace = lambda _: SimpleNamespace(root_dir=output.parent)
+        module.FileWorkspace = lambda _: SimpleNamespace(root_dir=output.parent)
         module.FileObjectStore = lambda _: object()
     module.run_forever = wait_for_shutdown
 else:

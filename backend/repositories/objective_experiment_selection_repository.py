@@ -25,14 +25,14 @@ class ObjectiveExperimentSelectionRepository:
     async def add_selection(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         selection: ObjectiveExperimentSelection,
         *,
         revision_id: int,
     ) -> ObjectiveExperimentSelection:
         return await _add_selection(
             db,
-            collection_id,
+            workspace_id,
             selection,
             revision_id=revision_id,
         )
@@ -40,12 +40,12 @@ class ObjectiveExperimentSelectionRepository:
     async def read_selection(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         selection_id: str,
     ) -> ObjectiveExperimentSelection | None:
         row = await db.scalar(
             select(ObjectiveExperimentSelectionORM).where(
-                ObjectiveExperimentSelectionORM.collection_id == collection_id,
+                ObjectiveExperimentSelectionORM.workspace_id == workspace_id,
                 ObjectiveExperimentSelectionORM.selection_id == selection_id,
             )
         )
@@ -54,7 +54,7 @@ class ObjectiveExperimentSelectionRepository:
     async def list_selections(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> tuple[ObjectiveExperimentSelection, ...]:
@@ -62,7 +62,7 @@ class ObjectiveExperimentSelectionRepository:
             await db.scalars(
                 select(ObjectiveExperimentSelectionORM)
                 .where(
-                    ObjectiveExperimentSelectionORM.collection_id == collection_id,
+                    ObjectiveExperimentSelectionORM.workspace_id == workspace_id,
                     ObjectiveExperimentSelectionORM.objective_id == objective_id,
                     ObjectiveExperimentSelectionORM.analysis_version
                     == analysis_version,
@@ -75,19 +75,19 @@ class ObjectiveExperimentSelectionRepository:
 
 async def _add_selection(
     db: AsyncSession,
-    collection_id: str,
+    workspace_id: str,
     selection: ObjectiveExperimentSelection,
     *,
     revision_id: int,
 ) -> ObjectiveExperimentSelection:
-    if not collection_id.strip():
-        raise ValueError("selection requires collection scope")
+    if not workspace_id.strip():
+        raise ValueError("selection requires workspace scope")
     if selection.objective_id == "":
         raise ValueError("selection requires objective")
     existing = await db.scalar(
         select(ObjectiveExperimentSelectionORM).where(
             ObjectiveExperimentSelectionORM.selection_id == selection.selection_id,
-            ObjectiveExperimentSelectionORM.collection_id == collection_id,
+            ObjectiveExperimentSelectionORM.workspace_id == workspace_id,
         )
     )
     if existing is not None:
@@ -96,7 +96,7 @@ async def _add_selection(
             return restored
         raise ValueError("selection identity already belongs to another record")
 
-    await _validate_analysis(db, collection_id, selection)
+    await _validate_analysis(db, workspace_id, selection)
     revision = await db.get(PaperExperimentORM, revision_id)
     if revision is None:
         raise ValueError("selection experiment revision was not found")
@@ -137,7 +137,7 @@ async def _add_selection(
 
     row = ObjectiveExperimentSelectionORM(
         selection_id=selection.selection_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=selection.objective_id,
         analysis_version=selection.analysis_version,
         experiment_id=selection.experiment_id,
@@ -175,12 +175,12 @@ async def _add_selection(
 
 async def _validate_analysis(
     db: AsyncSession,
-    collection_id: str,
+    workspace_id: str,
     selection: ObjectiveExperimentSelection,
 ) -> None:
     row = await db.scalar(
         select(ObjectiveAnalysisORM).where(
-            ObjectiveAnalysisORM.collection_id == collection_id,
+            ObjectiveAnalysisORM.workspace_id == workspace_id,
             ObjectiveAnalysisORM.objective_id == selection.objective_id,
             ObjectiveAnalysisORM.analysis_version == selection.analysis_version,
         )

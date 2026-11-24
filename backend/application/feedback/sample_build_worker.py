@@ -104,7 +104,7 @@ async def _build_dataset_sample(
         ):
             return await _complete_stale_dataset_sample(job, sample_id, generation)
         case = await FeedbackCaseRepo.read_case(sample.source_case_id)
-        if case is None or case.collection_id != dataset.collection_id:
+        if case is None or case.workspace_id != dataset.workspace_id:
             raise ValueError("dataset_sample_build_case_missing")
         if case.status == "withdrawn" or source_digest_for_case(case) != source_digest:
             await FeedbackDatasetSampleRepo.complete_build(
@@ -113,7 +113,7 @@ async def _build_dataset_sample(
                 generation=generation,
                 revision=None,
                 outcome="needs_input",
-                missing_reasons=("source_changed_since_collection",),
+                missing_reasons=("source_changed_since_workspace",),
                 finished_at=datetime.now(timezone.utc).isoformat(),
             )
             return await _read_finished_dataset_sample_job(job)

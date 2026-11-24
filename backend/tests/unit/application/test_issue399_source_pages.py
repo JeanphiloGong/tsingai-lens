@@ -52,7 +52,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         blocks=blocks + other,
     )
     monkeypatch.setattr(
-        document_sources.collection_service, "get_collection_for_user", AsyncMock()
+        document_sources.workspace_service, "get_workspace_for_user", AsyncMock()
     )
     monkeypatch.setattr(
         document_sources,
@@ -96,8 +96,8 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
 async def test_permission_failure_stops_before_loading_sources(monkeypatch):
     repo = SimpleNamespace(read_document=AsyncMock())
     monkeypatch.setattr(
-        document_sources.collection_service,
-        "get_collection_for_user",
+        document_sources.workspace_service,
+        "get_workspace_for_user",
         AsyncMock(side_effect=PermissionError()),
     )
     monkeypatch.setattr(document_sources, "SourceArtifactRepo", repo)
@@ -132,7 +132,7 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
         blocks=blocks,
     )
     monkeypatch.setattr(
-        document_sources.collection_service, "get_collection_for_user", AsyncMock()
+        document_sources.workspace_service, "get_workspace_for_user", AsyncMock()
     )
     monkeypatch.setattr(
         document_sources,
@@ -164,7 +164,7 @@ async def test_parent_section_reads_its_subsections_without_unrelated_sections(m
             text=f"Complete content for {heading}.", block_order=i, heading_path=heading,
         ) for i, heading in enumerate(headings)),
     )
-    monkeypatch.setattr(document_sources.collection_service, "get_collection_for_user", AsyncMock())
+    monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
     monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
         read_document=AsyncMock(return_value=document),
     ))

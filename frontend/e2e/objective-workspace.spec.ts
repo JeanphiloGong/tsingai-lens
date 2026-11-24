@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const collectionId = 'col_123';
+const workspaceId = 'col_123';
 const objectiveId = 'obj_1';
 const documentId = 'doc_1';
 const tableSourceRef = 'tbl_doc_1_3_table_3';
@@ -19,7 +19,7 @@ function json(body: unknown, status = 200) {
 }
 
 const objective = {
-	collection_id: collectionId,
+	workspace_id: workspaceId,
 	objective_id: objectiveId,
 	question: 'How does heat treatment affect LPBF 316L tensile strength?',
 	material_scope: ['316L stainless steel'],
@@ -41,7 +41,7 @@ const objective = {
 
 function analysis(status: 'succeeded' | 'failed', version: number) {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objective_id: objectiveId,
 		analysis_version: version,
 		document_inputs: [{ document_id: documentId, preparation_fingerprint: 'fingerprint-doc-1' }],
@@ -63,7 +63,7 @@ function analysis(status: 'succeeded' | 'failed', version: number) {
 }
 
 const finding = {
-	collection_id: collectionId,
+	workspace_id: workspaceId,
 	objective_id: objectiveId,
 	analysis_version: 1,
 	finding_id: 'finding-1',
@@ -116,7 +116,7 @@ const finding = {
 };
 
 const evidence = {
-	collection_id: collectionId,
+	workspace_id: workspaceId,
 	objective_id: objectiveId,
 	analysis_version: 1,
 	evidence_id: 'evidence-1',
@@ -226,7 +226,7 @@ const mechanismEvidence = {
 };
 
 const experimentProjection = {
-	collection_id: collectionId,
+	workspace_id: workspaceId,
 	objective_id: objectiveId,
 	analysis_version: 1,
 	selections: [
@@ -333,7 +333,7 @@ const experimentProjection = {
 
 function documentContent() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		document_id: documentId,
 		title: 'LPBF 316L tensile study',
 		source_filename: 'paper-1.pdf',
@@ -350,7 +350,7 @@ function documentMarkdown() {
 			`Source paragraph ${index + 1}. This bounded paragraph keeps the third table below the initial reader viewport.`
 	).join('\n\n');
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		document_id: documentId,
 		title: 'LPBF 316L tensile study',
 		source_filename: 'paper-1.pdf',
@@ -406,12 +406,12 @@ async function mockApis(page: Page) {
 				})
 			});
 		}
-		if (path === '/api/v1/collections') return route.fulfill(json({ items: [] }));
-		if (path === `/api/v1/collections/${collectionId}`) {
+		if (path === '/api/v1/workspaces') return route.fulfill(json({ items: [] }));
+		if (path === `/api/v1/workspaces/${workspaceId}`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
-					id: collectionId,
+					workspace_id: workspaceId,
+					id: workspaceId,
 					name: 'LPBF 316L objective set',
 					status: 'ready',
 					paper_count: 1,
@@ -419,14 +419,14 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/profiles`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/profiles`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					items: [
 						{
 							document_id: documentId,
-							collection_id: collectionId,
+							workspace_id: workspaceId,
 							title: 'LPBF 316L tensile study',
 							source_filename: 'paper-1.pdf',
 							doc_type: 'experimental',
@@ -446,10 +446,10 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/analysis`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/analysis`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective,
 					active_analysis: analysis('failed', 2),
 					published_analysis: analysis('succeeded', 1),
@@ -467,14 +467,14 @@ async function mockApis(page: Page) {
 			);
 		}
 		if (
-			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-analysis`
+			path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/experiment-analysis`
 		) {
 			return route.fulfill(json(experimentProjection));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					items: [finding],
@@ -484,10 +484,10 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					finding_id: url.searchParams.get('finding_id'),
@@ -500,16 +500,16 @@ async function mockApis(page: Page) {
 		}
 		if (
 			path ===
-				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
+				`/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
 			path ===
-				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/curation`
+				`/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings/finding-1/curation`
 		) {
 			return route.fulfill(json({ items: [] }));
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/content`) {
 			return route.fulfill(json(documentContent()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/markdown`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/markdown`) {
 			return route.fulfill(json(documentMarkdown()));
 		}
 		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
@@ -532,7 +532,7 @@ for (const width of [320, 768, 1024, 1440]) {
 		await page.route(`**/objectives/${objectiveId}/analysis`, (route) =>
 			route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective: { ...objective, active_analysis_version: 1 },
 					active_analysis: analysis('succeeded', 1),
 					published_analysis: analysis('succeeded', 1),
@@ -562,7 +562,7 @@ for (const width of [320, 768, 1024, 1440]) {
 		await page.route(`**/objectives/${objectiveId}/findings?*`, (route) =>
 			route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					items: findings,
@@ -572,7 +572,7 @@ for (const width of [320, 768, 1024, 1440]) {
 				})
 			)
 		);
-		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
+		await page.goto(`/workspaces/${workspaceId}/objectives/${objectiveId}`);
 		await expect(page.getByRole('heading', { name: /Research findings|研究发现/ })).toBeVisible();
 		const coverage = page.locator('details.coverage');
 		await expect(coverage).toBeVisible();
@@ -612,7 +612,7 @@ for (const width of [320, 768, 1024, 1440]) {
 test('keeps the selected Finding read-only and responsive', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await mockApis(page);
-	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`);
+	await page.goto(`/workspaces/${workspaceId}/objectives/${objectiveId}?finding_id=finding-1`);
 	await expect(page.getByRole('heading', { name: finding.statement, exact: true })).toBeVisible();
 	await expect(page.locator('.saved-review')).toHaveCount(0);
 	await expect(page.getByRole('button', { name: '反馈' })).toHaveCount(0);
@@ -641,7 +641,7 @@ for (const viewport of [
 		});
 		await page.setViewportSize({ width: viewport.width, height: viewport.height });
 		await mockApis(page);
-		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`);
+		await page.goto(`/workspaces/${workspaceId}/objectives/${objectiveId}?finding_id=finding-1`);
 
 		await expect(page.getByText('Evidence analysis did not complete.')).toBeVisible();
 		await expect(
@@ -701,7 +701,7 @@ for (const viewport of [
 		const sourceLink = annealedRow.getByRole('link', { name: /打开原文|Open source/ });
 		await expect(sourceLink).toHaveAttribute(
 			'href',
-			`/collections/${collectionId}/documents/${documentId}?view=parsed-paper&evidence_id=evidence-1&source_ref=${tableSourceRef}&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2F${collectionId}%2Fobjectives%2F${objectiveId}%3Ffinding_id%3Dfinding-1&page=7`
+			`/workspaces/${workspaceId}/documents/${documentId}?view=parsed-paper&evidence_id=evidence-1&source_ref=${tableSourceRef}&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fworkspaces%2F${workspaceId}%2Fobjectives%2F${objectiveId}%3Ffinding_id%3Dfinding-1&page=7`
 		);
 		await page.screenshot({
 			path: `test-results/objective-finding-workspace-${viewport.name}.png`,
@@ -741,10 +741,10 @@ for (const viewport of [
 			)
 			.toBe(true);
 		expect(sourceApiPaths).toContain(
-			`/api/v1/collections/${collectionId}/documents/${documentId}/content`
+			`/api/v1/workspaces/${workspaceId}/documents/${documentId}/content`
 		);
 		expect(sourceApiPaths).toContain(
-			`/api/v1/collections/${collectionId}/documents/${documentId}/markdown`
+			`/api/v1/workspaces/${workspaceId}/documents/${documentId}/markdown`
 		);
 		expect(consoleProblems).toEqual([]);
 		expect(requestFailures).toEqual([]);

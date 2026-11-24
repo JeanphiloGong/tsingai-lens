@@ -48,7 +48,7 @@ async def objective_repository(source_repository):
         )
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id=OBJECTIVE_ID
         or build_research_objective_id(
             question="How does laser power affect tensile strength?",
@@ -104,7 +104,7 @@ async def _queue_and_claim(repository):
 
 def _contribution(version: int, document_id: str) -> PaperContribution:
     return PaperContribution(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id=OBJECTIVE_ID or "",
         analysis_version=version or 0,
         document_id=document_id or "",
@@ -135,15 +135,15 @@ async def test_finding_http_revision_and_abstention_are_persisted(
         experiment_analysis_writer,
         experiment_query_service,
     )
-    from application.source import collection_service
+    from application.source import workspace_service
     from controllers.core.finding_review_routes import finding_review_router as router
     from controllers.dependencies.auth import get_current_user_id
     from domain.core import PaperContribution
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
 
-    from repositories.collection_repository import (
-        CollectionRepository,
+    from repositories.workspace_repository import (
+        WorkspaceRepository,
     )
     from repositories.comparison_group_repository import (
         ComparisonGroupRepository,
@@ -167,7 +167,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(
     sessions = database.AsyncSessionLocal
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id="preheat-elongation",
         question="Does preheat change elongation in 316L?",
         material_scope=("316L",),
@@ -205,14 +205,14 @@ async def test_finding_http_revision_and_abstention_are_persisted(
     async with database.AsyncSessionLocal() as db, db.begin():
         source = await writer.write_experiment_analysis(
             db=db,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             objective=objective,
             analysis=analysis,
             experiment_outputs=(_comparison_experiment("doc_a"),),
         )
     coverage = tuple(
         PaperContribution(
-            collection_id=COLLECTION_ID or "",
+            workspace_id=COLLECTION_ID or "",
             objective_id=objective.objective_id or "",
             analysis_version=1,
             document_id=doc or "",
@@ -257,14 +257,14 @@ async def test_finding_http_revision_and_abstention_are_persisted(
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     app.include_router(router, prefix="/api/v1")
-    finding_authoring_service.collection_service = collection_service
+    finding_authoring_service.workspace_service = workspace_service
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = query
     finding_authoring_service.experiment_analysis_writer = writer
-    collection_service.CollectionRepo = CollectionRepository()
+    workspace_service.WorkspaceRepo = WorkspaceRepository()
     app.dependency_overrides[get_current_user_id] = lambda: "user_source"
 
-    path = f"/api/v1/collections/{COLLECTION_ID}/objectives/{objective.objective_id}/findings"
+    path = f"/api/v1/workspaces/{COLLECTION_ID}/objectives/{objective.objective_id}/findings"
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -334,7 +334,7 @@ async def test_published_evidence_gap_survives_a_failed_followup(
 ) -> None:
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id="laser-power-porosity",
         question="How does laser power affect porosity in Ti-6Al-4V?",
         material_scope=("Ti-6Al-4V",),

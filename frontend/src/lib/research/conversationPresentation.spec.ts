@@ -261,7 +261,7 @@ describe('buildChatPresentation', () => {
 					{
 						resource_type: 'source',
 						resource_id: 'results-1',
-						href: '/collections/c1/documents/paper-a?source_ref=results-1'
+						href: '/workspaces/c1/documents/paper-a?source_ref=results-1'
 					}
 				],
 				data: {
@@ -273,7 +273,7 @@ describe('buildChatPresentation', () => {
 		});
 		expect(getCurrentReadings([...messages, received])[0]).toMatchObject({
 			status: 'received',
-			href: '/collections/c1/documents/paper-a?source_ref=results-1',
+			href: '/workspaces/c1/documents/paper-a?source_ref=results-1',
 			page: '7',
 			excerpt: 'Complete passage with all comparisons.'
 		});
@@ -507,7 +507,7 @@ describe('buildChatPresentation', () => {
 			message('user_1', 'user', { content: 'Which findings support this question?' }),
 			message('call_1', 'assistant', {
 				toolCallId: 'tool_1',
-				toolName: 'get_collection_context'
+				toolName: 'get_workspace_context'
 			}),
 			message('result_1', 'tool', { toolCallId: 'tool_1', toolResult: result('tool_1') }),
 			message('call_2', 'assistant', {
@@ -559,7 +559,7 @@ describe('buildChatPresentation', () => {
 		const items = buildChatPresentation([
 			message('call_context', 'assistant', {
 				toolCallId: 'tool_context',
-				toolName: 'get_collection_context'
+				toolName: 'get_workspace_context'
 			}),
 			message('result_context', 'tool', {
 				toolCallId: 'tool_context',
@@ -605,7 +605,7 @@ describe('buildChatPresentation', () => {
 		const items = buildChatPresentation([
 			message('call_1', 'assistant', {
 				toolCallId: 'tool_1',
-				toolName: 'get_collection_context'
+				toolName: 'get_workspace_context'
 			}),
 			message('result_1', 'tool', { toolCallId: 'tool_1', toolResult: result('tool_1') }),
 			message('call_2', 'assistant', {

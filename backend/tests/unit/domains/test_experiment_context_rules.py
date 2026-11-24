@@ -9,7 +9,7 @@ from domain.core.scientific_fact import ScientificContext
 
 def _finding(status="single_study", groups=()):
     return Finding(
-        collection_id="collection", objective_id="objective", analysis_version=1,
+        workspace_id="workspace", objective_id="objective", analysis_version=1,
         finding_id="finding", statement="Preheat increases elongation.",
         factors=("preheat",), outcome="elongation", direction="increase",
         assertion_strength="associative", attribution_scope="association_only",

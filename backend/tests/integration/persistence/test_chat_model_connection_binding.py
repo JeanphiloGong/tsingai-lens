@@ -56,7 +56,7 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
     fixture.client._transport.app.include_router(model_router, prefix="/api/v1")
     sessions = []
     for headers in ({}, {"Accept": "text/event-stream"}):
-        created = await fixture.client.post("/api/v1/chat-sessions", json={"collection_id": "collection"})
+        created = await fixture.client.post("/api/v1/chat-sessions", json={"workspace_id": "workspace"})
         session_id = created.json()["data"]["session_id"]
         # Keep optional title generation outside this provider-call binding check.
         await fixture.service.set_session_title_for_user(
@@ -125,7 +125,7 @@ async def test_other_worker_recovers_saved_decision_through_http(branch_app, dec
     first = fixture.service
     monkeypatch.setattr(provider_module, "OpenAIChatModel", build_model)
     monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-test-value")
-    session = await first.create_session(collection_id="collection", user_id=fixture.owner)
+    session = await first.create_session(workspace_id="workspace", user_id=fixture.owner)
     await first.set_session_title_for_user(
         session.session_id, fixture.owner, title="Research objective approval",
     )

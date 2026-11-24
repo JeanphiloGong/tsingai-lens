@@ -33,15 +33,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-class _CollectionService:
-    async def get_collection_for_user(
+class _WorkspaceService:
+    async def get_workspace_for_user(
         self,
-        collection_id: str,
+        workspace_id: str,
         user_id: str,
     ) -> dict:
-        if (collection_id, user_id) != ("col-1", "user-1"):
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id, "owner_user_id": user_id}
+        if (workspace_id, user_id) != ("col-1", "user-1"):
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id, "owner_user_id": user_id}
 
 
 class _FindingFeedbackService:
@@ -52,13 +52,13 @@ class _FindingFeedbackService:
     async def export_dataset(
         self,
         *,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         user_id: str,
     ) -> dict:
-        self.calls.append((collection_id, objective_id))
+        self.calls.append((workspace_id, objective_id))
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective_id,
             "items": [
                 {
@@ -115,7 +115,7 @@ class _ExperimentPlanService:
         self.plans = {
             "exp-agent-1": ExperimentPlanRecord(
                 plan_id="exp-agent-1",
-                collection_id="col-1",
+                workspace_id="col-1",
                 objective_id="objective-1",
                 title="Initial plan",
                 content="Initial content",
@@ -140,7 +140,7 @@ class _ExperimentPlanService:
         self.calls.append(kwargs)
         return ExperimentPlanRecord(
             plan_id="exp-agent-1",
-            collection_id=kwargs["collection_id"],
+            workspace_id=kwargs["workspace_id"],
             objective_id=kwargs["objective_id"],
             title=kwargs["title"],
             content=kwargs["content"],
@@ -156,19 +156,19 @@ class _ExperimentPlanService:
             updated_at="2026-09-06T00:00:00+00:00",
         )
 
-    async def list_plans(self, collection_id, objective_id, *, user_id):
-        assert (collection_id, objective_id) == ("col-1", "objective-1")
+    async def list_plans(self, workspace_id, objective_id, *, user_id):
+        assert (workspace_id, objective_id) == ("col-1", "objective-1")
         return tuple(self.plans.values())
 
-    async def read_plan(self, collection_id, objective_id, plan_id, *, user_id):
-        assert (collection_id, objective_id) == ("col-1", "objective-1")
+    async def read_plan(self, workspace_id, objective_id, plan_id, *, user_id):
+        assert (workspace_id, objective_id) == ("col-1", "objective-1")
         return self.plans[plan_id]
 
     async def update_plan(self, **kwargs):
         self.calls.append(kwargs)
         return ExperimentPlanRecord(
             plan_id="exp-agent-2",
-            collection_id=kwargs["collection_id"],
+            workspace_id=kwargs["workspace_id"],
             objective_id=kwargs["objective_id"],
             title=kwargs["title"],
             content=kwargs["content"],
@@ -202,7 +202,7 @@ def _context(call_id: str) -> CapabilityExecutionContext:
     return CapabilityExecutionContext(
         session_id="chat-1",
         user_id="user-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         tool_call_id=call_id,
     )
 
@@ -288,7 +288,7 @@ def test_plan_variable_rejects_blank_planned_value() -> None:
 
 async def test_research_plan_draft_is_structured_traceable_and_transient() -> None:
     feedback_service = _FindingFeedbackService()
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = feedback_service
     capability = ProposeResearchPlanCapability()
 
@@ -330,7 +330,7 @@ async def test_research_plan_draft_is_structured_traceable_and_transient() -> No
 
 
 async def test_research_plan_draft_marks_unreviewed_findings_for_review() -> None:
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = _FindingFeedbackService(label_status="unreviewed")
     capability = ProposeResearchPlanCapability()
 
@@ -345,7 +345,7 @@ async def test_research_plan_draft_marks_unreviewed_findings_for_review() -> Non
 
 
 async def test_research_plan_draft_rejects_evidence_outside_selected_findings() -> None:
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = _FindingFeedbackService()
     capability = ProposeResearchPlanCapability()
     payload = _plan_arguments()
@@ -367,7 +367,7 @@ async def test_research_plan_draft_rejects_evidence_outside_selected_findings() 
 
 
 def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = _FindingFeedbackService()
     capability = ProposeResearchPlanCapability()
     payload = _plan_arguments()
@@ -380,7 +380,7 @@ def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
 async def test_research_plan_write_waits_for_exact_approval_after_draft() -> None:
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = feedback_service
     proposal = ProposeResearchPlanCapability()
     research_planning.experiment_plan_service = plan_service
@@ -481,7 +481,7 @@ async def test_research_plan_write_rejects_changed_source_snapshot_without_persi
 ):
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = feedback_service
     research_planning.experiment_plan_service = plan_service
     capability = CreateResearchPlanCapability()
@@ -506,7 +506,7 @@ async def test_research_plan_write_preserves_stale_error_from_persistence_bounda
 ):
     feedback_service = _FindingFeedbackService()
     plan_service = _StaleExperimentPlanService()
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = feedback_service
     research_planning.experiment_plan_service = plan_service
     capability = CreateResearchPlanCapability()
@@ -528,7 +528,7 @@ async def test_research_plan_write_preserves_stale_error_from_persistence_bounda
 
 async def test_agent_can_inspect_current_or_named_research_plan_revision() -> None:
     plan_service = _ExperimentPlanService()
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.experiment_plan_service = plan_service
     capability = InspectResearchPlansCapability()
 
@@ -555,7 +555,7 @@ async def test_agent_can_inspect_current_or_named_research_plan_revision() -> No
 async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(
     label_status,
 ) -> None:
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = _FindingFeedbackService(label_status=label_status)
     proposal = ProposeResearchPlanCapability()
     model = _Model(
@@ -601,7 +601,7 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
 ):
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = feedback_service
     research_planning.experiment_plan_service = plan_service
     capability = ReviseResearchPlanCapability()

@@ -8,11 +8,11 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 			}, testInfo) => {
 				await page.setViewportSize({ width, height: 900 });
 				await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'zh'));
-				const collectionId = 'col_input';
+				const workspaceId = 'col_input';
 				const datasetId = `fdset_${taskType}`;
 				const dataset = {
 					dataset_id: datasetId,
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: `预热条件 ${taskType}`,
 					task_type: taskType,
 					construction_spec: {},
@@ -48,10 +48,10 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 					const request = route.request();
 					const path = new URL(request.url()).pathname;
 					let body: unknown = {};
-					if (path === '/api/v1/collections') body = { items: [] };
-					else if (path === `/api/v1/collections/${collectionId}`)
+					if (path === '/api/v1/workspaces') body = { items: [] };
+					else if (path === `/api/v1/workspaces/${workspaceId}`)
 						body = {
-							collection_id: collectionId,
+							workspace_id: workspaceId,
 							name: '预热文献',
 							documents: [],
 							status: 'ready'
@@ -110,7 +110,7 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 						body: JSON.stringify({ code: 200, message: 'success', data: body, meta: null })
 					});
 				});
-				await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+				await page.goto(`/workspaces/${workspaceId}/feedback/datasets/${datasetId}`);
 				await expect(page.getByText('待补充', { exact: true }).last()).toBeVisible();
 				if (withEvidence) {
 					await page.getByRole('button', { name: '添加证据片段' }).click();

@@ -28,7 +28,7 @@ Export current system output:
 
 ```bash
 ./.venv/bin/python scripts/evaluation/expert_gold/export_prediction_bundle.py \
-  --collection-id col_xxx \
+  --workspace-id col_xxx \
   --output-path path/to/prediction.json
 ```
 
@@ -84,7 +84,7 @@ Run the canonical Objective benchmark:
 
 ```bash
 ./.venv/bin/python scripts/evaluation/expert_gold/run_objective_gold_benchmark.py \
-  --collection-id col_xxx \
+  --workspace-id col_xxx \
   --output-dir path/to/output
 ```
 
@@ -93,7 +93,7 @@ an intermediate target model.
 
 Run real acceptance against an isolated PostgreSQL database migrated to the
 current head. The backend and checker must use the same `LENS_DATABASE_URL`
-because API records and Source locators must resolve from the same collection
+because API records and Source locators must resolve from the same workspace
 state. Use an empty `*_test` database and run `alembic upgrade head` before
 uploading the six approved PDFs. Do not migrate a retained development database
 merely to run this check.
@@ -105,7 +105,7 @@ manifest:
 ./.venv/bin/python \
   scripts/evaluation/expert_gold/check_objective_findings_projection.py \
   --user-id user_xxx \
-  --collection-id col_xxx \
+  --workspace-id col_xxx \
   --objective-id obj_preheating_xxx \
   --objective-id obj_corrosion_xxx \
   --objective-id obj_fatigue_xxx \
@@ -113,7 +113,7 @@ manifest:
   tests/fixtures/expert_gold/objective_finding_acceptance.json
 ```
 
-Local reads require `--user-id` to enforce Collection ownership. The authenticated
+Local reads require `--user-id` to enforce Workspace ownership. The authenticated
 API variant uses the account from its login cookie instead. The base URL must
 serve both `/api` and `/user-api`, such as the frontend development origin:
 
@@ -124,7 +124,7 @@ LENS_DATABASE_URL=<isolated-current-schema-database-url> \
 ./.venv/bin/python \
   scripts/evaluation/expert_gold/check_objective_findings_projection.py \
   --api-base-url http://localhost:5196 \
-  --collection-id col_xxx \
+  --workspace-id col_xxx \
   --objective-id obj_preheating_xxx \
   --objective-id obj_corrosion_xxx \
   --objective-id obj_fatigue_xxx \
@@ -139,7 +139,7 @@ succeeded published analysis with non-empty Findings. It validates:
 
 - exact coverage of the six approved PDF content hashes and complete
   successful/excluded paper traversal;
-- complete `(collection_id, objective_id, analysis_version, finding_id)`
+- complete `(workspace_id, objective_id, analysis_version, finding_id)`
   identity;
 - non-empty factors, exactly one outcome, direction, attribution, and synthesis
   status aligned to direct Evidence;
@@ -166,7 +166,7 @@ The output verdict is `pass`, `partial`, or `fail`. Execution, paper traversal,
 approved-paper coverage, Source identity, and required feedback are blocking;
 scientific-quality failures produce `partial` when the runtime chain remains
 auditable. The manifest deliberately contains stable PDF SHA-256 hashes and
-question matching terms, not runtime Source document, collection, or Objective
+question matching terms, not runtime Source document, workspace, or Objective
 ids. The checker resolves each hash to exactly one document in the active
 Source build before auditing traversal. A missing manifest, fewer than six
 manifest papers, or fewer than three selected runtime Objectives is rejected
@@ -175,9 +175,9 @@ before the scientific audit starts.
 Persist review decisions through the authenticated API before the final check:
 
 ```text
-POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback
-GET  /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback?analysis_version={version}
-GET  /api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset
+POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/feedback
+GET  /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/feedback?analysis_version={version}
+GET  /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/finding-dataset
 ```
 
 The POST body must include `analysis_version`, `review_status`, `issue_type`,
@@ -191,7 +191,7 @@ event controls `label_status`, `dataset_use_status`, and training inclusion.
 The canonical review identity is:
 
 ```text
-collection_id + objective_id + analysis_version + finding_id
+workspace_id + objective_id + analysis_version + finding_id
 ```
 
 Review decisions use `accept`, `reject`, `correct`, or `skip`. A correction
@@ -204,12 +204,12 @@ Import a JSONL decision file:
 ./.venv/bin/python \
   scripts/evaluation/expert_gold/import_finding_review_decisions.py \
   path/to/decisions.jsonl \
-  --user-id collection-owner-user-id \
+  --user-id workspace-owner-user-id \
   --reviewer expert@example.com \
   --dry-run
 ```
 
-The required `--user-id` is the Collection owner actor; `--reviewer` records the
+The required `--user-id` is the Workspace owner actor; `--reviewer` records the
 human decision identity. Import operations authorize the actor before reading or
 writing reviews. Remove `--dry-run` only after validation succeeds. The importer rejects
 non-human reviewer IDs, stale analysis versions, unknown Findings, and
@@ -218,21 +218,21 @@ cross-Finding Evidence.
 Minimal accept row:
 
 ```json
-{"collection_id":"col_xxx","objective_id":"obj_xxx","analysis_version":2,"finding_id":"finding_xxx","action":"accept","note":"Checked against the cited result table."}
+{"workspace_id":"col_xxx","objective_id":"obj_xxx","analysis_version":2,"finding_id":"finding_xxx","action":"accept","note":"Checked against the cited result table."}
 ```
 
 Minimal correction row:
 
 ```json
 {
-  "collection_id": "col_xxx",
+  "workspace_id": "col_xxx",
   "objective_id": "obj_xxx",
   "analysis_version": 2,
   "finding_id": "finding_xxx",
   "action": "correct",
   "curated_status": "limited",
   "curated_finding": {
-    "collection_id": "col_xxx",
+    "workspace_id": "col_xxx",
     "objective_id": "obj_xxx",
     "analysis_version": 2,
     "finding_id": "finding_xxx",
@@ -268,7 +268,7 @@ the final label human-owned:
 - `merge_expert_decision_board.py`
 
 Agent drafts remain `action=skip` and `human_confirmed=false`. They are keyed by
-the complete `(collection_id, objective_id, analysis_version, finding_id)`
+the complete `(workspace_id, objective_id, analysis_version, finding_id)`
 identity. A human converts an advisory row into an explicit import action.
 
 ## Dataset Export
@@ -276,8 +276,8 @@ identity. A human converts an advisory row into an explicit import action.
 The maintained HTTP dataset routes are:
 
 ```text
-GET /api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset
-GET /api/v1/collections/{collection_id}/finding-dataset
+GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/finding-dataset
+GET /api/v1/workspaces/{workspace_id}/finding-dataset
 ```
 
 Use `format=training_jsonl` for Lens-native fine-tuning rows. Each line contains:
@@ -290,7 +290,7 @@ Use `format=training_jsonl` for Lens-native fine-tuning rows. Each line contains
   ],
   "metadata": {
     "schema_version": "objective_finding_training.v2",
-    "collection_id": "col_xxx",
+    "workspace_id": "col_xxx",
     "objective_id": "obj_xxx",
     "analysis_version": 2,
     "finding_id": "finding_xxx",

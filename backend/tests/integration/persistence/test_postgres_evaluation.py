@@ -13,10 +13,10 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
-from domain.source import Collection
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from domain.source import Workspace
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
 )
 from repositories.evaluation_repository import (
     EvaluationRepository,
@@ -29,14 +29,14 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
-    collections = CollectionRepository()
-    for collection_id in ("col-gold", "col-other"):
-        await collections.add_collection(
-            StoredCollection(
-                collection=Collection(
-                    collection_id=collection_id,
+    workspaces = WorkspaceRepository()
+    for workspace_id in ("col-gold", "col-other"):
+        await workspaces.add_workspace(
+            StoredWorkspace(
+                workspace=Workspace(
+                    workspace_id=workspace_id,
                     owner_user_id="user-evaluation",
-                    name=collection_id,
+                    name=workspace_id,
                     description=None,
                     status="idle",
                 ),
@@ -47,11 +47,11 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     repository = EvaluationRepository()
     gold_set = EvaluationGoldSet(
         gold_id="gold-v1",
-        collection_id="col-gold",
+        workspace_id="col-gold",
         version="v1",
         target_layer="core",
         metric_profile="materials_core_v1",
-        description="LPBF 316L gold collection",
+        description="LPBF 316L gold workspace",
         metadata={"domain": "materials"},
     )
     gold_items = (
@@ -74,7 +74,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
 
     snapshot = EvaluationPredictionSnapshot(
         snapshot_id="snapshot-1",
-        collection_id="col-gold",
+        workspace_id="col-gold",
         target_layer="core",
         fact_source="objective_first",
         system_context={"model": "qwen"},
@@ -96,7 +96,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
 
     run = EvaluationRun(
         evaluation_run_id="eval-1",
-        collection_id="col-gold",
+        workspace_id="col-gold",
         gold_id="gold-v1",
         prediction_snapshot_id="snapshot-1",
         target_layer="core",
@@ -157,14 +157,14 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
 
     with pytest.raises(ValueError, match="gold set identity cannot be reassigned"):
         await repository.upsert_gold_set(
-            EvaluationGoldSet(**{**gold_set.__dict__, "collection_id": "col-other"}),
+            EvaluationGoldSet(**{**gold_set.__dict__, "workspace_id": "col-other"}),
             (),
         )
 
     await repository.upsert_prediction_snapshot(
         EvaluationPredictionSnapshot(
             snapshot_id="snapshot-other",
-            collection_id="col-other",
+            workspace_id="col-other",
             target_layer="core",
             fact_source="objective_first",
             system_context={},
@@ -172,12 +172,12 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
             items=(),
         )
     )
-    with pytest.raises(ValueError, match="evaluation parents must share collection"):
+    with pytest.raises(ValueError, match="evaluation parents must share workspace"):
         await repository.upsert_evaluation_run(
             EvaluationRun(
                 **{
                     **run.__dict__,
-                    "evaluation_run_id": "eval-cross-collection",
+                    "evaluation_run_id": "eval-cross-workspace",
                     "prediction_snapshot_id": "snapshot-other",
                     "scores": (),
                     "failures": (),
@@ -186,7 +186,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
         )
 
 
-async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascade(
+async def test_postgresql_enforces_evaluation_foreign_keys_and_workspace_cascade(
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
@@ -195,7 +195,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
         await repository.upsert_gold_set(
             EvaluationGoldSet(
                 gold_id="gold-orphan",
-                collection_id="col-missing",
+                workspace_id="col-missing",
                 version="v1",
                 target_layer="core",
                 metric_profile="materials_core_v1",
@@ -203,11 +203,11 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
             (),
         )
 
-    collections = CollectionRepository()
-    await collections.add_collection(
-        StoredCollection(
-            collection=Collection(
-                collection_id="col-evaluation-cascade",
+    workspaces = WorkspaceRepository()
+    await workspaces.add_workspace(
+        StoredWorkspace(
+            workspace=Workspace(
+                workspace_id="col-evaluation-cascade",
                 owner_user_id="user-evaluation-cascade",
                 name="Evaluation cascade",
                 description=None,
@@ -220,7 +220,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     await repository.upsert_gold_set(
         EvaluationGoldSet(
             gold_id="gold-cascade",
-            collection_id="col-evaluation-cascade",
+            workspace_id="col-evaluation-cascade",
             version="v1",
             target_layer="core",
             metric_profile="materials_core_v1",
@@ -230,7 +230,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     await repository.upsert_prediction_snapshot(
         EvaluationPredictionSnapshot(
             snapshot_id="snapshot-cascade",
-            collection_id="col-evaluation-cascade",
+            workspace_id="col-evaluation-cascade",
             target_layer="core",
             fact_source="objective_first",
             system_context={},
@@ -241,7 +241,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     await repository.upsert_evaluation_run(
         EvaluationRun(
             evaluation_run_id="evaluation-cascade",
-            collection_id="col-evaluation-cascade",
+            workspace_id="col-evaluation-cascade",
             gold_id="gold-cascade",
             prediction_snapshot_id="snapshot-cascade",
             target_layer="core",
@@ -262,7 +262,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
         )
     )
 
-    assert await collections.delete_collection("col-evaluation-cascade") is True
+    assert await workspaces.delete_workspace("col-evaluation-cascade") is True
     assert await repository.read_gold_set("gold-cascade") is None
     assert await repository.read_prediction_snapshot("snapshot-cascade") is None
     assert await repository.read_evaluation_run("evaluation-cascade") is None

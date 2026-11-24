@@ -195,7 +195,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
             _issue(
                 line_number,
                 finding_id,
-                "collection_id, objective_id, analysis_version, and finding_id are required",
+                "workspace_id, objective_id, analysis_version, and finding_id are required",
             )
         )
     action = _text(row.get("action")).lower()
@@ -211,7 +211,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     if agent_review is not None and not isinstance(agent_review, dict):
         errors.append(_issue(line_number, finding_id, "agent_review must be an object"))
         return {
-            "collection_id": row.get("collection_id"),
+            "workspace_id": row.get("workspace_id"),
             "objective_id": row.get("objective_id"),
             "finding_id": finding_id,
             "recommendation": "missing",
@@ -221,7 +221,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     if not agent_review:
         warnings.append(_issue(line_number, finding_id, "missing agent_review"))
         return {
-            "collection_id": _text(row.get("collection_id")),
+            "workspace_id": _text(row.get("workspace_id")),
             "objective_id": _text(row.get("objective_id")),
             "finding_id": finding_id,
             "recommendation": "missing",
@@ -303,7 +303,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     elif not evidence:
         warnings.append(_issue(line_number, finding_id, "row has no evidence summary"))
     return {
-        "collection_id": _text(row.get("collection_id")),
+        "workspace_id": _text(row.get("workspace_id")),
         "objective_id": _text(row.get("objective_id")),
         "finding_id": finding_id,
         "recommendation": recommendation or "missing",
@@ -315,11 +315,11 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
 def _goal_handoff(row_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     goals: dict[tuple[str, str], dict[str, Any]] = {}
     for result in row_results:
-        key = (_text(result.get("collection_id")), _text(result.get("objective_id")))
+        key = (_text(result.get("workspace_id")), _text(result.get("objective_id")))
         goal = goals.setdefault(
             key,
             {
-                "collection_id": key[0],
+                "workspace_id": key[0],
                 "objective_id": key[1],
                 "total_rows": 0,
                 "agent_reviewed_count": 0,
@@ -352,7 +352,7 @@ def _identity(row: dict[str, Any]) -> tuple[str, str, int, str] | None:
     except (TypeError, ValueError):
         analysis_version = 0
     identity = (
-        _text(row.get("collection_id")),
+        _text(row.get("workspace_id")),
         _text(row.get("objective_id")),
         analysis_version,
         _text(row.get("finding_id")),

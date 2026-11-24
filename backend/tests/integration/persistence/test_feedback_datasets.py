@@ -87,7 +87,7 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()
     dataset_service.FeedbackDatasetRepo = datasets
-    dataset_service.collection_service = chain.collection_service
+    dataset_service.workspace_service = chain.workspace_service
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
@@ -100,7 +100,7 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     terminal = await worker.run_once()
     assert terminal is not None and terminal.status == "succeeded"
     listed = await service.list_dataset_records_for_user(
-        user_id=USER_ID, collection_id=COLLECTION_ID
+        user_id=USER_ID, workspace_id=COLLECTION_ID
     )
     system = {item.dataset.task_type: item.dataset for item in listed}
     assert {"sft", "preference", "evaluation"} <= set(system)
@@ -129,18 +129,18 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
     await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
-    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    case = (await chain.cases.list_cases(workspace_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()
     dataset_service.FeedbackDatasetRepo = datasets
-    dataset_service.collection_service = chain.collection_service
+    dataset_service.workspace_service = chain.workspace_service
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     dataset = (
         await service.create_dataset_for_user(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             name=f"Preheating {task_type}",
             task_type=task_type,
             construction_spec={},
@@ -153,7 +153,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     assert stored.created_at.tzinfo is not None
     assert stored.updated_at == stored.created_at
     listed = await service.list_dataset_records_for_user(
-        user_id=USER_ID, collection_id=COLLECTION_ID
+        user_id=USER_ID, workspace_id=COLLECTION_ID
     )
     listed_by_id = {item.dataset.dataset_id: item for item in listed}
     assert listed_by_id[stored.dataset.dataset_id] == stored
@@ -172,7 +172,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     sample_build_worker.FeedbackDatasetSampleRepo = samples
     sample_build_worker.FeedbackCaseRepo = chain.cases
     build_worker = SampleWorkerFixture(builder=SftSampleBuilder())
-    # The automatic Collection workbenches may have queued their own samples
+    # The automatic Workspace workbenches may have queued their own samples
     # first. Drain the queue until this explicitly created dataset is built.
     for _ in range(4):
         await build_worker.run_once()
@@ -377,7 +377,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
     await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
-    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    case = (await chain.cases.list_cases(workspace_id=COLLECTION_ID))[0]
     await chain.case_service.save_feedback_annotation_for_user(
         case_id=case.case_id,
         user_id=USER_ID,
@@ -394,14 +394,14 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()
     dataset_service.FeedbackDatasetRepo = datasets
-    dataset_service.collection_service = chain.collection_service
+    dataset_service.workspace_service = chain.workspace_service
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     dataset = (
         await service.create_dataset_for_user(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             name="Preheating SFT",
             task_type="sft",
             construction_spec={},
@@ -687,18 +687,18 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
     analysis_worker.FeedbackCaseRepo = chain.cases
     await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
-    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    case = (await chain.cases.list_cases(workspace_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()
     dataset_service.FeedbackDatasetRepo = datasets
-    dataset_service.collection_service = chain.collection_service
+    dataset_service.workspace_service = chain.workspace_service
     dataset_service.FeedbackDatasetSampleRepo = samples
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     dataset = (
         await service.create_dataset_for_user(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             name="Lease test",
             task_type="sft",
             construction_spec={},
@@ -857,7 +857,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
         session.add(
             FeedbackCaseORM(
                 case_id=case_id,
-                collection_id=COLLECTION_ID,
+                workspace_id=COLLECTION_ID,
                 session_id=SESSION_ID,
                 anchor_message_id=chain.answer.message_id,
                 source_signal_ids=[],
@@ -908,7 +908,7 @@ async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
             FeedbackDatasetSnapshotORM(
                 dataset_id=legacy_snapshot_id,
                 owner_id=USER_ID,
-                collection_id=COLLECTION_ID,
+                workspace_id=COLLECTION_ID,
                 dataset_type="sft",
                 rows=[row],
                 exclusions=[],

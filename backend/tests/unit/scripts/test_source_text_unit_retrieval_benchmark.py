@@ -87,7 +87,7 @@ def test_validate_fixture_rejects_missing_or_untraceable_gold_ids() -> None:
     fixture = {
         "schema_version": 1,
         "name": "test",
-        "filters": {"collection_id": "col-1", "document_ids": ["doc-1"]},
+        "filters": {"workspace_id": "col-1", "document_ids": ["doc-1"]},
         "queries": [
             {
                 "id": "q1",
@@ -117,7 +117,7 @@ def test_validate_fixture_rejects_missing_or_untraceable_gold_ids() -> None:
     ):
         benchmark.validate_fixture(
             fixture,
-            collection_id="col-1",
+            workspace_id="col-1",
             available_ids={"untraceable"},
             locators={"untraceable": {"document_ids": ["doc-1"], "blocks": []}},
         )
@@ -126,7 +126,7 @@ def test_validate_fixture_rejects_locator_that_does_not_match_source() -> None:
     fixture = {
         "schema_version": 1,
         "name": "test",
-        "filters": {"collection_id": "col-1", "document_ids": ["doc-1"]},
+        "filters": {"workspace_id": "col-1", "document_ids": ["doc-1"]},
         "queries": [
             {
                 "id": "q1",
@@ -150,7 +150,7 @@ def test_validate_fixture_rejects_locator_that_does_not_match_source() -> None:
     ):
         benchmark.validate_fixture(
             fixture,
-            collection_id="col-1",
+            workspace_id="col-1",
             available_ids={"tu-1"},
             locators={
                 "tu-1": {

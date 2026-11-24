@@ -26,7 +26,7 @@ another experiment is needed.
 
 ```mermaid
 flowchart LR
-    U[Authenticated researcher] --> C[Collection]
+    U[Authenticated researcher] --> C[Workspace]
     C --> D[Current Documents]
     D --> PR[Preparation Pipeline Run]
     PR --> S[Current Source tree]
@@ -86,12 +86,12 @@ class is in `infra/persistence/postgres/models`.
 | Logic flow | Owning backend modules | Tables | What the rows mean |
 | --- | --- | --- | --- |
 | Authenticate requests | `controllers/dependencies/auth.py`, `infra/identity/client.py` | No local identity tables | Resolve the session through user-service over mTLS gRPC; Lens retains resource ownership checks. |
-| Create a collection and add papers | `application/source`, `controllers/source/collection_routes.py` | `collections`, `documents` | Collection membership and the current paper/file metadata. |
+| Create a workspace and add papers | `application/source`, `controllers/source/workspace_routes.py` | `workspaces`, `documents` | Workspace membership and the current paper/file metadata. |
 | Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_run_routes.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
 | Parse and analyze a paper | `infra/source`, `application/source`, `application/core/document_profiles` | `document_preparations` | One document-keyed preparation aggregate containing Source, Profile, Paper Map, and the provenance for each generated section. |
-| Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `collections`, `document_preparations`, `research_objectives` | Collection-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
+| Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `workspaces`, `document_preparations`, `research_objectives` | Workspace-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
 | Inspect experiments and compare papers | `application/core/objectives`, `application/core/paper_facts` | `paper_experiment`, `objective_experiment_selection`, `comparison_group`, `experiment_finding`, `objective_analyses` | Automatic analysis stores immutable experiment revisions, explicit selections, optional cross-paper groups, and Finding references. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
-| Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_conversations`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
+| Run workspace-bound Agent Chat | `application/chat`, `domain/chat` | `chat_conversations`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
 | Assess an answer's usefulness | `application/chat`, `domain/chat/feedback.py` | `chat_message_feedback` | One mutable user assessment of a saved answer, separate from scientific Finding review and model context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
 | Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. Evaluation items, scores, and failures remain inside their aggregate payloads. |
@@ -105,7 +105,7 @@ count. The remaining tables are separate for these concrete reasons:
 | --- | --- |
 | `chat_conversations`, `chat_messages`, `chat_tool_calls` | A conversation contains messages, and each assistant turn can contain ordered capability calls with approval and execution state. Tool results are embedded in their call. |
 | `chat_message_feedback` | A user can revise or withdraw an assessment without rewriting the append-only answer or its tool trajectory. |
-| `collections`, `documents`, `document_preparations` | Collection ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
+| `workspaces`, `documents`, `document_preparations` | Workspace ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
 | `pipeline_runs` | Technical retry/progress history must remain observable without being confused with scientific artifacts. |
 | `research_objectives`, `objective_analyses` | One Objective can have multiple immutable analysis attempts; the analysis version is the scientific result boundary. |
 | `objective_experiment_plans` | Plan revisions form an immutable successor chain and are optional downstream decisions, not analysis output. |
@@ -124,7 +124,7 @@ Repositories import their mapped classes directly from the owning module.
 
 | Module under `infra/persistence/postgres/models/` | Responsibility |
 | --- | --- |
-| `collection.py` | Collection metadata, current documents and document preparation |
+| `workspace.py` | Workspace metadata, current documents and document preparation |
 | `paper_experiment.py` | Immutable paper experiments and revision-local measurements/comparisons |
 | `objective.py` | Research objectives, analysis versions, selections, comparison groups and follow-up plans |
 | `finding.py` | Findings, selection/group links, expert feedback and curation |
@@ -150,25 +150,25 @@ foreign keys; business owner and actor IDs remain unchanged. Existing databases
 require stopped writes, a verified account import and a recoverable backup before
 this migration. A downgrade cannot reconstruct removed credentials.
 
-### 2. Collection Intake and Current Documents
+### 2. Workspace Intake and Current Documents
 
-`collection_service` owns the collection aggregate and the current Document
+`workspace_service` owns the workspace aggregate and the current Document
 membership used by every downstream flow.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `collections` | `collection_id` | `owner_user_id` (`RESTRICT` on user deletion), name/description, status, discovery state, and timestamps. The document count is derived from current `documents` rows. |
-| `documents` | `document_id` | Direct `collection_id` membership, original/stored names, object-store `storage_key`, SHA-256, media type, byte size, display order, and current preparation status. |
+| `workspaces` | `workspace_id` | `owner_user_id` (`RESTRICT` on user deletion), name/description, status, discovery state, and timestamps. The document count is derived from current `documents` rows. |
+| `documents` | `document_id` | Direct `workspace_id` membership, original/stored names, object-store `storage_key`, SHA-256, media type, byte size, display order, and current preparation status. |
 
-The database has no public collection-membership join object and no
+The database has no public workspace-membership join object and no
 `DocumentVersion` aggregate. A Document is the current paper in its
-Collection. Uniqueness is enforced per collection for content
-(`collection_id, sha256`) and display order (`collection_id, document_order`);
+Workspace. Uniqueness is enforced per workspace for content
+(`workspace_id, sha256`) and display order (`workspace_id, document_order`);
 the storage key is globally unique.
 
 The object store writes immutable input bytes before the Document is exposed as
-ready. PostgreSQL records their identity and integrity metadata. Collection
-deletion is coordinated by `collection_service`: it removes the collection
+ready. PostgreSQL records their identity and integrity metadata. Workspace
+deletion is coordinated by `workspace_service`: it removes the workspace
 directory/object files and deletes the PostgreSQL aggregate, allowing database
 cascades to remove dependent rows.
 
@@ -176,11 +176,11 @@ cascades to remove dependent rows.
 
 `pipeline_run_service` records technical execution while
 `document_preparation_service` and Objective discovery write their scientific
-results to the owning Source, Profile, Collection, and Objective tables.
+results to the owning Source, Profile, Workspace, and Objective tables.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `pipeline_runs` | `run_id` | Collection ownership, pipeline and polymorphic scope, input fingerprint, status, searchable timestamps, and one typed JSON snapshot containing progress and node telemetry. |
+| `pipeline_runs` | `run_id` | Workspace ownership, pipeline and polymorphic scope, input fingerprint, status, searchable timestamps, and one typed JSON snapshot containing progress and node telemetry. |
 
 Run status is limited to `queued`, `running`, `completed`,
 `partial_success`, and `failed`. Nested node status is limited to `queued`,
@@ -211,7 +211,7 @@ material that later Objective analysis may inspect.
 The top-level `source_fingerprint` belongs only to the Source producer.
 `profile_json.source_fingerprint` records the Source actually used to generate
 that Profile; the two can differ while a new Source awaits profile regeneration.
-Profile writes and Collection status changes preserve that difference. A row
+Profile writes and Workspace status changes preserve that difference. A row
 containing only a Profile must not be returned as an empty parsed Source, and
 a Source-only row does not yet satisfy the Paper Map's Profile prerequisite.
 
@@ -223,19 +223,19 @@ deeper inspection. They are navigation inputs, not Evidence.
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
 | `document_preparations` | `document_id` | One current preparation row. `profile_json` contains triage fields and `paper_map_payload` contains the optional lazy navigation map. |
-| `collections` | `collection_id` | Current discovery state: readiness flag, ordered `document_inputs`, Objective IDs, study dispositions, and update time. |
-| `research_objectives` | `(collection_id, objective_id)` | Ranked current Objective payload, origin (`system_discovered` or `chat_assisted`), optional Chat tool-call provenance, and timestamps. |
+| `workspaces` | `workspace_id` | Current discovery state: readiness flag, ordered `document_inputs`, Objective IDs, study dispositions, and update time. |
+| `research_objectives` | `(workspace_id, objective_id)` | Ranked current Objective payload, origin (`system_discovered` or `chat_assisted`), optional Chat tool-call provenance, and timestamps. |
 
 Discovery requires an explicit non-empty set of ready Document IDs. Each
 `document_inputs` item freezes the pair `{document_id,
 preparation_fingerprint}`. Replacing discovery changes the current candidates
-for that Collection; it does not create a Collection snapshot or duplicate the
+for that Workspace; it does not create a Workspace snapshot or duplicate the
 Source/Profile aggregates. Paper Map data is a navigation cache inside the
 preparation row, not a second artifact identity.
 
 The Objective payload carries confirmation and published/active analysis
 version pointers. The composite identity keeps Objectives from different
-Collections from colliding. `created_by_tool_call_id` is a uniqueness-checked
+Workspaces from colliding. `created_by_tool_call_id` is a uniqueness-checked
 provenance value; the Chat trajectory remains the authority for the call
 record.
 
@@ -249,7 +249,7 @@ publish a reviewable Finding set.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `objective_analyses` | `(collection_id, objective_id, analysis_version)` | One versioned analysis attempt and its execution metadata. Automatic scientific facts live in PaperExperiment/Selection/Group/Finding tables; authored snapshots remain in this payload. |
+| `objective_analyses` | `(workspace_id, objective_id, analysis_version)` | One versioned analysis attempt and its execution metadata. Automatic scientific facts live in PaperExperiment/Selection/Group/Finding tables; authored snapshots remain in this payload. |
 | `paper_experiment`, `experimental_variant`, `test_condition`, `measurement_result`, `experiment_comparison`, `experiment_comparison_measurement`, `reported_interpretation` | revision-local identities | Immutable same-paper experiment revisions and their source-bound components. A revision can be partial; unresolved bindings remain explicit. |
 | `objective_experiment_selection`, `selection_measurement`, `selection_comparison` | `selection_id` plus Objective analysis identity | The exact experiment revision, measurements, and comparisons used by one Objective analysis version. Selections never mean “latest”. |
 | `comparison_group`, `comparison_group_member` | `group_id` | Optional cross-paper comparison context and member disposition; no duplicate measurement values. |
@@ -266,7 +266,7 @@ in one workflow. Human- or Agent-authored versions continue to use their own
 immutable snapshot payload. The retired checkpoint payload is classified by
 migration `20260924_0075` and is not used at runtime.
 
-### 7. Collection-Bound Agent Chat
+### 7. Workspace-Bound Agent Chat
 
 Chat selects provider settings from `model_connections`. The
 [model connection data contract](../specs/model-connections/data-model.md)
@@ -278,7 +278,7 @@ create a parallel paper-fact model.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `chat_conversations` | `conversation_id` | Authenticated user and Collection ownership, current path selection, creation/update timestamps, and monotonic timestamp check. |
+| `chat_conversations` | `conversation_id` | Authenticated user and Workspace ownership, current path selection, creation/update timestamps, and monotonic timestamp check. |
 | `chat_messages` | `message_id` | Conversation ownership, optional parent, role (`user`, `assistant`, `tool`), content, tool metadata, and selected `source_contexts`. `(conversation_id, position)` preserves the existing Chat order. |
 | `chat_message_feedback` | `feedback_id` | User/message uniqueness, usefulness rating, optional reason/comment, saved-answer digest, and timestamps. Foreign keys cascade with the message or conversation. |
 | `chat_tool_calls` | `tool_call_id` | Session and assistant-message ownership, capability name/arguments, argument digest, risk (`unknown`, `read`, `draft`, `write`), approval/execution status, timing, decision-user provenance, and the optional structured result. One call is allowed per assistant message. |
@@ -312,7 +312,7 @@ prepare Source or rerun Objective analysis.
 #### Finding review
 
 `finding_feedback_records` and `finding_curation_records` both use the exact
-Finding identity `(collection_id, objective_id, analysis_version, finding_id)`.
+Finding identity `(workspace_id, objective_id, analysis_version, finding_id)`.
 The review repository validates that identity against the automatic `finding`
 row and its fixed selection/group references, or against the authored snapshot
 when the analysis origin is human- or agent-authored. Migration `20260908_0055`
@@ -335,8 +335,8 @@ less-readable table.
 
 | Table | Identity and role |
 | --- | --- |
-| `evaluation_gold_sets` | `gold_id`; versioned collection gold metadata and complete expected-item payload. |
-| `evaluation_prediction_snapshots` | `snapshot_id`; frozen collection prediction context and complete prediction-item payload. |
+| `evaluation_gold_sets` | `gold_id`; versioned workspace gold metadata and complete expected-item payload. |
+| `evaluation_prediction_snapshots` | `snapshot_id`; frozen workspace prediction context and complete prediction-item payload. |
 | `evaluation_runs` | `evaluation_run_id`; gold/prediction references, summary, complete score payload, and complete failure payload. |
 
 Evaluation payloads retain the exact evidence and prediction snapshots used for
@@ -387,7 +387,7 @@ resolved against the exact artifact row that produced it.
 
 The current model keeps lifecycle-local state together: the complete Source,
 Profile, and Paper Map preparation result lives on `document_preparations`,
-discovery state lives on `collections`, and automatic experiment selections and
+discovery state lives on `workspaces`, and automatic experiment selections and
 Findings use their own versioned tables. Authored Evidence/Finding snapshots
 remain in `objective_analyses.payload`; capability results live on
 `chat_tool_calls`.
@@ -427,15 +427,15 @@ The database therefore supports these observable outcomes:
 
 ## Deletion and Replacement Rules
 
-- Deleting a Collection cascades its Documents, current Source/Profile,
+- Deleting a Workspace cascades its Documents, current Source/Profile,
   Pipeline Runs, Objectives, analyses, Findings, review records, Chat
-  sessions, plans, and collection-owned evaluation inputs. Evaluation Runs
+  sessions, plans, and workspace-owned evaluation inputs. Evaluation Runs
   protect their gold-set and prediction-snapshot inputs with `RESTRICT`, so a
-  Collection deletion is blocked while those run dependencies exist. The same
+  Workspace deletion is blocked while those run dependencies exist. The same
   rule applies to any other `RESTRICT` provenance edge encountered during the
   cascade.
 - Deleting an Auth User cascades sessions and Chat sessions but is restricted
-  while the user still owns Collections or is recorded as a tool-call decision
+  while the user still owns Workspaces or is recorded as a tool-call decision
   user. Plan author fields are nullable and use `SET NULL`.
 - Chat feedback follows its message, session, and user with `CASCADE`. Explicit
   withdrawal deletes only the assessment; it never deletes the answer.
@@ -443,8 +443,8 @@ The database therefore supports these observable outcomes:
   embedded Paper Map cache), and analysis payloads that reference it. A
   document-scoped Pipeline Run uses a
   polymorphic logical `scope_id`, so its execution history remains until the
-  owning Collection is deleted. Published
-  Objective analysis rows are retained only while their parent Collection and
+  owning Workspace is deleted. Published
+  Objective analysis rows are retained only while their parent Workspace and
   Objective remain; a later analysis must select currently ready Documents.
 - Re-preparing a Document replaces its current Source and Profile only after
   the owning step succeeds. Pipeline Run history remains observable and old published
@@ -452,7 +452,7 @@ The database therefore supports these observable outcomes:
 - Evaluation Runs retain their referenced gold set and prediction snapshot by
   `RESTRICT`; those inputs cannot be deleted underneath a completed run.
 - The current-model cutover in migration `20260827_0038` intentionally removed
-  retired collection-build, document-version, paper-fact, comparison, and
+  retired workspace-build, document-version, paper-fact, comparison, and
   workspace-projection tables. There is no backfill, compatibility read, or
   runtime schema fallback for those names.
 
@@ -496,16 +496,16 @@ identity used by the Evidence or Finding.
 
 | Repository | Tables owned |
 | --- | --- |
-| `CollectionRepository` | `collections`, `documents` (document count derived from current rows) |
+| `WorkspaceRepository` | `workspaces`, `documents` (document count derived from current rows) |
 | `PipelineRunRepository` | `pipeline_runs` |
 | `SourceArtifactRepository` | `document_preparations.source_*`, `document_preparations.artifact_json` |
 | `DocumentProfileRepository` | `document_preparations.profile_json` |
 | `PaperMapRepository` | `document_preparations.paper_map_payload` |
-| `ObjectiveRepository` | `collections.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
+| `ObjectiveRepository` | `workspaces.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
 | `PaperExperimentRepository` / `ObjectiveExperimentSelectionRepository` | Immutable automatic experiment revisions and Objective-scoped selections |
 | `ComparisonGroupRepository` / `ExperimentFindingRepository` | Optional comparison groups and Findings that reference fixed selections |
 | `ChatRepository` | `chat_conversations`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
-| `ConversationRepository` | `chat_conversations`, `chat_messages`, `chat_message_feedback`, `agent_tasks`, `collections` for the selected path read |
+| `ConversationRepository` | `chat_conversations`, `chat_messages`, `chat_message_feedback`, `agent_tasks`, `workspaces` for the selected path read |
 | `ExperimentPlanRepository` | `objective_experiment_plans` |
 | `FindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
 | `EvaluationRepository` | All `evaluation_*` tables |
@@ -525,7 +525,7 @@ integration tests use an independent PostgreSQL database.
 - [`../../infra/persistence/README.md`](../../infra/persistence/README.md):
   persistence adapter boundary and repository ownership.
 - [`../../application/source/README.md`](../../application/source/README.md):
-  collection and preparation flow.
+  workspace and preparation flow.
 - [`../../application/core/README.md`](../../application/core/README.md):
   profiles, Paper Maps, Objective discovery, and analysis.
 - [`../../application/evaluation/README.md`](../../application/evaluation/README.md):
@@ -546,7 +546,7 @@ descriptions explain each field's business role in the Lens research chain. `JSO
 ### Contents
 
 - [Authentication and access](#authentication-and-access)
-- [Collections, documents, and pipeline runs](#collections-documents-and-pipeline-runs)
+- [Workspaces, documents, and pipeline runs](#workspaces-documents-and-pipeline-runs)
 - [Source parsing structure](#source-parsing-structure)
 - [Document Profiles and Objectives](#document-profiles-and-objectives)
 - [Agent Chat](#agent-chat)
@@ -576,48 +576,48 @@ Accounts and sessions are owned by the sibling user-service. See its
 [data model](../../../user-service/docs/data-model.md). Lens stores stable user IDs
 in business and audit rows without cross-database foreign keys.
 
-### Collections, documents, and pipeline runs
+### Workspaces, documents, and pipeline runs
 
-#### `collections` — Paper collections
+#### `workspaces` — Paper workspaces
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK | Identifier of the owning research collection. |
-| `owner_user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identity-service user ID of the collection owner; Lens enforces ownership on each request. |
-| `name` | `TEXT` | No | — | Human-readable collection name. |
-| `description` | `TEXT` | Yes | — | Optional research purpose or background for the collection. |
-| `status` | `VARCHAR(64)` | No | — | Current collection lifecycle state, maintained by `collection_service`. |
+| `workspace_id` | `VARCHAR(64)` | No | PK | Identifier of the owning research workspace. |
+| `owner_user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identity-service user ID of the workspace owner; Lens enforces ownership on each request. |
+| `name` | `TEXT` | No | — | Human-readable workspace name. |
+| `description` | `TEXT` | Yes | — | Optional research purpose or background for the workspace. |
+| `status` | `VARCHAR(64)` | No | — | Current workspace lifecycle state, maintained by `workspace_service`. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
-| `discovery_ready` | `BOOLEAN` | No | default `false` | Whether the current collection discovery result is ready for review or confirmation. |
+| `discovery_ready` | `BOOLEAN` | No | default `false` | Whether the current workspace discovery result is ready for review or confirmation. |
 | `discovery_document_inputs` | `JSONB` | No | default `[]` | Ordered selected inputs, each containing a `document_id` and preparation fingerprint. |
 | `discovery_objective_ids` | `JSONB` | No | default `[]` | Ordered Objective IDs produced by the current discovery result. |
 | `discovery_study_dispositions` | `JSONB` | No | default `[]` | Per-document study role, inclusion/exclusion, and uncertainty. |
 | `discovery_updated_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Timestamp of the latest discovery-state update. |
 
-#### `documents` — Current collection documents
+#### `documents` — Current workspace documents
 
 Document is the paper identity in the current model, not a publicly queryable version aggregate.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `document_id` | `VARCHAR(64)` | No | PK | Stable identifier of the current Document. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research workspace. |
 | `original_filename` | `TEXT` | No | — | Filename supplied by the user at upload time. |
 | `stored_filename` | `TEXT` | No | — | Sanitized filename used by object storage. |
 | `storage_key` | `TEXT` | No | UQ | Globally unique object-storage key for the immutable input bytes; the bytes are not stored in PostgreSQL. |
-| `sha256` | `VARCHAR(64)` | No | length 64; lowercase; per collection UQ | SHA-256 digest of the input bytes, used for deduplication and preparation fingerprints. |
+| `sha256` | `VARCHAR(64)` | No | length 64; lowercase; per workspace UQ | SHA-256 digest of the input bytes, used for deduplication and preparation fingerprints. |
 | `media_type` | `VARCHAR(255)` | Yes | — | MIME type of the uploaded file, such as `application/pdf`. |
 | `status` | `VARCHAR(64)` | No | — | Current document preparation state, maintained by the Source application layer. |
 | `size_bytes` | `BIGINT` | No | `>= 0` | Size of the original file in bytes. |
-| `document_order` | `INTEGER` | No | `>= 0`; per collection UQ | Stable display and processing position within the collection. |
+| `document_order` | `INTEGER` | No | `>= 0`; per workspace UQ | Stable display and processing position within the workspace. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 
 #### `pipeline_runs` — Observable technical pipeline execution
 
 One row represents one pipeline invocation. The indexed relational columns
-support admission, reuse, polling, and collection history queries. The
+support admission, reuse, polling, and workspace history queries. The
 `record_json` column stores the complete typed `PipelineRun` snapshot in the
 same row; it replaces the former separate stage rows without becoming a store
 for Source, Profile, Objective, Evidence, or Finding results.
@@ -625,10 +625,10 @@ for Source, Profile, Objective, Evidence, or Finding results.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `run_id` | `VARCHAR(64)` | No | PK | Stable identifier of one pipeline invocation. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Collection in which the pipeline executes and the ownership boundary for run history. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX; `ON DELETE CASCADE` | Workspace in which the pipeline executes and the ownership boundary for run history. |
 | `pipeline_name` | `VARCHAR(64)` | No | IDX; non-empty | Stable executable flow name, currently `document_preparation` or `objective_discovery`. |
-| `scope_type` | `VARCHAR(32)` | No | IDX; non-empty | Kind of logical execution target, currently `document` or `collection`. |
-| `scope_id` | `VARCHAR(64)` | No | IDX; non-empty | Identifier of the logical target. For document runs this is `documents.document_id`; for collection runs it equals `collection_id`. It is intentionally not a foreign key because the column is polymorphic. |
+| `scope_type` | `VARCHAR(32)` | No | IDX; non-empty | Kind of logical execution target, currently `document` or `workspace`. |
+| `scope_id` | `VARCHAR(64)` | No | IDX; non-empty | Identifier of the logical target. For document runs this is `documents.document_id`; for workspace runs it equals `workspace_id`. It is intentionally not a foreign key because the column is polymorphic. |
 | `mode` | `VARCHAR(64)` | No | — | Execution or entry mode selected for this invocation, currently `standard` in the maintained flows. |
 | `input_fingerprint` | `VARCHAR(64)` | Yes | — | Identity of the complete input state consumed by the run. A later run writes successor experiment revisions; it does not reuse a per-document scientific checkpoint. |
 | `status` | `VARCHAR(32)` | No | IDX; `queued` / `running` / `completed` / `partial_success` / `failed` | Current technical lifecycle state used for polling and recovery. |
@@ -654,7 +654,7 @@ The partial unique index `uq_pipeline_runs_active_scope` ensures that one
 
 | JSON field | Shape | Description |
 | :--- | :--- | :--- |
-| `run_id`, `collection_id`, `pipeline_name`, `scope_type`, `scope_id`, `mode`, `input_fingerprint`, `status` | scalar values | Serialized run identity and searchable state mirrored from relational columns. |
+| `run_id`, `workspace_id`, `pipeline_name`, `scope_type`, `scope_id`, `mode`, `input_fingerprint`, `status` | scalar values | Serialized run identity and searchable state mirrored from relational columns. |
 | `current_node` | string or null | Current browser-facing phase or pipeline node. |
 | `progress_percent` | integer `0..100` | Overall browser-facing completion percentage. |
 | `progress_detail` | object or null | Fine-grained phase progress, such as current/total units, message, and active Document or Objective ID. |
@@ -713,27 +713,27 @@ Evidence and Findings produced after Objective analysis reads exact Source mater
 
 Profile and parser provenance belongs to the named section that produced it:
 `document_preparations` owns both without making them file identity fields.
-`documents` remains the authority for collection ownership, filenames, file
+`documents` remains the authority for workspace ownership, filenames, file
 identity, and current preparation status. Profile queries join through
-`documents.document_id` when they need collection scoping.
+`documents.document_id` when they need workspace scoping.
 
 Paper Maps are built lazily when a ready Document is selected for Objective
 work. They are stored in the same preparation row because they are derived
 navigation state, not an independently addressable scientific artifact. The
 cache is rebuilt when its input fingerprint or map version is stale.
 
-Discovery state is stored in the `collections.discovery_*` fields. Replacing
-that state changes the current candidates for the Collection; it does not
-create a Collection snapshot or duplicate preparation aggregates.
+Discovery state is stored in the `workspaces.discovery_*` fields. Replacing
+that state changes the current candidates for the Workspace; it does not
+create a Workspace snapshot or duplicate preparation aggregates.
 
 #### `research_objectives` — Research Objectives
 
-The database identity of an Objective is `(collection_id, objective_id)`. Its complete scientific intent
+The database identity of an Objective is `(workspace_id, objective_id)`. Its complete scientific intent
 is stored in `payload` rather than split into a wide table detached from the domain model.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK (composite); FK -> `collections.collection_id`; `ON DELETE CASCADE` | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | PK (composite); FK -> `workspaces.workspace_id`; `ON DELETE CASCADE` | Identifier of the owning research workspace. |
 | `objective_id` | `VARCHAR(128)` | No | PK (composite) | Stable identifier of the research Objective. |
 | `rank` | `INTEGER` | No | — | Candidate order in the discovery result. |
 | `origin` | `VARCHAR(32)` | No | `system_discovered` / `chat_assisted` | Whether the Objective came from system discovery or Chat-assisted creation. |
@@ -744,12 +744,12 @@ is stored in `payload` rather than split into a wide table detached from the dom
 
 #### `objective_analyses` — Objective analysis versions
 
-The complete identity is `(collection_id, objective_id, analysis_version)` and links to
+The complete identity is `(workspace_id, objective_id, analysis_version)` and links to
 `research_objectives` through a composite foreign key.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `collection_id` | `VARCHAR(64)` | No | PK (composite); composite FK -> `research_objectives`; `ON DELETE CASCADE` | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | PK (composite); composite FK -> `research_objectives`; `ON DELETE CASCADE` | Identifier of the owning research workspace. |
 | `objective_id` | `VARCHAR(128)` | No | PK (composite); composite FK -> `research_objectives` | Stable identifier of the research Objective. |
 | `analysis_version` | `INTEGER` | No | PK (composite); positive integer | Positive analysis version; retries create a new version. |
 | `status` | `VARCHAR(16)` | No | `queued` / `running` / `succeeded` / `failed`; IDX | Lifecycle or execution status for the objective analyses record. |
@@ -781,7 +781,7 @@ revisions from another run.
 
 ### Agent Chat
 
-Chat is an auditable Collection-bound Agent trajectory. It records user-visible messages, model
+Chat is an auditable Workspace-bound Agent trajectory. It records user-visible messages, model
 capability requests, approval decisions, and structured results; it references Core Artifacts instead of creating a parallel
 paper-fact model.
 
@@ -797,7 +797,7 @@ separate migration. See the [Conversation and Agent data model](../specs/convers
 | :--- | :--- | :---: | :--- | :--- |
 | `conversation_id` | `VARCHAR(128)` | No | PK | Stable conversation identity carried forward from `chat_sessions.session_id`. |
 | `user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identifier for the authenticated user. |
-| `workspace_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Collection bound to the conversation. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX; `ON DELETE CASCADE` | Workspace bound to the conversation. |
 | `current_message_id`, `current_task_id` | `VARCHAR(128)` | Yes | Same-conversation FKs; at most one is set | Selected path tip or Task. |
 | `path_revision` | `BIGINT` | No | `>= 0`; default `0` | Version of the selected path. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
@@ -876,7 +876,7 @@ an immutable row; new revisions form a one-way chain through `parent_plan_id`.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `plan_id` | `VARCHAR(128)` | No | PK | Stable identifier of this experiment-plan revision. |
-| `collection_id` | `VARCHAR(64)` | No | IDX; composite FK -> `research_objectives`; ON DELETE CASCADE | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | IDX; composite FK -> `research_objectives`; ON DELETE CASCADE | Identifier of the owning research workspace. |
 | `objective_id` | `VARCHAR(128)` | No | IDX; composite FK -> `research_objectives` | Stable identifier of the research Objective. |
 | `title` | `TEXT` | No | — | Parsed or user-facing title. |
 | `content` | `TEXT` | No | — | Human- or system-readable text content. |
@@ -902,7 +902,7 @@ analysis. Review records always bind to the exact Finding version.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `feedback_id` | `VARCHAR(128)` | No | PK | Stable identifier of a Finding feedback event. |
-| `collection_id` | `VARCHAR(64)` | No | IDX; validated against `objective_analyses.payload`; `ON DELETE` through collection ownership | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | IDX; validated against `objective_analyses.payload`; `ON DELETE` through workspace ownership | Identifier of the owning research workspace. |
 | `objective_id` | `VARCHAR(128)` | No | IDX; validated against the analysis payload | Stable identifier of the research Objective. |
 | `analysis_version` | `INTEGER` | No | validated against the analysis payload | Positive analysis version; retries create a new version. |
 | `finding_id` | `VARCHAR(128)` | No | validated against the analysis payload | Stable identifier of the Finding within the analysis version. |
@@ -917,7 +917,7 @@ analysis. Review records always bind to the exact Finding version.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `curation_id` | `VARCHAR(128)` | No | PK | Stable identifier of the current Finding curation record. |
-| `collection_id` | `VARCHAR(64)` | No | IDX; validated against `objective_analyses.payload` | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | IDX; validated against `objective_analyses.payload` | Identifier of the owning research workspace. |
 | `objective_id` | `VARCHAR(128)` | No | IDX; validated against the analysis payload | Stable identifier of the research Objective. |
 | `analysis_version` | `INTEGER` | No | validated against the analysis payload | Positive analysis version; retries create a new version. |
 | `finding_id` | `VARCHAR(128)` | No | validated against the analysis payload | Stable identifier of the Finding within the analysis version. |
@@ -932,7 +932,7 @@ analysis. Review records always bind to the exact Finding version.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `gold_id` | `VARCHAR(128)` | No | PK | Stable identifier of a versioned evaluation gold set. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research workspace. |
 | `version` | `VARCHAR(64)` | No | — | Version label for the gold-set content. |
 | `target_layer` | `VARCHAR(32)` | No | `core` / `goal` | System layer evaluated by the gold set. |
 | `metric_profile` | `VARCHAR(128)` | No | — | Metric configuration used for evaluation. |
@@ -946,7 +946,7 @@ analysis. Review records always bind to the exact Finding version.
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
 | `snapshot_id` | `VARCHAR(128)` | No | PK | Stable identifier of one frozen prediction input snapshot. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; IDX(`collection_id`,`fact_source`); `ON DELETE CASCADE` | Identifier of the owning research collection. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX(`workspace_id`,`fact_source`); `ON DELETE CASCADE` | Identifier of the owning research workspace. |
 | `target_layer` | `VARCHAR(32)` | No | `core` / `goal` | System layer represented by the snapshot. |
 | `fact_source` | `VARCHAR(64)` | No | — | Label for the fact source used to produce predictions. |
 | `system_context` | `JSONB` | No | — | Structured system context captured for this record. |
@@ -958,8 +958,8 @@ analysis. Review records always bind to the exact Finding version.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `evaluation_run_id` | `VARCHAR(128)` | No | PK; IDX(`collection_id`,`created_at`) | Stable identifier of one complete evaluation run. |
-| `collection_id` | `VARCHAR(64)` | No | FK -> `collections.collection_id`; ON DELETE CASCADE | Identifier of the owning research collection. |
+| `evaluation_run_id` | `VARCHAR(128)` | No | PK; IDX(`workspace_id`,`created_at`) | Stable identifier of one complete evaluation run. |
+| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; ON DELETE CASCADE | Identifier of the owning research workspace. |
 | `gold_id` | `VARCHAR(128)` | No | FK -> `evaluation_gold_sets.gold_id`; `ON DELETE RESTRICT` | Gold set used by the run; it cannot be deleted underneath the run. |
 | `prediction_snapshot_id` | `VARCHAR(128)` | No | FK -> `evaluation_prediction_snapshots.snapshot_id`; `ON DELETE RESTRICT` | Prediction snapshot evaluated by the run. |
 | `target_layer` | `VARCHAR(32)` | No | `core` / `goal` | System layer evaluated by the run. |

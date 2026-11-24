@@ -2,7 +2,7 @@ import { requestJson } from './api';
 
 export type FeedbackCaseSummary = {
 	case_id: string;
-	collection_id: string;
+	workspace_id: string;
 	status: string;
 	anchor_message_id: string;
 	problem_type: string | null;
@@ -126,13 +126,13 @@ type FeedbackCaseList = {
 	offset: number;
 };
 
-function path(collectionId: string, caseId = '') {
+function path(workspaceId: string, caseId = '') {
 	const suffix = caseId ? `/${encodeURIComponent(caseId)}` : '';
-	return `/feedback-cases${suffix}?collection_id=${encodeURIComponent(collectionId)}`;
+	return `/feedback-cases${suffix}?workspace_id=${encodeURIComponent(workspaceId)}`;
 }
 
 export async function fetchFeedbackCases(
-	collectionId: string,
+	workspaceId: string,
 	options: {
 		status?: string;
 		problemType?: string;
@@ -141,7 +141,7 @@ export async function fetchFeedbackCases(
 		offset?: number;
 	} = {}
 ) {
-	const params = new URLSearchParams({ collection_id: collectionId });
+	const params = new URLSearchParams({ workspace_id: workspaceId });
 	if (options.status) params.set('status', options.status);
 	if (options.problemType) params.set('problem_type', options.problemType);
 	if (options.needsHumanReview !== undefined) {
@@ -154,16 +154,16 @@ export async function fetchFeedbackCases(
 	})) as FeedbackCaseList;
 }
 
-export async function fetchFeedbackCase(collectionId: string, caseId: string) {
-	return (await requestJson(path(collectionId, caseId), { method: 'GET' })) as FeedbackCaseDetail;
+export async function fetchFeedbackCase(workspaceId: string, caseId: string) {
+	return (await requestJson(path(workspaceId, caseId), { method: 'GET' })) as FeedbackCaseDetail;
 }
 
 export async function saveFeedbackAnnotation(
-	collectionId: string,
+	workspaceId: string,
 	caseId: string,
 	input: FeedbackAnnotationInput
 ) {
-	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/annotation', {
+	return (await requestJson(path(workspaceId, caseId).split('?')[0] + '/annotation', {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(input)
@@ -171,22 +171,22 @@ export async function saveFeedbackAnnotation(
 }
 
 export async function submitFeedbackReview(
-	collectionId: string,
+	workspaceId: string,
 	caseId: string,
 	input: { expected_annotation_digest: string; decision: string; reason: string },
 	idempotencyKey?: string
 ) {
 	const headers = new Headers({ 'Content-Type': 'application/json' });
 	if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
-	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/review', {
+	return (await requestJson(path(workspaceId, caseId).split('?')[0] + '/review', {
 		method: 'POST',
 		headers,
 		body: JSON.stringify(input)
 	})) as FeedbackReviewDecision;
 }
 
-export async function fetchFeedbackReviewDecisions(collectionId: string, caseId: string) {
-	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/review-decisions', {
+export async function fetchFeedbackReviewDecisions(workspaceId: string, caseId: string) {
+	return (await requestJson(path(workspaceId, caseId).split('?')[0] + '/review-decisions', {
 		method: 'GET'
 	})) as { items: FeedbackReviewDecision[] };
 }

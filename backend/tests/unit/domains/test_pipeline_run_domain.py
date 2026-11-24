@@ -40,7 +40,7 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
     pipeline_run_service.PipelineRunRepo = runs
     service = pipeline_run_service
     runs.run = service._new_run(
-        collection_id="col_1",
+        workspace_id="col_1",
         pipeline_name="document_preparation",
         scope_type="document",
         scope_id="doc_1",
@@ -101,7 +101,7 @@ async def test_progress_without_a_node_keeps_reported_errors():
     pipeline_run_service.PipelineRunRepo = runs
     service = pipeline_run_service
     runs.run = service._new_run(
-        collection_id="col_1",
+        workspace_id="col_1",
         pipeline_name="document_preparation",
         scope_type="document",
         scope_id="doc_1",
@@ -123,9 +123,9 @@ async def test_partial_success_skips_unstarted_nodes():
     pipeline_run_service.PipelineRunRepo = runs
     service = pipeline_run_service
     runs.run = service._new_run(
-        collection_id="col_1",
+        workspace_id="col_1",
         pipeline_name="objective_discovery",
-        scope_type="collection",
+        scope_type="workspace",
         scope_id="col_1",
         mode="standard",
         input_fingerprint=None,

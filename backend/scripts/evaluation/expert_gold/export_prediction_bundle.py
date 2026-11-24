@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         description="Export published Objective results for expert-gold evaluation."
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--collection-id")
+    source.add_argument("--workspace-id")
     source.add_argument("--output-dir", type=Path)
     parser.add_argument("--backend-root", type=Path, default=DEFAULT_BACKEND_ROOT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
@@ -68,7 +68,7 @@ async def main_async() -> None:
     args = parse_args()
     output_path = await export_prediction_bundle(
         backend_root=args.backend_root,
-        collection_id=args.collection_id,
+        workspace_id=args.workspace_id,
         source_output_dir=args.output_dir,
         output_path=args.output,
     )
@@ -78,20 +78,20 @@ async def main_async() -> None:
 async def export_prediction_bundle(
     *,
     backend_root: str | Path = DEFAULT_BACKEND_ROOT,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     source_output_dir: str | Path | None = None,
     output_path: str | Path = DEFAULT_OUTPUT_PATH,
 ) -> Path:
     root = Path(backend_root).expanduser().resolve()
     output_dir = _resolve_source_output_dir(
         backend_root=root,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         source_output_dir=source_output_dir,
     )
-    resolved_collection_id = collection_id or output_dir.parent.name
-    records, missing = await _load_artifacts(resolved_collection_id)
+    resolved_workspace_id = workspace_id or output_dir.parent.name
+    records, missing = await _load_artifacts(resolved_workspace_id)
     bundle = build_prediction_bundle(
-        collection_id=resolved_collection_id,
+        workspace_id=resolved_workspace_id,
         source_output_dir=output_dir,
         records_by_artifact=records,
         missing_artifacts=missing,
@@ -107,7 +107,7 @@ async def export_prediction_bundle(
 
 def build_prediction_bundle(
     *,
-    collection_id: str,
+    workspace_id: str,
     source_output_dir: Path,
     records_by_artifact: dict[str, list[dict[str, Any]]],
     missing_artifacts: list[str],
@@ -125,7 +125,7 @@ def build_prediction_bundle(
         "metadata": {
             "schema_version": SCHEMA_VERSION,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "source_output_dir": str(source_output_dir),
             "fact_source": "published_objectives",
             "artifact_rows": {
@@ -164,47 +164,47 @@ def build_prediction_bundle(
 
 
 async def _load_artifacts(
-    collection_id: str,
+    workspace_id: str,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
-        profiles = await DocumentProfileRepository().list_collection(
-            collection_id
+        documents = await SourceArtifactRepository().read_workspace_documents(workspace_id)
+        profiles = await DocumentProfileRepository().list_workspace(
+            workspace_id
         )
         objective_repository = ObjectiveRepository()
         evidence: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
-        for objective in await objective_repository.list_objectives(collection_id):
+        for objective in await objective_repository.list_objectives(workspace_id):
             version = objective.published_analysis_version
             if version is None:
                 continue
             analysis = await objective_repository.read_analysis(
-                collection_id, objective.objective_id, version
+                workspace_id, objective.objective_id, version
             )
             if is_experiment_backed_analysis(analysis):
                 objective_findings, objective_evidence, _ = (
                     await experiment_projection.read_analysis_records(
-                        collection_id, objective.objective_id, version
+                        workspace_id, objective.objective_id, version
                     )
                 )
             else:
                 objective_evidence = await list_all_evidence(
                     objective_repository,
-                    collection_id,
+                    workspace_id,
                     objective.objective_id,
                     version,
                 )
                 objective_findings = await list_all_findings(
                     objective_repository,
-                    collection_id,
+                    workspace_id,
                     objective.objective_id,
                     version,
                 )
             evidence.extend(
                 {
-                    "collection_id": item.collection_id,
+                    "workspace_id": item.workspace_id,
                     "objective_id": item.objective_id,
                     "analysis_version": item.analysis_version,
                     "evidence_id": item.evidence_id,
@@ -375,7 +375,7 @@ async def _load_artifacts(
             )
             findings.extend(
                 {
-                    "collection_id": item.collection_id,
+                    "workspace_id": item.workspace_id,
                     "objective_id": item.objective_id,
                     "analysis_version": item.analysis_version,
                     "finding_id": item.finding_id,
@@ -926,14 +926,14 @@ def _text(value: str | int | float | bool | None) -> str:
 def _resolve_source_output_dir(
     *,
     backend_root: Path,
-    collection_id: str | None,
+    workspace_id: str | None,
     source_output_dir: str | Path | None,
 ) -> Path:
     if source_output_dir is not None:
         return Path(source_output_dir).expanduser().resolve()
-    if not collection_id:
-        raise SystemExit("--collection-id or --output-dir is required")
-    return backend_root / "data" / "collections" / collection_id / "output"
+    if not workspace_id:
+        raise SystemExit("--workspace-id or --output-dir is required")
+    return backend_root / "data" / "workspaces" / workspace_id / "output"
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from infra.identity.client import SESSION_COOKIE_NAME
 from infra.persistence.postgres.models.chat import AgentTaskORM
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from main import app
 from sqlalchemy import event
@@ -32,8 +32,8 @@ async def test_conversation_path_metadata_and_feedback(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add_all(
-            CollectionORM(
-                collection_id=workspace,
+            WorkspaceORM(
+                workspace_id=workspace,
                 owner_user_id=user["user_id"],
                 name="316L comparison",
                 status="idle",

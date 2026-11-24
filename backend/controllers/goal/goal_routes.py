@@ -15,7 +15,7 @@ EntryMode = Literal["comparison", "exploratory"]
 
 
 class GoalIntakeRequest(BaseModel):
-    """Request payload for goal-driven collection seeding."""
+    """Request payload for goal-driven workspace seeding."""
 
     material_system: str | None = Field(
         default=None, description="Target material system"
@@ -72,12 +72,12 @@ class CoverageAssessmentResponse(BaseModel):
     )
 
 
-class SeedCollectionResponse(BaseModel):
-    """Collection created for the research brief."""
+class SeedWorkspaceResponse(BaseModel):
+    """Workspace created for the research brief."""
 
-    collection_id: str = Field(..., description="Target collection ID")
-    name: str = Field(..., description="Collection name")
-    created: bool = Field(default=True, description="Whether a collection was created")
+    workspace_id: str = Field(..., description="Target workspace ID")
+    name: str = Field(..., description="Workspace name")
+    created: bool = Field(default=True, description="Whether a workspace was created")
     seeded_document_count: int = Field(
         default=0,
         ge=0,
@@ -109,9 +109,9 @@ class GoalIntakeResponse(BaseModel):
         ...,
         description="Coverage assessment",
     )
-    seed_collection: SeedCollectionResponse = Field(
+    seed_workspace: SeedWorkspaceResponse = Field(
         ...,
-        description="Collection seeding result",
+        description="Workspace seeding result",
     )
     entry_recommendation: EntryRecommendationResponse = Field(
         ...,

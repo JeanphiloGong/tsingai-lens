@@ -69,7 +69,7 @@ class CreateFindingDraftCapability:
     ) -> ChatToolResult:
         try:
             await finding_authoring_service.validate_selection_references(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 source_analysis_version=arguments.source_analysis_version,
                 selection_ids=tuple(arguments.selection_ids),
@@ -93,7 +93,7 @@ class CreateFindingDraftCapability:
                 resource_type="research_objective",
                 resource_id=arguments.objective_id,
                 href=(
-                    f"/collections/{context.collection_id}/objectives/"
+                    f"/workspaces/{context.workspace_id}/objectives/"
                     f"{arguments.objective_id}"
                 ),
             )
@@ -105,7 +105,7 @@ class CreateFindingDraftCapability:
                     f"{arguments.objective_id}:{arguments.source_analysis_version}:{selection_id}"
                 ),
                 href=(
-                    f"/collections/{context.collection_id}/objectives/"
+                    f"/workspaces/{context.workspace_id}/objectives/"
                     f"{arguments.objective_id}?selection_id={selection_id}"
                 ),
             )
@@ -118,7 +118,7 @@ class CreateFindingDraftCapability:
                     f"{arguments.objective_id}:{arguments.source_analysis_version}:{group_id}"
                 ),
                 href=(
-                    f"/collections/{context.collection_id}/objectives/"
+                    f"/workspaces/{context.workspace_id}/objectives/"
                     f"{arguments.objective_id}?comparison_group_id={group_id}"
                 ),
             )
@@ -157,7 +157,7 @@ class CreateFindingVersionCapability:
     ) -> ChatToolResult:
         try:
             result = await finding_authoring_service.create_selection_version(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 source_analysis_version=arguments.source_analysis_version,
                 created_by_user_id=context.user_id,
@@ -184,7 +184,7 @@ class CreateFindingVersionCapability:
                     f"{arguments.objective_id}:{result.analysis.analysis_version}"
                 ),
                 href=(
-                    f"/collections/{context.collection_id}/objectives/"
+                    f"/workspaces/{context.workspace_id}/objectives/"
                     f"{arguments.objective_id}"
                 ),
             )
@@ -198,7 +198,7 @@ class CreateFindingVersionCapability:
                         f"{result.analysis.analysis_version}:{finding.finding_id}"
                     ),
                     href=(
-                        f"/collections/{context.collection_id}/objectives/"
+                        f"/workspaces/{context.workspace_id}/objectives/"
                         f"{arguments.objective_id}?finding_id={finding.finding_id}"
                     ),
                 )
@@ -208,7 +208,7 @@ class CreateFindingVersionCapability:
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "analysis": {
-                    "collection_id": result.analysis.collection_id,
+                    "workspace_id": result.analysis.workspace_id,
                     "objective_id": result.analysis.objective_id,
                     "analysis_version": result.analysis.analysis_version,
                     "document_inputs": [
@@ -267,7 +267,7 @@ class CreateFindingVersionCapability:
                 },
                 "finding": (
                     {
-                        "collection_id": finding.collection_id,
+                        "workspace_id": finding.workspace_id,
                         "objective_id": finding.objective_id,
                         "analysis_version": finding.analysis_version,
                         "finding_id": finding.finding_id,

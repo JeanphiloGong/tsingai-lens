@@ -32,10 +32,10 @@ from domain.source.artifacts import (
     resolve_heading_path_for_page,
     update_heading_stack,
 )
-from domain.source.collection import Collection, Document
+from domain.source.workspace import Workspace, Document
 
 __all__ = [
-    "Collection",
+    "Workspace",
     "Document",
     "SourceBlock",
     "SourceBlockType",

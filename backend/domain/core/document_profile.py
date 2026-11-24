@@ -40,7 +40,7 @@ class DocumentProfileSummary:
     technical_failure_count: int
 
 
-def summarize_document_profile_collection(
+def summarize_document_profile_workspace(
     profiles: Iterable[DocumentProfile],
 ) -> DocumentProfileSummary:
     normalized = list(profiles)
@@ -56,7 +56,7 @@ def summarize_document_profile_collection(
     )
     if total_documents and review_heavy_count / total_documents >= 0.5:
         warnings.append(
-            "Collection is review-heavy or mixed; experimental evidence may require manual review."
+            "Workspace is review-heavy or mixed; experimental evidence may require manual review."
         )
     if by_doc_type.get(DOC_TYPE_UNCERTAIN, 0) > 0:
         warnings.append("Some documents remain uncertain and may need manual review.")
@@ -85,5 +85,5 @@ __all__ = [
     "PROFILE_STATUS_COMPLETED",
     "PROFILE_STATUS_EXTRACTION_FAILED",
     "ProfileStatus",
-    "summarize_document_profile_collection",
+    "summarize_document_profile_workspace",
 ]

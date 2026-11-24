@@ -43,7 +43,7 @@ def test_case_digest_ignores_workflow_timestamps_and_status() -> None:
     now = datetime.now(timezone.utc).isoformat()
     case = FeedbackCase(
         case_id="case-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=("signal-1",),

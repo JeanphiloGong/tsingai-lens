@@ -26,7 +26,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from controllers.dependencies.auth import get_current_user_id
 from controllers.exception_router import project_exception_handler, request_validation_handler
-from application.source import collection_service
+from application.source import workspace_service
 from infra.llm.chat_model import OpenAIChatModel
 from infra.llm import chat_model as provider_module
 from repositories.chat_repository import ChatRepository
@@ -34,7 +34,7 @@ from repositories.source_artifact_repository import SourceArtifactRepository
 from repositories.model_connection_repository import ModelConnectionRepository
 from infra.persistence.postgres.models.model_connection import ModelConnectionORM
 from sqlalchemy import update
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 from tests.unit.application.test_chat_session_service import _WriteCapability
 from tests.unit.application.test_research_agent_runner import _Model
 
@@ -57,7 +57,7 @@ def connection(name="lab-a", *, enabled=True):
 
 @pytest.fixture(autouse=True)
 async def researchers(postgres_session_factory, monkeypatch):
-    monkeypatch.setattr(session_service_module, "collection_service", collection_service)
+    monkeypatch.setattr(session_service_module, "workspace_service", workspace_service)
     monkeypatch.setattr(session_service_module, "ChatRepo", ChatRepository())
     monkeypatch.setattr(session_service_module, "SourceArtifactRepo", SourceArtifactRepository())
     monkeypatch.setattr(session_service_module, "ModelConnectionRepo", ModelConnectionRepository())
@@ -65,7 +65,7 @@ async def researchers(postgres_session_factory, monkeypatch):
     monkeypatch.setenv("LENS_MODEL_KEY_LAB_A", "synthetic-test-value")
     monkeypatch.setenv("LENS_MODEL_KEY_LAB_B", "synthetic-test-value")
     for user in ("alice", "bob"):
-        await seed_collection(postgres_session_factory, f"col-{user}", user_id=user)
+        await seed_workspace(postgres_session_factory, f"col-{user}", user_id=user)
 
 
 async def configured(session_factory, *records):
@@ -101,7 +101,7 @@ async def test_concurrent_researchers_bind_distinct_connections_and_close_client
         return client
 
     runtime = service(await configured(postgres_session_factory, connection(), connection("lab-b")), factory)
-    sessions = [await runtime.create_session(collection_id=f"col-{user}", user_id=user)
+    sessions = [await runtime.create_session(workspace_id=f"col-{user}", user_id=user)
                 for user in ("alice", "bob")]
     await asyncio.gather(*[
         runtime.send_message(session.session_id, user, message="Explain evidence uncertainty without tools.",
@@ -130,7 +130,7 @@ async def test_approval_reads_disabled_original_connection_on_another_service(de
         return client
 
     first = service(repository, factory, None, write)
-    session = await first.create_session(collection_id="col-alice", user_id="alice")
+    session = await first.create_session(workspace_id="col-alice", user_id="alice")
     turn = await first.send_message(session.session_id, "alice", message="Save the research objective.",
                                              model_connection_id="lab-a")
     call = turn["pending_approval"]
@@ -156,7 +156,7 @@ async def test_approval_reads_disabled_original_connection_on_another_service(de
 
 async def test_unknown_connection_does_not_append_question_and_sse_keeps_error_code(postgres_session_factory):
     runtime = service(await configured(postgres_session_factory, connection(enabled=False)), lambda **_: pytest.fail("provider called"))
-    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
     with pytest.raises(ProjectException) as captured:
         await runtime.send_message(session.session_id, "alice", message="Compare papers", model_connection_id="lab-a")
     assert captured.value.data["code"] == "model_connection_unavailable"
@@ -194,7 +194,7 @@ async def test_directory_requires_login_and_never_exposes_private_fields(postgre
             {"connection_id": "lab-a", "display_name": "LAB-A", "model": "model-lab-a"},
             {"connection_id": "lab-b", "display_name": "LAB-B", "model": "model-lab-b"},
         ]}}
-        session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+        session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
         path = f"/api/v1/chat-sessions/{session.session_id}/messages"
         for unknown in ("missing", "LAB A"):
             response = await client.post(path, json={"message": "Explain uncertainty", "model_connection_id": unknown})
@@ -228,7 +228,7 @@ async def test_real_sdk_records_binding_without_recording_key(monkeypatch, postg
     monkeypatch.setattr("infra.llm.chat_model.AsyncOpenAI", build_client)
     repository = ChatRepository()
     await repository.add_session(ChatSession.create(
-        session_id="s1", user_id="alice", collection_id="col-alice",
+        session_id="s1", user_id="alice", workspace_id="col-alice",
         created_at="2026-10-25T00:00:00+00:00",
     ))
     runtime = ChatSessionService(capabilities=CapabilityRegistry(()))
@@ -259,7 +259,7 @@ async def test_client_closes_if_response_is_cancelled_or_snapshot_save_fails(fai
 
     model = Paused()
     runtime = service(await configured(postgres_session_factory, connection()), lambda **_: model)
-    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
     if failure == "snapshot":
         async def failed_save(*args):
             raise RuntimeError("snapshot-write-failed")
@@ -283,7 +283,7 @@ async def test_missing_key_keeps_a_saved_decision_visible_and_retryable(decision
     ),)))
     repository = await configured(postgres_session_factory, connection())
     runtime = service(repository, lambda **_: first_model, None, write)
-    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
     turn = await runtime.send_message(session.session_id, "alice", message="Save the objective.",
                                                model_connection_id="lab-a")
     pending = turn["pending_approval"]
@@ -362,7 +362,7 @@ async def test_omission_uses_the_first_available_model_and_tracks_priority_chang
         directory = (await client.get("/api/v1/model-connections")).json()["data"]["items"]
     assert [item["connection_id"] for item in directory] == ["lab-b", "lab-a"]
     assert all(set(item) == {"connection_id", "display_name", "model"} for item in directory)
-    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
     await runtime.set_session_title_for_user(session.session_id, "alice", title="Compare conditions")
     await runtime.send_message(session.session_id, "alice", message="Compare papers")
     snapshot = await session_service_module.ChatRepo.read_response_snapshot(session.session_id)
@@ -383,7 +383,7 @@ async def test_omission_uses_the_first_available_model_and_tracks_priority_chang
 
 async def test_omission_with_no_enabled_models_does_not_append_a_question(postgres_session_factory):
     runtime = service(await configured(postgres_session_factory, connection(enabled=False)), lambda **_: pytest.fail("provider called"))
-    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
     with pytest.raises(ProjectException) as captured:
         await runtime.send_message(session.session_id, "alice", message="Compare papers")
     assert captured.value.data["code"] == "model_connection_default_unavailable"
@@ -396,7 +396,7 @@ async def test_unbound_old_approval_refuses_to_guess_the_enabled_default(postgre
         "create_objective_candidate", {"question": "Compare LPBF evidence"},
     ),)))
     runtime = service(await configured(postgres_session_factory, connection()), lambda **_: model, None, write)
-    session = await runtime.create_session(collection_id="col-alice", user_id="alice")
+    session = await runtime.create_session(workspace_id="col-alice", user_id="alice")
     result = await runtime.send_message(session.session_id, "alice", message="Save the objective.", model_connection_id="lab-a")
     pending = result["pending_approval"]
     snapshot = await session_service_module.ChatRepo.read_response_snapshot(session.session_id)

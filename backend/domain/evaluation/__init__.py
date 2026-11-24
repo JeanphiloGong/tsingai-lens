@@ -1,4 +1,4 @@
-"""Evaluation domain records for collection-bound quality checks."""
+"""Evaluation domain records for workspace-bound quality checks."""
 
 from domain.evaluation.records import (
     EVALUATION_FAILURE_TYPES,

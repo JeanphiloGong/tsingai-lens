@@ -248,7 +248,7 @@ def _section_reading_progress(
                 else:
                     failed_reads[document_id] = failed_reads.get(document_id, 0) + 1
     for result in successful_results.get("search_sources", ()):
-        # None is the supported collection-wide search scope. Only returned
+        # None is the supported workspace-wide search scope. Only returned
         # matches identify candidate papers; a search hit is not an exact read.
         documents.update(result.get("document_ids") or ())
         documents.update(item["document_id"] for item in result.get("matches", ()))
@@ -443,7 +443,7 @@ def _confirmed_objective_ids(
     successful_results: Mapping[str, list[Mapping[str, Any]]],
 ) -> tuple[str, ...]:
     ids: list[str] = []
-    for result in successful_results.get("get_collection_context", ()):
+    for result in successful_results.get("get_workspace_context", ()):
         for item in result.get("objectives") or ():
             if not isinstance(item, Mapping):
                 continue
@@ -470,7 +470,7 @@ def stage_instruction(
     """Return factual execution observations without prescribing a route."""
     observations: dict[str, Any] = {}
     browsing: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for page in successful_results.get("browse_collection_papers", ()):
+    for page in successful_results.get("browse_workspace_papers", ()):
         key = (page.get("query"), page.get("catalog_digest"), page.get("paper_total"))
         ledger = browsing.setdefault(key, {
             "query": page.get("query"), "paper_total": page.get("paper_total"),

@@ -20,7 +20,7 @@ FeedbackCaseStatus = Literal[
 @dataclass(frozen=True)
 class FeedbackCase:
     case_id: str
-    collection_id: str
+    workspace_id: str
     session_id: str
     anchor_message_id: str
     source_signal_ids: tuple[str, ...]

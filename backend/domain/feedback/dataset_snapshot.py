@@ -18,7 +18,7 @@ class DatasetSnapshot:
 
     dataset_id: str
     owner_id: str
-    collection_id: str
+    workspace_id: str
     dataset_type: DatasetType
     rows: tuple[dict[str, Any], ...]
     exclusions: tuple[dict[str, Any], ...]
@@ -30,7 +30,7 @@ class DatasetSnapshot:
     created_at: str
 
     def __post_init__(self) -> None:
-        if not self.dataset_id or not self.owner_id or not self.collection_id:
+        if not self.dataset_id or not self.owner_id or not self.workspace_id:
             raise ValueError("dataset snapshot identity is required")
         if self.dataset_type not in _DATASET_TYPES:
             raise ValueError("invalid dataset type")

@@ -21,7 +21,7 @@ preparation errors with safe stage messages without rewriting stored diagnostics
 [`../../repositories/pipeline_run_repository.py`](../../repositories/pipeline_run_repository.py)
 and are persisted together in one `pipeline_runs` row. Reading them does not
 rerun graph validation or advance nodes. They do not define a
-collection snapshot, select Source
+workspace snapshot, select Source
 versions, or carry scientific results. Scientific ordering and result writes
 remain in the owning application service and artifact repository.
 

@@ -5,7 +5,7 @@ import pytest
 from application.core.objectives import objective_discovery_service as discovery
 from domain.core import PreparedDocumentInput
 from repositories.pipeline_run_repository import PipelineRunRepo
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -16,7 +16,7 @@ def anyio_backend():
 async def test_discovery_queue_reuses_active_work_without_executing(
     monkeypatch, postgres_session_factory
 ):
-    await seed_collection(
+    await seed_workspace(
         postgres_session_factory, "discovery-papers", document_ids=("a", "b")
     )
     inputs = (

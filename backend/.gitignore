@@ -216,15 +216,15 @@ data/logs/
 data/tasks/
 data/update_output/
 data/test_file/
-data/collections/cache/
-data/collections/_goal_sessions/
-data/collections/*/meta.json
-data/collections/*/files.json
-data/collections/*/import_manifest.json
-data/collections/*/artifacts.json
-data/collections/*/input/
-data/collections/*/objects/
-data/collections/*/output/
+data/workspaces/cache/
+data/workspaces/_goal_sessions/
+data/workspaces/*/meta.json
+data/workspaces/*/files.json
+data/workspaces/*/import_manifest.json
+data/workspaces/*/artifacts.json
+data/workspaces/*/input/
+data/workspaces/*/objects/
+data/workspaces/*/output/
 data/traces/
 
 data/vector_store/

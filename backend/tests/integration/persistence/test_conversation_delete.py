@@ -8,7 +8,7 @@ from agent.repositories.task_repository import CheckpointConflict, TaskRepositor
 from conversation.repositories.conversation_repository import ConversationRepository
 from infra.identity.client import SESSION_COOKIE_NAME
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from main import app
 
@@ -25,8 +25,8 @@ async def test_delete_soft_deletes_conversation_and_cancels_execution(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="delete-workspace",
+            WorkspaceORM(
+                workspace_id="delete-workspace",
                 owner_user_id=owner["user_id"],
                 name="Conversation deletion",
                 status="idle",
@@ -148,8 +148,8 @@ async def test_deleted_conversation_rejects_checkpoint_and_marks_tree_source(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="delete-tree-workspace",
+            WorkspaceORM(
+                workspace_id="delete-tree-workspace",
                 owner_user_id=owner["user_id"],
                 name="Deleted tree source",
                 status="idle",

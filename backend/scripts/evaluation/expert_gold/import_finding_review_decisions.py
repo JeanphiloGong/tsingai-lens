@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("input_path", type=Path)
     parser.add_argument("--reviewer", required=True)
     parser.add_argument(
-        "--user-id", required=True, help="Owner of the reviewed collections."
+        "--user-id", required=True, help="Owner of the reviewed workspaces."
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--format", choices=("json", "text"), default="json")

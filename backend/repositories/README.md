@@ -45,7 +45,7 @@ the persistence path.
 
 | File | Data and operations |
 | --- | --- |
-| [collection_repository.py](collection_repository.py) | Collections, Documents, storage metadata, membership and list projections |
+| [workspace_repository.py](workspace_repository.py) | Workspaces, Documents, storage metadata, membership and list projections |
 | [source_artifact_repository.py](source_artifact_repository.py) | Source documents, trees, tables, figures and references |
 | [document_profile_repository.py](document_profile_repository.py) | Current `DocumentProfile` values |
 | [paper_map_repository.py](paper_map_repository.py) | Current `PaperResearchMap` values |
@@ -94,7 +94,7 @@ Database connections, ORM tables, schema migrations and file storage stay in
 
 Database-backed tests use these same repositories against a separate PostgreSQL
 test database. There is no maintained in-memory repository implementation.
-Fixtures create the required users, collections and documents before exercising
+Fixtures create the required users, workspaces and documents before exercising
 service behavior, persistence, locking, constraints and rollback.
 
 The [ObjectStore contract](object_store.py) describes uploaded/extracted bytes,
@@ -105,7 +105,7 @@ persisted `ChatModelCall` beside the application operation; the model client
 does not import repository types or wrap audit arguments in transfer models.
 
 Dedicated results reuse domain values when possible: `StoredObjective`,
-`StoredDataset`, `StoredCollection` and `StoredDocument` attach metadata without
+`StoredDataset`, `StoredWorkspace` and `StoredDocument` attach metadata without
 copying scientific or business fields. JSON formats and HTTP schemas retain
 their existing contracts. Do not add duplicate Record/DTO models or serializers
 merely to mark a layer.
@@ -113,6 +113,6 @@ merely to mark a layer.
 See [backend architecture](../docs/architecture/overview.md) and
 [research-flow verification](../tests/objective-analysis-verification.md).
 
-SQLAlchemy table mappings use the `ORM` suffix (for example, `CollectionORM`
+SQLAlchemy table mappings use the `ORM` suffix (for example, `WorkspaceORM`
 and `ChatModelCallORM`). Domain values and repository results such as
-`Collection` and `StoredCollection` keep their existing names.
+`Workspace` and `StoredWorkspace` keep their existing names.

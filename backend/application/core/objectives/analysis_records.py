@@ -12,7 +12,7 @@ _PAGE_SIZE = 500
 
 async def list_all_evidence(
     repository: Any,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -20,7 +20,7 @@ async def list_all_evidence(
 ) -> tuple[RecordT, ...]:
     return await _list_all(
         lambda *, offset, limit: repository.list_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=offset,
@@ -32,7 +32,7 @@ async def list_all_evidence(
 
 async def list_all_findings(
     repository: Any,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -40,7 +40,7 @@ async def list_all_findings(
 ) -> tuple[RecordT, ...]:
     return await _list_all(
         lambda *, offset, limit: repository.list_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=offset,

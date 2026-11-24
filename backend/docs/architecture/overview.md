@@ -11,12 +11,12 @@ Read this page first, then follow the first entry point that matches the task:
 
 | Research step | First code entry point | Reads | Calls the LLM | Persists |
 |---|---|---|---|---|
-| Upload a paper | `controllers/source/collection_routes.py:upload_collection_document` | upload bytes | No | Document and original bytes |
+| Upload a paper | `controllers/source/workspace_routes.py:upload_workspace_document` | upload bytes | No | Document and original bytes |
 | Prepare one paper | `application/source/document_preparation_service.py:queue_document_preparation` | current Document and source file | Profile stage only; Docling parses the PDF | Source, Profile, Pipeline Run |
 | Map selected papers | `application/core/objectives/paper_research_map_service.py:build_document_paper_map` | prepared Source, Profile, tree | Extraction and signal reconciliation | None directly; input service stores map |
-| Form candidate questions | `controllers/core/research_objective_routes.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
+| Form candidate questions | `controllers/core/research_objective_routes.py:discover_workspace_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
 | Create or confirm a question | `application/core/objectives/objective_authoring_service.py:create_chat_assisted_candidate` or `confirm_objective` | exact candidate or approved arguments | No | Objective |
-| Analyze one confirmed question | `controllers/core/research_objective_routes.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
+| Analyze one confirmed question | `controllers/core/research_objective_routes.py:start_workspace_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
 | Chat or Agent request | `application/chat/session_service.py:send_message` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
 
 The normal reading path is:
@@ -42,7 +42,7 @@ tools and runtime limits. For each new Chat turn or approval continuation, the
 service creates a model client from the selected database connection and closes
 it after execution. Shared instances live with their actual owners:
 `application.chat.session_service.ChatService`,
-`infra.persistence.file.collection_workspace.Workspace`, and
+`infra.persistence.file.workspace_files.Workspace`, and
 `infra.persistence.file.object_store.Store`. Modules declare these names without
 creating clients or directories during import. Chat controllers call
 `session_service.ChatService` directly. File-facing application functions use
@@ -115,7 +115,7 @@ alone should not alter them.
 
 For a materials researcher comparing how a process variable affects an outcome:
 
-1. Add candidate papers to a Collection.
+1. Add candidate papers to a Workspace.
 2. Prepare each paper independently into readable Source structure and a coarse
    DocumentProfile.
 3. Inspect readiness and select the papers relevant to the current question.
@@ -146,7 +146,7 @@ not become scientific states.
 ## Ownership
 
 ```text
-Collection
+Workspace
   -> current Documents
 
 Document
@@ -170,7 +170,7 @@ Evidence/Finding snapshot; they do not participate in the automatic
 PaperExperiment write path.
 ```
 
-Collections only assemble Documents. Readiness and preparation failures belong
+Workspaces only assemble Documents. Readiness and preparation failures belong
 to each Document. One failed or processing Document does not block uploads,
 preparation of other Documents, Objective discovery from ready Documents, or
 analysis of an explicitly selected ready subset.
@@ -178,7 +178,7 @@ analysis of an explicitly selected ready subset.
 ## Runtime Boundaries
 
 - `controllers/` parses HTTP and shapes responses.
-- `application/source/` owns Collection and Document preparation use cases.
+- `application/source/` owns Workspace and Document preparation use cases.
 - `application/core/` owns scientific preparation, Objective discovery, and
   Objective analysis.
 - `application/chat/` owns conversation, capability trajectory, and approval;
@@ -205,7 +205,7 @@ but have separate owners.
 
 | Model family | Domain responsibility | Execution, storage, or HTTP owner |
 | --- | --- | --- |
-| Source and Collection | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
+| Source and Workspace | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
 | Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `repositories/objective_repository.py` |
 | Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `repositories/chat_repository.py` |
 | Feedback | Observed dissatisfaction/correction signals, evidence coverage, annotations, review decisions, sample revisions and export integrity | Jobs and leases live in `analysis_job_repository.py`; sample-build payloads and idempotency inputs live in `feedback_dataset_sample_repository.py` |
@@ -226,7 +226,7 @@ objects for independent-experiment rules. Invalid support rolls back the entire
 graph. Feedback review similarly retains digest and state conflicts under a row
 lock while content acceptance belongs to its domain object and service.
 
-`StoredCollection` contains the existing `Collection`, record timestamps, and
+`StoredWorkspace` contains the existing `Workspace`, record timestamps, and
 the current `StoredDocument` members. Each `StoredDocument` contains a `Document`
 plus its storage key, stored filename, and record timestamps. Content hashes,
 preparation fingerprints, and scientific analysis versions remain document
@@ -236,7 +236,7 @@ directly; domain objects do not format storage or HTTP dictionaries.
 For example, `StoredDataset` contains the existing `Dataset` plus database record
 timestamps. `Dataset` itself has no `created_at`, `updated_at`, constructor input
 normalization, or HTTP encoder. Dataset creation validates names, task types,
-Collection access and public construction rules in the application service and
+Workspace access and public construction rules in the application service and
 request schema. The PostgreSQL implementation generates and reads record
 timestamps. No duplicate Dataset fields or generic conversion layer is needed.
 

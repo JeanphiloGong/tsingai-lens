@@ -82,7 +82,7 @@ async def test_cycle_trace_records_the_actual_terminal_outcome(ending, caplog) -
 
     with caplog.at_level(logging.INFO, logger="application.chat.agent_runner"):
         await ResearchAgentRunner(model=Model(), capabilities=CapabilityRegistry((Capability(),))).run_turn(
-            context=AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1"),
+            context=AgentContext(session_id="chat-1", user_id="user-1", workspace_id="col-1"),
             previous_messages=(), user_message="Save this research objective.",
         )
 
@@ -98,7 +98,7 @@ async def test_cycle_trace_records_the_actual_terminal_outcome(ending, caplog) -
 def test_progress_trace_reports_cumulative_requested_actions_without_uninitialized_plan() -> None:
     events: list[dict[str, object]] = []
     progress = _RunProgress(AgentRunLimits(), progress_callback=events.append)
-    context = AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1")
+    context = AgentContext(session_id="chat-1", user_id="user-1", workspace_id="col-1")
 
     progress.requested_tool_calls += 2
     progress.trace(context, phase="tools")
@@ -114,7 +114,7 @@ def test_progress_trace_reports_cumulative_requested_actions_without_uninitializ
 def test_progress_trace_exposes_versioned_execution_plan() -> None:
     events: list[dict[str, object]] = []
     progress = _RunProgress(AgentRunLimits(), progress_callback=events.append)
-    context = AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1")
+    context = AgentContext(session_id="chat-1", user_id="user-1", workspace_id="col-1")
     request = ChatMessage.user(
         message_id="user-1", session_id=context.session_id,
         content="Compare the exact tensile conditions.", created_at="2026-10-09T00:00:00Z",
@@ -165,7 +165,7 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
 def test_progress_log_keeps_model_plan_request_out_of_info_logs(caplog) -> None:
     events: list[dict[str, object]] = []
     progress = _RunProgress(AgentRunLimits(), progress_callback=events.append)
-    context = AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1")
+    context = AgentContext(session_id="chat-1", user_id="user-1", workspace_id="col-1")
     request = ChatMessage.user(
         message_id="user-1", session_id=context.session_id,
         content="PRIVATE_RESEARCH_REQUEST", created_at="2026-10-09T00:00:00Z",

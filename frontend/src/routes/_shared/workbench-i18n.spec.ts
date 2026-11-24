@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { translateKey } from './i18n';
 
-const sources = import.meta.glob('../collections/[[]id]/feedback/**/*.svelte', {
+const sources = import.meta.glob('../workspaces/[[]id]/feedback/**/*.svelte', {
 	query: '?raw',
 	import: 'default',
 	eager: true
 });
-const objectives = import.meta.glob('../collections/[[]id]/objectives/+page.svelte', {
+const objectives = import.meta.glob('../workspaces/[[]id]/objectives/+page.svelte', {
 	query: '?raw',
 	import: 'default',
 	eager: true

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from infra.persistence.file import collection_workspace as workspace_module, object_store as store_module
+from infra.persistence.file import workspace_files as workspace_module, object_store as store_module
 
 import json
 import os
@@ -464,12 +464,12 @@ def _wait_for_run(client: TestClient, run_id: str) -> dict[str, Any]:
 
 def _wait_for_analysis(
     client: TestClient,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
 ) -> dict[str, Any]:
     deadline = monotonic() + 20
     path = (
-        f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/analysis"
+        f"{API_PREFIX}/workspaces/{workspace_id}/objectives/{objective_id}/analysis"
     )
     while monotonic() < deadline:
         response = client.get(path)
@@ -499,7 +499,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
     test_database_url = os.environ["LENS_TEST_DATABASE_URL"]
     monkeypatch.setenv("LENS_DATABASE_URL", test_database_url)
     monkeypatch.setattr(
-        "infra.persistence.file.collection_workspace.DATA_DIR", tmp_path
+        "infra.persistence.file.workspace_files.DATA_DIR", tmp_path
     )
 
     from main import create_app
@@ -530,7 +530,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         client.cookies.set("lens_session", "fixture:admin@example.com")
 
         created = client.post(
-            f"{API_PREFIX}/collections",
+            f"{API_PREFIX}/workspaces",
             json={
                 "name": "Ti-6Al-4V laser exposure comparison",
                 "description": "Four-paper deterministic research-chain acceptance.",
@@ -538,12 +538,12 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         )
         assert created.status_code == 200
         assert created.json()["code"] == 200, created.text
-        collection_id = created.json()["data"]["collection_id"]
+        workspace_id = created.json()["data"]["workspace_id"]
 
         document_ids_by_filename: dict[str, str] = {}
         for fixture_path in sorted(FIXTURE_DIR.glob("*.txt")):
             uploaded = client.post(
-                f"{API_PREFIX}/collections/{collection_id}/documents",
+                f"{API_PREFIX}/workspaces/{workspace_id}/documents",
                 files={
                     "file": (
                         fixture_path.name,
@@ -557,14 +557,14 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             document_id = uploaded.json()["data"]["document_id"]
             document_ids_by_filename[fixture_path.name] = document_id
             queued = client.post(
-                f"{API_PREFIX}/collections/{collection_id}/documents/"
+                f"{API_PREFIX}/workspaces/{workspace_id}/documents/"
                 f"{document_id}/preparation",
             )
             assert queued.status_code == 200
             assert queued.json()["code"] == 200, queued.text
 
         run_history = client.get(
-            f"{API_PREFIX}/collections/{collection_id}/pipeline-runs",
+            f"{API_PREFIX}/workspaces/{workspace_id}/pipeline-runs",
             params={"limit": 20},
         )
         assert run_history.status_code == 200
@@ -585,15 +585,15 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             assert completed_run["status"] == "completed", completed_run
 
         document_ids = tuple(document_ids_by_filename.values())
-        collection = client.get(f"{API_PREFIX}/collections/{collection_id}")
-        assert collection.status_code == 200
-        assert collection.json()["code"] == 200, collection.text
-        assert {item["status"] for item in collection.json()["data"]["documents"]} == {
+        workspace = client.get(f"{API_PREFIX}/workspaces/{workspace_id}")
+        assert workspace.status_code == 200
+        assert workspace.json()["code"] == 200, workspace.text
+        assert {item["status"] for item in workspace.json()["data"]["documents"]} == {
             "ready"
         }
 
         discovered = client.post(
-            f"{API_PREFIX}/collections/{collection_id}/objective-discovery",
+            f"{API_PREFIX}/workspaces/{workspace_id}/objective-discovery",
             json={"document_ids": list(document_ids)},
         )
         assert discovered.status_code == 200, discovered.text
@@ -610,7 +610,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         )
         assert completed_discovery["status"] == "completed", completed_discovery
         listed_objectives = client.get(
-            f"{API_PREFIX}/collections/{collection_id}/objectives"
+            f"{API_PREFIX}/workspaces/{workspace_id}/objectives"
         )
         assert listed_objectives.status_code == 200, listed_objectives.text
         assert listed_objectives.json()["code"] == 200, listed_objectives.text
@@ -624,7 +624,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         objective_id = objective["objective_id"]
 
         queued_analysis = client.post(
-            f"{API_PREFIX}/collections/{collection_id}/objectives/"
+            f"{API_PREFIX}/workspaces/{workspace_id}/objectives/"
             f"{objective_id}/analysis",
             json={"document_ids": list(document_ids)},
         )
@@ -633,7 +633,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         client.portal.call(
             partial(run_objective_analysis.run_forever, client=model, **worker_options)
         )
-        analysis = _wait_for_analysis(client, collection_id, objective_id)
+        analysis = _wait_for_analysis(client, workspace_id, objective_id)
         assert analysis["published_analysis"] is not None, (
             analysis["active_analysis"]["status"],
             analysis["active_analysis"]["error_code"],
@@ -645,7 +645,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         paper_c_id = document_ids_by_filename["paper-c-stress-relieved.txt"]
         review_id = document_ids_by_filename["paper-d-review.txt"]
         evidence = client.get(
-            f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/evidence"
+            f"{API_PREFIX}/workspaces/{workspace_id}/objectives/{objective_id}/evidence"
         )
         assert evidence.status_code == 200
         assert evidence.json()["code"] == 200, evidence.text
@@ -679,7 +679,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         }
 
         findings = client.get(
-            f"{API_PREFIX}/collections/{collection_id}/objectives/{objective_id}/findings"
+            f"{API_PREFIX}/workspaces/{workspace_id}/objectives/{objective_id}/findings"
         )
         assert findings.status_code == 200
         assert findings.json()["code"] == 200, findings.text
@@ -736,7 +736,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
 
         for item in direct_evidence:
             document_content = client.get(
-                f"{API_PREFIX}/collections/{collection_id}/documents/"
+                f"{API_PREFIX}/workspaces/{workspace_id}/documents/"
                 f"{item['document_id']}/content"
             )
             assert document_content.status_code == 200
@@ -748,7 +748,7 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
             assert item["source_ref"]
 
         published_again = client.get(
-            f"{API_PREFIX}/collections/{collection_id}/objectives/"
+            f"{API_PREFIX}/workspaces/{workspace_id}/objectives/"
             f"{objective_id}/analysis"
         )
         assert published_again.status_code == 200

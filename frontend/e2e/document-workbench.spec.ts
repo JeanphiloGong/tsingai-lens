@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
-const collectionId = 'col_123';
+const workspaceId = 'col_123';
 const documentId = 'doc_1';
 const screenshotDir = process.env.SOURCE_AGENT_SCREENSHOT_DIR ?? '';
 
@@ -30,7 +30,7 @@ async function mockPaperReaderApis(
 	const session = {
 		session_id: 'chat_source',
 		user_id: 'user_1',
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		created_at: '2026-08-31T00:00:00+00:00',
 		updated_at: '2026-08-31T00:00:00+00:00'
 	};
@@ -61,12 +61,12 @@ async function mockPaperReaderApis(
 				json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] })
 			);
 		}
-		if (path === '/api/v1/collections') {
+		if (path === '/api/v1/workspaces') {
 			return route.fulfill(
 				json({
 					items: [
 						{
-							collection_id: collectionId,
+							workspace_id: workspaceId,
 							name: 'LPBF source review',
 							status: 'ready',
 							documents: [{ document_id: documentId, status: 'ready' }]
@@ -139,21 +139,21 @@ async function mockPaperReaderApis(
 				body: `event: turn\ndata: ${JSON.stringify(turn)}\n\n`
 			});
 		}
-		if (path === `/api/v1/collections/${collectionId}`) {
+		if (path === `/api/v1/workspaces/${workspaceId}`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: 'LPBF source review',
 					status: 'ready',
 					documents: [{ document_id: documentId, status: sourceReady ? 'ready' : 'stored' }]
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/content`) {
 			if (!sourceReady) return route.fulfill(json({ detail: 'source unavailable' }, 404));
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					document_id: documentId,
 					title: 'Paper A',
 					source_filename: 'paper-a.pdf',
@@ -184,11 +184,11 @@ async function mockPaperReaderApis(
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/markdown`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/markdown`) {
 			if (!sourceReady) return route.fulfill(json({ detail: 'markdown unavailable' }, 404));
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					document_id: documentId,
 					title: 'Paper A',
 					source_filename: 'paper-a.pdf',
@@ -211,7 +211,7 @@ async function mockPaperReaderApis(
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/source`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/source`) {
 			return route.fulfill(json({ detail: 'PDF unavailable in fixture' }, 404));
 		}
 		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
@@ -229,7 +229,7 @@ test('paper reader shows parsed Source and exact Finding source selection', asyn
 	await mockPaperReaderApis(page);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await page.goto(
-		`/collections/${collectionId}/documents/${documentId}?view=parsed-paper&source_ref=results&quote=Conductivity+improved+to+12+mS%2Fcm+under+EIS.&return_to=%2Fcollections%2F${collectionId}%2Fobjectives%2Fobj_1`
+		`/workspaces/${workspaceId}/documents/${documentId}?view=parsed-paper&source_ref=results&quote=Conductivity+improved+to+12+mS%2Fcm+under+EIS.&return_to=%2Fworkspaces%2F${workspaceId}%2Fobjectives%2Fobj_1`
 	);
 
 	await expect(page.getByText('Paper A').first()).toBeVisible();
@@ -241,7 +241,7 @@ test('paper reader shows parsed Source and exact Finding source selection', asyn
 	await expect(page.getByText('Conductivity improved to 12 mS/cm under EIS.')).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Documents' }).last()).toHaveAttribute(
 		'href',
-		`/collections/${collectionId}/objectives/obj_1`
+		`/workspaces/${workspaceId}/objectives/obj_1`
 	);
 	await expectNoHorizontalOverflow(page);
 
@@ -251,12 +251,12 @@ test('paper reader shows parsed Source and exact Finding source selection', asyn
 
 test('paper reader reports when neither Source projection is available', async ({ page }) => {
 	await mockPaperReaderApis(page, false);
-	await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+	await page.goto(`/workspaces/${workspaceId}/documents/${documentId}`);
 
 	await expect(page.getByRole('heading', { name: 'Source view is unavailable' })).toBeVisible();
 });
 
-test('a selected document Source reaches the embedded Collection Agent without a Core write', async ({
+test('a selected document Source reaches the embedded Workspace Agent without a Core write', async ({
 	page
 }) => {
 	let postedMessage: Record<string, unknown> | null = null;
@@ -275,7 +275,7 @@ test('a selected document Source reaches the embedded Collection Agent without a
 		postedMessage = payload;
 	});
 	await page.setViewportSize({ width: 1440, height: 900 });
-	await page.goto(`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`);
+	await page.goto(`/workspaces/${workspaceId}/documents/${documentId}?view=parsed-paper`);
 
 	const askAction = page.getByTestId('ask-research-agent-source-results');
 	await askAction.locator('..').hover();
@@ -288,7 +288,7 @@ test('a selected document Source reaches the embedded Collection Agent without a
 	}
 	await askAction.click();
 	await expect(page).toHaveURL(
-		`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`
+		`/workspaces/${workspaceId}/documents/${documentId}?view=parsed-paper`
 	);
 	await expect(page.locator('.agent-pane')).toBeVisible();
 
@@ -328,7 +328,7 @@ test('a selected document Source reaches the embedded Collection Agent without a
 		message: expect.stringContaining('What does this result support?'),
 		source_contexts: [
 			{
-				collection_id: collectionId,
+				workspace_id: workspaceId,
 				document_id: documentId,
 				source_kind: 'text_window',
 				source_ref: 'results',

@@ -18,7 +18,7 @@ identity model is [`../../docs/architecture/persistence-model.md`](../../docs/ar
 startup and calls `AsyncSessionLocal.configure(bind=engine)` before handling requests.
 Imports do not create engines; startup failure and normal shutdown dispose the
 owned engine. The engine is available as `database.engine`; file resources are
-initialized as `collection_workspace.Workspace` and `object_store.Store` in
+initialized as `workspace_files.Workspace` and `object_store.Store` in
 their own modules. File-facing application functions reference these instances
 directly, while independent workers create and pass their own resources.
 The process uses one database binding, so overlapping runtimes
@@ -38,9 +38,9 @@ foreign keys across the service databases.
 
 ## Current Aggregate Ownership
 
-- `CollectionRepository`: `Collection -> current Documents`, including
+- `WorkspaceRepository`: `Workspace -> current Documents`, including
   file metadata and preparation state.
-- `PipelineRunRepository`: observable Collection- or Document-scoped
+- `PipelineRunRepository`: observable Workspace- or Document-scoped
   execution and nested node telemetry in one row.
 - `SourceArtifactRepository`: the current Source aggregate for each
   Document, stored in the Source section of `document_preparations`.
@@ -48,7 +48,7 @@ foreign keys across the service databases.
   stored in `document_preparations.profile_json` with its own input fingerprint.
 - `PaperMapRepository`: reads and writes the embedded Paper Map fields
   on `document_preparations`, after a profile exists.
-- `ObjectiveRepository`: Collection discovery fields, Objective records,
+- `ObjectiveRepository`: Workspace discovery fields, Objective records,
   and analysis lifecycle metadata. Automatic scientific facts belong to the
   PaperExperiment, ObjectiveExperimentSelection, ComparisonGroup, and Finding
   repositories; authored snapshots remain in the analysis payload.
@@ -60,7 +60,7 @@ foreign keys across the service databases.
 ## Objective Aggregate
 
 ```text
-collections.discovery_*
+workspaces.discovery_*
 research_objectives
   -> objective_analyses
      -> execution metadata and authored snapshots
@@ -76,7 +76,7 @@ Only a complete succeeded version advances the published pointer; failure never
 hides the prior published version.
 
 Each preparation producer owns its section. Updating a Profile cannot relabel
-the current Source fingerprint, and Collection status updates cannot rewrite
+the current Source fingerprint, and Workspace status updates cannot rewrite
 artifact provenance. A profile without a known input fingerprint remains
 unversioned; a preparation row without a Source artifact is not a parsed Source.
 
@@ -88,9 +88,9 @@ Repositories return those results or domain objects, never ORM rows or HTTP
 response models. Do not add a generic repository, storage
 selector, compatibility wrapper, dual write, schema probe, or fallback store.
 
-SQLAlchemy table mappings use the `ORM` suffix (for example, `CollectionORM`
+SQLAlchemy table mappings use the `ORM` suffix (for example, `WorkspaceORM`
 and `ChatModelCallORM`). Domain values and repository results such as
-`Collection` and `StoredCollection` keep their existing names.
+`Workspace` and `StoredWorkspace` keep their existing names.
 
 Within `postgres/models/`, `chat.py` owns model-call audit mappings,
 `analysis_job.py` owns shared worker scheduling, `finding_review.py` owns expert

@@ -139,7 +139,7 @@ describe('self-service password changes', () => {
 		async (status) => {
 			fetchMock.mockResolvedValueOnce(jsonResponse(user));
 			await login(user.email, 'current-password');
-			sessionStorage.setItem('lens.chatSourceContext.researcher_1:collection', 'private draft');
+			sessionStorage.setItem('lens.chatSourceContext.researcher_1:workspace', 'private draft');
 			fetchMock.mockResolvedValueOnce(
 				new Response(
 					JSON.stringify({
@@ -152,7 +152,7 @@ describe('self-service password changes', () => {
 				Error
 			);
 			expect(get(authState).user?.user_id).toBe(user.user_id);
-			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:collection')).toBe(
+			expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:workspace')).toBe(
 				'private draft'
 			);
 		}
@@ -161,7 +161,7 @@ describe('self-service password changes', () => {
 	it('clears account state and private drafts only after confirmed success', async () => {
 		fetchMock.mockResolvedValueOnce(jsonResponse(user));
 		await login(user.email, 'current-password');
-		sessionStorage.setItem('lens.chatSourceContext.researcher_1:collection', 'private draft');
+		sessionStorage.setItem('lens.chatSourceContext.researcher_1:workspace', 'private draft');
 		fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }));
 		await changePassword('current-password', 'replacement-password');
 		expect(fetchMock).toHaveBeenLastCalledWith(
@@ -172,7 +172,7 @@ describe('self-service password changes', () => {
 			})
 		);
 		expect(get(authState).status).toBe('anonymous');
-		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:collection')).toBeNull();
+		expect(sessionStorage.getItem('lens.chatSourceContext.researcher_1:workspace')).toBeNull();
 	});
 
 	it('waits for a password change to finish before a new login can set its cookie', async () => {

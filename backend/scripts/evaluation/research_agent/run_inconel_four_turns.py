@@ -41,16 +41,16 @@ async def run(args):
     from main import lifespan
     from application.chat import session_service
     from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
-    from application.source import collection_service
+    from application.source import workspace_service
     from repositories.chat_repository import ChatRepo
     from repositories.source_artifact_repository import SourceArtifactRepo
 
     async with lifespan():
         service = session_service.ChatService
-        await collection_service.get_collection_for_user(
-            args.collection_id, args.user_id
+        await workspace_service.get_workspace_for_user(
+            args.workspace_id, args.user_id
         )
-        documents = await SourceArtifactRepo.list_documents(args.collection_id)
+        documents = await SourceArtifactRepo.list_documents(args.workspace_id)
         if len(documents) != 100:
             raise ValueError("this acceptance fixture requires 100 prepared documents")
         before = {
@@ -89,7 +89,7 @@ async def run(args):
         save(args.output, report)
         try:
             session = await service.create_session(
-                collection_id=args.collection_id, user_id=args.user_id
+                workspace_id=args.workspace_id, user_id=args.user_id
             )
             report["session_id"] = session.session_id
             await ChatRepo.set_permission(
@@ -151,7 +151,7 @@ async def run(args):
             report["after"] = {
                 "scientific": scientific_snapshot(url),
                 "corpus": document_fingerprints(
-                    await SourceArtifactRepo.list_documents(args.collection_id)
+                    await SourceArtifactRepo.list_documents(args.workspace_id)
                 ),
             }
             report["scientific_data_unchanged"] = before == report["after"]
@@ -186,7 +186,7 @@ def main():
         help="freeze scientific rows and Source content without calling the model",
     )
     parser.add_argument("--expected-snapshot", type=Path)
-    parser.add_argument("--collection-id", required=True)
+    parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

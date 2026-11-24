@@ -24,7 +24,7 @@ from domain.core.research_objective import (
     normalize_objective_terms,
 )
 from domain.source import Document
-from repositories.collection_repository import StoredDocument
+from repositories.workspace_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 from repositories.paper_map_repository import PaperMapRepository
@@ -33,7 +33,7 @@ from repositories.source_artifact_repository import SourceArtifactRepository
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
     return ResearchObjective(
-        collection_id=payload.get("collection_id", "collection-test") or "",
+        workspace_id=payload.get("workspace_id", "workspace-test") or "",
         objective_id=payload.get("objective_id", None)
         or build_research_objective_id(
             question=payload.get(
@@ -91,7 +91,7 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
 
 def build_research_objective_service(
     *,
-    collection_service,
+    workspace_service,
     **kwargs,
 ) -> ModuleType:
     source_repository = kwargs.pop("source_artifact_repository", None)
@@ -119,21 +119,21 @@ def build_research_objective_service(
     document_profile_service = kwargs.pop(
         "document_profile_service", document_profile_module
     )
-    document_profile_service.collection_service = collection_service
+    document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceArtifactRepo = source_repository
     document_profile_service.DocumentProfileRepo = document_profile_repository
     objective_input_service = kwargs.pop(
         "objective_input_service",
         objective_input_module,
     )
-    objective_input_service.collection_service = collection_service
+    objective_input_service.workspace_service = workspace_service
     objective_input_service.SourceArtifactRepo = source_repository
     objective_input_service.PaperMapRepo = paper_map_repository
     objective_input_service.document_profile_service = document_profile_service
     objective_input_service.paper_research_map_service = kwargs.pop(
         "paper_map_service", paper_research_map_service
     )
-    experiment_analysis_service.collection_service = collection_service
+    experiment_analysis_service.workspace_service = workspace_service
     experiment_analysis_service.PaperMapRepo = paper_map_repository
     experiment_analysis_service.ObjectiveRepo = objective_repository
     experiment_analysis_service.objective_input_service = objective_input_service
@@ -144,17 +144,17 @@ def build_research_objective_service(
 
 async def seed_document_profiles(
     service: ModuleType,
-    collection_id: str,
+    workspace_id: str,
 ) -> None:
-    documents = await service.objective_input_service.SourceArtifactRepo.read_collection_documents(
-        collection_id
+    documents = await service.objective_input_service.SourceArtifactRepo.read_workspace_documents(
+        workspace_id
     )
-    current_collection = (
-        await service.collection_service.CollectionRepo.read_collection(collection_id)
+    current_workspace = (
+        await service.workspace_service.WorkspaceRepo.read_workspace(workspace_id)
     )
-    assert current_collection is not None
+    assert current_workspace is not None
     existing_document_ids = {
-        document.document.document_id for document in current_collection.documents
+        document.document.document_id for document in current_workspace.documents
     }
     now = datetime.now(timezone.utc).isoformat()
     new_documents = tuple(
@@ -177,7 +177,7 @@ async def seed_document_profiles(
                 document.metadata.get("source_filename")
                 or f"{document.document_id}.pdf"
             ),
-            storage_key=f"{collection_id}/input/{document.document_id}.pdf",
+            storage_key=f"{workspace_id}/input/{document.document_id}.pdf",
             created_at=now,
             updated_at=now,
         )
@@ -185,8 +185,8 @@ async def seed_document_profiles(
         if document.document_id not in existing_document_ids
     )
     if new_documents:
-        await service.collection_service.CollectionRepo.add_documents(
-            collection_id,
+        await service.workspace_service.WorkspaceRepo.add_documents(
+            workspace_id,
             new_documents,
             updated_at=now,
         )
@@ -204,31 +204,31 @@ async def seed_document_profiles(
         )
     for profile in profiles:
         await service.objective_input_service.document_profile_service.DocumentProfileRepo.replace(
-            collection_id, profile
+            workspace_id, profile
         )
 
 
 async def queue_running_analysis(
     service: ModuleType,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:
-    facts = await service.objective_repository.read(collection_id)
+    facts = await service.objective_repository.read(workspace_id)
     document_inputs = facts.document_inputs
     if not document_inputs:
         objective = await service.objective_repository.read_objective(
-            collection_id,
+            workspace_id,
             objective_id,
         )
         assert objective is not None
         document_inputs = (
             await service.objective_input_service.resolve_prepared_document_inputs(
-                collection_id,
+                workspace_id,
                 tuple(objective.seed_document_ids),
             )
         )
     _, queued = await service.objective_repository.queue_analysis(
-        collection_id,
+        workspace_id,
         objective_id,
         document_inputs=tuple(
             PreparedDocumentInput(
@@ -243,7 +243,7 @@ async def queue_running_analysis(
     )
     claimed = await claim_analysis_fixture(
         service.objective_repository,
-        collection_id,
+        workspace_id,
         objective_id,
         queued.analysis_version,
     )

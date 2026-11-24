@@ -19,11 +19,11 @@ def _request(service, user_id: str = "user-1"):
 class _Service:
     async def list_feedback_cases_for_user(self, **kwargs):
         if kwargs["user_id"] != "user-1":
-            raise ResourceNotFoundException("collection not found")
+            raise ResourceNotFoundException("workspace not found")
         return (
             FeedbackCaseSummary(
                 case_id="case-1",
-                collection_id="collection-1",
+                workspace_id="workspace-1",
                 status="needs_annotation",
                 anchor_message_id="answer-1",
                 problem_type="source_missing",
@@ -38,7 +38,7 @@ class _Service:
             raise ResourceNotFoundException("feedback case not found")
         return {
             "case_id": "case-1",
-            "collection_id": "collection-1",
+            "workspace_id": "workspace-1",
             "session_id": "session-1",
             "status": "needs_annotation",
             "source_signals": [],
@@ -65,7 +65,7 @@ def test_feedback_case_routes_return_summary_and_detail_without_client_ids():
                 asyncio.run(
                     feedback_cases.list_feedback_cases(
                         user_id=request.state.current_user["user_id"],
-                        collection_id="collection-1",
+                        workspace_id="workspace-1",
                         limit=50,
                         offset=0,
                     )
@@ -108,7 +108,7 @@ def test_feedback_case_detail_hides_unauthorized_case():
     assert error.value.code == 200201
 
 
-def test_feedback_case_list_hides_unauthorized_collection():
+def test_feedback_case_list_hides_unauthorized_workspace():
     with pytest.raises(ResourceNotFoundException) as error:
         feedback_cases.FeedbackCaseListResponse.model_validate(
             json.loads(
@@ -118,7 +118,7 @@ def test_feedback_case_list_hides_unauthorized_collection():
                             user_id=_request(
                                 _Service(), "other-user"
                             ).state.current_user["user_id"],
-                            collection_id="collection-1",
+                            workspace_id="workspace-1",
                             limit=50,
                             offset=0,
                         )

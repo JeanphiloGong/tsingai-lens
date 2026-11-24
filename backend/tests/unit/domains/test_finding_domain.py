@@ -49,7 +49,7 @@ def _evidence(
 ) -> ObjectiveEvidence:
     result_role = role in {"direct_result", "contradictory_result"}
     return ObjectiveEvidence(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=analysis_version,
         evidence_id=evidence_id,
@@ -103,7 +103,7 @@ def _contribution(
     analysis_status: str = "analyzed",
 ) -> PaperContribution:
     return PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id=document_id or "",
@@ -123,7 +123,7 @@ def _contribution(
 
 def _finding(**overrides) -> Finding:
     values = {
-        "collection_id": "collection-1",
+        "workspace_id": "workspace-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "finding_id": "finding-1",
@@ -157,7 +157,7 @@ def _finding(**overrides) -> Finding:
 def test_finding_represents_one_atomic_outcome_without_legacy_fields() -> None:
     finding = _finding()
 
-    assert finding.key == ("collection-1", "objective-1", 1, "finding-1")
+    assert finding.key == ("workspace-1", "objective-1", 1, "finding-1")
     assert finding.factors == ("preheating",)
     assert finding.outcome == "ductility"
     assert finding.support_scope == "paper"
@@ -181,7 +181,7 @@ def test_finding_represents_one_atomic_outcome_without_legacy_fields() -> None:
 
 def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monkeypatch) -> None:
     finding = Finding(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=2,
         finding_id="finding-experiment-1",
@@ -212,7 +212,7 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monke
     )
     repository = ObjectiveRepository()
     restored = asyncio.run(repository.read_finding(
-        finding.collection_id, finding.objective_id, finding.analysis_version, finding.finding_id,
+        finding.workspace_id, finding.objective_id, finding.analysis_version, finding.finding_id,
     ))
 
     assert restored == finding

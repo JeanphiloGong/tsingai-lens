@@ -93,7 +93,7 @@ Source labels. A supported comparison must close over those reported results;
 when either side is missing, the model retains the gap and returns no comparison.
 Reported interpretations likewise declare their statement, kind and Sources.
 
-The model must not emit formal IDs, collection/objective ownership, revision
+The model must not emit formal IDs, workspace/objective ownership, revision
 numbers, `SourceReference` records, or final `binding_status`, `direction`,
 `basis`, or attribution decisions. The service supplies those values after
 validation. A model-provided `identity_specificity=exact` or

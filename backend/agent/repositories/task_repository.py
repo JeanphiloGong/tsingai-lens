@@ -13,7 +13,7 @@ from infra.persistence.postgres.models.chat import (
     AgentTaskORM,
     AgentTaskStepORM,
 )
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,13 +110,13 @@ class TaskRepository:
                     ConversationORM.conversation_id == AgentTaskORM.session_id,
                 )
                 .join(
-                    CollectionORM,
-                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                    WorkspaceORM,
+                    WorkspaceORM.workspace_id == ConversationORM.workspace_id,
                 )
                 .where(
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
-                    CollectionORM.owner_user_id == user_id,
+                    WorkspaceORM.owner_user_id == user_id,
                     ConversationORM.deleted_at.is_(None),
                 )
                 .with_for_update()
@@ -161,14 +161,14 @@ class TaskRepository:
                     ConversationORM.conversation_id == AgentTaskORM.session_id,
                 )
                 .join(
-                    CollectionORM,
-                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                    WorkspaceORM,
+                    WorkspaceORM.workspace_id == ConversationORM.workspace_id,
                 )
                 .where(
                     AgentTaskORM.session_id == conversation_id,
                     AgentTaskORM.task_id == task_id,
                     ConversationORM.user_id == user_id,
-                    CollectionORM.owner_user_id == user_id,
+                    WorkspaceORM.owner_user_id == user_id,
                     ConversationORM.deleted_at.is_(None),
                 )
             )
@@ -225,13 +225,13 @@ class TaskRepository:
                 ConversationORM.conversation_id == AgentTaskORM.session_id,
             )
             .join(
-                CollectionORM,
-                CollectionORM.collection_id == ConversationORM.workspace_id,
+                WorkspaceORM,
+                WorkspaceORM.workspace_id == ConversationORM.workspace_id,
             )
             .where(
                 AgentTaskORM.session_id == conversation_id,
                 ConversationORM.user_id == user_id,
-                CollectionORM.owner_user_id == user_id,
+                WorkspaceORM.owner_user_id == user_id,
                 ConversationORM.deleted_at.is_(None),
             )
             .order_by(AgentTaskORM.updated_at.desc(), AgentTaskORM.task_id)
@@ -266,13 +266,13 @@ class TaskRepository:
             conversation = await db.scalar(
                 select(ConversationORM)
                 .join(
-                    CollectionORM,
-                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                    WorkspaceORM,
+                    WorkspaceORM.workspace_id == ConversationORM.workspace_id,
                 )
                 .where(
                     ConversationORM.conversation_id == conversation_id,
                     ConversationORM.user_id == user_id,
-                    CollectionORM.owner_user_id == user_id,
+                    WorkspaceORM.owner_user_id == user_id,
                     ConversationORM.deleted_at.is_(None),
                 )
                 .with_for_update()
@@ -310,13 +310,13 @@ class TaskRepository:
             conversation = await db.scalar(
                 select(ConversationORM)
                 .join(
-                    CollectionORM,
-                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                    WorkspaceORM,
+                    WorkspaceORM.workspace_id == ConversationORM.workspace_id,
                 )
                 .where(
                     ConversationORM.conversation_id == conversation_id,
                     ConversationORM.user_id == user_id,
-                    CollectionORM.owner_user_id == user_id,
+                    WorkspaceORM.owner_user_id == user_id,
                     ConversationORM.deleted_at.is_(None),
                 )
                 .with_for_update()
@@ -392,13 +392,13 @@ class TaskRepository:
             conversation = await db.scalar(
                 select(ConversationORM)
                 .join(
-                    CollectionORM,
-                    CollectionORM.collection_id == ConversationORM.workspace_id,
+                    WorkspaceORM,
+                    WorkspaceORM.workspace_id == ConversationORM.workspace_id,
                 )
                 .where(
                     ConversationORM.conversation_id == conversation_id,
                     ConversationORM.user_id == user_id,
-                    CollectionORM.owner_user_id == user_id,
+                    WorkspaceORM.owner_user_id == user_id,
                     ConversationORM.deleted_at.is_(None),
                 )
                 .with_for_update()

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import update
 
 from application.pipeline import pipeline_run_service
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core import PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
 from infra.persistence.postgres.models.execution import PipelineRunORM
@@ -17,7 +17,7 @@ from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.objective_repository import ObjectiveRepo, AnalysisLeaseLostError
 from repositories.pipeline_run_repository import PipelineRunRepo, PipelineLeaseLostError
-from tests.support.postgres import seed_collection, seed_objective
+from tests.support.postgres import seed_workspace, seed_objective
 
 pytestmark = pytest.mark.anyio
 
@@ -28,11 +28,11 @@ def anyio_backend():
 
 
 async def _queue_pipeline(factory, kind="document_preparation"):
-    await seed_collection(factory, "worker-papers", document_ids=("paper-a",))
+    await seed_workspace(factory, "worker-papers", document_ids=("paper-a",))
     return await pipeline_run_service.create_run(
         "worker-papers",
         kind,
-        scope_type="document" if kind == "document_preparation" else "collection",
+        scope_type="document" if kind == "document_preparation" else "workspace",
         scope_id="paper-a" if kind == "document_preparation" else "worker-papers",
         input_fingerprint="fixed-input",
     )
@@ -83,7 +83,7 @@ async def test_two_pipeline_workers_claim_once_and_expired_worker_cannot_write(
 
 
 async def _queue_analysis(factory):
-    await seed_collection(factory, "worker-papers", document_ids=("paper-a",))
+    await seed_workspace(factory, "worker-papers", document_ids=("paper-a",))
     await seed_objective(factory, "worker-papers", "power-porosity")
     await DocumentProfileRepo.replace(
         "worker-papers",
@@ -97,7 +97,7 @@ async def _queue_analysis(factory):
             profile_fingerprint="prepared-a",
         ),
     )
-    await collection_service.update_document_preparation(
+    await workspace_service.update_document_preparation(
         "worker-papers", "paper-a", status="ready"
     )
     return await ObjectiveRepo.queue_analysis(

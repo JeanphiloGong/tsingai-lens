@@ -58,7 +58,7 @@ _FORBIDDEN_DRAFT_FIELDS = frozenset(
         "revision_id",
         "document_id",
         "source_fingerprint",
-        "collection_id",
+        "workspace_id",
         "objective_id",
         "variant_id",
         "variant_ids",
@@ -315,7 +315,7 @@ def parse_paper_experiment_response(
             in {
                 "document_id",
                 "source_fingerprint",
-                "collection_id",
+                "workspace_id",
                 "objective_id",
             }
         ),

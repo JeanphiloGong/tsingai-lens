@@ -9,7 +9,7 @@ from infra.persistence.postgres.models.chat import (
     ChatModelCallORM,
     ChatToolCallORM,
 )
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from scripts.backfill_agent_tasks import (
     run,
@@ -25,8 +25,8 @@ async def test_agent_backfill_is_conservative_and_idempotent(postgres_session_fa
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="migration-v3-workspace",
+            WorkspaceORM(
+                workspace_id="migration-v3-workspace",
                 owner_user_id="migration-v3-owner",
                 name="Migration V3",
                 status="idle",
@@ -137,8 +137,8 @@ async def test_agent_backfill_reports_ambiguous_response(postgres_session_factor
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="migration-v3-ambiguous-workspace",
+            WorkspaceORM(
+                workspace_id="migration-v3-ambiguous-workspace",
                 owner_user_id="migration-v3-ambiguous-owner",
                 name="Migration V3 Ambiguous",
                 status="idle",

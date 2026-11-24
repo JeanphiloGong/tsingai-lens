@@ -14,7 +14,7 @@ from utils.response import ApiResponse, make_api_response
 
 class FeedbackCaseSummaryResponse(BaseModel):
     case_id: str
-    collection_id: str
+    workspace_id: str
     status: str
     anchor_message_id: str
     problem_type: str | None = None
@@ -37,7 +37,7 @@ class FeedbackCaseDetailResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     case_id: str
-    collection_id: str
+    workspace_id: str
     session_id: str
     status: str
     source_signals: list[dict[str, Any]] = Field(default_factory=list)
@@ -137,7 +137,7 @@ feedback_case_router = APIRouter(prefix="/feedback-cases", tags=["feedback-workb
 @feedback_case_router.get("", response_model=ApiResponse[FeedbackCaseListResponse])
 async def list_feedback_cases(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    collection_id: str | None = Query(default=None, min_length=1, max_length=64),
+    workspace_id: str | None = Query(default=None, min_length=1, max_length=64),
     status: str | None = Query(default=None, min_length=1, max_length=32),
     problem_type: str | None = Query(default=None, min_length=1, max_length=64),
     needs_human_review: bool | None = None,
@@ -146,7 +146,7 @@ async def list_feedback_cases(
 ) -> Response:
     items = await feedback_case_service.list_feedback_cases_for_user(
         user_id=user_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         status=status,
         problem_type=problem_type,
         needs_human_review=needs_human_review,

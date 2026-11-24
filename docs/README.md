@@ -70,7 +70,7 @@ docs/
   [`decisions/rfc-research-objective-first-product-flow.md`](decisions/rfc-research-objective-first-product-flow.md)
 - Collection-bound Research Agent:
   read
-  [`decisions/rfc-collection-bound-research-agent.md`](decisions/rfc-collection-bound-research-agent.md)
+  [`decisions/rfc-workspace-bound-research-agent.md`](decisions/rfc-workspace-bound-research-agent.md)
   after
   [`decisions/rfc-lens-agent-era-positioning.md`](decisions/rfc-lens-agent-era-positioning.md)
   when working on collection-bound Chat, Agent capabilities, write approval,
@@ -147,7 +147,7 @@ Decisions:
 - [`decisions/rfc-comparison-result-document-product-flow.md`](decisions/rfc-comparison-result-document-product-flow.md)
 - [`decisions/rfc-research-view-aggregation-layer.md`](decisions/rfc-research-view-aggregation-layer.md)
 - [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md)
-- [`decisions/rfc-collection-bound-research-agent.md`](decisions/rfc-collection-bound-research-agent.md)
+- [`decisions/rfc-workspace-bound-research-agent.md`](decisions/rfc-workspace-bound-research-agent.md)
 - [`decisions/rfc-research-objective-first-product-flow.md`](decisions/rfc-research-objective-first-product-flow.md)
 
 Research:

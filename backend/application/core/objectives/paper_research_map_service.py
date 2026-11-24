@@ -33,7 +33,7 @@ _PAPER_MAP_EXPANSION_SOURCE_BUDGET = 24
 
 
 def build_document_paper_map(
-    collection_id: str,
+    workspace_id: str,
     *,
     document: SourceDocument,
     profile: Any,
@@ -41,8 +41,8 @@ def build_document_paper_map(
     paper_map_extractor: PaperResearchMapExtractor,
     progress_callback: ProgressCallback | None = None,
 ) -> PaperResearchMap:
-    return build_collection_paper_maps(
-        collection_id,
+    return build_workspace_paper_maps(
+        workspace_id,
         documents=(document,),
         profiles_by_document_id={document.document_id: profile},
         document_trees_by_document_id={document.document_id: document_tree},
@@ -51,8 +51,8 @@ def build_document_paper_map(
     )[0]
 
 
-def build_collection_paper_maps(
-    collection_id: str,
+def build_workspace_paper_maps(
+    workspace_id: str,
     *,
     documents: tuple[SourceDocument, ...],
     profiles_by_document_id: Mapping[str, Any],
@@ -64,8 +64,8 @@ def build_collection_paper_maps(
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[PaperResearchMap, ...]:
     logger.info(
-        "Research objective paper map started collection_id=%s document_count=%s",
-        collection_id,
+        "Research objective paper map started workspace_id=%s document_count=%s",
+        workspace_id,
         len(documents),
     )
     paper_maps: list[PaperResearchMap] = []
@@ -78,8 +78,8 @@ def build_collection_paper_maps(
         document_table_rows = list(document.table_rows)
         document_figures = list(document.figures)
         logger.info(
-            "Research objective paper map document started collection_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
-            collection_id,
+            "Research objective paper map document started workspace_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
+            workspace_id,
             document.document_id,
             document_position,
             document_count,
@@ -88,7 +88,7 @@ def build_collection_paper_maps(
             len(document_figures),
         )
         payloads = paper_map_extraction.build_payloads(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document=document,
             profile=profiles_by_document_id.get(document.document_id),
             blocks=document_blocks,
@@ -129,7 +129,7 @@ def build_collection_paper_maps(
                 active_window_role=payload["window_role"],
             )
         for batch_maps, batch_signals in paper_map_extraction.extract_window_payloads(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document_id=document.document_id,
             payloads=payloads,
             paper_map_extractor=paper_map_extractor,
@@ -170,7 +170,7 @@ def build_collection_paper_maps(
                 if isinstance(unit, Mapping)
             )
             expansion_payloads = paper_map_extraction.build_payloads(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
                 blocks=document_blocks,
@@ -253,7 +253,7 @@ def build_collection_paper_maps(
                 batch_maps,
                 batch_signals,
             ) in paper_map_extraction.extract_window_payloads(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 document_id=document.document_id,
                 payloads=expansion_payloads,
                 paper_map_extractor=paper_map_extractor,
@@ -291,8 +291,8 @@ def build_collection_paper_maps(
         )
         paper_maps.append(paper_map)
         logger.info(
-            "Research objective paper map document finished collection_id=%s document_id=%s document_position=%s document_count=%s window_count=%s doc_role=%s study_count=%s relationship_count=%s unresolved_signal_count=%s completed_documents=%s remaining_documents=%s",
-            collection_id,
+            "Research objective paper map document finished workspace_id=%s document_id=%s document_position=%s document_count=%s window_count=%s doc_role=%s study_count=%s relationship_count=%s unresolved_signal_count=%s completed_documents=%s remaining_documents=%s",
+            workspace_id,
             document.document_id,
             document_position,
             document_count,
@@ -316,4 +316,4 @@ def _resolve_source_filename(document: Any) -> str | None:
     return None
 
 
-__all__ = ["build_document_paper_map", "build_collection_paper_maps"]
+__all__ = ["build_document_paper_map", "build_workspace_paper_maps"]

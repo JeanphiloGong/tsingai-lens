@@ -56,7 +56,7 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
     ResearchObjectiveNotFoundError,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core import ResearchObjective
 from domain.core.finding import Finding
 from domain.core.research_objective import ObjectiveEvidence
@@ -203,10 +203,10 @@ async def execute_objective_analysis_job(
     paper_map_extractor: PaperResearchMapExtractor | None = None,
     paper_experiment_extractor: PaperExperimentExtractor | None = None,
 ) -> dict[str, Any]:
-    collection_id, objective_id, analysis_version = job.analysis.key
+    workspace_id, objective_id, analysis_version = job.analysis.key
     owns_client = response_client is None
     try:
-        objective = await _require_objective(collection_id, objective_id)
+        objective = await _require_objective(workspace_id, objective_id)
         claimed = job.analysis
         async with AsyncSessionLocal() as db, db.begin():
             await ObjectiveRepo.lock_analysis_job(db, job)
@@ -222,7 +222,7 @@ async def execute_objective_analysis_job(
             artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
             try:
                 artifacts = await experiment_analysis_service.generate_experiment_analysis_artifacts(
-                    collection_id,
+                    workspace_id,
                     claimed,
                     progress_callback=progress_callback,
                     job=job,
@@ -235,7 +235,7 @@ async def execute_objective_analysis_job(
             except Exception as exc:
                 record_analysis_failure(
                     exc,
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     objective_id=objective_id,
                     analysis_version=analysis_version,
                     stage="generate_artifacts",
@@ -243,7 +243,7 @@ async def execute_objective_analysis_job(
                 raise
             finally:
                 claimed = await ObjectiveRepo.update_analysis_execution_stats(
-                    collection_id,
+                    workspace_id,
                     objective_id,
                     analysis_version,
                     job=job,
@@ -263,7 +263,7 @@ async def execute_objective_analysis_job(
             await ObjectiveRepo.check_analysis_inputs(db, claimed)
             native_result = await experiment_analysis_writer.write_experiment_analysis(
                 db=db,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective=objective,
                 analysis=claimed,
                 experiment_outputs=artifacts.experiment_outputs,
@@ -273,7 +273,7 @@ async def execute_objective_analysis_job(
             abstention_reason, abstention_note = _experiment_abstention(native_result)
             objective, completed = await ObjectiveRepo.publish_experiment_analysis(
                 db,
-                collection_id,
+                workspace_id,
                 objective_id,
                 analysis_version,
                 job=job,
@@ -281,46 +281,46 @@ async def execute_objective_analysis_job(
                 abstention_reason=abstention_reason,
                 abstention_note=abstention_note,
             )
-        return await _result(collection_id, objective.objective_id, analysis=completed)
+        return await _result(workspace_id, objective.objective_id, analysis=completed)
     except AnalysisLeaseLostError:
         raise
     except Exception as exc:  # noqa: BLE001
         record_analysis_failure(
             exc,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
             stage="execute_analysis",
         )
         logger.error(
-            "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
-            collection_id,
+            "Objective analysis failed workspace_id=%s objective_id=%s analysis_version=%s error_type=%s",
+            workspace_id,
             objective_id,
             analysis_version,
             type(exc).__name__,
         )
         current = await ObjectiveRepo.read_analysis(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         )
         if current is not None and current.status in {"queued", "running"}:
             current = await ObjectiveRepo.fail_analysis(
-                collection_id,
+                workspace_id,
                 objective_id,
                 analysis_version,
                 job=job,
                 error_code=_error_code(exc),
                 error_message=analysis_error_message(_error_code(exc)),
             )
-        return await _result(collection_id, objective_id, analysis=current)
+        return await _result(workspace_id, objective_id, analysis=current)
     finally:
         if owns_client and response_client is not None:
             response_client.client.close()
 
 
 async def summarize_objective_finding(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     *,
@@ -331,7 +331,7 @@ async def summarize_objective_finding(
 ) -> dict[str, Any]:
     try:
         detail = await get_finding(
-            collection_id,
+            workspace_id,
             objective_id,
             finding_id,
             analysis_version=analysis_version,
@@ -343,13 +343,13 @@ async def summarize_objective_finding(
             data={"code": "summary_stale_analysis"},
         ) from exc
     experiment_backed = await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     )
     if experiment_backed:
         records, total = await experiment_projection.list_analysis_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             finding_id=finding_id,
@@ -358,7 +358,7 @@ async def summarize_objective_finding(
         )
     else:
         records, total = await ObjectiveRepo.list_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             finding_id=finding_id,
@@ -381,7 +381,7 @@ async def summarize_objective_finding(
                 evidence=[
                     (
                         {
-                            "collection_id": item.collection_id,
+                            "workspace_id": item.workspace_id,
                             "objective_id": item.objective_id,
                             "analysis_version": item.analysis_version,
                             "evidence_id": item.evidence_id,
@@ -582,7 +582,7 @@ async def summarize_objective_finding(
             await asyncio.gather(summary_task, return_exceptions=True)
             raise
         try:
-            await _published_version(collection_id, objective_id, analysis_version)
+            await _published_version(workspace_id, objective_id, analysis_version)
         except ResourceConflictException as exc:
             raise ResourceConflictException(
                 "The published analysis has changed. Reload before generating a summary.",
@@ -595,71 +595,71 @@ async def summarize_objective_finding(
 
 
 async def start_objective_analysis(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     document_ids: tuple[str, ...],
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    return await queue_analysis(collection_id, objective_id, document_ids)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    return await queue_analysis(workspace_id, objective_id, document_ids)
 
 
 async def queue_analysis(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     document_ids: tuple[str, ...],
 ) -> dict[str, Any]:
     document_inputs = await objective_input_service.resolve_prepared_document_inputs(
-        collection_id,
+        workspace_id,
         document_ids,
     )
     objective, analysis = await ObjectiveRepo.queue_analysis(
-        collection_id,
+        workspace_id,
         objective_id,
         document_inputs=document_inputs,
         pipeline_version=_PIPELINE_VERSION,
         model_name=None,
         prompt_versions={},
     )
-    return await _result(collection_id, objective.objective_id, analysis=analysis)
+    return await _result(workspace_id, objective.objective_id, analysis=analysis)
 
 
 async def list_objectives(
-    collection_id: str, *, user_id: str
+    workspace_id: str, *, user_id: str
 ) -> tuple[StoredObjective, ...]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    return await ObjectiveRepo.list_objective_records(collection_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    return await ObjectiveRepo.list_objective_records(workspace_id)
 
 
 async def get_analysis_state(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    return await _result(collection_id, objective_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    return await _result(workspace_id, objective_id)
 
 
 async def get_analysis_status(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
     """Read only the active analysis progress needed for polling."""
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
 
-    objective = await _require_objective(collection_id, objective_id)
+    objective = await _require_objective(workspace_id, objective_id)
     analysis = await ObjectiveRepo.read_analysis(
-        collection_id,
+        workspace_id,
         objective.objective_id,
         objective.active_analysis_version,
     )
     if analysis is None:
         return {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective_id": objective.objective_id,
             "analysis_version": None,
             "status": None,
@@ -675,7 +675,7 @@ async def get_analysis_status(
             "completed_at": None,
         }
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective.objective_id,
         "analysis_version": analysis.analysis_version,
         "status": analysis.status,
@@ -699,7 +699,7 @@ async def get_analysis_status(
 
 
 async def list_findings(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
@@ -707,19 +707,19 @@ async def list_findings(
     offset: int = 0,
     limit: int = 50,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     version = await _published_version(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
     if await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=version,
     ):
         findings, total = await experiment_projection.list_analysis_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             offset=offset,
@@ -727,20 +727,20 @@ async def list_findings(
         )
     else:
         findings, total = await ObjectiveRepo.list_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             offset=offset,
             limit=limit,
         )
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "analysis_version": version,
         "items": [
             (
                 {
-                    "collection_id": finding.collection_id,
+                    "workspace_id": finding.workspace_id,
                     "objective_id": finding.objective_id,
                     "analysis_version": finding.analysis_version,
                     "finding_id": finding.finding_id,
@@ -902,7 +902,7 @@ async def list_findings(
             for finding in findings
         ],
         "evidence_reviews": await _finding_evidence_reviews(
-            collection_id, objective_id, version, findings
+            workspace_id, objective_id, version, findings
         ),
         "offset": offset,
         "limit": limit,
@@ -911,33 +911,33 @@ async def list_findings(
 
 
 async def get_finding(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     *,
     user_id: str,
     analysis_version: int | None = None,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     version = await _published_version(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
     if await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=version,
     ):
         finding = await experiment_projection.read_analysis_finding(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             finding_id,
         )
     else:
         finding = await ObjectiveRepo.read_finding(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             finding_id,
@@ -947,19 +947,19 @@ async def get_finding(
             "Published Finding not found.",
             data={
                 "code": "finding_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "analysis_version": version,
                 "finding_id": finding_id,
             },
         )
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "analysis_version": version,
         "finding": (
             {
-                "collection_id": finding.collection_id,
+                "workspace_id": finding.workspace_id,
                 "objective_id": finding.objective_id,
                 "analysis_version": finding.analysis_version,
                 "finding_id": finding.finding_id,
@@ -1116,14 +1116,14 @@ async def get_finding(
         ),
         "evidence_review": (
             await _finding_evidence_reviews(
-                collection_id, objective_id, version, (finding,)
+                workspace_id, objective_id, version, (finding,)
             )
         )[finding.finding_id],
     }
 
 
 async def _finding_evidence_reviews(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     version: int,
     findings: tuple[Finding, ...],
@@ -1131,9 +1131,9 @@ async def _finding_evidence_reviews(
     if not findings:
         return {}
     evidence = await _all_published_evidence(
-        collection_id, objective_id, version,
+        workspace_id, objective_id, version,
         experiment_backed=await should_read_experiment_projection(
-            collection_id=collection_id, objective_id=objective_id, analysis_version=version,
+            workspace_id=workspace_id, objective_id=objective_id, analysis_version=version,
         ),
     )
     evidence_by_id = {
@@ -1151,7 +1151,7 @@ async def _finding_evidence_reviews(
 
 
 async def list_evidence(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
@@ -1160,20 +1160,20 @@ async def list_evidence(
     offset: int = 0,
     limit: int = 100,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     version = await _published_version(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
     experiment_backed = await should_read_experiment_projection(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=version,
     )
     if experiment_backed:
         evidence, total = await experiment_projection.list_analysis_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             finding_id=finding_id,
@@ -1182,7 +1182,7 @@ async def list_evidence(
         )
     else:
         evidence, total = await ObjectiveRepo.list_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             finding_id=finding_id,
@@ -1190,7 +1190,7 @@ async def list_evidence(
             limit=limit,
         )
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "analysis_version": version,
         "finding_id": finding_id,
@@ -1198,7 +1198,7 @@ async def list_evidence(
             {
                 **(
                     {
-                        "collection_id": item.collection_id,
+                        "workspace_id": item.workspace_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
                         "evidence_id": item.evidence_id,
@@ -1392,16 +1392,16 @@ async def list_evidence(
 
 
 async def get_evidence_map(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    objective = await _require_objective(collection_id, objective_id)
-    version = await _published_version(collection_id, objective_id, None)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    objective = await _require_objective(workspace_id, objective_id)
+    version = await _published_version(workspace_id, objective_id, None)
     analysis = await ObjectiveRepo.read_published_analysis(
-        collection_id,
+        workspace_id,
         objective_id,
     )
     if analysis is None:
@@ -1411,19 +1411,19 @@ async def get_evidence_map(
         )
 
     findings = await _all_published_findings(
-        collection_id,
+        workspace_id,
         objective_id,
         version,
         experiment_backed=is_experiment_backed_analysis(analysis),
     )
     evidence_records = await _all_published_evidence(
-        collection_id,
+        workspace_id,
         objective_id,
         version,
         experiment_backed=is_experiment_backed_analysis(analysis),
     )
     profiles = await document_profile_service.read_document_profiles(
-        collection_id,
+        workspace_id,
         tuple(item.document_id for item in analysis.document_inputs),
     )
     if is_experiment_backed_analysis(analysis):
@@ -1436,7 +1436,7 @@ async def get_evidence_map(
         objective=objective,
         analysis=analysis,
         contributions=await ObjectiveRepo.list_contributions(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
         ),
@@ -1447,7 +1447,7 @@ async def get_evidence_map(
 
 
 async def _all_published_findings(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -1455,7 +1455,7 @@ async def _all_published_findings(
 ) -> tuple[Finding, ...]:
     if experiment_backed:
         findings, _ = await experiment_projection.list_analysis_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=0,
@@ -1466,7 +1466,7 @@ async def _all_published_findings(
     offset = 0
     while True:
         page, total = await ObjectiveRepo.list_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=offset,
@@ -1479,7 +1479,7 @@ async def _all_published_findings(
 
 
 async def _all_published_evidence(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -1487,7 +1487,7 @@ async def _all_published_evidence(
 ) -> tuple[ObjectiveEvidence, ...]:
     if experiment_backed:
         evidence, _ = await experiment_projection.list_analysis_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=0,
@@ -1498,7 +1498,7 @@ async def _all_published_evidence(
     offset = 0
     while True:
         page, total = await ObjectiveRepo.list_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=offset,
@@ -1528,21 +1528,21 @@ def _validate_artifacts(
 
 
 async def _result(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     analysis: ObjectiveAnalysis | None = None,
 ) -> dict[str, Any]:
     stored_objective = await ObjectiveRepo.read_objective_record(
-        collection_id, objective_id
+        workspace_id, objective_id
     )
     if stored_objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
     objective = stored_objective.objective
     active = analysis
     if active is None and objective.active_analysis_version is not None:
         active = await ObjectiveRepo.read_analysis(
-            collection_id, objective_id, objective.active_analysis_version
+            workspace_id, objective_id, objective.active_analysis_version
         )
     published = None
     if objective.published_analysis_version is not None:
@@ -1553,7 +1553,7 @@ async def _result(
             published = active
         else:
             published = await ObjectiveRepo.read_analysis(
-                collection_id, objective_id, objective.published_analysis_version
+                workspace_id, objective_id, objective.published_analysis_version
             )
     if active is not None and active.error_code == "analysis_interrupted":
         active = None
@@ -1575,12 +1575,12 @@ async def _result(
                     "evidence_status_counts": dict(item.evidence_status_counts),
                 }
                 for item in await experiment_projection.list_analysis_contributions(
-                    collection_id, objective.objective_id, published.analysis_version,
+                    workspace_id, objective.objective_id, published.analysis_version,
                 )
             )
             findings, finding_total = (
                 await experiment_projection.list_analysis_findings(
-                    collection_id,
+                    workspace_id,
                     objective.objective_id,
                     published.analysis_version,
                     offset=0,
@@ -1588,14 +1588,14 @@ async def _result(
                 )
             )
             evidence_records = await _all_published_evidence(
-                collection_id,
+                workspace_id,
                 objective.objective_id,
                 published.analysis_version,
                 experiment_backed=True,
             )
         else:
             contributions = await ObjectiveRepo.list_contributions(
-                collection_id,
+                workspace_id,
                 objective.objective_id,
                 published.analysis_version,
             )
@@ -1607,14 +1607,14 @@ async def _result(
                 for item in contributions
             )
             findings, finding_total = await ObjectiveRepo.list_findings(
-                collection_id,
+                workspace_id,
                 objective.objective_id,
                 published.analysis_version,
                 offset=0,
                 limit=50,
             )
             evidence_records = await _all_published_evidence(
-                collection_id,
+                workspace_id,
                 objective.objective_id,
                 published.analysis_version,
                 experiment_backed=False,
@@ -1659,7 +1659,7 @@ async def _result(
                 seen_warnings.add(scoped_warning)
                 warnings.append(scoped_warning)
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective": stored_objective,
         "analysis": active,
         "published_analysis": published,
@@ -1675,21 +1675,21 @@ async def _result(
 
 
 async def _require_objective(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
 ) -> ResearchObjective:
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     if objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
     return objective
 
 
 async def _published_version(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     requested_version: int | None,
 ) -> int:
-    objective = await _require_objective(collection_id, objective_id)
+    objective = await _require_objective(workspace_id, objective_id)
     published_version = objective.published_analysis_version
     if published_version is None:
         raise ResourceConflictException(
@@ -1726,7 +1726,7 @@ def _build_progress_callback(
             ):
                 completed_document_ids.add(active_document_id)
             await ObjectiveRepo.update_analysis_progress(
-                analysis.collection_id,
+                analysis.workspace_id,
                 analysis.objective_id,
                 analysis.analysis_version,
                 job=job,

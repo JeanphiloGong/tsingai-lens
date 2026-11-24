@@ -80,14 +80,14 @@ Use the current frontend seams directly:
 
 | Concern                   | Owning seam                                                     |
 | ------------------------- | --------------------------------------------------------------- |
-| Collection shell and tabs | `frontend/src/routes/collections/[id]/+layout.svelte`           |
-| Collection overview       | `frontend/src/routes/collections/[id]/+page.svelte`             |
-| Collection materials      | `frontend/src/routes/collections/[id]/materials/`               |
-| Collection documents      | `frontend/src/routes/collections/[id]/documents/`               |
-| Collection comparisons    | `frontend/src/routes/collections/[id]/comparisons/`             |
-| Paper detail              | `frontend/src/routes/collections/[id]/documents/[document_id]/` |
+| Collection shell and tabs | `frontend/src/routes/workspaces/[id]/+layout.svelte`           |
+| Collection overview       | `frontend/src/routes/workspaces/[id]/+page.svelte`             |
+| Collection materials      | `frontend/src/routes/workspaces/[id]/materials/`               |
+| Collection documents      | `frontend/src/routes/workspaces/[id]/documents/`               |
+| Collection comparisons    | `frontend/src/routes/workspaces/[id]/comparisons/`             |
+| Paper detail              | `frontend/src/routes/workspaces/[id]/documents/[document_id]/` |
 | Shared API helpers        | `frontend/src/routes/_shared/`                                  |
-| Route-local tests         | `frontend/src/routes/collections/`                              |
+| Route-local tests         | `frontend/src/routes/workspaces/`                              |
 
 Do not create route-level compatibility pages for old raw-result navigation.
 Move the primary UI to the new contract and keep raw fact browsing under
@@ -192,7 +192,7 @@ The helper should use `requestJson` from
 
 ### Collection Shell
 
-Modify `frontend/src/routes/collections/[id]/+layout.svelte`.
+Modify `frontend/src/routes/workspaces/[id]/+layout.svelte`.
 
 Current functions and reactive values to update:
 
@@ -235,7 +235,7 @@ still use them. They should not drive the primary collection navigation.
 
 ### Collection Overview Page
 
-Modify `frontend/src/routes/collections/[id]/+page.svelte`.
+Modify `frontend/src/routes/workspaces/[id]/+page.svelte`.
 
 Current functions and state to extend:
 
@@ -273,7 +273,7 @@ Target changes:
 
 ### Materials Tab
 
-Add `frontend/src/routes/collections/[id]/materials/+page.svelte`.
+Add `frontend/src/routes/workspaces/[id]/materials/+page.svelte`.
 
 New state and functions:
 
@@ -289,17 +289,17 @@ function materialEvidenceLabel(material: MaterialSummary)
 
 Target behavior:
 
-- fetch `/api/v1/collections/{collection_id}/materials`
+- fetch `/api/v1/workspaces/{workspace_id}/materials`
 - render one row or card per canonical material
 - show aliases, paper count, sample count, process families, measured
   properties, comparison count, evidence coverage, state, and warnings
-- link each material to `/collections/{collectionId}/materials/{materialId}`
+- link each material to `/workspaces/{workspaceId}/materials/{materialId}`
 - render explicit loading, empty, partial, failed, and unavailable states
 - do not show global comparison groups as the primary content of this page
 
 ### Material Detail Page
 
-Add `frontend/src/routes/collections/[id]/materials/[material_id]/+page.svelte`.
+Add `frontend/src/routes/workspaces/[id]/materials/[material_id]/+page.svelte`.
 
 New state and functions:
 
@@ -331,8 +331,8 @@ Target behavior:
 
 ### Papers Tab
 
-Modify `frontend/src/routes/collections/[id]/documents/+page.svelte`, or move
-the primary route to `frontend/src/routes/collections/[id]/papers/+page.svelte`
+Modify `frontend/src/routes/workspaces/[id]/documents/+page.svelte`, or move
+the primary route to `frontend/src/routes/workspaces/[id]/papers/+page.svelte`
 if route names are updated with the tab label.
 
 Current functions and state to update:
@@ -362,12 +362,12 @@ Target changes:
 - use `CollectionAggregation.paper_coverage` as the primary table
 - render an explicit loading, empty, or error state when the research-view
   endpoint is not ready
-- link each row to `/collections/{collectionId}/documents/{documentId}`
+- link each row to `/workspaces/{workspaceId}/documents/{documentId}`
 - do not render sample matrices or condition series inside this collection tab
 
 ### More / All Comparisons
 
-Modify `frontend/src/routes/collections/[id]/comparisons/+page.svelte` as the
+Modify `frontend/src/routes/workspaces/[id]/comparisons/+page.svelte` as the
 global all-comparisons browser under `More`, or move it under a `more`
 subroute if the route tree is renamed.
 
@@ -410,7 +410,7 @@ Target changes:
 
 ### Paper Detail Page
 
-Modify `frontend/src/routes/collections/[id]/documents/[document_id]/+page.svelte`.
+Modify `frontend/src/routes/workspaces/[id]/documents/[document_id]/+page.svelte`.
 
 Current functions and state to update:
 
@@ -461,13 +461,13 @@ Add route-local components only if they keep page files smaller without
 creating new contract ownership:
 
 ```text
-frontend/src/routes/collections/[id]/_components/EvidenceDrawer.svelte
-frontend/src/routes/collections/[id]/_components/ResearchStateNotice.svelte
-frontend/src/routes/collections/[id]/materials/_components/MaterialSummaryList.svelte
-frontend/src/routes/collections/[id]/materials/[material_id]/_components/MaterialProfileSections.svelte
-frontend/src/routes/collections/[id]/documents/[document_id]/_components/SampleMatrix.svelte
-frontend/src/routes/collections/[id]/documents/[document_id]/_components/ConditionSeriesPanel.svelte
-frontend/src/routes/collections/[id]/comparisons/_components/CrossPaperMatrix.svelte
+frontend/src/routes/workspaces/[id]/_components/EvidenceDrawer.svelte
+frontend/src/routes/workspaces/[id]/_components/ResearchStateNotice.svelte
+frontend/src/routes/workspaces/[id]/materials/_components/MaterialSummaryList.svelte
+frontend/src/routes/workspaces/[id]/materials/[material_id]/_components/MaterialProfileSections.svelte
+frontend/src/routes/workspaces/[id]/documents/[document_id]/_components/SampleMatrix.svelte
+frontend/src/routes/workspaces/[id]/documents/[document_id]/_components/ConditionSeriesPanel.svelte
+frontend/src/routes/workspaces/[id]/comparisons/_components/CrossPaperMatrix.svelte
 ```
 
 These components should receive already-normalized data. They should not fetch
@@ -478,11 +478,11 @@ or normalize API payloads themselves.
 | File                                                                                               | Test focus                                                                  |
 | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `frontend/src/routes/_shared/researchView.spec.ts`                                                 | helper normalization, state mapping, value formatting                       |
-| `frontend/src/routes/collections/[id]/workspace-page.svelte.spec.ts`                               | overview ready/partial/processing states and primary action                 |
-| `frontend/src/routes/collections/[id]/materials/materials-page.svelte.spec.ts`                     | material summaries, alias display, profile links                            |
-| `frontend/src/routes/collections/[id]/materials/material-detail-page.svelte.spec.ts`               | material profile modules, material-scoped comparisons                       |
-| `frontend/src/routes/collections/[id]/comparisons/comparisons-page.svelte.spec.ts`                 | advanced all-comparisons browser, matrix rendering, evidence drawer opening |
-| `frontend/src/routes/collections/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts` | sample matrix, condition series, evidence detail affordance                 |
+| `frontend/src/routes/workspaces/[id]/workspace-page.svelte.spec.ts`                               | overview ready/partial/processing states and primary action                 |
+| `frontend/src/routes/workspaces/[id]/materials/materials-page.svelte.spec.ts`                     | material summaries, alias display, profile links                            |
+| `frontend/src/routes/workspaces/[id]/materials/material-detail-page.svelte.spec.ts`               | material profile modules, material-scoped comparisons                       |
+| `frontend/src/routes/workspaces/[id]/comparisons/comparisons-page.svelte.spec.ts`                 | advanced all-comparisons browser, matrix rendering, evidence drawer opening |
+| `frontend/src/routes/workspaces/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts` | sample matrix, condition series, evidence detail affordance                 |
 
 ## Phase 1: Shared API Helper And Types
 
@@ -493,12 +493,12 @@ Implementation:
   `DocumentMaterialProfile`, `SampleMatrix`, `ConditionSeries`,
   `ComparableGroup`, `CrossPaperMatrix`, and `EvidenceBackedValue`
 - add same-origin API helpers for:
-  - `GET /api/v1/collections/{collection_id}/research-view`
-  - `GET /api/v1/collections/{collection_id}/materials`
-  - `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
-  - `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
-  - optional `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
-  - optional `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
+  - `GET /api/v1/workspaces/{workspace_id}/research-view`
+  - `GET /api/v1/workspaces/{workspace_id}/materials`
+  - `GET /api/v1/workspaces/{workspace_id}/materials/{material_id}/research-view`
+  - `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/research-view`
+  - optional `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/materials`
+  - optional `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/materials/{material_id}/research-view`
 - keep the helper under `frontend/src/routes/_shared/`
 - model `empty`, `processing`, `partial`, `ready`, and `failed` states
 

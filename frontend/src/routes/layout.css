@@ -523,7 +523,7 @@ textarea {
 	gap: 10px;
 }
 
-.collection-header {
+.workspace-header {
 	display: flex;
 	justify-content: space-between;
 	align-items: flex-end;
@@ -531,11 +531,11 @@ textarea {
 	flex-wrap: wrap;
 }
 
-.collection-meta {
+.workspace-meta {
 	margin-top: 6px;
 }
 
-.collection-panel {
+.workspace-panel {
 	display: flex;
 	flex-direction: column;
 	gap: 20px;
@@ -1291,8 +1291,8 @@ textarea {
 .textarea:focus-visible,
 .btn:focus-visible,
 .icon-button:focus-visible,
-.collection-tabs a:focus-visible,
-.collection-tabs summary:focus-visible {
+.workspace-tabs a:focus-visible,
+.workspace-tabs summary:focus-visible {
 	outline: 2px solid var(--brand-primary);
 	outline-offset: 3px;
 }
@@ -1879,24 +1879,24 @@ textarea {
 	gap: 24px;
 }
 
-.collection-header {
+.workspace-header {
 	align-items: flex-start;
 	gap: 24px;
 }
 
-.collection-header__main {
+.workspace-header__main {
 	min-width: 0;
 	display: grid;
 	gap: 8px;
 }
 
-.collection-title-row {
+.workspace-title-row {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 }
 
-.collection-title-row h1 {
+.workspace-title-row h1 {
 	margin: 0;
 	color: var(--text-primary);
 	font-size: 32px;
@@ -1905,14 +1905,14 @@ textarea {
 	letter-spacing: 0;
 }
 
-.collection-subtitle {
+.workspace-subtitle {
 	margin: 0;
 	color: var(--text-secondary);
 	font-size: 14px;
 	line-height: 22px;
 }
 
-.collection-meta-row {
+.workspace-meta-row {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
@@ -1955,13 +1955,13 @@ textarea {
 	background: var(--danger-bg);
 }
 
-.collection-actions {
+.workspace-actions {
 	margin-left: auto;
 	align-items: center;
 	gap: 10px;
 }
 
-.collection-tabs {
+.workspace-tabs {
 	position: relative;
 	min-height: 52px;
 	display: flex;
@@ -1976,8 +1976,8 @@ textarea {
 	box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
 }
 
-.collection-tabs a,
-.collection-tabs summary {
+.workspace-tabs a,
+.workspace-tabs summary {
 	min-height: 44px;
 	display: inline-flex;
 	align-items: center;
@@ -1997,25 +1997,25 @@ textarea {
 		color 0.18s ease;
 }
 
-.collection-tabs a:hover,
-.collection-tabs summary:hover {
+.workspace-tabs a:hover,
+.workspace-tabs summary:hover {
 	color: var(--text-primary);
 	background: var(--bg-subtle);
 }
 
-.collection-tabs a.locked {
+.workspace-tabs a.locked {
 	color: var(--text-disabled);
 	cursor: not-allowed;
 	opacity: 0.74;
 }
 
-.collection-tabs a.locked:hover {
+.workspace-tabs a.locked:hover {
 	color: var(--text-disabled);
 	background: transparent;
 }
 
-.collection-tabs a.active,
-.collection-tabs__more.active summary {
+.workspace-tabs a.active,
+.workspace-tabs__more.active summary {
 	color: var(--brand-primary);
 	background: var(--brand-soft);
 	text-decoration: underline;
@@ -2023,16 +2023,16 @@ textarea {
 	text-decoration-thickness: 2px;
 }
 
-.collection-tabs__more {
+.workspace-tabs__more {
 	position: relative;
 	flex: 0 0 auto;
 }
 
-.collection-tabs__more summary::-webkit-details-marker {
+.workspace-tabs__more summary::-webkit-details-marker {
 	display: none;
 }
 
-.collection-tabs__menu {
+.workspace-tabs__menu {
 	position: absolute;
 	top: calc(100% + 8px);
 	right: 0;
@@ -2047,20 +2047,20 @@ textarea {
 	box-shadow: var(--shadow-sm);
 }
 
-.collection-tabs__menu a {
+.workspace-tabs__menu a {
 	justify-content: flex-start;
 	min-height: 36px;
 }
 
-.collection-tabs__more:not([open]) .collection-tabs__menu {
+.workspace-tabs__more:not([open]) .workspace-tabs__menu {
 	display: none;
 }
 
-.collection-panel {
+.workspace-panel {
 	gap: 24px;
 }
 
-.collection-locked-surface {
+.workspace-locked-surface {
 	display: grid;
 	gap: 14px;
 	max-width: 720px;
@@ -2071,7 +2071,7 @@ textarea {
 	box-shadow: var(--shadow-sm);
 }
 
-.collection-locked-surface__eyebrow {
+.workspace-locked-surface__eyebrow {
 	margin: 0;
 	color: var(--warning-text);
 	font-size: 12px;
@@ -2080,17 +2080,17 @@ textarea {
 	text-transform: uppercase;
 }
 
-.collection-locked-surface h2,
-.collection-locked-surface p {
+.workspace-locked-surface h2,
+.workspace-locked-surface p {
 	margin: 0;
 }
 
-.collection-locked-surface h2 {
+.workspace-locked-surface h2 {
 	font-size: 24px;
 	line-height: 32px;
 }
 
-.collection-locked-surface p {
+.workspace-locked-surface p {
 	color: var(--text-secondary);
 	font-size: 15px;
 	line-height: 24px;
@@ -2557,9 +2557,9 @@ textarea {
 :root[data-theme='dark'] .icon-button,
 :root[data-theme='dark'] .overview-card,
 :root[data-theme='dark'] .readiness-card,
-:root[data-theme='dark'] .collection-locked-surface,
-:root[data-theme='dark'] .collection-tabs,
-:root[data-theme='dark'] .collection-tabs__menu {
+:root[data-theme='dark'] .workspace-locked-surface,
+:root[data-theme='dark'] .workspace-tabs,
+:root[data-theme='dark'] .workspace-tabs__menu {
 	background: rgba(16, 26, 44, 0.88);
 }
 
@@ -2736,32 +2736,32 @@ textarea {
 		flex: 0 0 40px;
 	}
 
-	.collection-title-row h1 {
+	.workspace-title-row h1 {
 		font-size: 26px;
 		line-height: 34px;
 	}
 
-	.collection-actions,
+	.workspace-actions,
 	.readiness-card__actions,
 	.split-actions {
 		width: 100%;
 	}
 
-	.collection-actions .btn,
+	.workspace-actions .btn,
 	.readiness-card__actions .btn,
 	.split-actions .btn {
 		flex: 1 1 100%;
 	}
 
-	.collection-tabs {
+	.workspace-tabs {
 		gap: 4px;
 		padding: 4px;
 		margin-inline: -2px;
 		border-radius: 14px;
 	}
 
-	.collection-tabs > a,
-	.collection-tabs summary {
+	.workspace-tabs > a,
+	.workspace-tabs summary {
 		padding-inline: 10px;
 	}
 
@@ -2834,13 +2834,13 @@ textarea {
 	gap: 0;
 }
 
-.app-shell--feedback .collection-context-bar {
+.app-shell--feedback .workspace-context-bar {
 	min-height: 48px;
 	padding: 12px 32px 4px;
 	background: var(--surface-card);
 }
 
-.app-shell--feedback .collection-tabs {
+.app-shell--feedback .workspace-tabs {
 	min-height: 34px;
 	flex-wrap: nowrap;
 	overflow-x: auto;
@@ -2851,7 +2851,7 @@ textarea {
 	box-shadow: none;
 }
 
-.app-shell--feedback .collection-tabs a {
+.app-shell--feedback .workspace-tabs a {
 	min-height: 34px;
 	padding: 0 2px;
 	margin-right: 18px;
@@ -2861,7 +2861,7 @@ textarea {
 	font-weight: 500;
 }
 
-.app-shell--feedback .collection-tabs a.active {
+.app-shell--feedback .workspace-tabs a.active {
 	border-bottom-color: var(--brand-primary);
 	background: transparent;
 }
@@ -2905,10 +2905,10 @@ textarea {
 	.app-shell--feedback .header-actions > .icon-button {
 		display: none;
 	}
-	.app-shell--feedback .collection-context-bar {
+	.app-shell--feedback .workspace-context-bar {
 		padding-inline: 16px;
 	}
-	.app-shell--feedback .collection-tabs {
+	.app-shell--feedback .workspace-tabs {
 		padding-inline: 16px;
 	}
 }

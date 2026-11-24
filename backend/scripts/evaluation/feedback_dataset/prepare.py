@@ -340,7 +340,7 @@ def _validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     dataset_type = manifest.get("dataset_type")
     if schema_version not in TASK_SCHEMA_TO_TYPE or dataset_type != TASK_SCHEMA_TO_TYPE[schema_version]:
         raise SnapshotValidationError("export_task_schema_invalid")
-    for field in ("dataset_id", "export_id", "collection_id", "main_file", "provenance_file"):
+    for field in ("dataset_id", "export_id", "workspace_id", "main_file", "provenance_file"):
         if not isinstance(manifest.get(field), str) or not str(manifest[field]).strip():
             raise SnapshotValidationError(f"export_manifest_{field}_invalid")
     for field in ("main_file", "provenance_file"):
@@ -414,7 +414,7 @@ def _export_metadata(manifest: dict[str, Any]) -> dict[str, Any]:
             "schema_version",
             "dataset_type",
             "dataset_id",
-            "collection_id",
+            "workspace_id",
             "export_id",
             "export_no",
             "row_count",

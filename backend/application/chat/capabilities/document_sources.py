@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from repositories.source_artifact_repository import SourceArtifactRepo
 
 import hashlib
@@ -44,7 +44,7 @@ async def _unavailable_document_sources(
     missing = []
     for document_id in document_ids:
         try:
-            await collection_service.get_document(context.collection_id, document_id)
+            await workspace_service.get_document(context.workspace_id, document_id)
         except ResourceNotFoundException:
             missing.append(document_id)
     return ChatToolResult(
@@ -52,7 +52,7 @@ async def _unavailable_document_sources(
         status=ToolResultStatus.FAILED,
         error_code="document_not_found" if missing else "document_sources_not_ready",
         error_message=(
-            "These document identifiers are not in this collection. Use browse_collection_papers "
+            "These document identifiers are not in this workspace. Use browse_workspace_papers "
             "to locate the papers and copy their exact document_id; this does not establish "
             "that the papers lack Source content."
             if missing
@@ -107,7 +107,7 @@ class InspectDocumentSourcesToolRequest(BaseModel):
 class SearchSourcesToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    document_ids: list[str] | None = Field(default=None, min_length=1, description="Omit to search the current collection; supply IDs to narrow it.")
+    document_ids: list[str] | None = Field(default=None, min_length=1, description="Omit to search the current workspace; supply IDs to narrow it.")
     match_mode: Literal["any", "all", "phrase"] = Field(default="any", description="Case-insensitive terms; all requires every term somewhere in the same paper, phrase requires an exact phrase.")
     query: str = Field(min_length=1, max_length=240)
     source_types: list[SourceType] = Field(default_factory=list, max_length=3)
@@ -186,12 +186,12 @@ class ReadSourceCapability:
         context: CapabilityExecutionContext,
         arguments: ReadSourceToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         document = await SourceArtifactRepo.read_document(
-            context.collection_id,
+            context.workspace_id,
             arguments.document_id,
         )
         if document is None:
@@ -226,7 +226,7 @@ class ReadSourceCapability:
         digest = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
         canonical_length = len(canonical_content)
         source_ref = InspectDocumentSourcesCapability._source_ref(
-            context.collection_id,
+            context.workspace_id,
             document.document_id,
             source,
         )
@@ -409,7 +409,7 @@ class SearchSourcesCapability:
     spec = ToolSpec(
         name="search_sources",
         description=(
-            "Search the current collection for paper content; omit document_ids for the whole collection. "
+            "Search the current workspace for paper content; omit document_ids for the whole workspace. "
             "Use match_mode to match any terms, all terms across a paper, or an exact phrase. "
             "Returns ranked papers and passages around actual hits with exact reading arguments. "
             "Results are bounded, paginated navigation candidates with "
@@ -427,15 +427,15 @@ class SearchSourcesCapability:
         context: CapabilityExecutionContext,
         arguments: SearchSourcesToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         try:
             documents = (
-                await SourceArtifactRepo.read_collection_documents(context.collection_id)
+                await SourceArtifactRepo.read_workspace_documents(context.workspace_id)
                 if arguments.document_ids is None else
-                await SourceArtifactRepo.read_documents(context.collection_id, tuple(arguments.document_ids))
+                await SourceArtifactRepo.read_documents(context.workspace_id, tuple(arguments.document_ids))
             )
         except FileNotFoundError:
             return await _unavailable_document_sources(
@@ -570,7 +570,7 @@ class SearchSourcesCapability:
             },
             resource_refs=tuple(
                 InspectDocumentSourcesCapability._source_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     item["document_id"],
                     item,
                 )
@@ -592,7 +592,7 @@ class SearchSourcesCapability:
             result = replace(result, data={**result.data, "matches": list(visible),
                                           "next_offset": next_offset if next_offset < len(matches) else None},
                              resource_refs=tuple(InspectDocumentSourcesCapability._source_ref(
-                                 context.collection_id, item["document_id"], item) for item in visible))
+                                 context.workspace_id, item["document_id"], item) for item in visible))
         return result
 
 
@@ -616,12 +616,12 @@ class InspectTableCapability:
         context: CapabilityExecutionContext,
         arguments: InspectTableToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         document = await SourceArtifactRepo.read_document(
-            context.collection_id,
+            context.workspace_id,
             arguments.document_id,
         )
         if document is None:
@@ -670,7 +670,7 @@ class InspectTableCapability:
                 },
                 resource_refs=(
                     InspectDocumentSourcesCapability._source_ref(
-                        context.collection_id,
+                        context.workspace_id,
                         document.document_id,
                         {"source_ref": table.table_id, "page": table.page},
                     ),
@@ -779,7 +779,7 @@ class InspectTableCapability:
             },
             resource_refs=(
                 InspectDocumentSourcesCapability._source_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     document.document_id,
                     {
                         "source_ref": table.table_id,
@@ -858,12 +858,12 @@ class InspectDocumentSourcesCapability:
         context: CapabilityExecutionContext,
         arguments: InspectDocumentSourcesToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         document = await SourceArtifactRepo.read_document(
-            context.collection_id,
+            context.workspace_id,
             arguments.document_id,
         )
         if document is None:
@@ -931,7 +931,7 @@ class InspectDocumentSourcesCapability:
             if source["source_type"] not in section["source_types"]:
                 section["source_types"].append(source["source_type"])
         tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables,
-                                          figures=document.figures, collection_id=context.collection_id)
+                                          figures=document.figures, workspace_id=context.workspace_id)
         section_nodes = {node.node_id: node for node in tree.nodes.values()
                          if node.node_type in {"section", "references_section"}}
         for heading, section in sections.items():
@@ -988,9 +988,9 @@ class InspectDocumentSourcesCapability:
         if next_offset >= len(matches):
             next_offset = None
 
-        refs = [self._document_ref(context.collection_id, document.document_id)]
+        refs = [self._document_ref(context.workspace_id, document.document_id)]
         refs.extend(
-            self._source_ref(context.collection_id, document.document_id, item)
+            self._source_ref(context.workspace_id, document.document_id, item)
             for item in visible
         )
         result = ChatToolResult(
@@ -1090,10 +1090,10 @@ class InspectDocumentSourcesCapability:
                     "continuation": {**continuation_args, "offset": next_offset} if next_offset < len(matches) else None,
                 },
                 resource_refs=(
-                    self._document_ref(context.collection_id, document.document_id),
+                    self._document_ref(context.workspace_id, document.document_id),
                     *(
                         self._source_ref(
-                            context.collection_id, document.document_id, source
+                            context.workspace_id, document.document_id, source
                         )
                         for source in visible
                     ),
@@ -1214,16 +1214,16 @@ class InspectDocumentSourcesCapability:
         )
 
     @staticmethod
-    def _document_ref(collection_id: str, document_id: str) -> ChatResourceRef:
+    def _document_ref(workspace_id: str, document_id: str) -> ChatResourceRef:
         return ChatResourceRef(
             resource_type="document",
             resource_id=document_id,
-            href=f"/collections/{collection_id}/documents/{document_id}",
+            href=f"/workspaces/{workspace_id}/documents/{document_id}",
         )
 
     @staticmethod
     def _source_ref(
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
         source: dict[str, Any],
     ) -> ChatResourceRef:
@@ -1237,7 +1237,7 @@ class InspectDocumentSourcesCapability:
             resource_type="source",
             resource_id=f"{document_id}:{source['source_ref']}",
             href=(
-                f"/collections/{collection_id}/documents/{document_id}?"
+                f"/workspaces/{workspace_id}/documents/{document_id}?"
                 f"{urlencode(query)}"
             ),
         )

@@ -1,1 +1,1 @@
-"""Collection-bound evaluation operations."""
+"""Workspace-bound evaluation operations."""

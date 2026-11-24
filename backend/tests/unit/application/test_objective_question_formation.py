@@ -149,7 +149,7 @@ def model_client(payload, *, finish_reason="stop"):
 def form(reading, client, **kwargs):
     maps, texts = reading
     return objective_candidate_service.propose_candidate_questions(
-        "collection",
+        "workspace",
         paper_maps=maps,
         source_texts=texts,
         response_client=client,
@@ -175,8 +175,8 @@ def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
             side_effect=lambda objective, **kwargs: objective
         ),
     )
-    objective_authoring_service.collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock(), get_document=AsyncMock()
+    objective_authoring_service.workspace_service = SimpleNamespace(
+        get_workspace_for_user=AsyncMock(), get_document=AsyncMock()
     )
     objective_authoring_service.ObjectiveRepo = repository
     analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
@@ -199,7 +199,7 @@ def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
             CapabilityExecutionContext(
                 session_id="chat-1",
                 user_id="user-1",
-                collection_id="col-1",
+                workspace_id="col-1",
                 tool_call_id="call-1",
             ),
             request,

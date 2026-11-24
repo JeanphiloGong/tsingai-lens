@@ -83,7 +83,7 @@ class ChatModelContext:
 
 
 _LINEAGE_FIELDS = {
-    "collection_id", "document_id", "document_ids", "objective_id", "finding_id",
+    "workspace_id", "document_id", "document_ids", "objective_id", "finding_id",
     "evidence_id", "source_ref", "source_kind", "table_ref", "table_id", "source_digest",
     "digest", "resource_id", "resource_type", "href", "task_id", "run_id", "status",
     "draft_id", "analysis_version", "source_analysis_version", "source_finding_ids",
@@ -569,7 +569,7 @@ class ChatContextBuilder:
                                 "resource_id": item.resource_ref.resource_id,
                                 "href": item.resource_ref.href,
                             },
-                            "collection_id": item.collection_id,
+                            "workspace_id": item.workspace_id,
                             "document_id": item.document_id,
                             "document_title": item.document_title,
                             "source_kind": item.source_kind,

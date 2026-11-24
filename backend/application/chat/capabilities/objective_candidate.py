@@ -66,7 +66,7 @@ class CreateObjectiveCandidateCapability:
     ) -> ChatToolResult:
         try:
             objective = await objective_authoring_service.create_chat_assisted_candidate(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 user_id=context.user_id,
                 tool_call_id=context.tool_call_id,
                 **arguments.model_dump(),
@@ -93,7 +93,7 @@ class CreateObjectiveCandidateCapability:
                     resource_type="research_objective",
                     resource_id=objective.objective_id,
                     href=(
-                        f"/collections/{context.collection_id}/objectives/"
+                        f"/workspaces/{context.workspace_id}/objectives/"
                         f"{objective.objective_id}"
                     ),
                 ),

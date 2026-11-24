@@ -29,7 +29,7 @@ def _load_prepare_module():
 
 def _finding(**overrides):
     finding = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -68,7 +68,7 @@ def _finding(**overrides):
 
 def _row(**overrides):
     row = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",

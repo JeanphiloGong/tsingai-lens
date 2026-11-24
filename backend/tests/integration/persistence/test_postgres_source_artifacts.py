@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from infra.persistence import database
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 from dataclasses import replace
 from hashlib import sha256
@@ -9,7 +9,7 @@ from hashlib import sha256
 import pytest
 
 from domain.source import (
-    Collection,
+    Workspace,
     Document,
     SourceBlock,
     SourceDocument,
@@ -22,9 +22,9 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
 )
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
     StoredDocument,
 )
 from repositories.source_artifact_repository import (
@@ -39,13 +39,13 @@ COLLECTION_ID = "col_source"
 
 @pytest.fixture
 async def source_repository(postgres_session_factory):
-    collections = CollectionRepository()
-    await collections.add_collection(
-        StoredCollection(
-            collection=Collection(
-                collection_id=COLLECTION_ID,
+    workspaces = WorkspaceRepository()
+    await workspaces.add_workspace(
+        StoredWorkspace(
+            workspace=Workspace(
+                workspace_id=COLLECTION_ID,
                 owner_user_id="user_source",
-                name="Source collection",
+                name="Source workspace",
                 description=None,
                 status="idle",
             ),
@@ -53,7 +53,7 @@ async def source_repository(postgres_session_factory):
             updated_at=NOW,
         )
     )
-    await collections.add_documents(
+    await workspaces.add_documents(
         COLLECTION_ID,
         (_document("doc_a"), _document("doc_b")),
         updated_at=NOW,
@@ -168,14 +168,14 @@ async def test_source_repository_round_trips_each_current_document_independently
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
 
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") == first
     assert await source_repository.read_document(COLLECTION_ID, "doc_b") == second
-    assert await source_repository.read_collection_documents(COLLECTION_ID) == (
+    assert await source_repository.read_workspace_documents(COLLECTION_ID) == (
         first,
         second,
     )
@@ -194,7 +194,7 @@ async def test_source_existence_does_not_load_artifact_json(
 
     monkeypatch.setattr(source_repository, "_read_documents", fail_hydration)
     assert await source_repository.has_documents(COLLECTION_ID)
-    assert not await source_repository.has_documents("another-collection")
+    assert not await source_repository.has_documents("another-workspace")
 
 
 async def test_profile_only_row_is_not_a_prepared_source(source_repository):
@@ -223,9 +223,9 @@ async def test_source_repository_batch_read_is_exact_ordered_and_complete(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     selected = await source_repository.read_documents(
@@ -253,9 +253,9 @@ async def test_replacing_one_document_source_does_not_rebuild_other_documents(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     revised_first = replace(
@@ -269,7 +269,7 @@ async def test_replacing_one_document_source_does_not_rebuild_other_documents(
         table_cells=(),
         figures=(),
     )
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(revised_first.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(revised_first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, revised_first)
 
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") == revised_first
@@ -280,7 +280,7 @@ async def test_source_repository_round_trips_document_references_and_tree(
     source_repository,
 ) -> None:
     source = _source("doc_a", title="Paper A")
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     references = SourceReferenceSet(
         entries=(
@@ -311,7 +311,7 @@ async def test_source_repository_round_trips_document_references_and_tree(
 
     await source_repository.replace_document_references("doc_a", references)
 
-    assert await source_repository.read_collection_references(COLLECTION_ID) == references
+    assert await source_repository.read_workspace_references(COLLECTION_ID) == references
     tree = await source_repository.read_document_tree(COLLECTION_ID, "doc_a")
     assert tree.document_id == "doc_a"
     assert {
@@ -328,9 +328,9 @@ async def test_source_reference_batch_excludes_unselected_documents(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
     await source_repository.replace_document_references(
         "doc_a",
@@ -358,7 +358,7 @@ async def test_source_reference_batch_excludes_unselected_documents(
         second_references,
     )
 
-    selected = await source_repository.read_collection_references(
+    selected = await source_repository.read_workspace_references(
         COLLECTION_ID,
         ("doc_b",),
     )
@@ -377,7 +377,7 @@ async def test_source_repository_rejects_cross_document_children_and_references(
             replace(source, blocks=(foreign_block,)),
         )
 
-    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     foreign_references = SourceReferenceSet(
         entries=(

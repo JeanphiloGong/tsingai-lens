@@ -9,7 +9,7 @@ from agent.application.task_execution import TaskExecution
 from agent.domain.models import Operation
 from agent.repositories.task_repository import TaskRepository
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 
 
@@ -43,8 +43,8 @@ async def test_recovery_reuses_committed_operation(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="agent-v3-workspace",
+            WorkspaceORM(
+                workspace_id="agent-v3-workspace",
                 owner_user_id=owner["user_id"],
                 name="Agent V3",
                 status="idle",

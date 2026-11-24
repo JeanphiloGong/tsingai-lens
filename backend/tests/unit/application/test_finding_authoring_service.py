@@ -37,7 +37,7 @@ def anyio_backend():
 
 def _objective() -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="Does treatment change outcome?",
         material_scope=(),
@@ -57,7 +57,7 @@ def _objective() -> ResearchObjective:
 
 def _analysis(version: int, status: str) -> ObjectiveAnalysis:
     return ObjectiveAnalysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=int(version or 0),
         document_inputs=(
@@ -85,9 +85,9 @@ def _selection() -> ObjectiveExperimentSelection:
     )
 
 
-class _Collection:
-    async def get_collection_for_user(self, collection_id, user_id):
-        return {"collection_id": collection_id}
+class _Workspace:
+    async def get_workspace_for_user(self, workspace_id, user_id):
+        return {"workspace_id": workspace_id}
 
 
 class _Transactions:
@@ -139,7 +139,7 @@ class _Repository:
     async def list_contributions(self, *args, **kwargs):
         return (
             PaperContribution(
-                collection_id="collection-1",
+                workspace_id="workspace-1",
                 objective_id="objective-1",
                 analysis_version=args[-1] or 0,
                 document_id="paper-1",
@@ -204,14 +204,14 @@ async def test_selection_version_copies_contributions_and_uses_one_transaction(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         transactions,
     )
-    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.workspace_service = _Workspace()
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = _Query()
     finding_authoring_service.experiment_analysis_writer = writer
     service = finding_authoring_service
 
     result = await service.create_selection_version(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         source_analysis_version=1,
         selection_ids=("selection-1",),
@@ -236,13 +236,13 @@ async def test_selection_revision_preserves_parent_and_expert_limitations(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         _Transactions(),
     )
-    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.workspace_service = _Workspace()
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = _Query()
     finding_authoring_service.experiment_analysis_writer = writer
     service = finding_authoring_service
     await service.create_selection_version(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         source_analysis_version=1,
         selection_ids=("selection-1",),
@@ -263,13 +263,13 @@ async def test_abstention_publishes_explanation_and_coverage_without_finding(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         transactions,
     )
-    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.workspace_service = _Workspace()
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = _Query()
     finding_authoring_service.experiment_analysis_writer = _Writer()
     service = finding_authoring_service
     result = await service.create_selection_version(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         source_analysis_version=1,
         selection_ids=(),
@@ -297,14 +297,14 @@ async def test_unknown_parent_is_rejected_before_creating_a_revision(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         transactions,
     )
-    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.workspace_service = _Workspace()
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = _Query()
     finding_authoring_service.experiment_analysis_writer = writer
     service = finding_authoring_service
     with pytest.raises(RequestInvalidException, match="parent Finding"):
         await service.create_selection_version(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             objective_id="objective-1",
             source_analysis_version=1,
             selection_ids=("selection-1",),
@@ -325,7 +325,7 @@ async def test_selection_version_rolls_back_without_leaving_a_queued_snapshot(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         transactions,
     )
-    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.workspace_service = _Workspace()
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = _Query()
     finding_authoring_service.experiment_analysis_writer = _Writer()
@@ -333,7 +333,7 @@ async def test_selection_version_rolls_back_without_leaving_a_queued_snapshot(
 
     with pytest.raises(RuntimeError, match="publish failed"):
         await service.create_selection_version(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             objective_id="objective-1",
             source_analysis_version=1,
             selection_ids=("selection-1",),
@@ -347,34 +347,34 @@ async def test_selection_version_rolls_back_without_leaving_a_queued_snapshot(
 async def test_authored_publication_preserves_coverage_with_real_repository(
     monkeypatch, *, postgres_session_factory
 ):
-    from tests.support.postgres import seed_collection
+    from tests.support.postgres import seed_workspace
 
-    await seed_collection(
+    await seed_workspace(
         postgres_session_factory,
-        "collection-1",
+        "workspace-1",
         document_ids=("paper-1", "paper-2", "paper-3"),
     )
     repository = ObjectiveRepository()
     objective = replace(_objective(), active_analysis_version=None)
     await repository.replace(
-        "collection-1", ObjectiveFactSet(research_objectives=(objective,))
+        "workspace-1", ObjectiveFactSet(research_objectives=(objective,))
     )
     inputs = tuple(
         PreparedDocumentInput(document_id=paper, preparation_fingerprint=paper)
         for paper in ("paper-1", "paper-2", "paper-3")
     )
     await repository.queue_analysis(
-        "collection-1",
+        "workspace-1",
         "objective-1",
         document_inputs=inputs,
         pipeline_version="test",
         model_name=None,
         prompt_versions={},
     )
-    await claim_analysis_fixture(repository, "collection-1", "objective-1", 1)
+    await claim_analysis_fixture(repository, "workspace-1", "objective-1", 1)
     coverage = tuple(
         PaperContribution(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             objective_id="objective-1",
             analysis_version=1,
             document_id=paper or "",
@@ -401,11 +401,11 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
     async with database.AsyncSessionLocal() as db, db.begin():
         objective, source = await repository.publish_experiment_analysis(
             db,
-            "collection-1",
+            "workspace-1",
             "objective-1",
             1,
             contributions=coverage,
-            job=analysis_job_fixture(repository, "collection-1", "objective-1", 1),
+            job=analysis_job_fixture(repository, "workspace-1", "objective-1", 1),
         )
 
     writer = _Writer()
@@ -413,20 +413,20 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         database.AsyncSessionLocal,
     )
-    finding_authoring_service.collection_service = _Collection()
+    finding_authoring_service.workspace_service = _Workspace()
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = _Query()
     finding_authoring_service.experiment_analysis_writer = writer
     service = finding_authoring_service
     await service.create_selection_version(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         source_analysis_version=1,
         selection_ids=("selection-1",),
         created_by_user_id="user-1",
     )
 
-    published = await repository.read_analysis("collection-1", "objective-1", 2)
+    published = await repository.read_analysis("workspace-1", "objective-1", 2)
     assert published.status == "succeeded"
     assert published.origin == "human_authored"
     assert published.scientific_record_source == "experiment_graph"
@@ -438,11 +438,11 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
     )
 
     assert await should_read_experiment_projection(
-        collection_id="collection-1", objective_id="objective-1", analysis_version=2,
+        workspace_id="workspace-1", objective_id="objective-1", analysis_version=2,
     )
     with pytest.raises(ValueError, match="source analysis version is stale"):
         await repository.queue_analysis(
-            "collection-1",
+            "workspace-1",
             "objective-1",
             document_inputs=inputs,
             pipeline_version="test",
@@ -453,10 +453,10 @@ async def test_authored_publication_preserves_coverage_with_real_repository(
             created_by_user_id="user-1",
         )
     assert await repository.list_contributions(
-        "collection-1", "objective-1", 2
+        "workspace-1", "objective-1", 2
     ) == tuple(replace(item, analysis_version=2) for item in coverage)
     assert (
-        await repository.list_contributions("collection-1", "objective-1", 1)
+        await repository.list_contributions("workspace-1", "objective-1", 1)
         == coverage
     )
     assert "contributions" not in writer.call

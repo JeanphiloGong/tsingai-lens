@@ -352,7 +352,7 @@ class SourceDocumentNode:
 @dataclass(frozen=True)
 class SourceDocumentTree:
     document_id: str
-    collection_id: str | None
+    workspace_id: str | None
     root_node_id: str
     nodes: Mapping[str, SourceDocumentNode]
     reference_records: Mapping[str, SourceReferenceEntry] = field(default_factory=dict)
@@ -489,13 +489,13 @@ def build_source_document_tree(
     tables: Iterable[SourceTable] = (),
     figures: Iterable[SourceFigure] = (),
     references: SourceReferenceSet | None = None,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> SourceDocumentTree:
     """Project flat Source artifacts into a section-oriented document tree."""
 
     builder = _SourceDocumentTreeBuilder(
         document=document,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         references=references or SourceReferenceSet(),
     )
     builder.add_blocks(blocks)
@@ -640,11 +640,11 @@ class _SourceDocumentTreeBuilder:
         self,
         *,
         document: SourceDocument,
-        collection_id: str | None,
+        workspace_id: str | None,
         references: SourceReferenceSet,
     ) -> None:
         self.document = document
-        self.collection_id = collection_id
+        self.workspace_id = workspace_id
         self.references = references
         self.root_node_id = f"node_{document.document_id}_document"
         self.nodes: dict[str, SourceDocumentNode] = {}
@@ -815,7 +815,7 @@ class _SourceDocumentTreeBuilder:
             self.nodes[node_id] = node.with_children(child_ids)
         return SourceDocumentTree(
             document_id=self.document.document_id,
-            collection_id=self.collection_id,
+            workspace_id=self.workspace_id,
             root_node_id=self.root_node_id,
             nodes=dict(self.nodes),
             reference_records={

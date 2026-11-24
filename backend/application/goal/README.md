@@ -1,7 +1,7 @@
 # Goal Application Layer
 
 This package owns Goal intake and Objective-scoped experiment plans. It does not
-own assistant conversation state. Collection-bound conversation, capability
+own assistant conversation state. Workspace-bound conversation, capability
 execution, structured results, and write approval live in `application/chat/`
 and `domain/chat/`.
 
@@ -34,8 +34,8 @@ and `domain/chat/`.
   Historical grounded drafts that violate either rule are reported as stale
   instead of being promoted for review.
 - `brief_service.py`
-  Optional goal-first collection-seeding path. It shapes a thin research brief
-  and creates an empty `Collection` directly. Papers become `Document` members
+  Optional goal-first workspace-seeding path. It shapes a thin research brief
+  and creates an empty `Workspace` directly. Papers become `Document` members
   only when the user uploads or imports them; Goal owns no handoff record.
 
 Future research-assistant capabilities belong in `application/chat/` and must

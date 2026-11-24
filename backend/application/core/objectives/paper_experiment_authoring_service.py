@@ -20,14 +20,14 @@ from application.core.objectives.analysis.paper_experiment_contract import (
 from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from infra.persistence.database import AsyncSessionLocal
 from infra.source.artifact_bundle import source_table_payload
 
 
 @dataclass(frozen=True)
 class PreparedPaperExperimentDraft:
-    collection_id: str
+    workspace_id: str
     output: ReconciledPaperExperimentOutput
     source_fingerprint: str
     draft_digest: str
@@ -124,18 +124,18 @@ from repositories.source_artifact_repository import SourceArtifactRepo
 
 async def prepare_paper_experiment_draft(
     *,
-    collection_id: str,
+    workspace_id: str,
     user_id: str,
     document_id: str,
     raw_draft: Mapping[str, Any],
 ) -> PreparedPaperExperimentDraft:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    document = await SourceArtifactRepo.read_document(collection_id, document_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    document = await SourceArtifactRepo.read_document(workspace_id, document_id)
     if document is None:
         raise FileNotFoundError(
-            f"prepared Source document not found: {collection_id}/{document_id}"
+            f"prepared Source document not found: {workspace_id}/{document_id}"
         )
-    document_record = await collection_service.get_document(collection_id, document_id)
+    document_record = await workspace_service.get_document(workspace_id, document_id)
     source_fingerprint = str(
         document_record.document.preparation_fingerprint
         or document_record.document.source_fingerprint
@@ -173,7 +173,7 @@ async def prepare_paper_experiment_draft(
         )
     digest = _canonical_digest(
         {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "document_id": document_id,
             "source_fingerprint": source_fingerprint,
             "source_catalog": bundle.source_catalog,
@@ -181,7 +181,7 @@ async def prepare_paper_experiment_draft(
         }
     )
     return PreparedPaperExperimentDraft(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         output=reconciled,
         source_fingerprint=source_fingerprint,
         draft_digest=digest,
@@ -192,17 +192,17 @@ async def prepare_paper_experiment_draft(
 async def write_prepared_paper_experiments(
     *,
     prepared: PreparedPaperExperimentDraft,
-    collection_id: str,
+    workspace_id: str,
     created_by: str,
 ) -> ExperimentAnalysisWriteResult:
-    if prepared.collection_id != collection_id:
-        raise ValueError("prepared paper experiment belongs to another collection")
-    await collection_service.get_collection_for_user(collection_id, created_by)
-    document_record = await collection_service.get_document(
-        collection_id, prepared.output.output.document_id
+    if prepared.workspace_id != workspace_id:
+        raise ValueError("prepared paper experiment belongs to another workspace")
+    await workspace_service.get_workspace_for_user(workspace_id, created_by)
+    document_record = await workspace_service.get_document(
+        workspace_id, prepared.output.output.document_id
     )
     document = await SourceArtifactRepo.read_document(
-        collection_id, prepared.output.output.document_id
+        workspace_id, prepared.output.output.document_id
     )
     if document is None:
         raise FileNotFoundError("prepared Source document is no longer available")

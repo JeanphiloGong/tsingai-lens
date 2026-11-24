@@ -1,4 +1,4 @@
-"""Prepare one document for later collection-level research work."""
+"""Prepare one document for later workspace-level research work."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from application.core.document_profiles.extraction import (
 )
 from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
-from application.source import collection_service
+from application.source import workspace_service
 from application.source import (
     reference_extraction_service as source_reference_extraction_service,
 )
@@ -31,7 +31,7 @@ from domain.source import Document, SourceDocument
 from exceptions import ServiceUnavailableException
 from infra.llm.model_credentials import provider_options
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.file import FileWorkspace
 from infra.source.artifact_bundle import SourceArtifactBundle
 from infra.source.config.source_parser_config import (
     InputConfig,
@@ -39,7 +39,7 @@ from infra.source.config.source_parser_config import (
     SourceParserConfig,
     StorageConfig,
 )
-from repositories.collection_repository import StoredDocument
+from repositories.workspace_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.object_store import ObjectStore
@@ -97,17 +97,17 @@ def profile_fingerprint(
 
 
 async def queue_document_preparation(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     *,
     user_id: str,
 ) -> PipelineRun:
-    """Queue or reuse preparation of one collection document."""
+    """Queue or reuse preparation of one workspace document."""
 
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
 
-    document = await collection_service.get_document(
-        collection_id,
+    document = await workspace_service.get_document(
+        workspace_id,
         document_id,
     )
     assignment = await ModelConnectionRepo.read_assignment("document_profile")
@@ -119,7 +119,7 @@ async def queue_document_preparation(
     connection_id = assignment.connection_id
     source_identity, profile_identity = fingerprints_for(document.document, connection_id)
     run, _ = await pipeline_run_service.get_or_create_document_run(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         document_id=document_id,
         pipeline_name="document_preparation",
         input_fingerprint=profile_identity,
@@ -130,14 +130,14 @@ async def queue_document_preparation(
             "model_connection_id": connection_id,
         },
         reuse_completed=await _can_reuse_document_preparation(
-            collection_id, document, source_identity, profile_identity
+            workspace_id, document, source_identity, profile_identity
         ),
     )
     return run
 
 
 async def _can_reuse_document_preparation(
-    collection_id: str, record: StoredDocument, source_identity: str, profile_identity: str
+    workspace_id: str, record: StoredDocument, source_identity: str, profile_identity: str
 ) -> bool:
     document = record.document
     if (
@@ -148,14 +148,14 @@ async def _can_reuse_document_preparation(
     ):
         return False
     profile = await DocumentProfileRepo.read(
-        collection_id,
+        workspace_id,
         document.document_id,
     )
     if profile is None or profile.profile_status != PROFILE_STATUS_COMPLETED:
         return False
     return (
         await SourceArtifactRepo.read_document(
-            collection_id,
+            workspace_id,
             document.document_id,
         )
         is not None
@@ -163,10 +163,10 @@ async def _can_reuse_document_preparation(
 
 
 async def _parse_document_sources(
-    collection_id: str,
+    workspace_id: str,
     record: StoredDocument,
     *,
-    workspace: FileCollectionWorkspace,
+    workspace: FileWorkspace,
     object_store: ObjectStore,
     source_artifact_builder: SourceArtifactBuilder,
     work_dir: Path,
@@ -175,7 +175,7 @@ async def _parse_document_sources(
     parser_task = asyncio.create_task(
         source_artifact_builder(
             config=_source_parser_config(
-                collection_id, workspace=workspace, work_dir=work_dir
+                workspace_id, workspace=workspace, work_dir=work_dir
             ),
             input_documents=pd.DataFrame(
                 [
@@ -211,8 +211,8 @@ async def _parse_document_sources(
         if payload is None or not figure.asset_sha256:
             raise RuntimeError(f"Source figure asset is incomplete: {figure.figure_id}")
         referenced_assets.add(image_path)
-        storage_key = collection_service.write_figure_asset(
-            collection_id,
+        storage_key = workspace_service.write_figure_asset(
+            workspace_id,
             document.document_id,
             image_path,
             payload,
@@ -236,14 +236,14 @@ async def _parse_document_sources(
 
 
 def _source_parser_config(
-    collection_id: str,
+    workspace_id: str,
     *,
-    workspace: FileCollectionWorkspace,
+    workspace: FileWorkspace,
     work_dir: Path,
 ) -> SourceParserConfig:
-    paths = workspace.get_paths(collection_id)
+    paths = workspace.get_paths(workspace_id)
     return SourceParserConfig(
-        root_dir=str(paths.collection_dir),
+        root_dir=str(paths.workspace_dir),
         input=InputConfig(
             storage=InputStorageConfig(base_dir=str(paths.input_dir)),
             file_type="document",
@@ -258,8 +258,8 @@ async def _check_preparation_input(
     db: AsyncSession, job: PipelineRunJobSnapshot
 ) -> StoredDocument:
     await PipelineRunRepo.lock_job(db, job)
-    record = await collection_service.get_document(
-        job.run.collection_id, job.run.scope_id, db=db
+    record = await workspace_service.get_document(
+        job.run.workspace_id, job.run.scope_id, db=db
     )
     if (
         preparation_fingerprint_for(
@@ -274,13 +274,13 @@ async def _check_preparation_input(
 async def execute_document_preparation_job(
     job: PipelineRunJobSnapshot,
     *,
-    workspace: FileCollectionWorkspace,
+    workspace: FileWorkspace,
     object_store: ObjectStore,
     source_artifact_builder: SourceArtifactBuilder,
     profile_extractor: DocumentProfileExtractor | None = None,
 ) -> PipelineRun:
     run_id = job.run.run_id
-    collection_id = job.run.collection_id
+    workspace_id = job.run.workspace_id
     document_id = job.run.scope_id
     stage = "source_parsing"
     warnings: list[str] = []
@@ -289,8 +289,8 @@ async def execute_document_preparation_job(
         async with AsyncSessionLocal() as db, db.begin():
             record = await _check_preparation_input(db, job)
             source_identity, profile_identity = fingerprints_for(record.document, connection_id)
-            await collection_service.update_document_preparation(
-                collection_id, document_id, status="processing", db=db
+            await workspace_service.update_document_preparation(
+                workspace_id, document_id, status="processing", db=db
             )
             await pipeline_run_service.update_run(
                 run_id,
@@ -301,21 +301,21 @@ async def execute_document_preparation_job(
                 progress_percent=5,
             )
         source_document = await SourceArtifactRepo.read_document(
-            collection_id, document_id
+            workspace_id, document_id
         )
         if (
             source_document is None
             or record.document.source_fingerprint != source_identity
         ):
             temporary_root = (
-                workspace.get_paths(collection_id).output_dir / "preparation"
+                workspace.get_paths(workspace_id).output_dir / "preparation"
             )
             temporary_root.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(
                 prefix=f"{run_id}-{job.lease_version}-", dir=temporary_root
             ) as work_dir:
                 source_document = await _parse_document_sources(
-                    collection_id,
+                    workspace_id,
                     record,
                     workspace=workspace,
                     object_store=object_store,
@@ -333,10 +333,10 @@ async def execute_document_preparation_job(
             async with AsyncSessionLocal() as db, db.begin():
                 await _check_preparation_input(db, job)
                 await SourceArtifactRepo.replace_document(
-                    collection_id, source_document, db=db
+                    workspace_id, source_document, db=db
                 )
-                await collection_service.update_document_preparation(
-                    collection_id,
+                await workspace_service.update_document_preparation(
+                    workspace_id,
                     document_id,
                     status="processing",
                     source_fingerprint=source_identity,
@@ -370,7 +370,7 @@ async def execute_document_preparation_job(
             await pipeline_run_service.update_run(
                 run_id, job=job, db=db, current_node=stage, progress_percent=45
             )
-        profile = await DocumentProfileRepo.read(collection_id, document_id)
+        profile = await DocumentProfileRepo.read(workspace_id, document_id)
         if (
             profile is None
             or record.document.profile_fingerprint != profile_identity
@@ -392,7 +392,7 @@ async def execute_document_preparation_job(
                     ))
                     profile_extractor = DocumentProfileExtractor(client=client, model=connection.model)
                 profile = await document_profile_service.build_document_profile(
-                    collection_id,
+                    workspace_id,
                     document_id,
                     source_fingerprint=source_identity,
                     profile_fingerprint=profile_identity,
@@ -400,11 +400,11 @@ async def execute_document_preparation_job(
                 )
         async with AsyncSessionLocal() as db, db.begin():
             await _check_preparation_input(db, job)
-            await DocumentProfileRepo.replace(collection_id, profile, db=db)
+            await DocumentProfileRepo.replace(workspace_id, profile, db=db)
             if profile.profile_status != PROFILE_STATUS_COMPLETED:
                 message = document_preparation_error_message(stage)
-                await collection_service.update_document_preparation(
-                    collection_id, document_id, status="stored", db=db
+                await workspace_service.update_document_preparation(
+                    workspace_id, document_id, status="stored", db=db
                 )
                 return await pipeline_run_service.finish_run(
                     run_id,
@@ -415,8 +415,8 @@ async def execute_document_preparation_job(
                     warnings=[*warnings, message],
                     errors=[message],
                 )
-            await collection_service.update_document_preparation(
-                collection_id,
+            await workspace_service.update_document_preparation(
+                workspace_id,
                 document_id,
                 status="ready",
                 preparation_fingerprint=profile_identity,
@@ -442,8 +442,8 @@ async def execute_document_preparation_job(
         )
         async with AsyncSessionLocal() as db, db.begin():
             await PipelineRunRepo.lock_job(db, job)
-            await collection_service.update_document_preparation(
-                collection_id, document_id, status="failed", db=db
+            await workspace_service.update_document_preparation(
+                workspace_id, document_id, status="failed", db=db
             )
             return await pipeline_run_service.finish_run(
                 run_id,

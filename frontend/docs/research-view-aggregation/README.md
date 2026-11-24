@@ -56,12 +56,12 @@ Excluded:
 
 Implementation should stay in the existing frontend seams:
 
-- `frontend/src/routes/collections/`
-- `frontend/src/routes/collections/[id]/+layout.svelte`
-- `frontend/src/routes/collections/[id]/+page.svelte`
-- paper detail routes under `frontend/src/routes/collections/[id]/documents/`
+- `frontend/src/routes/workspaces/`
+- `frontend/src/routes/workspaces/[id]/+layout.svelte`
+- `frontend/src/routes/workspaces/[id]/+page.svelte`
+- paper detail routes under `frontend/src/routes/workspaces/[id]/documents/`
 - shared API and state helpers under `frontend/src/routes/_shared/`
-- route-local tests under `frontend/src/routes/collections/`
+- route-local tests under `frontend/src/routes/workspaces/`
 
 Use the same-origin helper path. Do not introduce a second browser API
 contract.

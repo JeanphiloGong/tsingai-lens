@@ -49,7 +49,7 @@ pytestmark = [
 def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
     return tuple(
         ObjectiveEvidence(
-            collection_id=COLLECTION_ID or "",
+            workspace_id=COLLECTION_ID or "",
             objective_id=OBJECTIVE_ID or "",
             analysis_version=version or 0,
             evidence_id=f'evidence-{document_id}'
@@ -126,7 +126,7 @@ def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
 
 def _finding(version: int) -> Finding:
     return Finding(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id=OBJECTIVE_ID or "",
         analysis_version=version,
         finding_id="finding-strength",
@@ -218,7 +218,7 @@ async def test_finding_review_round_trips_published_analysis_identity(
     feedback = await reviews.upsert_feedback(
         FindingFeedback(
             feedback_id="feedback-1",
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             objective_id=OBJECTIVE_ID,
             analysis_version=analysis.analysis_version,
             finding_id=finding.finding_id,
@@ -232,7 +232,7 @@ async def test_finding_review_round_trips_published_analysis_identity(
     curation = await reviews.upsert_curation(
         FindingCuration(
             curation_id="curation-1",
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             objective_id=OBJECTIVE_ID,
             analysis_version=analysis.analysis_version,
             finding_id=finding.finding_id,
@@ -273,7 +273,7 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
         session.add(
             ExperimentFindingORM(
                 finding_id=finding.finding_id,
-                collection_id=COLLECTION_ID,
+                workspace_id=COLLECTION_ID,
                 objective_id=OBJECTIVE_ID,
                 analysis_version=analysis.analysis_version,
                 statement=finding.statement,
@@ -401,7 +401,7 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
     feedback = await reviews.upsert_feedback(
         FindingFeedback(
             feedback_id="experiment-feedback-1",
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             objective_id=OBJECTIVE_ID,
             analysis_version=analysis.analysis_version,
             finding_id=finding.finding_id,

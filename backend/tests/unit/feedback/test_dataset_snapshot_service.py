@@ -22,11 +22,11 @@ from domain.feedback import (
 )
 
 
-class _Collections:
-    async def get_collection_for_user(self, collection_id: str, user_id: str):
-        if (collection_id, user_id) != ("collection-1", "user-1"):
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id}
+class _Workspaces:
+    async def get_workspace_for_user(self, workspace_id: str, user_id: str):
+        if (workspace_id, user_id) != ("workspace-1", "user-1"):
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id}
 
 
 class _Chat:
@@ -80,7 +80,7 @@ def _fixture(*, target: str | None = "A corrected answer"):
     session = ChatSession.create(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         created_at="2026-09-24T00:00:00+00:00",
     )
     question = ChatMessage.user(
@@ -97,7 +97,7 @@ def _fixture(*, target: str | None = "A corrected answer"):
     )
     case = FeedbackCase(
         case_id="case-1",
-        collection_id=session.collection_id,
+        workspace_id=session.workspace_id,
         session_id=session.session_id,
         anchor_message_id=answer.message_id,
         source_signal_ids=("feedback-1",),
@@ -156,7 +156,7 @@ def _fixture(*, target: str | None = "A corrected answer"):
     dataset_snapshot_service.DatasetSnapshotRepo = snapshots
     dataset_snapshot_service.FeedbackCaseRepo = _Cases(case, annotation, review)
     dataset_snapshot_service.ChatRepo = _Chat(session, (question, answer))
-    dataset_snapshot_service.collection_service = _Collections()
+    dataset_snapshot_service.workspace_service = _Workspaces()
     service = dataset_snapshot_service
     return service, snapshots
 
@@ -166,7 +166,7 @@ def test_evaluation_snapshot_freezes_rows_and_digest() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"),),
             now="2026-09-24T00:01:00+00:00",
@@ -191,7 +191,7 @@ def test_sft_without_target_is_excluded_but_empty_snapshot_is_valid() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="sft",
             selections=(DatasetSelection("case-1"),),
         )
@@ -207,7 +207,7 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
     sft = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="sft",
             selections=(DatasetSelection("case-1"),),
         )
@@ -215,7 +215,7 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
     preference = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="preference",
             selections=(DatasetSelection("case-1"),),
         )
@@ -232,7 +232,7 @@ def test_download_rows_keep_readable_evidence_but_hide_internal_ids() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="sft",
             selections=(DatasetSelection("case-1"),),
         )
@@ -268,7 +268,7 @@ def test_sft_is_excluded_when_support_source_has_no_readable_content() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="sft",
             selections=(DatasetSelection("case-1"),),
         )
@@ -300,7 +300,7 @@ def test_sft_is_excluded_when_evidence_has_no_readable_document_title() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="sft",
             selections=(DatasetSelection("case-1"),),
         )
@@ -315,7 +315,7 @@ def test_selection_order_is_canonical_for_digest() -> None:
     first = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"),),
         )
@@ -323,7 +323,7 @@ def test_selection_order_is_canonical_for_digest() -> None:
     second = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"),),
         )
@@ -336,7 +336,7 @@ def test_duplicate_case_is_excluded_without_experiment_grouping() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"), DatasetSelection("case-1")),
         )
@@ -352,7 +352,7 @@ def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"),),
         )
@@ -376,7 +376,7 @@ def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
         for key in (
             "schema_version",
             "owner_id",
-            "collection_id",
+            "workspace_id",
             "dataset_type",
             "rows",
             "exclusions",
@@ -412,13 +412,13 @@ def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
     assert read.manifest == manifest
 
 
-def test_cross_collection_access_is_rejected_before_reading_cases() -> None:
+def test_cross_workspace_access_is_rejected_before_reading_cases() -> None:
     service, _ = _fixture()
     with pytest.raises(FileNotFoundError):
         asyncio.run(
             service.create_dataset_snapshot_for_user(
                 owner_id="other-user",
-                collection_id="collection-1",
+                workspace_id="workspace-1",
                 dataset_type="evaluation",
                 selections=(),
             )
@@ -458,7 +458,7 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
         job_id="job-1",
         feedback_id="feedback-1",
         session_id=case.session_id,
-        collection_id=case.collection_id,
+        workspace_id=case.workspace_id,
         anchor_message_id=case.anchor_message_id,
         problem_type="source_missing",
         confidence=0.9,
@@ -487,7 +487,7 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="sft",
             selections=(DatasetSelection("case-1"),),
         )
@@ -500,7 +500,7 @@ def test_read_rejects_snapshot_when_provenance_digest_no_longer_matches() -> Non
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"),),
         )
@@ -519,7 +519,7 @@ def test_download_rejects_snapshot_when_manifest_digest_no_longer_matches() -> N
     snapshot = asyncio.run(
         service.create_dataset_snapshot_for_user(
             owner_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             dataset_type="evaluation",
             selections=(DatasetSelection("case-1"),),
         )

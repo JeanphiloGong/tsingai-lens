@@ -9,11 +9,11 @@ from domain.chat import (
     ChatToolRequest,
     ToolRisk,
 )
-from domain.source import Collection
+from domain.source import Workspace
 from repositories.chat_repository import ChatRepository, ChatWriteConflict
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
 )
 
 pytestmark = pytest.mark.anyio
@@ -22,10 +22,10 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 async def permission_case(postgres_session_factory):
     now = datetime.now(timezone.utc).isoformat()
-    await CollectionRepository().add_collection(
-        StoredCollection(
-            collection=Collection(
-                collection_id="c",
+    await WorkspaceRepository().add_workspace(
+        StoredWorkspace(
+            workspace=Workspace(
+                workspace_id="c",
                 owner_user_id="u",
                 name="Test",
                 description=None,
@@ -37,7 +37,7 @@ async def permission_case(postgres_session_factory):
     )
     repo = ChatRepository()
     session = ChatSession.create(
-        session_id="s", user_id="u", collection_id="c", created_at=now
+        session_id="s", user_id="u", workspace_id="c", created_at=now
     )
     await repo.add_session(session)
     grant = await repo.set_permission(

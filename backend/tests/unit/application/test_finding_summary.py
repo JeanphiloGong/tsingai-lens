@@ -26,7 +26,7 @@ from exceptions import ResourceConflictException
 
 def review_input():
     finding = Finding(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -80,7 +80,7 @@ def review_input():
         },
     ]
     return {
-        "collection_id": finding.collection_id,
+        "workspace_id": finding.workspace_id,
         "objective_id": finding.objective_id,
         "analysis_version": finding.analysis_version,
         "finding_id": finding.finding_id,
@@ -328,7 +328,7 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
     finding, evidence = review_input()
     records = tuple(
         ObjectiveEvidence(
-            collection_id="col-1",
+            workspace_id="col-1",
             objective_id="obj-1",
             analysis_version=1,
             evidence_id=item["evidence_id"],

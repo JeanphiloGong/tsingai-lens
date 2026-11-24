@@ -1,5 +1,5 @@
 """Domain layer exports."""
 
-from domain.source import Collection, Document
+from domain.source import Workspace, Document
 
-__all__ = ["Collection", "Document"]
+__all__ = ["Workspace", "Document"]

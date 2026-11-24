@@ -100,7 +100,7 @@ def _revision() -> PaperExperimentRevision:
 
 
 class _Selections:
-    async def list_selections(self, db, collection_id, objective_id, analysis_version):
+    async def list_selections(self, db, workspace_id, objective_id, analysis_version):
         return (
             ObjectiveExperimentSelection(
                 selection_id="selection-1",
@@ -115,12 +115,12 @@ class _Selections:
 
 
 class _Groups:
-    async def list_groups(self, db, collection_id, objective_id, analysis_version):
+    async def list_groups(self, db, workspace_id, objective_id, analysis_version):
         return ()
 
 
 class _Findings:
-    async def list_findings(self, db, collection_id, objective_id, analysis_version):
+    async def list_findings(self, db, workspace_id, objective_id, analysis_version):
         return ()
 
 
@@ -138,7 +138,7 @@ class _ObjectiveAnalyses:
     def __init__(self, analysis=None):
         self.analysis = analysis
 
-    async def read_analysis(self, collection_id, objective_id, analysis_version):
+    async def read_analysis(self, workspace_id, objective_id, analysis_version):
         return self.analysis
 
 
@@ -155,7 +155,7 @@ async def test_query_service_exports_fixed_revision_data(export_kind: str) -> No
 
     if export_kind == "json":
         payload = await service.export_analysis_json(
-            "collection-1", "objective-1", 1, user_id="user-1"
+            "workspace-1", "objective-1", 1, user_id="user-1"
         )
         assert payload["experiments"][0]["experiment_version"] == 1
         assert payload["selections"][0]["measurement_keys"] == [
@@ -164,7 +164,7 @@ async def test_query_service_exports_fixed_revision_data(export_kind: str) -> No
         ]
     else:
         payload = await service.export_analysis_csv(
-            "collection-1", "objective-1", 1, user_id="user-1"
+            "workspace-1", "objective-1", 1, user_id="user-1"
         )
         header = payload.splitlines()[0]
         assert "measurement_key" in header
@@ -186,7 +186,7 @@ async def test_query_service_rejects_unknown_analysis_snapshot() -> None:
     service = experiment_query_service
 
     with pytest.raises(ResourceNotFoundException, match="Analysis snapshot not found"):
-        await service.export_analysis_json("collection-1", "objective-1", 99, user_id="user-1")
+        await service.export_analysis_json("workspace-1", "objective-1", 99, user_id="user-1")
 
 
 async def test_query_service_rejects_incomplete_analysis_snapshot() -> None:
@@ -202,15 +202,15 @@ async def test_query_service_rejects_incomplete_analysis_snapshot() -> None:
     with pytest.raises(
         ResourceConflictException, match="Analysis snapshot is not completed"
     ):
-        await service.export_analysis_json("collection-1", "objective-1", 1, user_id="user-1")
+        await service.export_analysis_json("workspace-1", "objective-1", 1, user_id="user-1")
 
 
 @pytest.fixture(autouse=True)
 def export_owner(monkeypatch):
     monkeypatch.setattr(
         experiment_query_service,
-        "collection_service",
+        "workspace_service",
         SimpleNamespace(
-            get_collection_for_user=AsyncMock(return_value={"owner_user_id": "user-1"})
+            get_workspace_for_user=AsyncMock(return_value={"owner_user_id": "user-1"})
         ),
     )

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document owns the browser presentation contract for the collection-bound
+This document owns the browser presentation contract for the workspace-bound
 Research Agent. Chat is the only supported assistant-session runtime; the
 retired Goal-session design is not a compatibility contract.
 
@@ -17,16 +17,16 @@ User message
 ```
 
 Ordinary conversation does not require a capability. The Agent receives a
-small, intent-matched set of collection, Source, Finding, Objective, or plan
+small, intent-matched set of workspace, Source, Finding, Objective, or plan
 actions for each decision; it does not receive the whole capability catalogue.
-Collection screening stays separate from Source reading, and deriving a new
+Workspace screening stays separate from Source reading, and deriving a new
 Objective requires an explicit request. A Core write remains paused until the
-user approves the exact persisted arguments by default. The collection Settings
-page controls the default for new collection Agent sessions with read-only, per-call
+user approves the exact persisted arguments by default. The workspace Settings
+page controls the default for new workspace Agent sessions with read-only, per-call
 confirmation, and automatic grants. An automatic grant can stay active until revoked or be
 limited to at most 24 hours. A select-all control can authorize
 the complete current write-action set. The session permission control remains a
-session-scoped override for one active conversation; changing the collection default
+session-scoped override for one active conversation; changing the workspace default
 never silently changes an active session. Branches continue to start with
 confirmation so a copied conversation cannot inherit automatic authority.
 Granting Evidence or Finding creation includes publishing its new analysis version. The control
@@ -37,7 +37,7 @@ and messages/{message_id}/edits default to confirmation.
 
 ## Product Boundary
 
-The Research Agent helps a materials researcher inspect a collection, ask what
+The Research Agent helps a materials researcher inspect a workspace, ask what
 the published analysis supports, formulate a focused candidate question,
 review an existing published conclusion, and propose a new conclusion from
 fixed PaperExperiment selections and optional comparison groups through the
@@ -104,8 +104,8 @@ POST /api/v1/conversations/{conversation_id}/messages/{message_id}/edits
 GET  /api/v1/conversations/{conversation_id}/tree
 PUT  /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback
 POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/operations/{operation_id}/decision
-GET  /api/v1/collections/{collection_id}/agent-permissions
-PUT  /api/v1/collections/{collection_id}/agent-permissions
+GET  /api/v1/workspaces/{workspace_id}/agent-permissions
+PUT  /api/v1/workspaces/{workspace_id}/agent-permissions
 ```
 
 Both Chat entrypoints render the shared model picker inside the composer, just
@@ -145,18 +145,18 @@ recovery polling excludes this explicitly retryable call, and new questions wait
 until its continuation finishes. A repeated completed decision cannot run twice.
 
 The composer also exposes an explicit PDF-paper upload action for the current
-Collection. It calls the same `POST /collections/{collection_id}/documents`
-and per-document preparation endpoint used by the Collection workspace. The
+Workspace. It calls the same `POST /workspaces/{workspace_id}/documents`
+and per-document preparation endpoint used by the Workspace. The
 upload is a user action outside the Chat trajectory: PDF bytes are never sent
 to the model or stored as a Chat attachment, and uploading does not create an
 Objective, Evidence, or Finding. Each file reports its own stored, preparing,
 queued, upload-failed, or preparation-failed state. A preparation retry reuses
-the stored document ID, while the Collection workspace remains the canonical
-view for long-running Pipeline Run progress.
+the stored document ID, while the Workspace remains the canonical view for
+long-running Pipeline Run progress.
 
 If an upload response is lost, retrying can find the file already stored. The
 composer retries the upload with `reuse_existing=true`. The import service
-matches the normalized bytes by SHA-256 inside the owned Collection and returns
+matches the normalized bytes by SHA-256 inside the owned Workspace and returns
 the existing Document, preserving its preparation state. The composer then
 prepares that exact document ID. This works on ordinary HTTP installations
 without browser hashing or filename-based matching. If recovery fails, the
@@ -204,15 +204,15 @@ does not switch conversations, send a message, or change the activity timestamp.
 The control shows pending state and updates after a successful save; failures
 retain the previous state and allow retry. A successful pin change refreshes
 the loaded window before continuing pagination. Responses from a previous
-account or Collection cannot update the current history or cache.
+account or Workspace cannot update the current history or cache.
 
 The selected session ID and a small presentation-only history are stored under:
 
 ```text
-lens.chatSession.{encoded_user_id}:{encoded_collection_id}
-lens.chatSession.{encoded_user_id}:{encoded_collection_id}:documents
-lens.chatSessionHistory.{encoded_user_id}:{encoded_collection_id}
-lens.chatSourceContext.{encoded_user_id}:{encoded_collection_id}
+lens.chatSession.{encoded_user_id}:{encoded_workspace_id}
+lens.chatSession.{encoded_user_id}:{encoded_workspace_id}:documents
+lens.chatSessionHistory.{encoded_user_id}:{encoded_workspace_id}
+lens.chatSourceContext.{encoded_user_id}:{encoded_workspace_id}
 ```
 
 Chat waits for an authenticated account before reading these keys. Successful
@@ -229,7 +229,7 @@ An unavailable session read preserves its history entry and offers a retry of
 that exact session. Only an explicit `404` removes the missing session and
 creates a replacement; network errors and other HTTP failures remain visible.
 
-The server trajectory is authoritative. The collection session list supplies
+The server trajectory is authoritative. The workspace session list supplies
 each saved conversation's manual or generated title, falling back to its first
 question, so history labels remain available on a new browser or after local
 storage is cleared. After a normally completed first answer, the server generates
@@ -296,7 +296,7 @@ comment input and respects reduced motion and narrow viewports.
 
 `ResearchConversation.svelte` owns the message-keyed saved state, errors, and pending requests.
 It restores feedback from the trajectory's separate `feedback` array and
-aborts/ignores stale responses after session, collection, or account changes.
+aborts/ignores stale responses after session, workspace, or account changes.
 `MessageFeedback.svelte` owns the per-answer editor. No feedback is stored in
 browser storage or sent as a conversation message or scientific review action.
 See the backend API authority for the persistence and authorization contract.
@@ -395,7 +395,7 @@ first.
 
 Switching to a completed node shows the conversation through that answer and a
 compact historical-checkpoint row. The cursor survives reload in the same
-user/Collection/workspace scope; returning to latest restores the full trajectory.
+user/workspace scope; returning to latest restores the full trajectory.
 Sending a new question from this cursor creates a `continue` branch through the
 selected answer, excluding later turns. Editing a node instead creates a
 `revise` branch before its question. Both use existing durable branch drafts,
@@ -407,7 +407,7 @@ mode. Busy sessions remain viewable but cannot be branched until their current
 turn and pending approvals are resolved.
 
 Tree loading and failure have explicit states and retry; running nodes refresh
-while the dialog is open. Switching session, Collection, or user aborts stale tree
+while the dialog is open. Switching session, workspace, or user aborts stale tree
 reads. Tool calls remain within their saved turn rather than becoming separate
 checkpoints. This is conversation navigation: it never rolls back uploaded papers,
 published Evidence, Findings, or completed writes. The tree is derived from saved
@@ -421,31 +421,31 @@ keeping Lens-specific research boundaries explicit:
 - `+page.svelte` is the standalone route entry. `ResearchConversation.svelte`
   owns session orchestration, streaming, and approval state for both that route
   and the documents split workspace. It does not create a second browser API or persistence
-  model. Each session load has a request generation and abort signal; collection
+  model. Each session load has a request generation and abort signal; workspace
   changes, account changes, and unmounting invalidate pending reads, streams, and approval
   responses before they can update the current conversation or local history.
   Disconnecting the browser does not revoke an approved backend write; returning
   to the original session reloads its authoritative trajectory and approval state.
-- `ResearchSidebar.svelte` owns collection navigation, session history, and
+- `ResearchSidebar.svelte` owns workspace navigation, session history, and
   the responsive desktop/mobile navigation rail. It receives presentation data
   and callbacks from the route; it does not load or persist sessions. On small
   screens the history rail is collapsed behind an explicit toggle so session
   switching remains available without consuming the conversation viewport.
-  Collection context stays visible on mobile and displays the name from the
-  shared Collection store loaded by the parent layout. Missing names use the
+  Workspace context stays visible on mobile and displays the name from the
+  shared Workspace store loaded by the parent layout. Missing names use the
   existing untitled label; identifiers remain in navigation URLs. Long names
   are truncated with the full name available on hover.
 - `ConversationHeader.svelte` is a compact toolbar showing the conversation's
   first question and optional Objective link. An empty conversation without an
   Objective has no toolbar. It does not repeat the Research Agent brand or the
-  Collection context. Runtime status, elapsed time, and progress history belong
+  Workspace context. Runtime status, elapsed time, and progress history belong
   to the corresponding Assistant response.
 - `MessageComposer.svelte` owns the composer, PDF handoff presentation, and
-  collection-bound upload state and orchestration. It sends on Enter, preserves
+  workspace-bound upload state and orchestration. It sends on Enter, preserves
   Shift+Enter and IME composition, and grows the textarea up to a bounded height.
   An upload already started finishes its upload/preparation chain against the
-  original collection. Navigation drops its UI updates and stops the remaining
-  batch from starting; it does not move papers to the newly selected collection.
+  original workspace. Navigation drops its UI updates and stops the remaining
+  batch from starting; it does not move papers to the newly selected workspace.
   Account changes clear the attachment UI and prevent an uploaded paper from
   starting preparation under a different account. On constrained viewports,
   attachments and pending Source context share a bounded scroll area above the
@@ -481,13 +481,13 @@ keeping Lens-specific research boundaries explicit:
   disables non-essential movement. Status labels remain observable research
   stages; hidden model reasoning and provider internals never enter the view.
 - The header, timeline, and composer share a 900px reading measure. The
-  sidebar is a navigation rail on desktop and a compact collection/session
+  sidebar is a navigation rail on desktop and a compact workspace/session
   bar on mobile. The composer remains the final focus target and honors the
   device safe area.
 
 This composition is intentionally a presentation boundary, not a new domain
 layer: server trajectory data remains authoritative, and structured result
-cards continue to link to the canonical Collection, Objective, Finding,
+cards continue to link to the canonical Workspace, Objective, Finding,
 Evidence, and Source routes.
 
 ## Visible States
@@ -518,7 +518,7 @@ separate execution history.
 
 ### Empty and ordinary conversation
 
-The page offers realistic prompts for collection overview, published Findings,
+The page offers realistic prompts for workspace overview, published Findings,
 and focused Objective proposals. A greeting or general conversational response
 is rendered incrementally as a normal assistant message with no fake capability
 activity. A stable response cursor occupies the assistant row before the first
@@ -535,7 +535,7 @@ internal budgets remain undisclosed.
 
 Source-mapped paragraphs, list items, figures, tables, and parsed-source blocks
 offer an action to ask the Research Agent. The handoff opens the Agent for the
-same Collection and preserves the document, Source kind/reference, page,
+same Workspace and preserves the document, Source kind/reference, page,
 heading, canonical return link, bounded quote, and any explicit shortened-quote
 state. The user reviews that
 context and writes the actual question before sending it.
@@ -551,10 +551,10 @@ On desktop, the paper list or reader remains beside the conversation; on narrow
 screens, closing the conversation returns to the mounted reading surface.
 Collapsing the panel keeps the same conversation and ongoing work mounted.
 The document workspace and standalone Agent remember their active sessions
-separately for the authenticated user and Collection. Opening the document
+separately for the authenticated user and Workspace. Opening the document
 panel for the first time creates its own session; reopening or reloading resumes
 that document conversation. New session creates a separate session in the same
-Collection and retains unsent selections, without changing the other entry's
+Workspace and retains unsent selections, without changing the other entry's
 active session. Both entries share the conversation history, so researchers can
 explicitly select a document conversation from the standalone Agent or vice versa.
 History updates read the latest stored list before changing an entry, preserving
@@ -565,7 +565,7 @@ which owns session loading, streaming, approvals, and recovery.
 The reading area keeps one tab per opened paper. `DocumentTabs.svelte` owns tab
 selection and keyboard controls; the documents layout owns the opened tabs and
 the primary and comparison pane assignments. `DocumentReader.svelte` receives
-an explicit Collection, document, and Source-location request. Each mounted
+an explicit Workspace, document, and Source-location request. Each mounted
 reader retains its reading mode and scroll position across tab switches within
 the workspace. Closing a tab releases that reader without removing its pending
 Source selections or changing the conversation. Leaving the documents workspace
@@ -666,7 +666,7 @@ Their result panels show:
 - selected PDF papers and their upload/preparation state when papers are added
   from the composer;
 - warnings and scientific absence;
-- links to canonical collection, Objective, Finding, or Evidence records;
+- links to canonical Workspace, Objective, Finding, or Evidence records;
 - a distinct Agent paper-analysis activity whose completed summary reports the
   number of published Source-grounded Evidence records and links to the
   canonical Objective analysis. An inspected paper with no grounded Evidence
@@ -772,7 +772,7 @@ operations.
 ## Responsive And Accessibility Contract
 
 - The desktop layout provides conversation history beside the active thread.
-- The mobile layout removes the secondary history rail but retains collection
+- The mobile layout removes the secondary history rail but retains workspace
   navigation, active conversation, structured results, approval controls, and
   the composer.
 - The mobile composer keeps its input and send action on one row, follows the
@@ -791,7 +791,7 @@ operations.
 The focused browser suite covers:
 
 1. greeting with no capability;
-2. collection read with structured result, warning, resource link, and final
+2. workspace read with structured result, warning, resource link, and final
    answer;
 3. canonical per-paper preparation status with user-visible stages;
 4. Objective draft proposal without a Core write;
@@ -804,7 +804,7 @@ The focused browser suite covers:
 11. a visible mobile composer across consecutive turns and reduced viewport
     height;
 12. text visible before the final persisted turn arrives.
-13. multiple document Sources handed to the same Collection Agent, removable before
+13. multiple document Sources handed to the same Workspace Agent, removable before
     submission and persisted only with the sent user message;
 14. exact published Finding and linked Evidence inspection before review;
 15. distinct feedback and curation approvals, including rejection without a
@@ -837,9 +837,9 @@ interaction names, horizontal overflow, and browser console errors.
 
 - [`frontend-plan.md`](frontend-plan.md)
   Current same-origin browser API contract.
-- [`../src/routes/collections/README.md`](../src/routes/collections/README.md)
-  Collection route ownership and Objective interaction flow.
-- [`../../docs/decisions/rfc-collection-bound-research-agent.md`](../../docs/decisions/rfc-collection-bound-research-agent.md)
+- [`../src/routes/workspaces/README.md`](../src/routes/workspaces/README.md)
+  Workspace route ownership and Objective interaction flow.
+- [`../../docs/decisions/rfc-workspace-bound-research-agent.md`](../../docs/decisions/rfc-workspace-bound-research-agent.md)
   Shared Research Agent product, scientific, and authorization decision.
 - [`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md)
   Backend Chat and capability contract.

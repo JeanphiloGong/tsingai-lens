@@ -164,8 +164,8 @@ def summarize_finding_evidence(
         if not cited.issubset(reference_ids):
             raise FindingSummaryUnavailable("summary_invalid_citations")
         logger.info(
-            "Finding summary completed collection_id=%s objective_id=%s finding_id=%s analysis_version=%s evidence_count=%s model=%s",
-            finding["collection_id"],
+            "Finding summary completed workspace_id=%s objective_id=%s finding_id=%s analysis_version=%s evidence_count=%s model=%s",
+            finding["workspace_id"],
             finding["objective_id"],
             finding["finding_id"],
             finding["analysis_version"],
@@ -176,7 +176,7 @@ def summarize_finding_evidence(
             **{
                 key: finding[key]
                 for key in (
-                    "collection_id",
+                    "workspace_id",
                     "objective_id",
                     "finding_id",
                     "analysis_version",

@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
-from application.source import collection_service
+from application.source import workspace_service
 from domain.chat import ChatMessageRole
 from domain.feedback import (
     AnalysisResult,
@@ -23,14 +23,14 @@ from exceptions import (
     ResourceConflictException,
     ResourceNotFoundException,
 )
-from repositories.collection_repository import CollectionRepo
+from repositories.workspace_repository import WorkspaceRepo
 from repositories.feedback_case_repository import FeedbackCaseWriteConflict
 
 
 @dataclass(frozen=True)
 class FeedbackCaseSummary:
     case_id: str
-    collection_id: str
+    workspace_id: str
     status: str
     anchor_message_id: str
     problem_type: str | None
@@ -50,7 +50,7 @@ from repositories.feedback_case_repository import FeedbackCaseRepo
 async def list_feedback_cases_for_user(
     *,
     user_id: str,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     status: str | None = None,
     problem_type: str | None = None,
     needs_human_review: bool | None = None,
@@ -61,10 +61,10 @@ async def list_feedback_cases_for_user(
         raise RequestInvalidException(
             "Invalid pagination.", data={"code": "feedback_case_filter_invalid"}
         )
-    collection_ids = await _authorized_collection_ids(user_id, collection_id)
+    workspace_ids = await _authorized_workspace_ids(user_id, workspace_id)
     rows: list[FeedbackCaseSummary] = []
     cases = await FeedbackCaseRepo.list_cases(
-        collection_ids=collection_ids,
+        workspace_ids=workspace_ids,
         status=status,
         problem_type=problem_type,
         limit=None,
@@ -89,12 +89,12 @@ async def get_feedback_case_for_user(case_id: str, user_id: str) -> dict[str, An
             "Feedback case not found.",
             data={"code": "feedback_case_not_found", "case_id": case_id},
         )
-    await collection_service.get_collection_for_user(case.collection_id, user_id)
+    await workspace_service.get_workspace_for_user(case.workspace_id, user_id)
     session = await ChatRepo.read_session(case.session_id)
     if (
         session is None
         or session.user_id != user_id
-        or session.collection_id != case.collection_id
+        or session.workspace_id != case.workspace_id
     ):
         raise ResourceNotFoundException(
             "Feedback case not found.",
@@ -219,12 +219,12 @@ async def _authorized_case(
             "Feedback case not found.",
             data={"code": "feedback_case_not_found", "case_id": case_id},
         )
-    await collection_service.get_collection_for_user(case.collection_id, user_id)
+    await workspace_service.get_workspace_for_user(case.workspace_id, user_id)
     session = await ChatRepo.read_session(case.session_id)
     if (
         session is None
         or session.user_id != user_id
-        or session.collection_id != case.collection_id
+        or session.workspace_id != case.workspace_id
     ):
         raise ResourceNotFoundException(
             "Feedback case not found.",
@@ -342,14 +342,14 @@ async def list_feedback_reviews_for_user(
     return await FeedbackCaseRepo.read_review_decisions(case.case_id)
 
 
-async def _authorized_collection_ids(
-    user_id: str, collection_id: str | None
+async def _authorized_workspace_ids(
+    user_id: str, workspace_id: str | None
 ) -> tuple[str, ...]:
-    if collection_id is not None:
-        await collection_service.get_collection_for_user(collection_id, user_id)
-        return (collection_id,)
-    collections = await CollectionRepo.list_collections(user_id)
-    return tuple(item.collection_id for item in collections)
+    if workspace_id is not None:
+        await workspace_service.get_workspace_for_user(workspace_id, user_id)
+        return (workspace_id,)
+    workspaces = await WorkspaceRepo.list_workspaces(user_id)
+    return tuple(item.workspace_id for item in workspaces)
 
 
 async def _summarize(
@@ -362,7 +362,7 @@ async def _summarize(
     if (
         session is None
         or session.user_id != user_id
-        or session.collection_id != case.collection_id
+        or session.workspace_id != case.workspace_id
     ):
         return None
     messages = await ChatRepo.read_messages(case.session_id)
@@ -398,7 +398,7 @@ async def _summarize(
     document_titles = _document_titles(asdict(coverage) if coverage else {})
     return FeedbackCaseSummary(
         case_id=case.case_id,
-        collection_id=case.collection_id,
+        workspace_id=case.workspace_id,
         status=case.status,
         anchor_message_id=case.anchor_message_id,
         problem_type=result.problem_type if result else None,
@@ -481,7 +481,7 @@ def _detail(
             analysis["feedback_id"] = latest.feedback_id
     return {
         "case_id": case.case_id,
-        "collection_id": case.collection_id,
+        "workspace_id": case.workspace_id,
         "session_id": case.session_id,
         "status": case.status,
         "source_signals": [

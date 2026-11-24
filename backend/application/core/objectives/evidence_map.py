@@ -30,7 +30,7 @@ def build_objective_evidence_map(
     version = objective.published_analysis_version
     if version is None:
         raise ValueError("objective has no published analysis")
-    expected = (objective.collection_id, objective.objective_id, version)
+    expected = (objective.workspace_id, objective.objective_id, version)
     if analysis.key != expected:
         raise ValueError("analysis is not the Objective published analysis version")
     for record in (*contributions, *findings, *evidence_records):
@@ -195,7 +195,7 @@ def build_objective_evidence_map(
         item.analysis_status == "failed" for item in contributions
     )
     return {
-        "collection_id": objective.collection_id,
+        "workspace_id": objective.workspace_id,
         "objective_id": objective.objective_id,
         "analysis_version": version,
         "projection_version": PROJECTION_VERSION,

@@ -1,4 +1,4 @@
-"""Validate, store, and register an uploaded Document in a Collection."""
+"""Validate, store, and register an uploaded Document in a Workspace."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from uuid import uuid4
 from domain.source import Document
 from exceptions import RequestInvalidException, ResourceConflictException
 from infra.source.ingestion.upload_validation import validate_upload
-from repositories.collection_repository import (
+from repositories.workspace_repository import (
     DocumentContentAlreadyExists,
     StoredDocument,
 )
@@ -23,12 +23,12 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-from application.source import collection_service
-from repositories.collection_repository import CollectionRepo
+from application.source import workspace_service
+from repositories.workspace_repository import WorkspaceRepo
 
 
 async def add_document(
-    collection_id: str,
+    workspace_id: str,
     filename: str,
     content: bytes,
     media_type: str | None = None,
@@ -37,7 +37,7 @@ async def add_document(
     reuse_existing: bool = False,
 ) -> StoredDocument:
     object_store = object_store_module.Store
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
 
     filename = Path(filename or "upload.bin").name or "upload.bin"
     media_type = (str(media_type).strip() or None) if media_type else None
@@ -50,7 +50,7 @@ async def add_document(
 
     path = Path(filename)
     stored_filename = f"{uuid4().hex}_{path.stem}{path.suffix.lower() or '.bin'}"
-    storage_key = f"{collection_id}/input/{stored_filename}"
+    storage_key = f"{workspace_id}/input/{stored_filename}"
     digest = sha256(content).hexdigest()
     record = StoredDocument(
         document=Document(
@@ -68,14 +68,14 @@ async def add_document(
     )
     object_store.write(storage_key, content, digest)
     try:
-        await CollectionRepo.add_documents(
-            collection_id,
+        await WorkspaceRepo.add_documents(
+            workspace_id,
             (record,),
             updated_at=_now_iso(),
         )
     except Exception as exc:
         try:
-            current = await CollectionRepo.read_collection(collection_id)
+            current = await WorkspaceRepo.read_workspace(workspace_id)
         except Exception:
             current = None
         documents = current.documents if current is not None else ()
@@ -88,10 +88,10 @@ async def add_document(
                     return existing
         if isinstance(exc, DocumentContentAlreadyExists):
             raise ResourceConflictException(
-                "Document content already exists in this collection.",
+                "Document content already exists in this workspace.",
                 data={
                     "code": "document_content_already_exists",
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                 },
             ) from exc
         raise

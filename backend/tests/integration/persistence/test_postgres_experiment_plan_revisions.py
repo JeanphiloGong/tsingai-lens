@@ -31,7 +31,7 @@ OBJECTIVE_ID = "objective-plan-revisions"
 @pytest.fixture
 async def experiment_plan_repository(source_repository):
     objective = ResearchObjective(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id=OBJECTIVE_ID
         or build_research_objective_id(
             question="How does laser power affect porosity?",
@@ -70,7 +70,7 @@ async def experiment_plan_repository(source_repository):
 def _plan(**overrides) -> ExperimentPlanRecord:
     payload = {
         "plan_id": "plan-v1",
-        "collection_id": COLLECTION_ID,
+        "workspace_id": COLLECTION_ID,
         "objective_id": OBJECTIVE_ID,
         "title": "Initial plan",
         "content": "Initial approved plan.",

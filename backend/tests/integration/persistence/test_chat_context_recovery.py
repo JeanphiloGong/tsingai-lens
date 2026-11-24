@@ -35,7 +35,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
     """Exercise HTTP routes, SDK parsing and PostgreSQL with an offline provider."""
     fixture = branch_app
     session = await fixture.service.create_session(
-        collection_id="collection", user_id=fixture.owner
+        workspace_id="workspace", user_id=fixture.owner
     )
     session = await fixture.service.set_session_title_for_user(
         session.session_id, fixture.owner, title="Context recovery regression"

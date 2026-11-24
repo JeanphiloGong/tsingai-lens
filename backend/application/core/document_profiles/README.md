@@ -1,12 +1,12 @@
 # Document Profiles
 
-This package owns collection-time document classification and bounded profile
+This package owns workspace-time document classification and bounded profile
 summaries derived from normalized Source artifacts.
 
 ## Owner
 
 - `service.py`
-  Builds and reads `DocumentProfile` records and the collection profile
+  Builds and reads `DocumentProfile` records and the workspace profile
   summary used by downstream Core workflows.
 - `extraction.py`
   Calls the configured model provider and owns document-profile completion
@@ -25,8 +25,8 @@ failure; it must remain visible as a retryable warning and must not be treated
 as evidence that the document itself is scientifically uncertain.
 
 Single-paper content and Profile reads query the selected document directly.
-An empty Source collection remains a not-ready response; a missing document in
-a collection with prepared Sources remains not-found. The existence check does
+An empty Source workspace remains a not-ready response; a missing document in
+a workspace with prepared Sources remains not-found. The existence check does
 not load other papers' artifacts.
 
 Classification consumes `SourceDocument` directly and returns `DocumentProfile`.

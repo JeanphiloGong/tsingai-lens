@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 from uuid import uuid4
 
-from application.source import collection_service
+from application.source import workspace_service
 from domain.chat import ChatMessageRole
 from domain.feedback import DatasetSnapshot, DatasetType
 from exceptions import (
@@ -52,12 +52,12 @@ from repositories.feedback_case_repository import FeedbackCaseRepo
 async def create_dataset_snapshot_for_user(
     *,
     owner_id: str,
-    collection_id: str,
+    workspace_id: str,
     dataset_type: DatasetType | str,
     selections: tuple[DatasetSelection, ...],
     now: str | None = None,
 ) -> DatasetSnapshot:
-    await collection_service.get_collection_for_user(collection_id, owner_id)
+    await workspace_service.get_workspace_for_user(workspace_id, owner_id)
     if dataset_type not in {"evaluation", "sft", "preference"}:
         raise DatasetSnapshotError("dataset_type_invalid")
     if len(selections) > 500:
@@ -77,7 +77,7 @@ async def create_dataset_snapshot_for_user(
         try:
             candidate = await _candidate(
                 owner_id=owner_id,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 dataset_type=dataset_type,  # type: ignore[arg-type]
                 selection=selection,
             )
@@ -100,7 +100,7 @@ async def create_dataset_snapshot_for_user(
     provenance_items.sort(key=lambda item: (str(item.get("case_id")),))
     provenance = {
         "schema_version": "feedback-dataset-provenance.v2",
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "dataset_type": dataset_type,
         "items": provenance_items,
     }
@@ -108,7 +108,7 @@ async def create_dataset_snapshot_for_user(
     digest_basis = {
         "schema_version": "feedback-dataset.v3",
         "owner_id": owner_id,
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "dataset_type": dataset_type,
         "rows": rows,
         "exclusions": exclusions,
@@ -131,7 +131,7 @@ async def create_dataset_snapshot_for_user(
     snapshot = DatasetSnapshot(
         dataset_id=dataset_id,
         owner_id=owner_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         dataset_type=dataset_type,  # type: ignore[arg-type]
         rows=tuple(rows),
         exclusions=tuple(exclusions),
@@ -148,7 +148,7 @@ async def create_dataset_snapshot_for_user(
 async def list_dataset_snapshots_for_user(
     *,
     owner_id: str,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     dataset_type: DatasetType | str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -161,15 +161,15 @@ async def list_dataset_snapshots_for_user(
         "preference",
     }:
         raise DatasetSnapshotError("dataset_type_invalid")
-    if collection_id is not None:
-        await collection_service.get_collection_for_user(collection_id, owner_id)
+    if workspace_id is not None:
+        await workspace_service.get_workspace_for_user(workspace_id, owner_id)
     else:
-        # Listing without a collection still needs to be bounded to the
-        # user's owned collections; the repository applies owner scope.
+        # Listing without a workspace still needs to be bounded to the
+        # user's owned workspaces; the repository applies owner scope.
         pass
     return await DatasetSnapshotRepo.list_for_owner(
         owner_id=owner_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         dataset_type=dataset_type,  # type: ignore[arg-type]
         limit=limit,
         offset=offset,
@@ -183,7 +183,7 @@ async def get_dataset_snapshot_for_user(*, owner_id: str, dataset_id: str) -> Da
             "Dataset snapshot not found.",
             data={"code": "dataset_snapshot_not_found", "dataset_id": dataset_id},
         )
-    await collection_service.get_collection_for_user(snapshot.collection_id, owner_id)
+    await workspace_service.get_workspace_for_user(snapshot.workspace_id, owner_id)
     _verify_snapshot_integrity(snapshot)
     return snapshot
 
@@ -199,18 +199,18 @@ async def export_dataset_snapshot_jsonl_for_user(
 async def _candidate(
     *,
     owner_id: str,
-    collection_id: str,
+    workspace_id: str,
     dataset_type: DatasetType,
     selection: DatasetSelection,
 ) -> "_Candidate":
     case = await FeedbackCaseRepo.read_case(selection.case_id)
-    if case is None or case.collection_id != collection_id:
-        raise DatasetSnapshotError("case_not_in_collection")
+    if case is None or case.workspace_id != workspace_id:
+        raise DatasetSnapshotError("case_not_in_workspace")
     session = await ChatRepo.read_session(case.session_id)
     if (
         session is None
         or session.user_id != owner_id
-        or session.collection_id != collection_id
+        or session.workspace_id != workspace_id
     ):
         raise DatasetSnapshotError("case_not_accessible")
     annotation = await FeedbackCaseRepo.read_annotation(case.case_id)
@@ -355,9 +355,9 @@ def _verify_snapshot_integrity(snapshot: DatasetSnapshot) -> None:
         )
     if manifest.get("owner_id") != snapshot.owner_id:
         raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_owner_mismatch")
-    if manifest.get("collection_id") != snapshot.collection_id:
+    if manifest.get("workspace_id") != snapshot.workspace_id:
         raise DatasetSnapshotIntegrityError(
-            "dataset_snapshot_manifest_collection_mismatch"
+            "dataset_snapshot_manifest_workspace_mismatch"
         )
     if manifest.get("dataset_type") != snapshot.dataset_type:
         raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_type_mismatch")
@@ -388,7 +388,7 @@ def _verify_snapshot_integrity(snapshot: DatasetSnapshot) -> None:
         for key in (
             "schema_version",
             "owner_id",
-            "collection_id",
+            "workspace_id",
             "dataset_type",
             "rows",
             "exclusions",

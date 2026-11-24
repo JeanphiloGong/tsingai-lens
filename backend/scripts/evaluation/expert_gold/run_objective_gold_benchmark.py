@@ -41,18 +41,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Run the offline expert-gold benchmark against objective-first "
-            "Findings and evidence from an already-built collection."
+            "Findings and evidence from an already-built workspace."
         )
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
-        "--collection-id",
-        help="Collection id under <backend-root>/data/collections/<collection-id>.",
+        "--workspace-id",
+        help="Workspace id under <backend-root>/data/workspaces/<workspace-id>.",
     )
     source.add_argument(
         "--output-dir",
         type=Path,
-        help="Direct collection output directory; collection id is inferred from it.",
+        help="Direct workspace output directory; workspace id is inferred from it.",
     )
     parser.add_argument(
         "--backend-root",
@@ -95,7 +95,7 @@ def main() -> None:
     args = parse_args()
     summary = run_objective_gold_benchmark(
         backend_root=args.backend_root,
-        collection_id=args.collection_id,
+        workspace_id=args.workspace_id,
         source_output_dir=args.output_dir,
         gold_input_dir=args.gold_input_dir,
         benchmark_output_dir=args.benchmark_output_dir,
@@ -113,7 +113,7 @@ def main() -> None:
 def run_objective_gold_benchmark(
     *,
     backend_root: str | Path = DEFAULT_BACKEND_ROOT,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     source_output_dir: str | Path | None = None,
     gold_input_dir: str | Path = DEFAULT_GOLD_DIR,
     benchmark_output_dir: str | Path = DEFAULT_OUTPUT_DIR,
@@ -132,7 +132,7 @@ def run_objective_gold_benchmark(
     )
     exported_prediction = export_prediction_bundle.export_prediction_bundle(
         backend_root=backend_root,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         source_output_dir=source_output_dir,
         output_path=prediction_path,
     )

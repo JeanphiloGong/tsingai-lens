@@ -284,12 +284,12 @@ def test_prompt_splits_multi_outcome_interest_before_scope_screening() -> None:
     assert "changing an outcome does not replace the intervention" in prompt
 
 
-def test_prompt_separates_product_questions_from_collection_reads() -> None:
+def test_prompt_separates_product_questions_from_workspace_reads() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
-    assert "Lens purpose/capability questions directly when no collection fact is needed" in prompt
+    assert "Lens purpose/capability questions directly when no workspace fact is needed" in prompt
     assert "This system" in prompt
     assert "Lens unless the user asks about its papers" in prompt
-    assert "get_collection_context when context is unknown" in prompt
+    assert "get_workspace_context when context is unknown" in prompt
     assert "literal filename/title query is not semantic relevance search" in prompt
     assert "Search matches, snippets and headings locate content" in prompt
     assert "Adding or deferring a paper changes only that paper" in prompt
@@ -498,11 +498,11 @@ async def test_openai_chat_model_marks_selected_canonical_source_as_not_yet_evid
                     resource_type="source",
                     resource_id="doc-1:results",
                     href=(
-                        "/collections/col-1/documents/doc-1"
+                        "/workspaces/col-1/documents/doc-1"
                         "?view=parsed-paper&source_ref=results&page=3"
                     ),
                 ),
-                collection_id="col-1",
+                workspace_id="col-1",
                 document_id="doc-1",
                 document_title="Paper A",
                 source_kind="text_window",
@@ -530,15 +530,15 @@ async def test_openai_chat_model_parses_one_typed_tool_call() -> None:
         id="call-1",
         type="function",
         function=SimpleNamespace(
-            name="get_collection_context",
+            name="get_workspace_context",
             arguments='{"include_documents":true}',
         ),
     )
     client, completions = _client(_completion(tool_calls=[tool_call]))
     model = OpenAIChatModel(client=client, model="test-model")
     spec = ToolSpec(
-        name="get_collection_context",
-        description="Read bounded collection context.",
+        name="get_workspace_context",
+        description="Read bounded workspace context.",
         risk=ToolRisk.READ,
         input_model=_NoArguments,
     )
@@ -546,11 +546,11 @@ async def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     turn = await model.respond(context=ChatModelContext((_message(),)), tool_specs=(spec,))
 
     assert turn.tool_calls != ()
-    assert turn.tool_calls[0].name == "get_collection_context"
+    assert turn.tool_calls[0].name == "get_workspace_context"
     assert turn.tool_calls[0].arguments == {"include_documents": True}
     request = completions.calls[0]
     assert request["parallel_tool_calls"] is True
-    assert request["tools"][0]["function"]["name"] == "get_collection_context"
+    assert request["tools"][0]["function"]["name"] == "get_workspace_context"
 
 
 async def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
@@ -590,7 +590,7 @@ async def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
         index=0,
         id="provider-call-0",
         type="function",
-        function=SimpleNamespace(name="get_collection_context", arguments=""),
+        function=SimpleNamespace(name="get_workspace_context", arguments=""),
     )
     second = SimpleNamespace(
         index=0,
@@ -615,7 +615,7 @@ async def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
     )
 
     assert turn.tool_calls != ()
-    assert turn.tool_calls[0].name == "get_collection_context"
+    assert turn.tool_calls[0].name == "get_workspace_context"
     assert turn.tool_calls[0].arguments == {}
 
 

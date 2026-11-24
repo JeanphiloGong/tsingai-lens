@@ -51,7 +51,7 @@ def _selected_payloads(blocks, *, reader=None):
     documents, tree = _artifacts(blocks=blocks)
     document = documents[0]
     return paper_map_extraction.build_payloads(
-        collection_id="context-reading",
+        workspace_id="context-reading",
         document=document,
         profile=None,
         blocks=list(document.blocks),
@@ -258,7 +258,7 @@ def test_actual_provider_attempts_share_budget_and_do_not_count_unsent_calls(mod
 
     with capture_llm_usage() as usage:
         results = paper_map_extraction.extract_window_payloads(
-            collection_id="test", document_id="paper-1", payloads=payloads,
+            workspace_id="test", document_id="paper-1", payloads=payloads,
             paper_map_extractor=reader, extraction_budget=budget,
         )
 
@@ -276,7 +276,7 @@ def test_expired_document_budget_sends_no_model_request():
     budget = PaperMapExtractionBudget(deadline=monotonic() - 1, max_calls=2, max_recovery_calls=1)
 
     results = paper_map_extraction.extract_window_payloads(
-        collection_id="test", document_id="paper-1", payloads=payloads,
+        workspace_id="test", document_id="paper-1", payloads=payloads,
         paper_map_extractor=reader, extraction_budget=budget,
     )
 
@@ -351,7 +351,7 @@ def test_other_window_budget_failure_does_not_mask_this_window_parse_failure():
     )
 
     results = paper_map_extraction.extract_window_payloads(
-        collection_id="test", document_id="paper-1", payloads=payloads,
+        workspace_id="test", document_id="paper-1", payloads=payloads,
         paper_map_extractor=_ContextReader(respond), extraction_budget=budget,
     )
 

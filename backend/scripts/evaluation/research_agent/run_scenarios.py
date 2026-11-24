@@ -22,7 +22,7 @@ from pathlib import Path
 SCIENTIFIC_SNAPSHOT_TABLES = (
     "documents",
     "document_preparations",
-    "collections",
+    "workspaces",
     "research_objectives",
     "objective_analyses",
     "paper_experiment",
@@ -56,9 +56,9 @@ def validate_fixture(fixture):
     ids = [case["id"] for case in cases]
     if len(ids) != 21 or set(ids) != {f"S{i:02}" for i in range(1, 22)}:
         raise ValueError("fixture must contain S01-S21 exactly once")
-    collections = [case["collection_id"] for case in cases]
-    if len(set(collections)) != 21:
-        raise ValueError("each scenario requires its own isolated collection")
+    workspaces = [case["workspace_id"] for case in cases]
+    if len(set(workspaces)) != 21:
+        raise ValueError("each scenario requires its own isolated workspace")
     for case in cases:
         if "REPLACE" in json.dumps(case, ensure_ascii=False):
             raise ValueError("replace template identities and scope before replay")
@@ -149,7 +149,7 @@ async def replay_case(service, case, mode):
     }
     try:
         session = await service.create_session(
-            collection_id=case["collection_id"], user_id=case["user_id"]
+            workspace_id=case["workspace_id"], user_id=case["user_id"]
         )
         result["session_id"] = session.session_id
         if mode != "confirm":
@@ -169,7 +169,7 @@ async def replay_case(service, case, mode):
         for instruction in case["turns"]:
             if instruction.get("new_session"):
                 session = await service.create_session(
-                    collection_id=case["collection_id"], user_id=case["user_id"]
+                    workspace_id=case["workspace_id"], user_id=case["user_id"]
                 )
                 automatic_authorization_active = False
             if instruction.get("revoke"):

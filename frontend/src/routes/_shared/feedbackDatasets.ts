@@ -5,7 +5,7 @@ export type DatasetExportFormat = 'jsonl' | 'json' | 'provenance' | 'manifest';
 
 export type FeedbackDataset = {
 	dataset_id: string;
-	collection_id: string;
+	workspace_id: string;
 	name: string;
 	task_type: FeedbackDatasetTaskType;
 	construction_spec: Record<string, unknown>;
@@ -84,7 +84,7 @@ export type DatasetSampleRevision = {
 
 export type DatasetSampleSourceCase = {
 	case_id: string;
-	collection_id: string;
+	workspace_id: string;
 	session_id: string;
 	anchor_message_id: string;
 	status: string;
@@ -155,11 +155,11 @@ function datasetPath(datasetId = '') {
 }
 
 export async function fetchFeedbackDatasets(
-	collectionId: string,
+	workspaceId: string,
 	options: { limit?: number; offset?: number } = {}
 ) {
 	const params = new URLSearchParams({
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		limit: String(options.limit ?? 50),
 		offset: String(options.offset ?? 0)
 	});

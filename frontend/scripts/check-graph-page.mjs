@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const DEFAULT_URL = 'http://127.0.0.1:5173/collections/col_0e54529f9c68/graph';
+const DEFAULT_URL = 'http://127.0.0.1:5173/workspaces/col_0e54529f9c68/graph';
 const DEFAULT_OUTPUT_DIR = '/tmp/lens-graph-page-check';
 
 function readArgValue(name) {

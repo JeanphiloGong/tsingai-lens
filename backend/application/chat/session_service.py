@@ -262,10 +262,10 @@ class ChatApprovalPendingError(ResourceConflictException):
         )
 
 
-from application.source import collection_service as collection_service
+from application.source import workspace_service as workspace_service
 from repositories.analysis_job_repository import AnalysisJobRepo
 from repositories.chat_repository import ChatRepo
-from repositories.collection_repository import CollectionRepo
+from repositories.workspace_repository import WorkspaceRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 
 class ChatSessionService:
@@ -290,19 +290,19 @@ class ChatSessionService:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def create_session(self, *, collection_id: str, user_id: str) -> ChatSession:
-        default = await collection_service.get_agent_default_permission_for_user(
-            collection_id, user_id
+    async def create_session(self, *, workspace_id: str, user_id: str) -> ChatSession:
+        default = await workspace_service.get_agent_default_permission_for_user(
+            workspace_id, user_id
         )
         now = _now_iso()
         session = ChatSession.create(
             session_id=f"chat_{uuid4().hex[:16]}",
             user_id=user_id,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             created_at=now,
         )
-        # Collection settings are defaults for newly created conversations. A
-        # session stores its own revision so later collection changes cannot
+        # Workspace settings are defaults for newly created conversations. A
+        # session stores its own revision so later workspace changes cannot
         # silently change an active conversation's authority.
         mode = str(default.get("mode") or "confirm")
         should_seed = mode == "read_only" or (
@@ -355,8 +355,8 @@ class ChatSessionService:
         session = await ChatRepo.read_session(session_id)
         if session is None or session.user_id != user_id:
             raise ChatSessionNotFoundError(session_id)
-        if not await CollectionRepo.collection_belongs_to_user(
-            session.collection_id, user_id
+        if not await WorkspaceRepo.workspace_belongs_to_user(
+            session.workspace_id, user_id
         ):
             raise ChatSessionNotFoundError(session_id)
         return session
@@ -395,19 +395,19 @@ class ChatSessionService:
     async def list_sessions_for_user(
         self,
         *,
-        collection_id: str,
+        workspace_id: str,
         user_id: str,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[ChatSessionSummary, ...]:
-        if not await CollectionRepo.collection_belongs_to_user(collection_id, user_id):
+        if not await WorkspaceRepo.workspace_belongs_to_user(workspace_id, user_id):
             raise ResourceNotFoundException(
-                f"collection not found: {collection_id}",
-                data={"code": "collection_not_found", "collection_id": collection_id},
+                f"workspace not found: {workspace_id}",
+                data={"code": "workspace_not_found", "workspace_id": workspace_id},
             )
         return await ChatRepo.list_sessions(
             user_id=user_id,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             limit=limit,
             offset=offset,
         )
@@ -594,7 +594,7 @@ class ChatSessionService:
                     session_id="chat_branch_"
                     + sha256(f"{user_id}:{request_id}".encode()).hexdigest()[:40],
                     user_id=user_id,
-                    collection_id=session.collection_id,
+                    workspace_id=session.workspace_id,
                     created_at=now,
                     updated_at=now,
                     root_session_id=session.root_session_id or session.session_id,
@@ -832,7 +832,7 @@ class ChatSessionService:
             checkpoint_id = None
             first = True
             while True:
-                # Recheck ownership on each sample, including collection deletion/revocation.
+                # Recheck ownership on each sample, including workspace deletion/revocation.
                 await self.get_session_for_user(session_id, user_id)
                 snapshot = await ChatRepo.read_response_snapshot(session_id)
                 running = await ChatRepo.is_session_running(session_id)
@@ -1685,7 +1685,7 @@ class ChatSessionService:
                     "context": AgentContext(
                         session_id=session.session_id,
                         user_id=session.user_id,
-                        collection_id=session.collection_id,
+                        workspace_id=session.workspace_id,
                     ),
                     "previous_messages": previous_messages,
                     "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
@@ -1865,7 +1865,7 @@ class ChatSessionService:
                         await ChatRepo.save_trajectory(
                             chat_session=session.update(
                                 user_id=session.user_id,
-                                collection_id=session.collection_id,
+                                workspace_id=session.workspace_id,
                                 updated_at=messages[-1].created_at,
                             ),
                             messages=tuple(messages),
@@ -1968,7 +1968,7 @@ class ChatSessionService:
             await ChatRepo.save_trajectory(
                 chat_session=session.update(
                     user_id=session.user_id,
-                    collection_id=session.collection_id,
+                    workspace_id=session.workspace_id,
                     updated_at=messages[-1].created_at,
                 ),
                 messages=tuple(messages),
@@ -2015,23 +2015,23 @@ class ChatSessionService:
         session: ChatSession,
         source_contexts: tuple[ChatSourceContext, ...],
     ) -> tuple[ChatSourceContext, ...]:
-        if any(item.collection_id != session.collection_id for item in source_contexts):
+        if any(item.workspace_id != session.workspace_id for item in source_contexts):
             raise ChatSourceContextError(
-                "source context does not belong to the Chat collection"
+                "source context does not belong to the Chat workspace"
             )
         canonical_contexts: list[ChatSourceContext] = []
         for item in source_contexts:
             try:
-                await collection_service.get_document(
-                    session.collection_id,
+                await workspace_service.get_document(
+                    session.workspace_id,
                     item.document_id,
                 )
             except ResourceNotFoundException as exc:
                 raise ChatSourceContextError(
-                    "source context document does not belong to the Chat collection"
+                    "source context document does not belong to the Chat workspace"
                 ) from exc
             document = await SourceArtifactRepo.read_document(
-                session.collection_id,
+                session.workspace_id,
                 item.document_id,
             )
             if document is None:
@@ -2089,11 +2089,11 @@ class ChatSessionService:
                         resource_type="source",
                         resource_id=f"{item.document_id}:{item.source_ref}",
                         href=(
-                            f"/collections/{session.collection_id}/documents/"
+                            f"/workspaces/{session.workspace_id}/documents/"
                             f"{item.document_id}?{urlencode(query)}"
                         ),
                     ),
-                    collection_id=session.collection_id,
+                    workspace_id=session.workspace_id,
                     document_id=item.document_id,
                     document_title=document_title,
                     source_kind=item.source_kind,
@@ -2217,7 +2217,7 @@ class ChatSessionService:
             await ChatRepo.save_trajectory(
                 chat_session=session.update(
                     user_id=session.user_id,
-                    collection_id=session.collection_id,
+                    workspace_id=session.workspace_id,
                     updated_at=updated_at,
                 ),
                 messages=messages,

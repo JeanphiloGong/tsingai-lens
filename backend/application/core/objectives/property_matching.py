@@ -1232,7 +1232,7 @@ def resolve_objective_axis(
     return None
 
 
-def axis_collections_are_equivalent(
+def axis_workspaces_are_equivalent(
     left: Iterable[str],
     right: Iterable[str],
 ) -> bool:
@@ -1270,7 +1270,7 @@ def paper_signal_context_conflicts(
             if signal.get(field_name)
         ]
         if any(
-            not axis_collections_are_equivalent(left, right)
+            not axis_workspaces_are_equivalent(left, right)
             for position, left in enumerate(contexts)
             for right in contexts[position + 1 :]
         ):

@@ -36,7 +36,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 def _finding(**overrides):
     finding = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -75,7 +75,7 @@ def _finding(**overrides):
 
 def _row(**overrides):
     row = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -131,7 +131,7 @@ def test_check_agent_review_draft_accepts_safe_silver_draft(tmp_path):
     assert summary["counts"] == {"accept": 1, "correct": 1}
     assert summary["goals"] == [
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "total_rows": 2,
             "agent_reviewed_count": 2,
@@ -264,7 +264,7 @@ def test_check_agent_review_draft_groups_unresolved_rows_by_goal(tmp_path):
 
     assert summary["goals"] == [
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "total_rows": 2,
             "agent_reviewed_count": 1,

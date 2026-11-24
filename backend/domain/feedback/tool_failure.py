@@ -65,7 +65,7 @@ class ToolFailureAnalysisResult:
     signal_id: str
     signal_type: str
     session_id: str
-    collection_id: str
+    workspace_id: str
     tool_call_id: str
     assistant_message_id: str
     result_message_id: str

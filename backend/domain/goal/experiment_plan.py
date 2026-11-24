@@ -12,7 +12,7 @@ EXPERIMENT_PLAN_STATUSES = {"draft", "ready_for_review", "archived"}
 @dataclass(frozen=True)
 class ExperimentPlanRecord:
     plan_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     title: str
     content: str

@@ -37,12 +37,12 @@ class ExperimentFindingRepository:
     async def read_finding(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         finding_id: str,
     ) -> Finding | None:
         row = await db.scalar(
             select(ExperimentFindingORM).where(
-                ExperimentFindingORM.collection_id == collection_id,
+                ExperimentFindingORM.workspace_id == workspace_id,
                 ExperimentFindingORM.finding_id == finding_id,
             )
         )
@@ -51,7 +51,7 @@ class ExperimentFindingRepository:
     async def list_findings(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Finding, ...]:
@@ -59,7 +59,7 @@ class ExperimentFindingRepository:
             await db.scalars(
                 select(ExperimentFindingORM)
                 .where(
-                    ExperimentFindingORM.collection_id == collection_id,
+                    ExperimentFindingORM.workspace_id == workspace_id,
                     ExperimentFindingORM.objective_id == objective_id,
                     ExperimentFindingORM.analysis_version == analysis_version,
                 )
@@ -97,7 +97,7 @@ async def _add_finding(
     selections, groups = await _validate_context(db, finding)
     row = ExperimentFindingORM(
         finding_id=finding.finding_id,
-        collection_id=finding.collection_id,
+        workspace_id=finding.workspace_id,
         objective_id=finding.objective_id,
         analysis_version=finding.analysis_version,
         statement=finding.statement,
@@ -228,7 +228,7 @@ async def _validate_context(
 ) -> tuple[tuple[ObjectiveExperimentSelectionORM, ...], tuple[ComparisonGroupORM, ...]]:
     analysis = await db.scalar(
         select(ObjectiveAnalysisORM).where(
-            ObjectiveAnalysisORM.collection_id == finding.collection_id,
+            ObjectiveAnalysisORM.workspace_id == finding.workspace_id,
             ObjectiveAnalysisORM.objective_id == finding.objective_id,
             ObjectiveAnalysisORM.analysis_version == finding.analysis_version,
         )
@@ -239,7 +239,7 @@ async def _validate_context(
     selection_rows = tuple(
         await db.scalars(
             select(ObjectiveExperimentSelectionORM).where(
-                ObjectiveExperimentSelectionORM.collection_id == finding.collection_id,
+                ObjectiveExperimentSelectionORM.workspace_id == finding.workspace_id,
                 ObjectiveExperimentSelectionORM.selection_id.in_(finding.selection_ids),
             )
         )
@@ -260,7 +260,7 @@ async def _validate_context(
         group_rows = tuple(
             await db.scalars(
                 select(ComparisonGroupORM).where(
-                    ComparisonGroupORM.collection_id == finding.collection_id,
+                    ComparisonGroupORM.workspace_id == finding.workspace_id,
                     ComparisonGroupORM.group_id.in_(finding.comparison_group_ids),
                 )
             )
@@ -316,7 +316,7 @@ async def load_experiment_finding(
         )
     )
     return Finding(
-        collection_id=row.collection_id,
+        workspace_id=row.workspace_id,
         objective_id=row.objective_id,
         analysis_version=row.analysis_version,
         finding_id=row.finding_id,

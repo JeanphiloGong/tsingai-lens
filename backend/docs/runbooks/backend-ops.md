@@ -304,9 +304,9 @@ The feedback sample Worker runs independently of HTTP requests:
 ```
 
 It initializes one application runtime per process and closes it on shutdown.
-Before polling, it backfills historical Collections and non-withdrawn cases in
+Before polling, it backfills historical Workspaces and non-withdrawn cases in
 batches of 200. Restarting it repeats this idempotent backfill without replacing
-human revisions or duplicating sample jobs. Collection creation initializes
+human revisions or duplicating sample jobs. Workspace creation initializes
 the three fixed workbenches; analysis writes commit the case and all three
 sample queues atomically. Opening or refreshing the workbench does not enqueue
 work. Initialization and polling errors are logged and retried after the polling

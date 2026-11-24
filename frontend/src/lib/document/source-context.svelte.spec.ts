@@ -8,7 +8,7 @@ import type { ChatMessage } from '$lib/conversation/api';
 
 const source: ChatSourceContext = {
 	resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
-	collection_id: 'col_123',
+	workspace_id: 'col_123',
 	document_id: 'doc_1',
 	document_title: 'LPBF study',
 	source_kind: 'text_window',

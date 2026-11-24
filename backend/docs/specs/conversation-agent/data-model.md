@@ -313,7 +313,7 @@ Conversation creates its first new Task.
 Conversation V2 Alembic revision `b71000000002` renames the Conversation table and
 ownership columns in place. It preserves existing Conversation, Message, and
 Feedback identities and constrains Feedback and its target Message to the same
-Conversation. `workspace_id` continues to reference `collections.collection_id`
+Conversation. `workspace_id` continues to reference `workspaces.workspace_id`
 at this stage. Parent-chain backfill for existing Messages, Agent runtime migration,
 and HTTP cutover happen in later stages.
 
@@ -323,7 +323,7 @@ The conceptual mapping is:
 | --- | --- |
 | `chat_sessions` | `chat_conversations` |
 | `session_id` | `conversation_id` |
-| `collection_id` | `workspace_id` |
+| `workspace_id` | `workspace_id` |
 | `chat_messages.position` | `parent_message_id` |
 | Session `response_snapshot` | `agent_tasks.checkpoint` |
 | `response_id` | `task_id` |

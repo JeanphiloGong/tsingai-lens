@@ -27,7 +27,7 @@ class PipelineNodeResponse(BaseModel):
 
 
 class PipelineRunSummaryResponse(BaseModel):
-    """Compact execution state used to locate and monitor collection runs."""
+    """Compact execution state used to locate and monitor workspace runs."""
 
     run_id: str = Field(..., description="Stable pipeline run ID")
     pipeline_name: str = Field(..., description="Stable pipeline name")
@@ -45,7 +45,7 @@ class PipelineRunSummaryResponse(BaseModel):
 class PipelineRunResponse(PipelineRunSummaryResponse):
     """Complete technical execution state for one pipeline invocation."""
 
-    collection_id: str = Field(..., description="Owning Collection ID")
+    workspace_id: str = Field(..., description="Owning Workspace ID")
     mode: str = Field(..., description="Execution mode")
     input_fingerprint: str | None = Field(
         default=None,
@@ -61,7 +61,7 @@ class PipelineRunResponse(PipelineRunSummaryResponse):
 
 
 class PipelineRunListResponse(BaseModel):
-    collection_id: str = Field(..., description="Owning Collection ID")
+    workspace_id: str = Field(..., description="Owning Workspace ID")
     count: int = Field(..., description="Number of returned runs")
     items: list[PipelineRunSummaryResponse] = Field(default_factory=list)
 

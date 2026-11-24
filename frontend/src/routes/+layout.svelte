@@ -19,7 +19,7 @@
 	import { authState, startAuthSynchronization } from './_shared/authState';
 	import { fetchCurrentSession, logout } from './_shared/auth';
 	import { API_DOCS_PATH } from './_shared/base';
-	import { collections } from '$lib/workspace/collections';
+	import { workspaces } from '$lib/workspace/workspaces';
 	import { errorMessage } from './_shared/api';
 	import { language, t } from './_shared/i18n';
 	import ResearchAgentLauncher from './_shared/ResearchAgentLauncher.svelte';
@@ -54,7 +54,7 @@
 		.slice(0, 1)
 		.toUpperCase();
 	$: if (browser && $authState.status === 'anonymous' && !isAuthRoute) {
-		collections.set([]);
+		workspaces.set([]);
 		void goto(resolve('/login'), { replaceState: true });
 	}
 
@@ -155,12 +155,12 @@
 		}
 	});
 
-	$: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
-	$: isCollectionRoute = Boolean(collectionRouteMatch);
-	$: isFeedbackRoute = /^\/collections\/[^/]+\/feedback(?:\/|$)/.test($page.url.pathname);
-	$: headerCollectionId = collectionRouteMatch?.[1] ? decodeRoutePart(collectionRouteMatch[1]) : '';
-	$: headerCollection = $collections.find((item) => item.collection_id === headerCollectionId);
-	$: headerCollectionName = headerCollection?.name || headerCollectionId;
+	$: workspaceRouteMatch = /^\/workspaces\/([^/]+)/.exec($page.url.pathname);
+	$: isWorkspaceRoute = Boolean(workspaceRouteMatch);
+	$: isFeedbackRoute = /^\/workspaces\/[^/]+\/feedback(?:\/|$)/.test($page.url.pathname);
+	$: headerWorkspaceId = workspaceRouteMatch?.[1] ? decodeRoutePart(workspaceRouteMatch[1]) : '';
+	$: headerWorkspace = $workspaces.find((item) => item.workspace_id === headerWorkspaceId);
+	$: headerWorkspaceName = headerWorkspace?.name || headerWorkspaceId;
 </script>
 
 <div
@@ -168,7 +168,7 @@
 	class:app-shell--feedback={isFeedbackRoute}
 	class:app-shell--login={isAuthRoute}
 >
-	<header class="site-header" class:site-header--collection={isCollectionRoute}>
+	<header class="site-header" class:site-header--workspace={isWorkspaceRoute}>
 		<div class="header-left">
 			<a class="brand" href={resolve('/')}>
 				<img class="brand-logo" src="/lens-mark-a2.svg" alt="" />
@@ -187,18 +187,18 @@
 				</div>
 			</a>
 
-			{#if isCollectionRoute}
+			{#if isWorkspaceRoute}
 				<nav class="header-breadcrumb" aria-label={$t('header.breadcrumbLabel')}>
-					<a href={resolve('/')}>{$t('header.breadcrumbCollection')}</a>
+					<a href={resolve('/')}>{$t('header.breadcrumbWorkspace')}</a>
 					<span aria-hidden="true">/</span>
-					<span class="header-breadcrumb__current">{headerCollectionName}</span>
+					<span class="header-breadcrumb__current">{headerWorkspaceName}</span>
 				</nav>
 			{/if}
 		</div>
 
 		<div class="header-actions">
 			{#if authenticatedUser}
-				<ResearchAgentLauncher collectionId={headerCollectionId} />
+				<ResearchAgentLauncher workspaceId={headerWorkspaceId} />
 				<div class="session-menu" bind:this={sessionMenu}>
 					<button
 						class="session-trigger"

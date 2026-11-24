@@ -8,7 +8,7 @@ from domain.core.document_profile import (
     DocumentProfile,
     DocumentProfileSummary,
     ProfileStatus,
-    summarize_document_profile_collection,
+    summarize_document_profile_workspace,
 )
 from domain.core.finding import (
     FINDING_ASSERTION_STRENGTHS,
@@ -163,5 +163,5 @@ __all__ = [
     "build_research_objective_id",
     "is_question_shaped_objective",
     "normalize_objective_terms",
-    "summarize_document_profile_collection",
+    "summarize_document_profile_workspace",
 ]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from application.core.objectives import objective_authoring_service
 from application.core.objectives import analysis_service as objective_analysis_service
 from repositories.objective_repository import ObjectiveRepo
@@ -69,7 +69,7 @@ class ConfirmObjectiveCapability:
     ) -> ChatToolResult:
         try:
             objective = await objective_authoring_service.confirm_objective(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 user_id=context.user_id,
                 objective_id=arguments.objective_id,
             )
@@ -94,7 +94,7 @@ class ConfirmObjectiveCapability:
                     resource_type="research_objective",
                     resource_id=objective.objective_id,
                     href=(
-                        f"/collections/{context.collection_id}/objectives/"
+                        f"/workspaces/{context.workspace_id}/objectives/"
                         f"{objective.objective_id}"
                     ),
                 ),
@@ -109,7 +109,7 @@ class StartObjectiveAnalysisCapability:
             "Queue the canonical Source-grounded analysis for one already confirmed "
             "research question and exact paper scope. This write requires explicit "
             "user approval. It uses the same analysis service and state as the "
-            "collection workspace and returns immediately after scheduling."
+            "workspace workspace and returns immediately after scheduling."
         ),
         risk=ToolRisk.WRITE,
         input_model=StartObjectiveAnalysisToolRequest,
@@ -121,12 +121,12 @@ class StartObjectiveAnalysisCapability:
         context: CapabilityExecutionContext,
         arguments: StartObjectiveAnalysisToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         objective = await ObjectiveRepo.read_objective(
-            context.collection_id,
+            context.workspace_id,
             arguments.objective_id,
         )
         if objective is None:
@@ -134,7 +134,7 @@ class StartObjectiveAnalysisCapability:
                 tool_call_id=context.tool_call_id,
                 status=ToolResultStatus.FAILED,
                 error_code="objective_not_found",
-                error_message="The research Objective was not found in this collection. Inspect the current Objectives before starting analysis.",
+                error_message="The research Objective was not found in this workspace. Inspect the current Objectives before starting analysis.",
             )
         if objective.confirmation_status != "confirmed":
             return ChatToolResult(
@@ -144,14 +144,14 @@ class StartObjectiveAnalysisCapability:
                 error_message="Confirm the research Objective before starting analysis.",
             )
         payload = await objective_analysis_service.start_objective_analysis(
-            context.collection_id,
+            context.workspace_id,
             arguments.objective_id,
             tuple(arguments.document_ids),
             user_id=context.user_id,
         )
         projection = _project_analysis(payload)
         status = projection["analysis"]["status"]
-        ref = _analysis_ref(context.collection_id, arguments.objective_id, projection)
+        ref = _analysis_ref(context.workspace_id, arguments.objective_id, projection)
         if status == "failed":
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
@@ -196,12 +196,12 @@ class InspectObjectiveAnalysisCapability:
         context: CapabilityExecutionContext,
         arguments: InspectObjectiveAnalysisToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         payload = await objective_analysis_service.get_analysis_state(
-            context.collection_id, arguments.objective_id, user_id=context.user_id
+            context.workspace_id, arguments.objective_id, user_id=context.user_id
         )
         projection = _project_analysis(payload)
         return ChatToolResult(
@@ -210,7 +210,7 @@ class InspectObjectiveAnalysisCapability:
             data=projection,
             resource_refs=(
                 _analysis_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     arguments.objective_id,
                     projection,
                 ),
@@ -238,12 +238,12 @@ class AssessObjectiveQualityCapability:
         context: CapabilityExecutionContext,
         arguments: AssessObjectiveQualityToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         payload = await objective_analysis_service.get_analysis_state(
-            context.collection_id, arguments.objective_id, user_id=context.user_id
+            context.workspace_id, arguments.objective_id, user_id=context.user_id
         )
         published = payload.get("published_analysis")
         active = payload.get("analysis")
@@ -321,7 +321,7 @@ class AssessObjectiveQualityCapability:
                     f"{item.get('source_ref', '')}"
                 ),
                 href=(
-                    f"/collections/{context.collection_id}/documents/"
+                    f"/workspaces/{context.workspace_id}/documents/"
                     f"{item.get('document_id', '')}?"
                     + urlencode(
                         {
@@ -388,7 +388,7 @@ class AssessObjectiveQualityCapability:
                         else arguments.objective_id
                     ),
                     href=(
-                        f"/collections/{context.collection_id}/objectives/"
+                        f"/workspaces/{context.workspace_id}/objectives/"
                         f"{arguments.objective_id}"
                     ),
                 ),
@@ -457,7 +457,7 @@ def _quality_gap_summary(item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _analysis_ref(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     projection: dict[str, Any],
 ) -> ChatResourceRef:
@@ -467,7 +467,7 @@ def _analysis_ref(
         resource_id=(
             f"{objective_id}:{version}" if version is not None else objective_id
         ),
-        href=f"/collections/{collection_id}/objectives/{objective_id}",
+        href=f"/workspaces/{workspace_id}/objectives/{objective_id}",
     )
 
 

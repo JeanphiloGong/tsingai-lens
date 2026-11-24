@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from domain.core.document_profile import DocumentProfile
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import (
+from infra.persistence.postgres.models.workspace import (
     DocumentORM,
     DocumentPreparationORM,
 )
@@ -19,7 +19,7 @@ from sqlalchemy import select
 class DocumentProfileRepository:
     async def replace(
         self,
-        collection_id: str,
+        workspace_id: str,
         profile: DocumentProfile,
         *,
         db: AsyncSession | None = None,
@@ -38,9 +38,9 @@ class DocumentProfileRepository:
         }
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             document = await db.get(DocumentORM, profile.document_id)
-            if document is None or document.collection_id != collection_id:
+            if document is None or document.workspace_id != workspace_id:
                 raise FileNotFoundError(
-                    f"collection document not found: {collection_id}/{profile.document_id}"
+                    f"workspace document not found: {workspace_id}/{profile.document_id}"
                 )
             row = await db.get(DocumentPreparationORM, profile.document_id)
             if row is None:
@@ -60,7 +60,7 @@ class DocumentProfileRepository:
 
     async def read(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
     ) -> DocumentProfile | None:
         async with AsyncSessionLocal() as db:
@@ -72,7 +72,7 @@ class DocumentProfileRepository:
                 )
                 .where(
                     DocumentPreparationORM.document_id == document_id,
-                    DocumentORM.collection_id == collection_id,
+                    DocumentORM.workspace_id == workspace_id,
                 )
             )
             if row is None or not row.profile_json:
@@ -92,9 +92,9 @@ class DocumentProfileRepository:
             )
             return profile
 
-    async def list_collection(
+    async def list_workspace(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_ids: tuple[str, ...] | None = None,
     ) -> tuple[DocumentProfile, ...]:
         if document_ids == ():
@@ -106,7 +106,7 @@ class DocumentProfileRepository:
                     DocumentORM,
                     DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
-                .where(DocumentORM.collection_id == collection_id)
+                .where(DocumentORM.workspace_id == workspace_id)
             )
             if document_ids is not None:
                 statement = statement.where(

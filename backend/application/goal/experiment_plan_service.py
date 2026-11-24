@@ -11,7 +11,7 @@ from application.goal.protocol_contract import (
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.goal import ExperimentPlanRecord, ExperimentPlanStatus
 from exceptions import (
     RequestInvalidException,
@@ -23,15 +23,15 @@ _HISTORICAL_REVIEW_GATE = "reviewed_findings"
 
 
 class ExperimentPlanNotFoundError(ResourceNotFoundException):
-    def __init__(self, collection_id: str, objective_id: str, plan_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, objective_id: str, plan_id: str) -> None:
+        self.workspace_id = workspace_id
         self.objective_id = objective_id
         self.plan_id = plan_id
         super().__init__(
             f"experiment plan not found: {plan_id}",
             data={
                 "code": "experiment_plan_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "plan_id": plan_id,
             },
@@ -43,24 +43,24 @@ from repositories.experiment_plan_repository import ExperimentPlanRepo
 
 async def create_plan(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     title: str,
     content: str,
     structured_plan: Mapping[str, Any] | None = None,
     created_by: str,
 ) -> ExperimentPlanRecord:
-    await collection_service.get_collection_for_user(collection_id, created_by)
+    await workspace_service.get_workspace_for_user(workspace_id, created_by)
     now = _now_iso()
     plan = ExperimentPlanRecord(
         plan_id=_plan_id(
-            collection_id,
+            workspace_id,
             objective_id,
             title,
             content,
             now,
         ),
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         title=title,
         content=content,
@@ -79,7 +79,7 @@ async def create_plan(
 
 async def create_agent_plan(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     title: str,
     content: str,
@@ -91,7 +91,7 @@ async def create_agent_plan(
 ) -> ExperimentPlanRecord:
     """Persist one approved plan draft against current Finding snapshots."""
 
-    await collection_service.get_collection_for_user(collection_id, created_by)
+    await workspace_service.get_workspace_for_user(workspace_id, created_by)
     if not created_by.strip():
         raise RequestInvalidException(
             "research plan requires an authenticated creator",
@@ -127,7 +127,7 @@ async def create_agent_plan(
             data={"code": "experiment_plan_invalid"},
         )
     validity, reasons = await finding_snapshot_service.source_snapshot_validity(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         source_findings=source_findings,
     )
@@ -141,14 +141,14 @@ async def create_agent_plan(
     now = _now_iso()
     plan = ExperimentPlanRecord(
         plan_id=_plan_id(
-            collection_id,
+            workspace_id,
             objective_id,
             title,
             content,
             created_by_tool_call_id,
             now,
         ),
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         title=title,
         content=content,
@@ -173,13 +173,13 @@ async def create_agent_plan(
 
 
 async def list_plans(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
 ) -> tuple[ExperimentPlanRecord, ...]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    plans = await ExperimentPlanRepo.list_plans(collection_id, objective_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    plans = await ExperimentPlanRepo.list_plans(workspace_id, objective_id)
     result: list[ExperimentPlanRecord] = []
     for plan in plans:
         result.append(
@@ -191,22 +191,22 @@ async def list_plans(
 
 
 async def read_plan(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     plan_id: str,
     *,
     user_id: str,
 ) -> ExperimentPlanRecord:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    plan = await ExperimentPlanRepo.read_plan(collection_id, objective_id, plan_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    plan = await ExperimentPlanRepo.read_plan(workspace_id, objective_id, plan_id)
     if plan is None:
-        raise ExperimentPlanNotFoundError(collection_id, objective_id, plan_id)
+        raise ExperimentPlanNotFoundError(workspace_id, objective_id, plan_id)
     return await _with_source_validity(plan) if _is_source_grounded_plan(plan) else plan
 
 
 async def update_plan(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     plan_id: str,
     title: str | None = None,
@@ -218,10 +218,10 @@ async def update_plan(
     source_findings: list[Mapping[str, Any]] | None = None,
     updated_by_tool_call_id: str | None = None,
 ) -> ExperimentPlanRecord:
-    await collection_service.get_collection_for_user(collection_id, updated_by)
-    plan = await ExperimentPlanRepo.read_plan(collection_id, objective_id, plan_id)
+    await workspace_service.get_workspace_for_user(workspace_id, updated_by)
+    plan = await ExperimentPlanRepo.read_plan(workspace_id, objective_id, plan_id)
     if plan is None:
-        raise ExperimentPlanNotFoundError(collection_id, objective_id, plan_id)
+        raise ExperimentPlanNotFoundError(workspace_id, objective_id, plan_id)
     title = plan.title if title is None else title
     content = plan.content if content is None else content
     status = plan.status if status is None else status
@@ -263,7 +263,7 @@ async def update_plan(
                 data={"code": "experiment_plan_invalid"},
             )
         validity, reasons = await finding_snapshot_service.source_snapshot_validity(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             source_findings=source_findings,
         )
@@ -341,7 +341,7 @@ async def _with_source_validity(
             if isinstance(item, dict)
         )
         validity, reasons = await finding_snapshot_service.source_snapshot_validity(
-            collection_id=plan.collection_id,
+            workspace_id=plan.workspace_id,
             objective_id=plan.objective_id,
             source_findings=source_findings,
         )

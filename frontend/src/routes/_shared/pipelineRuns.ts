@@ -27,7 +27,7 @@ export type PipelineRunSummary = {
 };
 
 export type PipelineRun = PipelineRunSummary & {
-	collection_id: string;
+	workspace_id: string;
 	mode: string;
 	input_fingerprint: string | null;
 	nodes: Record<string, unknown>;
@@ -40,7 +40,7 @@ export type PipelineRun = PipelineRunSummary & {
 };
 
 export type PipelineRunListResponse = {
-	collection_id: string;
+	workspace_id: string;
 	count: number;
 	items: PipelineRunSummary[];
 };
@@ -55,24 +55,24 @@ export function isPipelineRunFinished(run: PipelineRunSummary | null | undefined
 	return run.status === 'completed' || run.status === 'partial_success' || run.status === 'failed';
 }
 
-export async function prepareCollectionDocument(collectionId: string, documentId: string) {
+export async function prepareWorkspaceDocument(workspaceId: string, documentId: string) {
 	const data = await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/preparation`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/preparation`,
 		{
 			method: 'POST'
 		}
 	);
 
 	const run = data as PipelineRun;
-	if (run.collection_id !== collectionId || run.scope_id !== documentId) {
+	if (run.workspace_id !== workspaceId || run.scope_id !== documentId) {
 		throw new Error('PipelineRun response does not match the requested document.');
 	}
 	return run;
 }
 
-export async function formCollectionResearchQuestions(collectionId: string, documentIds: string[]) {
+export async function formWorkspaceResearchQuestions(workspaceId: string, documentIds: string[]) {
 	const data = await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/objective-discovery`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/objective-discovery`,
 		{
 			method: 'POST',
 			body: JSON.stringify({ document_ids: documentIds })
@@ -80,8 +80,8 @@ export async function formCollectionResearchQuestions(collectionId: string, docu
 	);
 
 	const run = data as PipelineRun;
-	if (run.collection_id !== collectionId) {
-		throw new Error('PipelineRun response does not match collection_id.');
+	if (run.workspace_id !== workspaceId) {
+		throw new Error('PipelineRun response does not match workspace_id.');
 	}
 	return run;
 }
@@ -95,8 +95,8 @@ export async function getPipelineRun(runId: string) {
 	return run;
 }
 
-export async function listCollectionPipelineRuns(
-	collectionId: string,
+export async function listWorkspacePipelineRuns(
+	workspaceId: string,
 	options: { status?: string; limit?: number; offset?: number } = {}
 ) {
 	const params = new URLSearchParams();
@@ -105,13 +105,13 @@ export async function listCollectionPipelineRuns(
 	params.set('offset', String(options.offset ?? 0));
 
 	const data = await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/pipeline-runs?${params.toString()}`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs?${params.toString()}`,
 		{ method: 'GET' }
 	);
 
 	const record = data as PipelineRunListResponse;
-	if (record.collection_id !== collectionId) {
-		throw new Error('PipelineRun list response does not match collection_id.');
+	if (record.workspace_id !== workspaceId) {
+		throw new Error('PipelineRun list response does not match workspace_id.');
 	}
 	return record;
 }

@@ -58,14 +58,14 @@ test('real administrator saves/tests/enables a model, researcher uses it and los
 	expect(Object.keys(catalog[0]).sort()).toEqual(['connection_id', 'display_name', 'model']);
 	const created = (
 		await (
-			await researcher.request.post('/api/v1/collections', {
+			await researcher.request.post('/api/v1/workspaces', {
 				data: { name: 'Synthetic model tutorial' }
 			})
 		).json()
 	).data;
-	const collectionID = created.collection_id;
-	expect(collectionID).toBeTruthy();
-	await researcher.goto(`/collections/${collectionID}/assistant`);
+	const workspaceID = created.workspace_id;
+	expect(workspaceID).toBeTruthy();
+	await researcher.goto(`/workspaces/${workspaceID}/assistant`);
 	await expect(researcher.getByTestId('model-connection-picker')).toContainText(
 		'Tutorial local model'
 	);
@@ -73,7 +73,7 @@ test('real administrator saves/tests/enables a model, researcher uses it and los
 	const session = (
 		await (
 			await researcher.request.post('/api/v1/conversations', {
-				data: { collection_id: collectionID }
+				data: { workspace_id: workspaceID }
 			})
 		).json()
 	).data;

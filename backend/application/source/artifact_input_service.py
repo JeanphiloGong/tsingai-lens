@@ -17,12 +17,12 @@ from repositories.source_artifact_repository import SourceArtifactRepository
 SourceRecord = dict[str, Any]
 
 
-async def load_collection_inputs(
-    collection_id: str,
+async def load_workspace_inputs(
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[tuple[SourceRecord, ...], tuple[SourceRecord, ...] | None]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository
+        workspace_id, source_artifact_repository
     )
     documents = tuple(
         source_document_payload(document) for document in source_documents
@@ -36,11 +36,11 @@ async def load_collection_inputs(
 
 
 async def load_blocks_artifact(
-    collection_id: str,
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository
+        workspace_id, source_artifact_repository
     )
     return tuple(
         source_block_payload(block)
@@ -50,11 +50,11 @@ async def load_blocks_artifact(
 
 
 async def load_table_rows_artifact(
-    collection_id: str,
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository
+        workspace_id, source_artifact_repository
     )
     return tuple(
         source_table_row_payload(row)
@@ -64,11 +64,11 @@ async def load_table_rows_artifact(
 
 
 async def load_table_cells_artifact(
-    collection_id: str,
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository
+        workspace_id, source_artifact_repository
     )
     return tuple(
         source_table_cell_payload(cell)
@@ -78,21 +78,21 @@ async def load_table_cells_artifact(
 
 
 async def load_figures_artifact(
-    collection_id: str,
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     return tuple(
         source_figure_payload(figure)
-        for figure in await source_artifact_repository.list_figures(collection_id)
+        for figure in await source_artifact_repository.list_figures(workspace_id)
     )
 
 
 async def load_tables_artifact(
-    collection_id: str,
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
-        collection_id, source_artifact_repository
+        workspace_id, source_artifact_repository
     )
     return tuple(
         source_table_payload(table)
@@ -102,12 +102,12 @@ async def load_tables_artifact(
 
 
 async def _load_source_documents(
-    collection_id: str,
+    workspace_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceDocument, ...]:
-    documents = await source_artifact_repository.read_collection_documents(
-        collection_id
+    documents = await source_artifact_repository.read_workspace_documents(
+        workspace_id
     )
     if not documents:
-        raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
+        raise FileNotFoundError(f"source artifacts not ready: {workspace_id}")
     return documents

@@ -8,7 +8,7 @@ from application.chat import AgentRunLimits, CapabilityRegistry
 from application.chat import session_service
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
-    BrowseCollectionPapersCapability,
+    BrowseWorkspacePapersCapability,
     ConfirmObjectiveCapability,
     CreateFindingDraftCapability,
     CreateFindingVersionCapability,
@@ -17,7 +17,7 @@ from application.chat.capabilities import (
     CreateResearchPlanCapability,
     CurateFindingCapability,
     DeriveObjectiveCapability,
-    GetCollectionContextCapability,
+    GetWorkspaceContextCapability,
     InspectDocumentSourcesCapability,
     InspectObjectiveAnalysisCapability,
     InspectPublishedFindingCapability,
@@ -41,7 +41,7 @@ from infra.persistence.database import (
     build_database_engine,
 )
 from infra.persistence import database
-from infra.persistence.file import collection_workspace, object_store
+from infra.persistence.file import workspace_files, object_store
 
 from config import DATA_DIR
 from controllers import feedback_case_routes as feedback_cases
@@ -59,7 +59,7 @@ from controllers.exception_router import (
 from controllers.feedback import feedback_dataset_routes as task_datasets
 from controllers.goal import experiment_plan_routes as experiment_plans
 from controllers.goal import goal_routes as goals
-from controllers.source import collection_routes as collections
+from controllers.source import workspace_routes as workspaces
 from controllers.source import pipeline_run_routes as pipeline_runs
 from controllers.source import reference_routes as references
 from conversation.controllers.routes import conversation_error_handler, conversation_router
@@ -162,11 +162,9 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
         cleanup.push_async_callback(database_engine.dispose)
         database.engine = database_engine
         database.AsyncSessionLocal.configure(bind=database_engine)
-        collection_workspace.Workspace = collection_workspace.FileCollectionWorkspace(
-            DATA_DIR / "collections"
-        )
+        workspace_files.Workspace = workspace_files.FileWorkspace(DATA_DIR / "workspaces")
         object_store.Store = object_store.FileObjectStore(
-            collection_workspace.Workspace.root_dir
+            workspace_files.Workspace.root_dir
         )
         from infra.llm.model_credentials import decrypt_api_key, load_master_key
         from infra.persistence.postgres.models.model_connection import ModelConnectionORM
@@ -186,8 +184,8 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
             limits=_parse_agent_run_limits(),
             capabilities=CapabilityRegistry(
                 (
-                    GetCollectionContextCapability(),
-                    BrowseCollectionPapersCapability(),
+                    GetWorkspaceContextCapability(),
+                    BrowseWorkspacePapersCapability(),
                     InspectDocumentSourcesCapability(),
                     SearchSourcesCapability(),
                     InspectTableCapability(),
@@ -301,7 +299,7 @@ def register_routes(app: FastAPI) -> None:
     """Register the public Lens API routers."""
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    app.include_router(collections.collection_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(workspaces.workspace_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(references.reference_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.goal_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(

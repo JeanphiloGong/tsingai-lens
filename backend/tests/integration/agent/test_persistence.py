@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 
 from agent.repositories.task_repository import (
@@ -21,8 +21,8 @@ async def test_task_checkpoint_and_bundle_persist_atomically(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="agent-v2-workspace",
+            WorkspaceORM(
+                workspace_id="agent-v2-workspace",
                 owner_user_id=owner["user_id"],
                 name="Agent V2",
                 status="idle",

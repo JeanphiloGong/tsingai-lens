@@ -11,7 +11,7 @@ from domain.chat.resource_ref import ChatResourceRef
 @dataclass(frozen=True)
 class ChatSourceContext:
     resource_ref: ChatResourceRef
-    collection_id: str
+    workspace_id: str
     document_id: str
     document_title: str
     source_kind: str
@@ -33,7 +33,7 @@ class ChatSourceContext:
         if self.resource_ref.href is not None:
             parsed = urlsplit(self.resource_ref.href)
             expected_path = (
-                f"/collections/{self.collection_id}/documents/{self.document_id}"
+                f"/workspaces/{self.workspace_id}/documents/{self.document_id}"
             )
             if parsed.scheme or parsed.netloc or parsed.path != expected_path:
                 raise ValueError("source context href does not match its document")

@@ -30,7 +30,7 @@ class ExperimentPlanRepository:
             if row is not None:
                 existing = ExperimentPlanRecord(
                     plan_id=row.plan_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     objective_id=row.objective_id,
                     title=row.title,
                     content=row.content,
@@ -58,7 +58,7 @@ class ExperimentPlanRepository:
                 )
             row = ObjectiveExperimentPlanORM(
                 plan_id=plan.plan_id,
-                collection_id=plan.collection_id,
+                workspace_id=plan.workspace_id,
                 objective_id=plan.objective_id,
                 title=plan.title,
                 content=plan.content,
@@ -78,7 +78,7 @@ class ExperimentPlanRepository:
             await db.flush()
             return ExperimentPlanRecord(
                 plan_id=row.plan_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 objective_id=row.objective_id,
                 title=row.title,
                 content=row.content,
@@ -137,7 +137,7 @@ class ExperimentPlanRepository:
             await _validate_source_message(db, plan)
             row = ObjectiveExperimentPlanORM(
                 plan_id=plan.plan_id,
-                collection_id=plan.collection_id,
+                workspace_id=plan.workspace_id,
                 objective_id=plan.objective_id,
                 title=plan.title,
                 content=plan.content,
@@ -171,7 +171,7 @@ class ExperimentPlanRepository:
                 raise
             return ExperimentPlanRecord(
                 plan_id=row.plan_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 objective_id=row.objective_id,
                 title=row.title,
                 content=row.content,
@@ -190,7 +190,7 @@ class ExperimentPlanRepository:
 
     async def read_plan(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         plan_id: str,
     ) -> ExperimentPlanRecord | None:
@@ -198,7 +198,7 @@ class ExperimentPlanRepository:
             row = await db.scalar(
                 select(ObjectiveExperimentPlanORM).where(
                     ObjectiveExperimentPlanORM.plan_id == plan_id,
-                    ObjectiveExperimentPlanORM.collection_id == collection_id,
+                    ObjectiveExperimentPlanORM.workspace_id == workspace_id,
                     ObjectiveExperimentPlanORM.objective_id == objective_id,
                 )
             )
@@ -206,7 +206,7 @@ class ExperimentPlanRepository:
                 return None
             return ExperimentPlanRecord(
                 plan_id=row.plan_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 objective_id=row.objective_id,
                 title=row.title,
                 content=row.content,
@@ -225,14 +225,14 @@ class ExperimentPlanRepository:
 
     async def list_plans(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
                 select(ObjectiveExperimentPlanORM)
                 .where(
-                    ObjectiveExperimentPlanORM.collection_id == collection_id,
+                    ObjectiveExperimentPlanORM.workspace_id == workspace_id,
                     ObjectiveExperimentPlanORM.objective_id == objective_id,
                 )
                 .order_by(
@@ -244,7 +244,7 @@ class ExperimentPlanRepository:
             records = tuple(
                 ExperimentPlanRecord(
                     plan_id=row.plan_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     objective_id=row.objective_id,
                     title=row.title,
                     content=row.content,
@@ -284,8 +284,8 @@ async def _validate_source_message(
         if message is not None
         else None
     )
-    if message is None or chat is None or chat.workspace_id != plan.collection_id:
-        raise ValueError("historical source message must belong to the plan collection")
+    if message is None or chat is None or chat.workspace_id != plan.workspace_id:
+        raise ValueError("historical source message must belong to the plan workspace")
 
 
 def _validate_successor(
@@ -294,7 +294,7 @@ def _validate_successor(
 ) -> None:
     if (
         successor.parent_plan_id != parent.plan_id
-        or successor.collection_id != parent.collection_id
+        or successor.workspace_id != parent.workspace_id
         or successor.objective_id != parent.objective_id
         or successor.plan_version != parent.plan_version + 1
         or successor.created_by != parent.created_by

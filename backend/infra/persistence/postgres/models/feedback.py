@@ -48,9 +48,9 @@ class FeedbackAnalysisResultORM(Base):
         nullable=False,
         index=True,
     )
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -122,9 +122,9 @@ class FeedbackSignalAnalysisResultORM(Base):
         nullable=False,
         index=True,
     )
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -190,8 +190,8 @@ class ToolFailureAnalysisResultORM(Base):
         String(128), ForeignKey("chat_conversations.conversation_id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
-    collection_id: Mapped[str] = mapped_column(
-        String(64), ForeignKey("collections.collection_id", ondelete="CASCADE"),
+    workspace_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
     tool_call_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
@@ -233,17 +233,17 @@ class FeedbackCaseORM(Base):
             "session_id", "anchor_message_id", name="uq_feedback_cases_session_anchor"
         ),
         Index(
-            "ix_feedback_cases_collection_status",
-            "collection_id",
+            "ix_feedback_cases_workspace_status",
+            "workspace_id",
             "status",
             "created_at",
         ),
     )
 
     case_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -407,7 +407,7 @@ class FeedbackDatasetSnapshotORM(Base):
             "manifest_digest",
             name="uq_feedback_dataset_owner_manifest",
         ),
-        Index("ix_feedback_dataset_collection_created", "collection_id", "created_at"),
+        Index("ix_feedback_dataset_workspace_created", "workspace_id", "created_at"),
     )
 
     dataset_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -416,9 +416,9 @@ class FeedbackDatasetSnapshotORM(Base):
         nullable=False,
         index=True,
     )
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

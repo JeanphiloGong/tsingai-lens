@@ -15,11 +15,11 @@ from domain.core.paper_experiment import (
     ReportedInterpretation,
     SourceReference,
 )
-from domain.source import Collection, Document
+from domain.source import Workspace, Document
 from infra.persistence import database
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
     StoredDocument,
 )
 from repositories.paper_experiment_repository import (
@@ -39,21 +39,21 @@ NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 @pytest.fixture
 async def paper_experiment_repository(postgres_session_factory):
-    collections = CollectionRepository()
-    collection = StoredCollection(
-        collection=Collection(
-            collection_id="experiment-collection",
+    workspaces = WorkspaceRepository()
+    workspace = StoredWorkspace(
+        workspace=Workspace(
+            workspace_id="experiment-workspace",
             owner_user_id="experiment-owner",
-            name="Experiment collection",
+            name="Experiment workspace",
             description=None,
             status="idle",
         ),
         created_at=NOW.isoformat(),
         updated_at=NOW.isoformat(),
     )
-    await collections.add_collection(collection)
-    await collections.add_documents(
-        collection.collection.collection_id,
+    await workspaces.add_workspace(workspace)
+    await workspaces.add_documents(
+        workspace.workspace.workspace_id,
         (
             StoredDocument(
                 document=Document(
@@ -65,7 +65,7 @@ async def paper_experiment_repository(postgres_session_factory):
                     size_bytes=10,
                 ),
                 stored_filename="paper.pdf",
-                storage_key="experiment-collection/paper.pdf",
+                storage_key="experiment-workspace/paper.pdf",
                 created_at=NOW.isoformat(),
                 updated_at=NOW.isoformat(),
             ),

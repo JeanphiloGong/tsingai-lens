@@ -40,7 +40,7 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopePreview,
     screen_objective_scope,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core import (
     InspectedObjectiveSourceRef,
     PaperContribution,
@@ -168,7 +168,7 @@ def _draft_measurements(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], 
 
 def _build_contribution_for_extraction(
     *,
-    collection_id: str,
+    workspace_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
     frame: PaperAnalysisFrame | None,
@@ -308,7 +308,7 @@ def _build_contribution_for_extraction(
         )
     )
     return PaperContribution(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective.objective_id,
         analysis_version=analysis.analysis_version,
         document_id=document_id,
@@ -351,13 +351,13 @@ def _build_contribution_for_extraction(
 
 def _failed_document_contribution(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     document_id: str,
 ) -> PaperContribution:
     return PaperContribution(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         document_id=document_id,
@@ -407,29 +407,29 @@ class DocumentExperimentArtifacts:
 class ResearchObjectiveNotFoundError(ResourceNotFoundException):
     """Raised when one persisted research objective cannot be found."""
 
-    def __init__(self, collection_id: str, objective_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, objective_id: str) -> None:
+        self.workspace_id = workspace_id
         self.objective_id = objective_id
         super().__init__(
-            f"research objective not found: {collection_id}/{objective_id}",
+            f"research objective not found: {workspace_id}/{objective_id}",
             data={
                 "code": "research_objective_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
             },
         )
 
 
 class ObjectiveScopeNotReadyError(ResourceConflictException):
-    """Raised when no collection Paper Maps are available for scope screening."""
+    """Raised when no workspace Paper Maps are available for scope screening."""
 
-    def __init__(self, collection_id: str, objective_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, objective_id: str) -> None:
+        self.workspace_id = workspace_id
         super().__init__(
-            f"objective paper scope not ready: {collection_id}",
+            f"objective paper scope not ready: {workspace_id}",
             data={
                 "code": "objective_scope_not_ready",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
             },
         )
@@ -441,28 +441,28 @@ from repositories.paper_map_repository import PaperMapRepo
 
 
 async def preview_objective_scope(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
 ) -> ObjectiveScopePreview:
-    """Screen every current collection Paper Map for one persisted Objective."""
+    """Screen every current workspace Paper Map for one persisted Objective."""
 
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     objective = await ObjectiveRepo.read_objective(
-        collection_id,
+        workspace_id,
         objective_id,
     )
     if objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
-    paper_maps = await PaperMapRepo.list_collection(collection_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
+    paper_maps = await PaperMapRepo.list_workspace(workspace_id)
     if not paper_maps:
-        raise ObjectiveScopeNotReadyError(collection_id, objective_id)
+        raise ObjectiveScopeNotReadyError(workspace_id, objective_id)
     return screen_objective_scope(paper_maps, objective=objective)
 
 
 async def generate_experiment_analysis_artifacts(
-    collection_id: str,
+    workspace_id: str,
     analysis: ObjectiveAnalysis,
     progress_callback: ProgressCallback | None = None,
     *,
@@ -472,17 +472,17 @@ async def generate_experiment_analysis_artifacts(
     paper_experiment_extractor: PaperExperimentExtractor,
     paper_map_extractor: PaperResearchMapExtractor,
 ) -> ObjectiveExperimentAnalysisArtifacts:
-    if analysis.collection_id != collection_id:
-        raise ValueError("analysis belongs to another collection")
+    if analysis.workspace_id != workspace_id:
+        raise ValueError("analysis belongs to another workspace")
     active_objective = await ObjectiveRepo.read_objective(
-        collection_id, analysis.objective_id
+        workspace_id, analysis.objective_id
     )
     if active_objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, analysis.objective_id)
     if active_objective.active_analysis_version != analysis.analysis_version:
         raise ValueError("analysis is not the active objective version")
     objective_inputs = await _build_objective_analysis_inputs(
-        collection_id,
+        workspace_id,
         job=job,
         document_inputs=analysis.document_inputs,
         paper_map_extractor=paper_map_extractor,
@@ -520,7 +520,7 @@ async def generate_experiment_analysis_artifacts(
         document_input: PreparedDocumentInput,
     ) -> DocumentExperimentArtifacts:
         document_objective_inputs = _objective_inputs_for_document(
-            collection_id,
+            workspace_id,
             objective_inputs,
             document_input.document_id,
         )
@@ -549,7 +549,7 @@ async def generate_experiment_analysis_artifacts(
                 read_task = asyncio.create_task(
                     to_thread(
                         _reconstruct_document_experiments,
-                        collection_id=collection_id,
+                        workspace_id=workspace_id,
                         analysis=analysis,
                         objective=active_objective,
                         objective_inputs=document_objective_inputs,
@@ -567,22 +567,22 @@ async def generate_experiment_analysis_artifacts(
         except Exception as exc:  # noqa: BLE001
             record_analysis_failure(
                 exc,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective_id=active_objective.objective_id,
                 document_id=document_input.document_id,
                 stage="document_experiment_extraction",
             )
             logger.error(
                 "Objective document experiment extraction failed "
-                "collection_id=%s objective_id=%s document_id=%s error_type=%s",
-                collection_id,
+                "workspace_id=%s objective_id=%s document_id=%s error_type=%s",
+                workspace_id,
                 active_objective.objective_id,
                 document_input.document_id,
                 type(exc).__name__,
             )
             artifacts = DocumentExperimentArtifacts(
                 contribution=_failed_document_contribution(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     objective_id=active_objective.objective_id,
                     analysis_version=analysis.analysis_version,
                     document_id=document_input.document_id,
@@ -634,7 +634,7 @@ async def generate_experiment_analysis_artifacts(
 
 def _reconstruct_document_experiments(
     *,
-    collection_id: str,
+    workspace_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
     objective_inputs: ObjectiveAnalysisInputs,
@@ -644,7 +644,7 @@ def _reconstruct_document_experiments(
     paper_experiment_extractor: PaperExperimentExtractor,
 ) -> DocumentExperimentArtifacts:
     screened_sources = screen_sources(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         source_screener=source_screener,
         objectives=(objective,),
         paper_maps=objective_inputs["paper_maps"],
@@ -656,7 +656,7 @@ def _reconstruct_document_experiments(
         progress_callback=progress_callback,
     )
     source_inspection_routes = route_sources(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objectives=(objective,),
         objective_paper_frames=screened_sources,
         blocks_by_document_id=objective_inputs["blocks_by_document_id"],
@@ -737,7 +737,7 @@ def _reconstruct_document_experiments(
             for selection in _selection_slices(revision, objective)
         )
     contribution = _build_contribution_for_extraction(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         analysis=analysis,
         objective=objective,
         frame=frame,
@@ -760,7 +760,7 @@ def _reconstruct_document_experiments(
 
 
 def _objective_inputs_for_document(
-    collection_id: str,
+    workspace_id: str,
     objective_inputs: ObjectiveAnalysisInputs,
     document_id: str,
 ) -> ObjectiveAnalysisInputs:
@@ -775,7 +775,7 @@ def _objective_inputs_for_document(
         if item.document_id == document_id
     )
     if len(documents) != 1 or len(paper_maps) != 1:
-        raise ResearchObjectivesNotReadyError(collection_id)
+        raise ResearchObjectivesNotReadyError(workspace_id)
     return {
         "documents": documents,
         "paper_maps": paper_maps,
@@ -801,18 +801,18 @@ def _objective_inputs_for_document(
 
 
 async def _build_objective_analysis_inputs(
-    collection_id: str,
+    workspace_id: str,
     *,
     job: ObjectiveAnalysisJobSnapshot,
     document_inputs: tuple[PreparedDocumentInput, ...],
     paper_map_extractor: PaperResearchMapExtractor,
 ) -> ObjectiveAnalysisInputs:
     source_inputs = await objective_input_service.load_source_inputs(
-        collection_id,
+        workspace_id,
         document_inputs=document_inputs,
     )
     paper_maps = await objective_input_service.load_or_build_paper_maps(
-        collection_id,
+        workspace_id,
         document_inputs=document_inputs,
         source_inputs=source_inputs,
         paper_map_extractor=paper_map_extractor,
@@ -821,7 +821,7 @@ async def _build_objective_analysis_inputs(
         await ObjectiveRepo.lock_analysis_job(db, job)
         await ObjectiveRepo.check_analysis_inputs(db, job.analysis)
         for paper_map in paper_maps:
-            await PaperMapRepo.replace(collection_id, paper_map, db=db)
+            await PaperMapRepo.replace(workspace_id, paper_map, db=db)
     return {
         **source_inputs,
         "paper_maps": paper_maps,

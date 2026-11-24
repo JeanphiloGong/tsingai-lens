@@ -25,7 +25,7 @@ from application.feedback.dataset_snapshot_service import (
     DatasetSelection,
     jsonl_bytes_for_rows,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -42,7 +42,7 @@ from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
 from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.tool_failure import tool_failure_signal_id, tool_result_digest
-from domain.source import Collection
+from domain.source import Workspace
 
 
 from repositories.analysis_job_repository import (
@@ -52,9 +52,9 @@ from repositories.analysis_job_repository import (
     tool_failure_idempotency_key,
 )
 from repositories.chat_repository import ChatRepository
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
 )
 from repositories.dataset_snapshot_repository import (
     DatasetSnapshotRepository,
@@ -70,7 +70,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")
 
 NOW = "2026-09-24T10:00:00+00:00"
 USER_ID = "feedback-chain-user"
-COLLECTION_ID = "feedback-chain-collection"
+COLLECTION_ID = "feedback-chain-workspace"
 SESSION_ID = "feedback-chain-session"
 
 
@@ -81,13 +81,13 @@ def _current_iso() -> str:
 @pytest.fixture
 async def feedback_chain(postgres_session_factory, tmp_path):
 
-    collections = CollectionRepository()
-    await collections.add_collection(
-        StoredCollection(
-            collection=Collection(
-                collection_id=COLLECTION_ID,
+    workspaces = WorkspaceRepository()
+    await workspaces.add_workspace(
+        StoredWorkspace(
+            workspace=Workspace(
+                workspace_id=COLLECTION_ID,
                 owner_user_id=USER_ID,
-                name="Feedback chain collection",
+                name="Feedback chain workspace",
                 description="Persistent workbench integration fixture",
                 status="idle",
             ),
@@ -95,13 +95,13 @@ async def feedback_chain(postgres_session_factory, tmp_path):
             updated_at=NOW,
         )
     )
-    collection_service.CollectionRepo = collections
+    workspace_service.WorkspaceRepo = workspaces
 
     chat = ChatRepository()
     session = ChatSession.create(
         session_id=SESSION_ID,
         user_id=USER_ID,
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         created_at=NOW,
     )
     await chat.add_session(session)
@@ -110,9 +110,9 @@ async def feedback_chain(postgres_session_factory, tmp_path):
             resource_ref=ChatResourceRef(
                 resource_type="source",
                 resource_id="doc-a:source-a-results",
-                href="/collections/feedback-chain-collection/documents/doc-a",
+                href="/workspaces/feedback-chain-workspace/documents/doc-a",
             ),
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             document_id="doc-a",
             document_title="Paper A",
             source_kind="text_window",
@@ -126,9 +126,9 @@ async def feedback_chain(postgres_session_factory, tmp_path):
             resource_ref=ChatResourceRef(
                 resource_type="source",
                 resource_id="doc-b:source-b-caption",
-                href="/collections/feedback-chain-collection/documents/doc-b",
+                href="/workspaces/feedback-chain-workspace/documents/doc-b",
             ),
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             document_id="doc-b",
             document_title="Paper B",
             source_kind="figure_caption",
@@ -155,7 +155,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     await chat.save_trajectory(
         chat_session=session.update(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             updated_at="2026-09-24T10:00:02+00:00",
         ),
         messages=(question, answer),
@@ -164,7 +164,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     )
 
     jobs = AnalysisJobRepository()
-    chat_session_service.collection_service = collection_service
+    chat_session_service.workspace_service = workspace_service
     chat_session_service.SourceArtifactRepo = None
     chat_session_service.ChatRepo = chat
     chat_session_service.AnalysisJobRepo = jobs
@@ -172,13 +172,13 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     cases = FeedbackCaseRepository()
     feedback_case_service.FeedbackCaseRepo = cases
     feedback_case_service.ChatRepo = chat
-    feedback_case_service.collection_service = collection_service
+    feedback_case_service.workspace_service = workspace_service
     case_service = feedback_case_service
     snapshots = DatasetSnapshotRepository()
     dataset_snapshot_service.DatasetSnapshotRepo = snapshots
     dataset_snapshot_service.FeedbackCaseRepo = cases
     dataset_snapshot_service.ChatRepo = chat
-    dataset_snapshot_service.collection_service = collection_service
+    dataset_snapshot_service.workspace_service = workspace_service
     snapshot_service = dataset_snapshot_service
     return SimpleNamespace(
         chat=chat,
@@ -188,7 +188,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         jobs=jobs,
         snapshots=snapshots,
         snapshot_service=snapshot_service,
-        collection_service=collection_service,
+        workspace_service=workspace_service,
         session=session,
         question=question,
         answer=answer,
@@ -235,7 +235,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert saved_job.result_id == terminal_job.result_id
 
     cases = await chain.cases.list_cases(
-        collection_id=COLLECTION_ID, status="needs_annotation"
+        workspace_id=COLLECTION_ID, status="needs_annotation"
     )
     assert len(cases) == 1
     case = cases[0]
@@ -300,7 +300,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
 
     snapshot = await chain.snapshot_service.create_dataset_snapshot_for_user(
         owner_id=USER_ID,
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         dataset_type="preference",
         selections=(DatasetSelection(case.case_id),),
         now=_current_iso(),
@@ -332,7 +332,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
             {
                 "dataset_id": loaded_snapshot.dataset_id,
                 "owner_id": loaded_snapshot.owner_id,
-                "collection_id": loaded_snapshot.collection_id,
+                "workspace_id": loaded_snapshot.workspace_id,
                 "dataset_type": loaded_snapshot.dataset_type,
                 "rows": [deepcopy(row) for row in loaded_snapshot.rows],
                 "exclusions": [deepcopy(item) for item in loaded_snapshot.exclusions],
@@ -407,7 +407,7 @@ async def test_withdrawn_feedback_cancels_pending_job_without_creating_a_case(
     assert len(cancelled) == 1
     assert cancelled[0].error_code == "feedback_withdrawn"
     assert await chain.chat.read_feedback_by_id(feedback.feedback_id) is None
-    assert await chain.cases.list_cases(collection_id=COLLECTION_ID) == ()
+    assert await chain.cases.list_cases(workspace_id=COLLECTION_ID) == ()
 
     analysis_handler.ChatRepo = chain.chat
     analysis_worker.AnalysisJobRepo = chain.jobs
@@ -482,7 +482,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     await chain.chat.save_trajectory(
         chat_session=chain.session.update(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             updated_at="2026-09-24T10:00:05+00:00",
         ),
         messages=trajectory,
@@ -552,7 +552,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     assert saved_result.evidence_coverage.coverage_status == "failed"
 
     stored_cases = await chain.cases.list_cases(
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         problem_type="tool_failure",
     )
     assert len(stored_cases) == 1
@@ -567,7 +567,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
 
     summaries = await chain.case_service.list_feedback_cases_for_user(
         user_id=USER_ID,
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         problem_type="tool_failure",
     )
     assert len(summaries) == 1
@@ -626,7 +626,7 @@ async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
     correction_job = await chain.jobs.claim_next_correction_signal_analysis_job(now=_current_iso())
     common = {
         "session_id": SESSION_ID,
-        "collection_id": COLLECTION_ID,
+        "workspace_id": COLLECTION_ID,
         "anchor_message_id": chain.answer.message_id,
         "problem_type": "source_missing",
         "confidence": 0.8,
@@ -684,7 +684,7 @@ async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
             await chain.cases.upsert_case_from_analysis(
                 feedback, job=feedback_job, context_snapshot=snapshots[source], now=_current_iso()
             )
-    cases = await chain.cases.list_cases(collection_id=COLLECTION_ID)
+    cases = await chain.cases.list_cases(workspace_id=COLLECTION_ID)
     assert len(cases) == 1
     snapshot = cases[0].context_snapshot
     assert snapshot["corrected_answer"] == "Paper B was preheated at 200 C."
@@ -724,7 +724,7 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
         job_id=job.job_id,
         feedback_id=feedback.feedback_id,
         session_id=SESSION_ID,
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         anchor_message_id=chain.answer.message_id,
         problem_type="source_missing",
         confidence=0.8,
@@ -777,7 +777,7 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
         await chain.cases.upsert_case_from_analysis(replay, job=job,
             context_snapshot=frozen_case.context_snapshot, now=_current_iso())
 
-    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    case = (await chain.cases.list_cases(workspace_id=COLLECTION_ID))[0]
     assert case.analysis_result_ids == (result.result_id,)
     stored = await chain.cases.read_analysis_results((result.result_id,))
     assert tuple(item.result_id for item in stored) == (result.result_id,)

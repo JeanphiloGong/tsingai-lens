@@ -19,27 +19,27 @@ pipeline_run_router = APIRouter(tags=["pipeline-runs"])
 
 
 @pipeline_run_router.post(
-    "/collections/{collection_id}/documents/{document_id}/preparation",
+    "/workspaces/{workspace_id}/documents/{document_id}/preparation",
     response_model=ApiResponse[PipelineRunResponse],
-    summary="Prepare one collection document",
+    summary="Prepare one workspace document",
 )
-async def prepare_collection_document(
+async def prepare_workspace_document(
     request: Request,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    run = await queue_document_preparation(collection_id, document_id, user_id=user_id)
+    run = await queue_document_preparation(workspace_id, document_id, user_id=user_id)
     return make_api_response(data=PipelineRunResponse(**pipeline_run_response(run)))
 
 
 @pipeline_run_router.get(
-    "/collections/{collection_id}/pipeline-runs",
+    "/workspaces/{workspace_id}/pipeline-runs",
     response_model=ApiResponse[PipelineRunListResponse],
-    summary="List collection pipeline run history",
+    summary="List workspace pipeline run history",
 )
-async def list_collection_pipeline_runs(
-    collection_id: str,
+async def list_workspace_pipeline_runs(
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     status: str | None = Query(default=None, description="Filter by run status"),
     limit: int = Query(default=20, ge=1, le=200, description="Number to return"),
@@ -49,7 +49,7 @@ async def list_collection_pipeline_runs(
     items = [
         PipelineRunSummaryResponse(**pipeline_run_response(record))
         for record in await pipeline_run_service.list_runs(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             status=status,
             limit=limit,
             offset=offset,
@@ -58,7 +58,7 @@ async def list_collection_pipeline_runs(
     ]
     return make_api_response(
         data=PipelineRunListResponse(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             count=len(items),
             items=items,
         )

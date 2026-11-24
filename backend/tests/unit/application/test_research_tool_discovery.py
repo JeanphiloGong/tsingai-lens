@@ -102,8 +102,8 @@ async def test_missing_source_distinguishes_unknown_identity_from_unprepared_pap
         SearchSourcesToolRequest,
     )
 
-    collection = SimpleNamespace(
-        get_collection_for_user=AsyncMock(),
+    workspace = SimpleNamespace(
+        get_workspace_for_user=AsyncMock(),
         get_document=AsyncMock(
             side_effect=None if exists else ResourceNotFoundException()
         ),
@@ -133,7 +133,7 @@ async def test_missing_source_distinguishes_unknown_identity_from_unprepared_pap
         ),
     }
     capability, args = handlers[tool]
-    document_sources.collection_service = collection
+    document_sources.workspace_service = workspace
     document_sources.SourceArtifactRepo = sources
     result = await capability().execute(
         CapabilityExecutionContext.for_call(_context(), "read"),
@@ -144,7 +144,7 @@ async def test_missing_source_distinguishes_unknown_identity_from_unprepared_pap
     )
     assert result.data["missing_document_ids"] == ([] if exists else ["paper"])
     if not exists:
-        assert "browse_collection_papers" in result.error_message
+        assert "browse_workspace_papers" in result.error_message
 
 
 @pytest.mark.anyio
@@ -196,21 +196,21 @@ async def test_source_reads_expose_the_authoring_label_catalog():
         figures=(),
     )
 
-    class _Collection:
-        async def get_collection_for_user(self, collection_id, user_id):
+    class _Workspace:
+        async def get_workspace_for_user(self, workspace_id, user_id):
             return None
 
     class _Sources:
-        async def read_document(self, collection_id, document_id):
+        async def read_document(self, workspace_id, document_id):
             return document
 
     context = CapabilityExecutionContext(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         tool_call_id="call-1",
     )
-    document_sources.collection_service = _Collection()
+    document_sources.workspace_service = _Workspace()
     document_sources.SourceArtifactRepo = _Sources()
     inspected = await InspectDocumentSourcesCapability().execute(context, InspectDocumentSourcesToolRequest(document_id="paper-1"))
 
@@ -227,7 +227,7 @@ async def test_source_reads_expose_the_authoring_label_catalog():
         "S002": "results-1",
     }
 
-    document_sources.collection_service = _Collection()
+    document_sources.workspace_service = _Workspace()
     document_sources.SourceArtifactRepo = _Sources()
     read = await ReadSourceCapability().execute(
         context,
@@ -378,7 +378,7 @@ def test_explicit_tool_permission_mode_controls_visible_specs(mode, expected):
     message = ChatMessage.user(
         message_id="u",
         session_id="chat-1",
-        content="Explain the collection.",
+        content="Explain the workspace.",
         created_at="2026-09-09T00:00:00Z",
     )
 
@@ -403,7 +403,7 @@ async def test_invalid_permission_mode_is_rejected_before_checkpointing():
         await runner.run_turn(
             context=_context(),
             previous_messages=(),
-            user_message="Explain the collection.",
+            user_message="Explain the workspace.",
             permission_mode="unsafe",
             checkpoint=checkpoint,
         )
@@ -566,7 +566,7 @@ def test_initial_catalog_defers_new_registered_read_capability():
 @pytest.mark.anyio
 async def test_discovered_paper_claim_may_finish_without_a_backend_read_mandate():
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 1,
@@ -582,13 +582,13 @@ async def test_discovered_paper_claim_may_finish_without_a_backend_read_mandate(
                 ModelToolCall(
                     name="discover_research_tools",
                     arguments={
-                        "tool_names": ["browse_collection_papers"],
+                        "tool_names": ["browse_workspace_papers"],
 
                     },
                 ),
             )
         ),
-        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_workspace_papers"),)),
         ModelTurn(content="Premature claim from the paper map."),
         ModelTurn(tool_calls=(ModelToolCall(name="search_sources"),)),
         ModelTurn(
@@ -615,7 +615,7 @@ async def test_empty_provider_response_retains_exact_read_and_unread_papers():
     from application.chat.model import ModelResponseError
 
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 2,
@@ -639,7 +639,7 @@ async def test_empty_provider_response_retains_exact_read_and_unread_papers():
         },
     )
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_workspace_papers"),)),
         ModelTurn(tool_calls=(ModelToolCall(name="read_source"),)),
         *(
             ModelResponseError("private-provider-content", reason="empty_response")
@@ -673,7 +673,7 @@ async def test_existing_conclusion_is_located_before_rechecking_paper_sources():
     query = _Capability(
         "query_published_findings", ToolRisk.READ, result_data={"findings": []}
     )
-    browse = _Capability("browse_collection_papers", ToolRisk.READ)
+    browse = _Capability("browse_workspace_papers", ToolRisk.READ)
     model = _Model(
         ModelTurn(
             tool_calls=(
@@ -714,7 +714,7 @@ async def test_existing_conclusion_is_located_before_rechecking_paper_sources():
 @pytest.mark.anyio
 async def test_selecting_papers_for_a_later_comparison_does_not_force_reading():
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 1,
@@ -725,7 +725,7 @@ async def test_selecting_papers_for_a_later_comparison_does_not_force_reading():
     )
     search = _Capability("search_sources", ToolRisk.READ)
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_workspace_papers"),)),
         ModelTurn(content="The paper is selected for the later comparison."),
     )
     result = await ResearchAgentRunner(
@@ -740,11 +740,11 @@ async def test_selecting_papers_for_a_later_comparison_does_not_force_reading():
 
 
 @pytest.mark.anyio
-async def test_filtered_filename_miss_is_not_reported_as_an_empty_collection():
+async def test_filtered_filename_miss_is_not_reported_as_an_empty_workspace():
     from application.chat.model import ModelResponseError
 
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "query": "unmatched-filename",
@@ -755,7 +755,7 @@ async def test_filtered_filename_miss_is_not_reported_as_an_empty_collection():
         },
     )
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_workspace_papers"),)),
         *(ModelResponseError("empty", reason="empty_response") for _ in range(6)),
     )
     result = await ResearchAgentRunner(
@@ -766,8 +766,8 @@ async def test_filtered_filename_miss_is_not_reported_as_an_empty_collection():
         user_message="Locate that filename.",
     )
     assert result.error_code == "model_response_invalid"
-    assert "Collection paper total: unknown" in result.messages[-1].content
-    assert "Collection paper total: 0" not in result.messages[-1].content
+    assert "Workspace paper total: unknown" in result.messages[-1].content
+    assert "Workspace paper total: 0" not in result.messages[-1].content
 
 
 @pytest.mark.anyio
@@ -1072,7 +1072,7 @@ async def test_no_save_plan_draft_does_not_reenable_writes_after_discovery():
 def test_completed_write_does_not_hide_same_capability_for_another_resource():
     registry = CapabilityRegistry(
         (
-            _Capability("get_collection_context", ToolRisk.READ),
+            _Capability("get_workspace_context", ToolRisk.READ),
             _Capability("create_objective_candidate", ToolRisk.WRITE),
         )
     )
@@ -1126,14 +1126,14 @@ def test_completed_write_does_not_hide_same_capability_for_another_resource():
 def test_read_only_discovery_catalog_excludes_write_capabilities():
     registry = CapabilityRegistry(
         (
-            _Capability("get_collection_context", ToolRisk.READ),
+            _Capability("get_workspace_context", ToolRisk.READ),
             _Capability("create_objective_candidate", ToolRisk.WRITE),
         )
     )
     message = ChatMessage.user(
         message_id="u",
         session_id="chat-1",
-        content="Inspect this collection.",
+        content="Inspect this workspace.",
         created_at="2026-09-09T00:00:00Z",
     )
 
@@ -1144,7 +1144,7 @@ def test_read_only_discovery_catalog_excludes_write_capabilities():
         permission_mode=ToolPermissionMode.READ_ONLY,
     )
     catalog = next(spec for spec in specs if spec.name == "discover_research_tools")
-    assert "get_collection_context" in catalog.description
+    assert "get_workspace_context" in catalog.description
     assert "create_objective_candidate" not in catalog.description
 
 
@@ -1199,7 +1199,7 @@ async def test_reading_a_plan_section_keeps_selected_source_tools():
         capabilities=CapabilityRegistry(
             (
                 inspect,
-                _Capability("get_collection_context", ToolRisk.READ),
+                _Capability("get_workspace_context", ToolRisk.READ),
                 _Capability("assess_objective_quality", ToolRisk.READ),
                 _Capability("query_published_findings", ToolRisk.READ),
                 _Capability("propose_research_plan", ToolRisk.DRAFT),

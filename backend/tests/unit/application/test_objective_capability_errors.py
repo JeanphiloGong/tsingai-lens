@@ -61,7 +61,7 @@ async def test_objective_tool_preserves_rejection_and_repair_reason(
 
     result = await capability.execute(
         CapabilityExecutionContext(
-            session_id="chat-1", user_id="user-1", collection_id="col-1", tool_call_id="call-1",
+            session_id="chat-1", user_id="user-1", workspace_id="col-1", tool_call_id="call-1",
         ),
         arguments,
     )
@@ -85,7 +85,7 @@ async def test_objective_tool_does_not_disguise_internal_faults(
     with pytest.raises(exception_type, match="private implementation failure"):
         await capability.execute(
             CapabilityExecutionContext(
-                session_id="chat-1", user_id="user-1", collection_id="col-1", tool_call_id="call-1",
+                session_id="chat-1", user_id="user-1", workspace_id="col-1", tool_call_id="call-1",
             ),
             arguments,
         )
@@ -98,13 +98,13 @@ async def test_confirm_missing_objective_is_rejected_without_writing(
 
     monkeypatch.setattr(objective_authoring_service, "ObjectiveRepo", ObjectiveRepository())
     monkeypatch.setattr(
-        objective_authoring_service, "collection_service",
-        SimpleNamespace(get_collection_for_user=AsyncMock()),
+        objective_authoring_service, "workspace_service",
+        SimpleNamespace(get_workspace_for_user=AsyncMock()),
     )
 
     result = await ConfirmObjectiveCapability().execute(
         CapabilityExecutionContext(
-            session_id="chat-1", user_id="local-user", collection_id="missing-col", tool_call_id="call-1",
+            session_id="chat-1", user_id="local-user", workspace_id="missing-col", tool_call_id="call-1",
         ),
         ConfirmObjectiveToolRequest(objective_id="missing-objective"),
     )

@@ -15,7 +15,7 @@ from alembic.config import Config
 from tests.support.identity import subjects as identity_subjects
 from infra.identity.client import SESSION_COOKIE_NAME
 from application.chat import session_service as chat_session_service
-from application.source import collection_service
+from application.source import workspace_service
 from controllers.chat.chat_session_routes import chat_session_router as router
 from controllers.exception_router import (
     general_exception_handler,
@@ -33,7 +33,7 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
-from domain.source import Collection
+from domain.source import Workspace
 from exceptions import ProjectException
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -45,11 +45,11 @@ from infra.persistence.postgres.models import (
     MessageORM,
     ConversationORM,
 )
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from repositories.chat_repository import ChatRepository
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
 )
 from sqlalchemy import delete, func, inspect, select, update
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -78,11 +78,11 @@ async def feedback_app(postgres_session_factory, tmp_path, monkeypatch):
             email=email,
         )
         cookies.append(result["session_id"])
-    collections = CollectionRepository()
-    await collections.add_collection(
-        StoredCollection(
-            collection=Collection(
-                collection_id="collection",
+    workspaces = WorkspaceRepository()
+    await workspaces.add_workspace(
+        StoredWorkspace(
+            workspace=Workspace(
+                workspace_id="workspace",
                 owner_user_id=users[0]["user_id"],
                 name="LPBF comparison",
                 description=None,
@@ -96,7 +96,7 @@ async def feedback_app(postgres_session_factory, tmp_path, monkeypatch):
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=users[0]["user_id"],
-        collection_id="collection",
+        workspace_id="workspace",
         created_at=NOW,
     )
     await repository.add_session(chat)
@@ -104,7 +104,7 @@ async def feedback_app(postgres_session_factory, tmp_path, monkeypatch):
         ChatSession.create(
             session_id="chat-2",
             user_id=users[0]["user_id"],
-            collection_id="collection",
+            workspace_id="workspace",
             created_at=NOW,
         )
     )
@@ -165,10 +165,10 @@ async def feedback_app(postgres_session_factory, tmp_path, monkeypatch):
     await repository.save_trajectory(
         chat_session=chat, messages=messages, tool_calls=(call,), tool_results=(result,)
     )
-    chat_session_service.collection_service = collection_service
+    chat_session_service.workspace_service = workspace_service
     chat_session_service.SourceArtifactRepo = None
     chat_session_service.ChatRepo = repository
-    collection_service.CollectionRepo = collections
+    workspace_service.WorkspaceRepo = workspaces
     service = chat_session_service.ChatSessionService(capabilities=CapabilityRegistry(()))
     app = FastAPI()
     monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
@@ -283,7 +283,7 @@ async def test_feedback_permissions_and_input_boundaries(feedback_app):
     assert await app.repository.read_feedback("chat-1", app.users[0]["user_id"]) == ()
     async with app.sessions.begin() as database:
         await database.execute(
-            update(CollectionORM).values(owner_user_id=app.users[1]["user_id"])
+            update(WorkspaceORM).values(owner_user_id=app.users[1]["user_id"])
         )
     rejection = await app.client.put(PATH, json={"rating": "helpful"})
     assert rejection.status_code == 200
@@ -310,7 +310,7 @@ async def test_concurrent_feedback_upserts_keep_one_identity(feedback_app):
         )
 
 
-@pytest.mark.parametrize("parent", [MessageORM, ConversationORM, CollectionORM])
+@pytest.mark.parametrize("parent", [MessageORM, ConversationORM, WorkspaceORM])
 async def test_parent_deletion_cascades_feedback(feedback_app, parent):
     app = feedback_app
     assert (await app.client.put(PATH, json={"rating": "helpful"})).status_code == 200

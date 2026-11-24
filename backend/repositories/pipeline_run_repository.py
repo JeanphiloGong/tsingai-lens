@@ -10,8 +10,8 @@ from typing import Any
 
 from infra.persistence.database import AsyncSessionLocal
 from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
-from infra.persistence.postgres.models.collection import (
-    CollectionORM,
+from infra.persistence.postgres.models.workspace import (
+    WorkspaceORM,
     DocumentORM,
 )
 from infra.persistence.postgres.models.execution import PipelineRunORM
@@ -101,7 +101,7 @@ class PipelineRun:
     pipeline_name: str
     mode: str
     run_id: str
-    collection_id: str
+    workspace_id: str
     scope_type: str
     scope_id: str
     status: PipelineRunStatus
@@ -121,7 +121,7 @@ class PipelineRun:
 @dataclass(frozen=True)
 class PipelineRunSummary:
     run_id: str
-    collection_id: str
+    workspace_id: str
     pipeline_name: str
     scope_type: str
     scope_id: str
@@ -159,7 +159,7 @@ class PipelineRunRepository:
             db.add(
                 PipelineRunORM(
                     run_id=run.run_id,
-                    collection_id=run.collection_id,
+                    workspace_id=run.workspace_id,
                     pipeline_name=run.pipeline_name,
                     scope_type=run.scope_type,
                     scope_id=run.scope_id,
@@ -225,20 +225,20 @@ class PipelineRunRepository:
             )
         return run
 
-    async def get_or_create_collection_run(
+    async def get_or_create_workspace_run(
         self,
         run: PipelineRun,
     ) -> tuple[PipelineRun, bool]:
-        if run.scope_type != "collection" or run.scope_id != run.collection_id:
-            raise ValueError("collection run must use its collection as scope")
+        if run.scope_type != "workspace" or run.scope_id != run.workspace_id:
+            raise ValueError("workspace run must use its workspace as scope")
         async with AsyncSessionLocal() as db, db.begin():
-            collection = await db.scalar(
-                select(CollectionORM)
-                .where(CollectionORM.collection_id == run.collection_id)
+            workspace = await db.scalar(
+                select(WorkspaceORM)
+                .where(WorkspaceORM.workspace_id == run.workspace_id)
                 .with_for_update()
             )
-            if collection is None:
-                raise FileNotFoundError(f"collection not found: {run.collection_id}")
+            if workspace is None:
+                raise FileNotFoundError(f"workspace not found: {run.workspace_id}")
             active = await self._active_run(db, run)
             if active is not None:
                 payload = active.record_json
@@ -247,7 +247,7 @@ class PipelineRunRepository:
                         pipeline_name=active.pipeline_name,
                         mode=active.mode,
                         run_id=active.run_id,
-                        collection_id=active.collection_id,
+                        workspace_id=active.workspace_id,
                         scope_type=active.scope_type,
                         scope_id=active.scope_id,
                         status=PipelineRunStatus(active.status),
@@ -338,7 +338,7 @@ class PipelineRunRepository:
             db.add(
                 PipelineRunORM(
                     run_id=run.run_id,
-                    collection_id=run.collection_id,
+                    workspace_id=run.workspace_id,
                     pipeline_name=run.pipeline_name,
                     scope_type=run.scope_type,
                     scope_id=run.scope_id,
@@ -418,14 +418,14 @@ class PipelineRunRepository:
             document = await db.scalar(
                 select(DocumentORM)
                 .where(
-                    DocumentORM.collection_id == run.collection_id,
+                    DocumentORM.workspace_id == run.workspace_id,
                     DocumentORM.document_id == run.scope_id,
                 )
                 .with_for_update()
             )
             if document is None:
                 raise FileNotFoundError(
-                    f"document not found: {run.collection_id}/{run.scope_id}"
+                    f"document not found: {run.workspace_id}/{run.scope_id}"
                 )
             existing = await self._active_run(db, run)
             if existing is None and reuse_completed:
@@ -450,7 +450,7 @@ class PipelineRunRepository:
                         pipeline_name=existing.pipeline_name,
                         mode=existing.mode,
                         run_id=existing.run_id,
-                        collection_id=existing.collection_id,
+                        workspace_id=existing.workspace_id,
                         scope_type=existing.scope_type,
                         scope_id=existing.scope_id,
                         status=PipelineRunStatus(existing.status),
@@ -541,7 +541,7 @@ class PipelineRunRepository:
             db.add(
                 PipelineRunORM(
                     run_id=run.run_id,
-                    collection_id=run.collection_id,
+                    workspace_id=run.workspace_id,
                     pipeline_name=run.pipeline_name,
                     scope_type=run.scope_type,
                     scope_id=run.scope_id,
@@ -618,7 +618,7 @@ class PipelineRunRepository:
             pipeline_name=row.pipeline_name,
             mode=row.mode,
             run_id=row.run_id,
-            collection_id=row.collection_id,
+            workspace_id=row.workspace_id,
             scope_type=row.scope_type,
             scope_id=row.scope_id,
             status=PipelineRunStatus(row.status),
@@ -693,14 +693,14 @@ class PipelineRunRepository:
     async def list_runs(
         self,
         *,
-        collection_id: str | None = None,
+        workspace_id: str | None = None,
         status: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[PipelineRunSummary, ...]:
         statement = select(
             PipelineRunORM.run_id,
-            PipelineRunORM.collection_id,
+            PipelineRunORM.workspace_id,
             PipelineRunORM.pipeline_name,
             PipelineRunORM.scope_type,
             PipelineRunORM.scope_id,
@@ -716,8 +716,8 @@ class PipelineRunRepository:
             PipelineRunORM.record_json["errors"].label("errors"),
             PipelineRunORM.record_json["warnings"].label("warnings"),
         )
-        if collection_id is not None:
-            statement = statement.where(PipelineRunORM.collection_id == collection_id)
+        if workspace_id is not None:
+            statement = statement.where(PipelineRunORM.workspace_id == workspace_id)
         if status is not None:
             statement = statement.where(PipelineRunORM.status == status)
         statement = statement.order_by(
@@ -733,7 +733,7 @@ class PipelineRunRepository:
             return tuple(
                 PipelineRunSummary(
                     run_id=row.run_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     pipeline_name=row.pipeline_name,
                     scope_type=row.scope_type,
                     scope_id=row.scope_id,
@@ -836,8 +836,8 @@ class PipelineRunRepository:
                 raise PipelineLeaseLostError(f"pipeline lease lost: {job.run.run_id}")
 
     async def lock_job(self, db: AsyncSession, job: PipelineRunJobSnapshot) -> None:
-        # Enqueue locks the collection before looking up its active run.
-        await db.get(CollectionORM, job.run.collection_id, with_for_update=True)
+        # Enqueue locks the workspace before looking up its active run.
+        await db.get(WorkspaceORM, job.run.workspace_id, with_for_update=True)
         if job.run.scope_type == "document":
             await db.get(DocumentORM, job.run.scope_id, with_for_update=True)
         row = await db.get(PipelineRunORM, job.run.run_id, with_for_update=True)
@@ -859,7 +859,7 @@ class PipelineRunRepository:
         row = await db.get(PipelineRunORM, job.run.run_id)
         if run.run_id != job.run.run_id:
             raise ValueError("pipeline result belongs to another run")
-        row.collection_id = run.collection_id
+        row.workspace_id = run.workspace_id
         row.pipeline_name = run.pipeline_name
         row.scope_type = run.scope_type
         row.scope_id = run.scope_id

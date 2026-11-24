@@ -323,7 +323,7 @@ def validate_source_fact(
     candidate_variables: tuple[str, ...] = (),
     grounding_sources: tuple[Mapping[str, Any], ...] = (),
     grounding_source_refs: tuple[Mapping[str, Any], ...] = (),
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> tuple[dict[str, Any], ...]:
     # A result is often split across Results and Methods in the same paper.
     # The result Source remains authoritative for measured values and wording;
@@ -351,8 +351,8 @@ def validate_source_fact(
         if record.get("selection_status", "extracted") == "extracted"
         else "uncertain"
     )
-    if collection_id:
-        record["collection_id"] = collection_id
+    if workspace_id:
+        record["workspace_id"] = workspace_id
     record = _objective_normalize_explicit_no_change_direction(record)
     reported_result = record.get("reported_result")
     if isinstance(reported_result, Mapping):

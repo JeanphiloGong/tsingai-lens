@@ -67,9 +67,9 @@ The following rules apply across the Core artifact set:
 ### Role
 
 `document_profiles` decides document type, protocol suitability, and early
-collection-level gating.
+workspace-level gating.
 
-Collection-level suitability states should be derived from
+Workspace-level suitability states should be derived from
 `document_profiles` rather than introduced as an unrelated parallel source of
 truth.
 
@@ -79,7 +79,7 @@ warning object.
 ### Minimum Required Fields
 
 - `document_id`
-- `collection_id`
+- `workspace_id`
 - `doc_type`
   Allowed values: `experimental | review | mixed | uncertain`
 - `protocol_extractable`
@@ -93,7 +93,7 @@ warning object.
 | Field | Purpose | Notes |
 | --- | --- | --- |
 | `document_id` | Unique identity for one source document | Used to bind the profile to downstream fact and view artifacts |
-| `collection_id` | Binds the profile to the collection that owns the document | Keeps profiling collection-scoped rather than global |
+| `workspace_id` | Binds the profile to the workspace that owns the document | Keeps profiling workspace-scoped rather than global |
 | `doc_type` | Stores the document's coarse literature type | Drives downstream routing, warnings, and suitability decisions |
 | `protocol_extractable` | Stores whether protocol derivation is likely to be usable | Should not collapse into a bare boolean because partial or uncertain cases matter |
 | `protocol_extractability_signals` | Preserves the controlled reasons behind the protocol judgment | May remain empty in narrow triage waves, but when populated it must stay enum-like rather than free-form |
@@ -178,7 +178,7 @@ Every primary fact object should preserve:
 
 - a stable object id
 - `document_id`
-- `collection_id`
+- `workspace_id`
 - enough identity to bind it to its owning `PaperExperiment`
 
 Traceability is preserved by the accepted `SourceObservation` records and the
@@ -237,7 +237,7 @@ The current shared compatibility surface should preserve:
 
 - `evidence_id`
 - `document_id`
-- `collection_id`
+- `workspace_id`
 - `claim_text`
 - `claim_type`
 - `evidence_source_type`
@@ -254,7 +254,7 @@ The current shared compatibility surface should preserve:
 | --- | --- | --- |
 | `evidence_id` | Unique identity for one evidence card | Used by UI selection, traceback, and narrow evidence review workflows |
 | `document_id` | Binds the card to its source document | Supports source inspection and paper-level grouping |
-| `collection_id` | Binds the card to the owning collection | Keeps evidence views aligned with collection-level workflows |
+| `workspace_id` | Binds the card to the owning workspace | Keeps evidence views aligned with workspace-level workflows |
 | `claim_text` | Stores the card's reader-facing claim or summary phrase | This is a display-oriented meaning shell, not the only canonical research fact |
 | `claim_type` | Classifies what kind of reader-facing unit this is | Helps separate property, mechanism, process, or qualitative views |
 | `evidence_source_type` | Stores what kind of source supports the card | Important for judging evidence strength and UI presentation |
@@ -343,7 +343,7 @@ over:
 ### Minimum Required Fields
 
 - `row_id`
-- `collection_id`
+- `workspace_id`
 - `source_document_id`
 - `supporting_evidence_ids`
 - `material_system_normalized`
@@ -360,7 +360,7 @@ over:
 | Field | Purpose | Notes |
 | --- | --- | --- |
 | `row_id` | Unique identity for one comparison row | Used by UI selection, pagination, sorting, and traceback jumps |
-| `collection_id` | Binds the row to one collection-level comparison workspace | Comparison rows are collection-scoped rather than global |
+| `workspace_id` | Binds the row to one workspace-level comparison surface | Comparison rows are workspace-scoped rather than global |
 | `source_document_id` | Preserves which document produced the row | Supports source filtering and paper-level drill-down |
 | `supporting_evidence_ids` | Anchors the row to traceback-ready evidence views that justify it | Prevents the row from becoming an ungrounded summary while public compatibility still uses evidence ids |
 | `material_system_normalized` | Normalizes the material system into a comparison-ready label | Used to group or filter rows that refer to the same system family |

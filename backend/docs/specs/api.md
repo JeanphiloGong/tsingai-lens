@@ -21,7 +21,7 @@ target Conversation, Feedback, Task, tree, and persistence semantics.
   stable internal user ID. They do not log email addresses, session values, or
   authentication credentials. Process-local background work inherits the
   initiating request and user context.
-- A collection is the primary working scope; a document is a source inside it.
+- A workspace is the primary working scope; a document is a source inside it.
 - PostgreSQL is the structured runtime authority.
 - GET requests never trigger LLM analysis.
 - Retired payloads and endpoints are not accepted through aliases or fallback
@@ -55,27 +55,27 @@ Successful Lens JSON and unrelated existing business failures retain the
 `200201`. Business clients must read that envelope rather than infer success
 solely from HTTP 200. Stable user IDs remain in business/audit records.
 
-### Collections, Documents, And Preparation
+### Workspaces, Documents, And Preparation
 
-- `GET /api/v1/collections`
-- `POST /api/v1/collections`
-- `GET /api/v1/collections/{collection_id}`
-- `DELETE /api/v1/collections/{collection_id}`
-- `GET /api/v1/collections/{collection_id}/documents`
-- `POST /api/v1/collections/{collection_id}/documents`
-- `POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation`
-- `POST /api/v1/collections/{collection_id}/source-archives`
-- `GET /api/v1/collections/{collection_id}/pipeline-runs`
+- `GET /api/v1/workspaces`
+- `POST /api/v1/workspaces`
+- `GET /api/v1/workspaces/{workspace_id}`
+- `DELETE /api/v1/workspaces/{workspace_id}`
+- `GET /api/v1/workspaces/{workspace_id}/documents`
+- `POST /api/v1/workspaces/{workspace_id}/documents`
+- `POST /api/v1/workspaces/{workspace_id}/documents/{document_id}/preparation`
+- `POST /api/v1/workspaces/{workspace_id}/source-archives`
+- `GET /api/v1/workspaces/{workspace_id}/pipeline-runs`
 - `GET /api/v1/pipeline-runs/{run_id}`
 
-A Collection groups current Documents. Each Document independently owns its
+A Workspace groups current Documents. Each Document independently owns its
 preparation status, current Source structure, and current DocumentProfile. The
-collection-scoped preparation, Pipeline Run, and experiment-plan endpoints are
-restricted to the authenticated Collection owner and return `200201` for other
+workspace-scoped preparation, Pipeline Run, and experiment-plan endpoints are
+restricted to the authenticated Workspace owner and return `200201` for other
 users.
 Document upload accepts the optional query parameter `reuse_existing=true` for
 retrying an uncertain upload outcome. If the normalized content already exists
-in this Collection, the server returns that Document with `200`, preserving its
+in this Workspace, the server returns that Document with `200`, preserving its
 identity, filename, and preparation state. Content matching uses server-side
 SHA-256; a matching filename alone never selects an existing Document. The
 default remains `false`, with duplicate content returning `200100`. Neither mode
@@ -84,8 +84,8 @@ the existing preparation command. Ownership and upload validation apply before
 recovery just as they do before an ordinary upload.
 
 The preparation command queues only the named Document; it does not prepare other
-Collection members or discover Objectives. Paper Map construction is a lazy
-Objective-core operation over an explicit ready-document selection. Collection
+Workspace members or discover Objectives. Paper Map construction is a lazy
+Objective-core operation over an explicit ready-document selection. Workspace
 Pipeline Run history returns compact rows with run identity,
 pipeline and scope, status, current node, progress, warnings, terminal errors,
 and last-update time. `GET /api/v1/pipeline-runs/{run_id}` returns the complete
@@ -94,11 +94,11 @@ context, timestamps, and retry lineage. Runs do not expose a filesystem output
 path; scientific artifacts are addressed by their owning Document, Objective,
 analysis, Finding, or Evidence identities.
 
-`GET /api/v1/collections` is the collection-picker projection. Each item
-contains collection identity, name, description, status, paper count, and
+`GET /api/v1/workspaces` is the workspace-picker projection. Each item
+contains workspace identity, name, description, status, paper count, and
 compact current-document rows (`document_id`, filename, media type, status,
 size, and timestamps). It intentionally omits storage keys, SHA-256 values,
-parser versions, and preparation fingerprints. Use the collection detail or
+parser versions, and preparation fingerprints. Use the workspace detail or
 document-list endpoints when those operational fields are required.
 
 At most one `document_preparation` run may be queued or running for a Document.
@@ -116,7 +116,7 @@ discovery, or analysis over other ready Documents.
 
 PDF uploads are opened with the Source PDF engine before persistence. A damaged,
 incomplete, password-protected, or otherwise unreadable PDF returns `200100` and is
-not added to the collection. This check establishes parser readability only;
+not added to the workspace. This check establishes parser readability only;
 scientific structure extraction happens during that Document's preparation.
 A later parser or runtime failure sets only that Document and run to `failed`.
 A recoverable model-classification failure preserves the parsed Source, leaves
@@ -132,22 +132,22 @@ Paper Map failures belong to Objective discovery/analysis and do not change the
 Document preparation run. All such failures stay technical; they do not claim
 scientific absence.
 
-The source archive request accepts between one and 100 unique collection
+The source archive request accepts between one and 100 unique workspace
 `document_id` values with at most 256 MiB of persisted source bytes and returns an
 `application/zip` attachment. The archive contains the selected original
 uploads under `sources/` plus `manifest.json` with their stable document IDs,
 archive paths, media types, sizes, and SHA-256 digests. Selection is atomic: a
 missing, oversized, unsafe, unavailable, or integrity-failing source prevents
 the complete archive from being returned.
-An unknown selected ID returns `200201 collection_source_document_not_found`.
-An oversized selection returns `200100 collection_source_archive_too_large`
+An unknown selected ID returns `200201 workspace_source_document_not_found`.
+An oversized selection returns `200100 workspace_source_archive_too_large`
 before any selected Source bytes are read.
 Persisted metadata whose bytes are unavailable, unsafe, or fail integrity
 verification returns `200204` with the corresponding bounded
-`collection_source_*` code; storage paths are never returned.
+`workspace_source_*` code; storage paths are never returned.
 The endpoint does not infer which papers failed. Parsing, Paper Map, and
 Objective analysis retain ownership of their failure states. Clients select
-IDs from `Collection.documents` or from stage-specific failure lineage.
+IDs from `Workspace.documents` or from stage-specific failure lineage.
 
 The preparation command has no request body and runs the canonical Source and
 DocumentProfile preparation pipeline. It starts a process-local asyncio task
@@ -160,7 +160,7 @@ handoff and admission limit are not an external durable queue.
 
 - `POST /api/v1/goals/intake`
 
-Goal intake creates an empty collection directly; it does not create a durable
+Goal intake creates an empty workspace directly; it does not create a durable
 handoff record or a second research-result identity.
 
 ### Shared Model Connections
@@ -225,7 +225,7 @@ Session operation permissions are exposed by authenticated
 (`read_only`, `confirm`, `auto`), an explicit `actions` list, and
 `expires_at` (`null` keeps an automatic grant active until it is
 revoked or changed, while a non-null value must be no more than 24 hours
-ahead), `all_actions`, and `expected_revision`. A session without a collection default and every branched session defaults
+ahead), `all_actions`, and `expected_revision`. A session without a workspace default and every branched session defaults
 to `confirm`; revision conflicts and invalid grants return `200204`, inaccessible
 sessions return `200201`. The model cannot call this settings endpoint.
 
@@ -248,10 +248,10 @@ blocks even explicit approvals. Request-level no-save constraints further
 restrict writes; natural-language detection remains bounded, and read-only
 settings are the deterministic control.
 
-Collection owners can set a default for newly created collection Agent sessions through
-authenticated `GET/PUT /api/v1/collections/{collection_id}/agent-permissions`.
+Workspace owners can set a default for newly created workspace Agent sessions through
+authenticated `GET/PUT /api/v1/workspaces/{workspace_id}/agent-permissions`.
 The endpoint uses the same mode, action, optional expiry, and revision contract and
-returns `200201` for a collection the caller does not own. A collection default is
+returns `200201` for a workspace the caller does not own. A workspace default is
 copied when a session is created; changing it does not silently change an
 active session. Branches continue to default to confirmation. `all_actions=true` is expanded by the backend to every current
 registered write action, so clients do not need to maintain that authoritative
@@ -279,13 +279,13 @@ under `/api/v1/conversations`. Its path-conflict and resource errors use HTTP `4
 and `404` with `meta.error_code`.
 
 Chat is the independent conversation and Agent trajectory owner. A Chat session
-belongs to one authenticated user and one collection. Its ordered messages
+belongs to one authenticated user and one workspace. Its ordered messages
 record ordinary user and assistant conversation, model tool intent, and bounded
 structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
 
-The collection-scoped list returns the authenticated user's saved sessions,
+The workspace-scoped list returns the authenticated user's saved sessions,
 ordered by `is_pinned` descending, then `updated_at` descending and `conversation_id`
 descending, before applying `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
@@ -297,7 +297,7 @@ history without loading every trajectory or relying on a local title cache.
 `PUT .../{conversation_id}/title` accepts `{"title": "IN718 comparison"}` and
 returns the saved session. The application service trims titles and then checks
 the 1–160 character limit. NUL, CR and LF are rejected in the original input,
-including at its edges; invalid requests return 200100. Both session and collection
+including at its edges; invalid requests return 200100. Both session and workspace
 ownership are required; missing or unowned sessions return 200201. Renaming changes
 only the title, preserving messages, progress, pin state and activity time.
 Individual session reads expose the saved title or null. Later generation
@@ -316,7 +316,7 @@ normally completed answer can retry naming. Named sessions are not regenerated.
 Session responses include `is_pinned` (false by default). `PUT .../{conversation_id}/pin`
 accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the
 saved session. Setting the same state is idempotent. The authenticated user must
-own both the session and its Collection; missing or unowned sessions return 200201
+own both the session and its Workspace; missing or unowned sessions return 200201
 `chat_session_not_found`. Pinning is independent of execution and does not
 change `updated_at`, messages, approvals, or Source attachments. Generation
 checkpoints preserve the saved preference, and new revisions start unpinned.
@@ -354,14 +354,14 @@ an idle session with no unresolved approvals or tool results.
 `running`, `approval_required`, `failed`, `interrupted`, `incomplete`, or `draft`;
 partial answer text comes only from the server-owned response snapshot. A draft
 is a synthetic user message with stable `draft_{conversation_id}` identity. The
-endpoint checks current user and Collection ownership and does not mutate state.
+endpoint checks current user and Workspace ownership and does not mutate state.
 
 Branch creation atomically copies complete turns before the selected question,
 assigning new message and call identities while retaining canonical Source and
 resource references. Later answers and writes stay in their original branch.
 Copied terminal calls describe historical work; they cannot be claimed again.
 New writes require a new exact approval. Branching requires both session and
-current Collection ownership, and returns 200204 during execution or unresolved
+current Workspace ownership, and returns 200204 during execution or unresolved
 approval/recovery, 200201 for an unavailable saved user message, and 200100 for an
 invalid revision or stale Source.
 
@@ -418,7 +418,7 @@ update time. Withdrawal is idempotent and removes the optional details.
 
 The target must be a persisted, non-empty Assistant text message without tool
 requests in the owned session. Authentication is required (`200301`); unavailable
-session, collection, or message ownership returns `200201`; ineligible message
+session, workspace, or message ownership returns `200201`; ineligible message
 roles or invalid input return `200100`. Temporary streaming messages have no saved
 identity and cannot receive feedback.
 
@@ -451,9 +451,9 @@ audit:
 - `POST /api/v1/feedback-cases/{case_id}/review`
 - `GET /api/v1/feedback-cases/{case_id}/review-decisions`
 
-The authenticated user must be able to access the case's Collection. The
+The authenticated user must be able to access the case's Workspace. The
 current validation phase has no separate annotator, reviewer, or dataset-admin
-role, so one authorized Collection user may inspect or edit a case. The fixed
+role, so one authorized Workspace user may inspect or edit a case. The fixed
 task workbench does not require a separate case annotation/review pass: it
 shows the case's readable evidence inside the task-specific editor and lets
 the user confirm or revise the generated sample. The browser carries business
@@ -485,9 +485,9 @@ edits and confirmations use the sample revision and generation digests
 described below.
 
 The maintained task-dataset flow is separate from an immutable historical
-snapshot. Every Collection has three fixed internal workbenches: SFT,
-preference, and evaluation. They are created in the Collection creation
-transaction, or initialized for historical Collections by the sample Worker;
+snapshot. Every Workspace has three fixed internal workbenches: SFT,
+preference, and evaluation. They are created in the Workspace creation
+transaction, or initialized for historical Workspaces by the sample Worker;
 the browser chooses
 one task type and never configures a Dataset or selects case IDs:
 
@@ -511,7 +511,7 @@ three sample-build jobs in one PostgreSQL transaction. A queue failure rolls
 back the entire write. List GETs only read; refreshing and pagination cannot
 enqueue model work. The sample Worker backfills historical cases in bounded
 batches once at process startup, skips withdrawn cases, and preserves existing
-samples through idempotent collection. The `dataset_sample_build`
+samples through idempotent writes. The `dataset_sample_build`
 Worker reads the case's frozen context
 and any available readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
@@ -589,7 +589,7 @@ so a withdrawn or changed-task pairing cannot survive as an old correction.
 The same case-write transaction invalidates samples whose source digest
 changed. Worker candidates receive a new generation and rebuild job. Human
 revisions remain readable, while confirmation is cleared and the sample moves
-to `needs_input` with `source_changed_since_collection`; edit or rebuild it
+to `needs_input` with `source_changed_since_workspace`; edit or rebuild it
 before confirming again. Discarded samples remain discarded.
 
 The sample workbench reads the current immutable revision and the source case
@@ -693,7 +693,7 @@ training endpoint or modify Chat. A legacy DatasetSnapshot can be consumed
 only by the D7 migration script, not by this product API.
 
 A user message may carry up to 12 `source_contexts` items selected from the
-same Collection's document reader. The item contains a stable Source resource
+same Workspace's document reader. The item contains a stable Source resource
 reference, document identity, Source kind and reference, optional page and
 heading, a bounded verbatim quote, and whether that quote was shortened. Before
 the model sees the message, the server resolves the exact canonical Source,
@@ -715,7 +715,7 @@ Research Agent behavior: read and transient-draft capabilities may execute and
 durable writes require exact user approval. `read_only` rejects durable writes
 before execution, while `none` exposes and accepts no capabilities. This is a
 per-turn caller policy; natural-language phrases such as “do not search” do not
-change tool visibility. The mode does not remove Source, collection, or domain
+change tool visibility. The mode does not remove Source, workspace, or domain
 validation, and it does not turn a model proposal into approval.
 
 `POST /api/v1/conversations/{conversation_id}/messages` returns the existing JSON
@@ -798,7 +798,7 @@ the saved messages own the final answer. Branches do not copy runtime snapshots.
 
 `GET /api/v1/conversations/{conversation_id}/tasks/{task_id}/events` resumes
 read-only SSE updates, including when direct execution owns the Task. The
-authenticated user must still own the session and Collection. The endpoint
+authenticated user must still own the session and Workspace. The endpoint
 samples the shared snapshot every 250 ms, sends the current trajectory first,
 then changed snapshots, and a new trajectory at checkpoints and termination.
 It never submits a question or repeats a tool. The response ID bounds the
@@ -827,7 +827,7 @@ non-write work can finish. While a write remains `approval_required`, posting an
 message to that session returns `200204 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
-The production Research Agent exposes core collection search, browsing, reading
+The production Research Agent exposes core workspace search, browsing, reading
 and execution-plan schemas immediately. `discover_research_tools` accepts only
 `tool_names` and loads additional registered schemas from a catalog of missing
 definitions. Already exposed names leave that catalog and remain available for
@@ -837,12 +837,12 @@ scope remains in the conversation. Backend permission mode, capability risk,
 typed arguments, canonical Source prerequisites and exact write approval remain
 the authoritative boundaries. The available capabilities include:
 
-- `get_collection_context` returns a bounded collection and Objective overview;
-- `browse_collection_papers` returns a context-sized, screening-only paper survey.
+- `get_workspace_context` returns a bounded workspace and Objective overview;
+- `browse_workspace_papers` returns a context-sized, screening-only paper survey.
   Omitting `limit` permits up to 100 records; an explicit limit is a record cap.
   The returned page fits the available context, and `next_offset` identifies
   the first record after that page. `catalog_digest` identifies the ordered
-  collection membership used to reconstruct browsing progress across requests. A
+  workspace membership used to reconstruct browsing progress across requests. A
   paper's `source_status` is `available` when canonical parsed Source content
   can be read, `preparing` while preparation is still running,
   `not_prepared` when an uploaded/stored paper has not been prepared,
@@ -857,7 +857,7 @@ the authoritative boundaries. The available capabilities include:
   are normal navigation results, not warnings or scientific absence. Source
   read failures are isolated to the affected paper so other page results remain
   usable;
-- `search_sources` searches prepared content in the current collection when
+- `search_sources` searches prepared content in the current workspace when
   `document_ids` is omitted; explicit IDs narrow that scope. `match_mode` is
   `any` terms, `all` terms across a paper, or an exact `phrase`. Results rank
   papers by matched terms and title matches, then passages by matched terms.
@@ -918,8 +918,8 @@ the authoritative boundaries. The available capabilities include:
   Pipeline Run records immediately. Preparation parses paper content and classifies
   paper type and role. It does not build a Paper Map, discover or confirm an
   Objective, run Objective-specific Evidence extraction, or publish a Finding.
-  Unknown IDs fail before any run is created. A Collection with no
-  uploaded papers returns `collection_has_no_papers`;
+  Unknown IDs fail before any run is created. A Workspace with no
+  uploaded papers returns `workspace_has_no_papers`;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
@@ -1131,23 +1131,23 @@ can be inspected.
 
 ### Research Objectives
 
-- `POST /api/v1/collections/{collection_id}/objective-discovery`
-- `GET /api/v1/collections/{collection_id}/objectives`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/scope`
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis/status`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
+- `POST /api/v1/workspaces/{workspace_id}/objective-discovery`
+- `GET /api/v1/workspaces/{workspace_id}/objectives`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/scope`
+- `POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis/status`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis`
 
 Discovery accepts `{"document_ids": [...]}` with one or more unique current
 Documents. The explicit selection is not truncated or divided into independent
 discovery scopes, so candidate formation retains the complete cross-paper
 context. Every selected Document must be `ready` with a preparation fingerprint.
 The command freezes the resolved `(document_id, preparation_fingerprint)`
-values in one collection-scoped `objective_discovery` Pipeline Run and returns
+values in one workspace-scoped `objective_discovery` Pipeline Run and returns
 that run immediately. At most one discovery run may be `queued` or `running`
-for a Collection; a repeated command returns the active run without scheduling a
+for a Workspace; a repeated command returns the active run without scheduling a
 second worker, even when another request reaches a different backend process.
-Clients restore and poll its state through the Collection Pipeline Run and
+Clients restore and poll its state through the Workspace Pipeline Run and
 run-detail endpoints. On completion they read the replaced candidate set from
 `GET .../objectives`; on failure the terminal run error remains visible and a
 new command creates a retry run. A backend restart marks an interrupted run
@@ -1155,7 +1155,7 @@ failed rather than leaving it permanently active.
 
 The background worker lazily builds or reuses the selected Documents' current
 Paper Maps, reads their Profiles and maps, and replaces the current generated
-candidates. It does not silently include all Collection papers. This is
+candidates. It does not silently include all Workspace papers. This is
 research-question formation, not Objective Evidence analysis: analysis still
 requires the later, explicit Objective command. The worker is process-local,
 while admission, progress, completion, and failure are persisted; the Pipeline Run
@@ -1169,7 +1169,7 @@ analysis may use it to prioritize Source inspection and surface coverage
 warnings, but only facts grounded in inspected Sources may populate Evidence.
 
 `ResearchObjective` is the aggregate root for the research question and its
-analysis lifecycle. Its identity is `(collection_id, objective_id)`. Reusable
+analysis lifecycle. Its identity is `(workspace_id, objective_id)`. Reusable
 paper-owned experiment content has a separate `PaperExperiment` revision
 boundary: it is identified by `(experiment_id, experiment_version)` and does
 not belong to one Objective. An Objective analysis connects the two through an
@@ -1201,7 +1201,7 @@ rather than embedded in Objective list responses.
 
 `GET .../scope` is the read-only screening step between question formation and
 deep analysis. It applies the Objective's material, variables, and outcome to
-every current Collection Paper Map and returns each mapped Document exactly once
+every current Workspace Paper Map and returns each mapped Document exactly once
 as `likely_relevant`, `needs_inspection`, or
 `confidently_out_of_scope`. The response contains complete
 `recommended_document_ids`, `review_document_ids`, and
@@ -1211,7 +1211,7 @@ synthesis match is navigation support only; `support_is_evidence` is always
 false. Incomplete maps, partial matches, broad-variable uncertainty, and review
 citation leads require researcher inspection and are not selected by default.
 The endpoint performs no LLM call and persists no scope. An unknown Objective
-returns `200201`; a Collection with no Paper Maps returns
+returns `200201`; a Workspace with no Paper Maps returns
 `200204 objective_scope_not_ready`.
 
 `GET .../analysis/status` is the polling projection for the active analysis.
@@ -1260,7 +1260,7 @@ Chat/Agent three-step approval lifecycle. For a candidate Objective it
 atomically confirms the Objective and queues automatic analysis; this contract
 does not introduce a separate REST confirmation request.
 Independent Objective analyses,
-including analyses from different collections, execute as process-local asyncio
+including analyses from different workspaces, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
 execution. Tasks above that limit wait on the in-process semaphore; this is not
 a durable application queue. Synchronous model and scientific computations run
@@ -1347,12 +1347,12 @@ responses that predate this ledger.
 
 ### Published Findings And Evidence
 
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence-map`
+- `POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings`
+- `POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/evidence`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/evidence`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/evidence-map`
 
 Finding and Evidence list endpoints support `offset` and `limit`. All responses
 include an explicit `analysis_version`. If omitted from the query, the backend
@@ -1426,7 +1426,7 @@ parent. The new version retains the source analysis's document coverage.
 
 The new analysis version records the abstention as metadata and creates no
 placeholder Finding. An unauthenticated request returns `200301`; missing or
-unowned collections and missing Objectives return `200201`; stale source versions,
+unowned workspaces and missing Objectives return `200201`; stale source versions,
 concurrent analysis, unknown or ineligible Evidence, and scientifically
 inconsistent role selections return `200204`; malformed request shapes return
 `200100`.
@@ -1436,8 +1436,8 @@ inconsistent role selections return `200204`; malformed request shapes return
 The experiment-domain migration adds read-only routes; it does not replace or
 change the Objective, Finding, Evidence, or Agent request contracts above:
 
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis?analysis_version={n}`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis/export?analysis_version={n}&format=json|csv`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-analysis?analysis_version={n}`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-analysis/export?analysis_version={n}&format=json|csv`
 
 Both routes require a positive, explicit `analysis_version` and read the same
 fixed Selection, optional ComparisonGroup, Finding, and PaperExperiment
@@ -1473,7 +1473,7 @@ specific prepared Document Source. It accepts `source_analysis_version`,
 `document_id`, `source_kind` (`text_window | table | figure`), `source_ref`, an
 exact `source_excerpt`, an Evidence role, optional changed variables,
 comparison, reported result, attribution scope, and scientific context. The
-server checks collection ownership, the published analysis version, the
+server checks workspace ownership, the published analysis version, the
 analysis document scope, the Source locator, and that the normalized excerpt
 is a substring of the canonical Source. It derives identity, page, resolution,
 confidence, and creator provenance. The browser cannot provide a creator,
@@ -1504,8 +1504,8 @@ reached a non-technical analysis outcome. A scientifically valid empty result is
 complete; any paper with `analysis_status=failed` makes it false.
 
 An optional reading summary is available through
-`POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary`.
-The authenticated Collection owner supplies `analysis_version` (positive integer)
+`POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/summary`.
+The authenticated Workspace owner supplies `analysis_version` (positive integer)
 and `language` (`en` or `zh`, default `en`), not browser-provided evidence.
 The service reads the published Finding and all its linked Evidence, then asks
 the configured model for one short paragraph. The response contains `text`,
@@ -1521,7 +1521,7 @@ Unavailable summaries return `200205` with a safe `summary_*` reason code. Missi
 linked Evidence or input exceeding 200 records or the 24,000-token prompt budget
 is rejected explicitly, never silently truncated. Summary failure does not fail
 or replace the published analysis. Clients discard responses after changing the
-Collection, Objective, Finding, version, or language.
+Workspace, Objective, Finding, version, or language.
 
 A Finding contains:
 
@@ -1582,7 +1582,7 @@ Evidence annotation and correction remain the separate #191 workflow.
 The consumer identity is always:
 
 ```text
-(collection_id, objective_id, analysis_version, finding_id)
+(workspace_id, objective_id, analysis_version, finding_id)
 ```
 
 Direct contributing paper count is computed from PaperContribution Evidence
@@ -1594,13 +1594,13 @@ count as independent cross-paper confirmation.
 
 ### Finding Feedback, Curation, And Dataset Export
 
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback`
-- `PUT /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset`
-- `GET /api/v1/collections/{collection_id}/finding-dataset`
-- `GET /api/v1/collections/{collection_id}/finding-gold-draft`
+- `POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/feedback`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/feedback`
+- `PUT /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/curation`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/curation`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/finding-dataset`
+- `GET /api/v1/workspaces/{workspace_id}/finding-dataset`
+- `GET /api/v1/workspaces/{workspace_id}/finding-gold-draft`
 
 Feedback requires `analysis_version`, `review_status`, and `issue_type`.
 Curation requires `analysis_version` and one complete canonical
@@ -1659,9 +1659,9 @@ formatter (the default column names are already correct):
 
 ### Objective Experiment Plans
 
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`
-- `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
+- `GET /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-plans`
+- `POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-plans`
+- `PATCH /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 
 Plans are human-editable downstream drafts, not scientific source records.
 The HTTP POST creates a manual draft without Chat provenance. The Research
@@ -1685,14 +1685,14 @@ with `experiment_plan_revision_immutable` or
 
 ### Documents And Source Verification
 
-- `GET /api/v1/collections/{collection_id}/documents/profiles`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/markdown`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/source`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/figures/{figure_id}/image`
-- `GET /api/v1/collections/{collection_id}/references`
-- `POST /api/v1/collections/{collection_id}/references/build`
+- `GET /api/v1/workspaces/{workspace_id}/documents/profiles`
+- `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/profile`
+- `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/content`
+- `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/markdown`
+- `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/source`
+- `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/figures/{figure_id}/image`
+- `GET /api/v1/workspaces/{workspace_id}/references`
+- `POST /api/v1/workspaces/{workspace_id}/references/build`
 
 The document reader shows parsed paper content and supports precise Source
 navigation. A Finding Evidence link names the owning document, stable
@@ -1705,16 +1705,16 @@ matching against the profile title. `doc_type` accepts
 `experimental`, `review`, `mixed`, or `uncertain`; `has_warnings` filters by
 whether profile-classification warnings are present. Profile items contain
 `document_id`, `title`, `doc_type`, `profile_warnings`, and `confidence`;
-collection ownership and filenames remain on the collection's Document records.
+workspace ownership and filenames remain on the workspace's Document records.
 All active criteria are combined before
 pagination. `total` is the number of matching profiles, `count` is the current
 page size, and `summary.total_documents` remains the complete profiled
-collection size.
+workspace size.
 
 The browser comparison overview has no separate comparison aggregate endpoint.
 It reads the Objective list and each published Finding list described above.
 Legacy research-view, Materials, comparable-result, Evidence-card, and
-collection-wide Graph routes are not part of the maintained HTTP contract.
+workspace-wide Graph routes are not part of the maintained HTTP contract.
 
 ## Error Contract
 

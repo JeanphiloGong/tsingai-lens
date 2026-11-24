@@ -576,7 +576,7 @@ class ProposePaperExperimentDraftCapability:
             "mechanism_hypothesis, or limitation), and source_labels. "
             "Measurements must provide a local key, outcome, value or result_text, "
             "and source_labels. This is a review-only draft; do not include formal "
-            "IDs, fingerprints, versions, collection IDs, or objective IDs inside "
+            "IDs, fingerprints, versions, workspace IDs, or objective IDs inside "
             "the scientific payload. The draft does not write a PaperExperiment or "
             "an Objective Selection."
         ),
@@ -596,7 +596,7 @@ class ProposePaperExperimentDraftCapability:
         )
 
         prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
-            collection_id=context.collection_id,
+            workspace_id=context.workspace_id,
             user_id=context.user_id,
             document_id=arguments.document_id,
             raw_draft=arguments.raw_draft(),
@@ -690,7 +690,7 @@ class ProposePaperExperimentDraftCapability:
                     resource_type="paper_experiment_draft",
                     resource_id=draft_id,
                     href=(
-                        f"/collections/{context.collection_id}/documents/"
+                        f"/workspaces/{context.workspace_id}/documents/"
                         f"{arguments.document_id}?view=paper-experiment-draft"
                     ),
                 ),
@@ -774,7 +774,7 @@ class CreatePaperExperimentRevisionCapability:
                 "stored paper experiment draft is missing its scope"
             )
         prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
-            collection_id=context.collection_id,
+            workspace_id=context.workspace_id,
             user_id=context.user_id,
             document_id=document_id,
             raw_draft=raw_draft,
@@ -785,7 +785,7 @@ class CreatePaperExperimentRevisionCapability:
             )
         result = await paper_experiment_authoring_service.write_prepared_paper_experiments(
             prepared=prepared,
-            collection_id=context.collection_id,
+            workspace_id=context.workspace_id,
             created_by=context.user_id,
         )
         refs = [
@@ -796,7 +796,7 @@ class CreatePaperExperimentRevisionCapability:
                     f"{item.revision.experiment_version}"
                 ),
                 href=(
-                    f"/collections/{context.collection_id}/documents/"
+                    f"/workspaces/{context.workspace_id}/documents/"
                     f"{item.revision.document_id}?view=paper-experiment"
                 ),
             )

@@ -77,7 +77,7 @@ def _failure_modes() -> dict:
 
 def _bundle(*, synthesis_status: str = "insufficient_confirmation"):
     finding = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -104,7 +104,7 @@ def _bundle(*, synthesis_status: str = "insufficient_confirmation"):
         ],
     }
     evidence = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "evidence_id": "evidence-1",
@@ -140,13 +140,13 @@ def _bundle(*, synthesis_status: str = "insufficient_confirmation"):
     }
     return {
         "objective": {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "question": "How does VED affect density?",
             "confirmation_status": "confirmed",
         },
         "published_analysis": {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "status": "succeeded",
@@ -182,7 +182,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 
     findings = [
         Finding(
-            collection_id="col-test",
+            workspace_id="col-test",
             objective_id="obj-1",
             analysis_version=1,
             finding_id="finding-1",
@@ -207,7 +207,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
             ),
         ),
         Finding(
-            collection_id="col-test",
+            workspace_id="col-test",
             objective_id="obj-1",
             analysis_version=1,
             finding_id="finding-2",
@@ -234,7 +234,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
     ]
     published_evidence = [
         ObjectiveEvidence(
-            collection_id="col-test",
+            workspace_id="col-test",
             objective_id="obj-1",
             analysis_version=1,
             evidence_id="evidence-1",
@@ -257,7 +257,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
             confidence=0.0,
         ),
         ObjectiveEvidence(
-            collection_id="col-test",
+            workspace_id="col-test",
             objective_id="obj-1",
             analysis_version=1,
             evidence_id="evidence-2",
@@ -280,7 +280,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
             confidence=0.0,
         ),
         ObjectiveEvidence(
-            collection_id="col-test",
+            workspace_id="col-test",
             objective_id="obj-1",
             analysis_version=1,
             evidence_id="context-1",
@@ -305,11 +305,11 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
     ]
 
     class ObjectiveRepository:
-        async def read_objective(self, _collection_id, _objective_id):
+        async def read_objective(self, _workspace_id, _objective_id):
             from domain.core.research_objective import ResearchObjective
 
             return ResearchObjective(
-                collection_id="col-1",
+                workspace_id="col-1",
                 objective_id="objective-1",
                 question="Does preheat affect elongation?",
                 material_scope=(),
@@ -329,7 +329,7 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 
         async def read_analysis(self, *_args):
             return ObjectiveAnalysis(
-                collection_id="col-1",
+                workspace_id="col-1",
                 objective_id="objective-1",
                 analysis_version=2,
                 document_inputs=(
@@ -441,7 +441,7 @@ def _add_second_direct_result(
     )
     bundle["evidence_by_finding"]["finding-1"].append(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "evidence_id": "evidence-2",
@@ -528,7 +528,7 @@ def test_returned_context_evidence_does_not_fail_direct_support_check() -> None:
     )
     bundle["evidence_by_finding"]["finding-1"].append(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "evidence_id": "context-1",
@@ -1410,7 +1410,7 @@ def test_context_table_does_not_require_result_group_binding() -> None:
     )
     bundle["evidence_by_finding"]["finding-1"].append(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "evidence_id": "context-table",
@@ -1449,7 +1449,7 @@ def test_table_row_summary_excerpt_matches_canonical_source_row() -> None:
     )
     bundle["evidence_by_finding"]["finding-1"].append(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "evidence_id": "context-table",
@@ -1935,7 +1935,7 @@ async def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
         [entry for entry in checker.sys.path if entry != backend_root],
     )
 
-    async def assert_backend_import_path(_collection_id, _documents):
+    async def assert_backend_import_path(_workspace_id, _documents):
         assert backend_root in checker.sys.path
         raise RuntimeError("manifest resolution reached")
 
@@ -1953,7 +1953,7 @@ async def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
     try:
         await checker.check_objective_findings_projection(
             user_id="reviewer-1",
-            collection_id="col-1",
+            workspace_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
             acceptance_manifest=manifest,
         )
@@ -2098,7 +2098,7 @@ def test_researcher_parity_reads_required_context_from_complete_evidence_map() -
     bundle = _bundle()
     methods_text = "The fixed process used 200 W laser power and 1833 mm/s scan speed."
     context = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "evidence_id": "context-1",
@@ -2360,7 +2360,7 @@ async def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
     with pytest.raises(ValueError, match="acceptance_manifest is required"):
         await checker.check_objective_findings_projection(
             user_id="reviewer-1",
-            collection_id="col-1",
+            workspace_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
         )
 
@@ -2372,7 +2372,7 @@ async def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
     with pytest.raises(ValueError, match="at least three objective_ids"):
         await checker.check_objective_findings_projection(
             user_id="reviewer-1",
-            collection_id="col-1",
+            workspace_id="col-1",
             objective_ids=("objective-1",),
             acceptance_manifest=manifest,
         )
@@ -2401,7 +2401,7 @@ async def test_real_acceptance_requires_three_distinct_manifest_objectives(
         checker,
         "_local_objective_bundle",
         AsyncMock(
-            side_effect=lambda _collection_id, objective_id, **_kwargs: {
+            side_effect=lambda _workspace_id, objective_id, **_kwargs: {
                 "objective": {"objective_id": objective_id, "question": same_question}
             }
         ),
@@ -2420,14 +2420,14 @@ async def test_real_acceptance_requires_three_distinct_manifest_objectives(
     with pytest.raises(ValueError, match="distinct acceptance objectives"):
         await checker.check_objective_findings_projection(
             user_id="reviewer-1",
-            collection_id="col-1",
+            workspace_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
             acceptance_manifest=manifest,
         )
 
 
 @pytest.mark.anyio
-async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
+async def test_acceptance_resolves_paper_source_requirements_to_workspace_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checker = _load_module()
@@ -2452,7 +2452,7 @@ async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
         checker,
         "_local_objective_bundle",
         AsyncMock(
-            side_effect=lambda _collection_id, objective_id, **_kwargs: {
+            side_effect=lambda _workspace_id, objective_id, **_kwargs: {
                 "objective": {
                     "objective_id": objective_id,
                     "question": questions[objective_id],
@@ -2475,7 +2475,7 @@ async def test_acceptance_resolves_paper_source_requirements_to_collection_ids(
 
     await checker.check_objective_findings_projection(
         user_id="reviewer-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_ids=("objective-1", "objective-2", "objective-3"),
         acceptance_manifest=manifest,
     )
@@ -2596,7 +2596,7 @@ def test_condition_dependent_requires_a_disjoint_context_between_opposing_papers
     context_text = "Both samples were tested at room temperature."
     bundle["evidence_by_finding"]["finding-1"].append(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 2,
             "evidence_id": "context-2",
@@ -2681,7 +2681,7 @@ def test_source_audit_rejects_ambiguous_page_lists_for_source_jump() -> None:
 def test_finding_and_evidence_require_complete_scoped_identity() -> None:
     checker = _load_module()
     bundle = _bundle()
-    bundle["findings"][0]["collection_id"] = "col-other"
+    bundle["findings"][0]["workspace_id"] = "col-other"
     bundle["evidence_by_finding"]["finding-1"][0]["analysis_version"] = 3
 
     result = checker.evaluate_objective_bundle(
@@ -2942,7 +2942,7 @@ def test_training_jsonl_excludes_latest_partial_feedback() -> None:
                 {"role": "assistant", "content": "Finding"},
             ],
             "metadata": {
-                "collection_id": "col-1",
+                "workspace_id": "col-1",
                 "objective_id": "objective-1",
                 "analysis_version": 2,
                 "finding_id": "finding-1",
@@ -2978,7 +2978,7 @@ def test_training_jsonl_matches_latest_training_ready_dataset_item() -> None:
         {"role": "assistant", "content": json.dumps(training_target)},
     ]
     metadata = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
@@ -3019,7 +3019,7 @@ def test_training_jsonl_validates_roles_evidence_and_training_target() -> None:
         {"role": "user", "content": json.dumps({"statement": "Wrong target."})},
     ]
     metadata = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",

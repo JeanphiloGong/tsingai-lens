@@ -3,15 +3,15 @@
 ## Purpose
 
 This document records the implemented backend domain boundaries. Code follows
-the research process rather than a collection-wide technical build graph.
+the research process rather than a workspace-wide technical build graph.
 
 ## Domain Map
 
 ### Source
 
-Owns Collection membership and one paper's preparation:
+Owns Workspace membership and one paper's preparation:
 
-- create, read, and delete Collections;
+- create, read, and delete Workspaces;
 - upload and list current Documents;
 - prepare one Document into Source, Profile, and Paper Map;
 - expose per-document Pipeline Run status and failure;
@@ -39,7 +39,7 @@ or Core application services; it does not persist another scientific model.
 ### Goal
 
 Owns initial research brief intake and Objective-scoped experiment plans. Intake
-may create an empty Collection, but it does not manufacture evidence.
+may create an empty Workspace, but it does not manufacture evidence.
 
 ### Derived views
 
@@ -50,7 +50,7 @@ and Evidence. They are projections, not alternate conclusion identities.
 
 ```text
 controllers/
-  source/       Collection, Document, preparation command, Source reference
+  source/       Workspace, Document, preparation command, Source reference
   core/         Document reads, Objectives, Findings, Evidence, review
   chat/         Research Agent sessions and approval
   goal/         intake and experiment plans
@@ -63,7 +63,7 @@ application/
 
 domain/
   pipeline.py   Pipeline Run and node execution state
-  source/       Collection, Document, Source
+  source/       Workspace, Document, Source
   core/         Profile, Paper Map, Objective, Evidence, Finding
   chat/         trajectory and approval records
 
@@ -76,7 +76,7 @@ infra/
 
 - Controllers call owning application services; they do not assemble scientific
   state from repository internals.
-- Collection groups Documents but does not own preparation readiness.
+- Workspace groups Documents but does not own preparation readiness.
 - Document preparation performs no Objective-specific Evidence extraction.
 - Objective discovery and analysis accept explicit ready `document_ids`.
 - Analysis freezes preparation fingerprints and rejects stale inputs.

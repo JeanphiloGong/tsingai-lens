@@ -77,7 +77,7 @@ paper-experiment extraction and query boundaries:
 | `unknown_fields`, conflicts and coverage | `uncertainties` and an incomplete/partial status |
 | `status` and expected disposition | bound/incomplete plus downstream Finding or abstention |
 
-The fixture intentionally does not invent runtime `collection_id` or
+The fixture intentionally does not invent runtime `workspace_id` or
 `document_id` values. Those are supplied by the ingestion snapshot at replay
 time; the DOI, PDF hash, snapshot IDs and semantic locators provide the stable
 source identity.

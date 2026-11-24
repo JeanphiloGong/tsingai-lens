@@ -102,7 +102,7 @@ class SourceReferenceCandidateResponse(BaseModel):
 
 
 class SourceReferenceSummaryResponse(BaseModel):
-    collection_id: str = Field(..., description="Collection ID")
+    workspace_id: str = Field(..., description="Workspace ID")
     entry_count: int = Field(default=0, description="Reference entry count")
     mention_count: int = Field(default=0, description="In-text citation mention count")
     resolution_count: int = Field(default=0, description="External resolution count")
@@ -129,7 +129,7 @@ class SourceReferenceSetResponse(SourceReferenceSummaryResponse):
 
 
 reference_router = APIRouter(
-    prefix="/collections/{collection_id}/references",
+    prefix="/workspaces/{workspace_id}/references",
     tags=["source-references"],
 )
 
@@ -137,14 +137,14 @@ reference_router = APIRouter(
 @reference_router.post(
     "/build",
     response_model=ApiResponse[SourceReferenceSummaryResponse],
-    summary="Build the collection reference candidate pool",
+    summary="Build the workspace reference candidate pool",
 )
-async def build_collection_references(
-    collection_id: str,
+async def build_workspace_references(
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await reference_workflow_service.get_collection_references(
-        collection_id,
+    result = await reference_workflow_service.get_workspace_references(
+        workspace_id,
         user_id=user_id,
     )
     return make_api_response(data=SourceReferenceSummaryResponse(**result.to_summary()))
@@ -153,14 +153,14 @@ async def build_collection_references(
 @reference_router.get(
     "",
     response_model=ApiResponse[SourceReferenceSetResponse],
-    summary="Read the collection reference candidate pool",
+    summary="Read the workspace reference candidate pool",
 )
-async def get_collection_references(
-    collection_id: str,
+async def get_workspace_references(
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await reference_workflow_service.read_collection_references(
-        collection_id,
+    result = await reference_workflow_service.read_workspace_references(
+        workspace_id,
         user_id=user_id,
     )
     return make_api_response(data=_reference_set_response(result))
@@ -171,7 +171,7 @@ def _reference_set_response(
 ) -> SourceReferenceSetResponse:
     references = result.references
     return SourceReferenceSetResponse(
-        collection_id=result.collection_id,
+        workspace_id=result.workspace_id,
         entry_count=len(references.entries),
         mention_count=len(references.mentions),
         resolution_count=len(references.resolutions),

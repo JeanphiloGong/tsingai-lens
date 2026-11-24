@@ -1,4 +1,4 @@
-"""User-approved handoff to the canonical collection research process."""
+"""User-approved handoff to the canonical workspace research process."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from application.source.document_preparation_service import queue_document_preparation
 from application.pipeline.pipeline_run_service import document_preparation_error_message
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
@@ -25,8 +25,8 @@ class StartResearchProcessCapability:
     spec = ToolSpec(
         name="start_research_process",
         description=(
-            "Start the canonical literature-collection research process after the "
-            "researcher explicitly approves it. Use this for a collection whose "
+            "Start the canonical literature-workspace research process after the "
+            "researcher explicitly approves it. Use this for a workspace whose "
             "uploaded papers need to be prepared, classified by paper type and role, "
             "screened into a lightweight Paper Map, and synthesized into candidate "
             "research questions. This queues background work and returns immediately. "
@@ -44,16 +44,16 @@ class StartResearchProcessCapability:
         context: CapabilityExecutionContext,
         arguments: StartResearchProcessToolRequest,
     ) -> ChatToolResult:
-        collection = await collection_service.get_collection_for_user(
-            context.collection_id,
+        workspace = await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
-        documents = collection.documents
+        documents = workspace.documents
         if not documents:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status=ToolResultStatus.FAILED,
-                error_code="collection_has_no_papers",
+                error_code="workspace_has_no_papers",
                 error_message=(
                     "Upload at least one paper before starting literature analysis."
                 ),
@@ -78,7 +78,7 @@ class StartResearchProcessCapability:
                 status=ToolResultStatus.FAILED,
                 error_code="document_not_found",
                 error_message=(
-                    "The selected document is not part of this collection: "
+                    "The selected document is not part of this workspace: "
                     + ", ".join(missing_ids)
                 ),
             )
@@ -86,7 +86,7 @@ class StartResearchProcessCapability:
         for document_id in selected_ids:
             queued_runs.append(
                 await queue_document_preparation(
-                    context.collection_id,
+                    context.workspace_id,
                     document_id,
                     user_id=context.user_id,
                 )
@@ -135,12 +135,12 @@ class StartResearchProcessCapability:
                 nodes[node.name] = record
             observation["nodes"] = nodes
             observations.append(observation)
-        scope_is_collection = not requested_ids
+        scope_is_workspace = not requested_ids
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.QUEUED,
             data={
-                "collection_id": context.collection_id,
+                "workspace_id": context.workspace_id,
                 "document_ids": list(selected_ids),
                 "runs": tuple(observations),
                 "research_scope": "document_preparation",
@@ -151,16 +151,16 @@ class StartResearchProcessCapability:
                 ChatResourceRef(
                     resource_type="pipeline_run",
                     resource_id=run.run_id,
-                    href=f"/collections/{context.collection_id}",
+                    href=f"/workspaces/{context.workspace_id}",
                 )
                 for run in runs
             ),
             warnings=(
                 (
                     f"No document scope was supplied; all {len(selected_ids)} paper(s) "
-                    "in the collection were queued for preparation.",
+                    "in the workspace were queued for preparation.",
                 )
-                if scope_is_collection
+                if scope_is_workspace
                 else ()
             ),
         )

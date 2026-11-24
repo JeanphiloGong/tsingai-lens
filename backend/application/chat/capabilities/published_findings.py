@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from application.core.objectives import analysis_service as objective_analysis_service
 from application.evaluation import finding_feedback_service
 from repositories.objective_repository import ObjectiveRepo
@@ -59,7 +59,7 @@ class QueryPublishedFindingsCapability:
         name="query_published_findings",
         description=(
             "Read bounded Finding and source-linked Evidence summaries from published "
-            "Research Objective analyses. A successful empty result means the collection "
+            "Research Objective analyses. A successful empty result means the workspace "
             "does not yet contain published evidence for the selected Objectives. "
             "Evidence explicitly reports whether it is eligible for new Finding "
             "authorship."
@@ -73,12 +73,12 @@ class QueryPublishedFindingsCapability:
         context: CapabilityExecutionContext,
         arguments: QueryPublishedFindingsToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         objectives = await ObjectiveRepo.list_objectives(
-            context.collection_id
+            context.workspace_id
         )
         objectives_by_id = {item.objective_id: item for item in objectives}
         requested_ids = arguments.objective_ids or [
@@ -100,7 +100,7 @@ class QueryPublishedFindingsCapability:
                 unpublished_count += 1
                 continue
             findings = await objective_analysis_service.list_findings(
-                context.collection_id,
+                context.workspace_id,
                 objective.objective_id,
                 analysis_version=version,
                 offset=0,
@@ -108,7 +108,7 @@ class QueryPublishedFindingsCapability:
                 user_id=context.user_id,
             )
             evidence = await objective_analysis_service.list_evidence(
-                context.collection_id,
+                context.workspace_id,
                 objective.objective_id,
                 analysis_version=version,
                 offset=0,
@@ -134,11 +134,11 @@ class QueryPublishedFindingsCapability:
                 }
             )
             refs.append(
-                self._objective_ref(context.collection_id, objective.objective_id)
+                self._objective_ref(context.workspace_id, objective.objective_id)
             )
             refs.extend(
                 self._finding_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     objective.objective_id,
                     version,
                     item["finding_id"],
@@ -147,7 +147,7 @@ class QueryPublishedFindingsCapability:
             )
             refs.extend(
                 self._evidence_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     objective.objective_id,
                     item["document_id"],
                     item["evidence_id"],
@@ -219,16 +219,16 @@ class QueryPublishedFindingsCapability:
         }
 
     @staticmethod
-    def _objective_ref(collection_id: str, objective_id: str) -> ChatResourceRef:
+    def _objective_ref(workspace_id: str, objective_id: str) -> ChatResourceRef:
         return ChatResourceRef(
             resource_type="research_objective",
             resource_id=objective_id,
-            href=f"/collections/{collection_id}/objectives/{objective_id}",
+            href=f"/workspaces/{workspace_id}/objectives/{objective_id}",
         )
 
     @staticmethod
     def _finding_ref(
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         version: int,
         finding_id: str,
@@ -237,14 +237,14 @@ class QueryPublishedFindingsCapability:
             resource_type="finding",
             resource_id=f"{objective_id}:{version}:{finding_id}",
             href=(
-                f"/collections/{collection_id}/objectives/{objective_id}"
+                f"/workspaces/{workspace_id}/objectives/{objective_id}"
                 f"?finding_id={finding_id}"
             ),
         )
 
     @staticmethod
     def _evidence_ref(
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         document_id: str,
         evidence_id: str,
@@ -253,7 +253,7 @@ class QueryPublishedFindingsCapability:
             resource_type="evidence",
             resource_id=f"{objective_id}:{evidence_id}",
             href=(
-                f"/collections/{collection_id}/documents/{document_id}"
+                f"/workspaces/{workspace_id}/documents/{document_id}"
                 f"?evidence_id={evidence_id}"
             ),
         )
@@ -283,12 +283,12 @@ class InspectPublishedFindingCapability:
         context: CapabilityExecutionContext,
         arguments: InspectPublishedFindingToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         detail = await objective_analysis_service.get_finding(
-            context.collection_id,
+            context.workspace_id,
             arguments.objective_id,
             arguments.finding_id,
             analysis_version=arguments.analysis_version,
@@ -296,7 +296,7 @@ class InspectPublishedFindingCapability:
         )
         version = detail["analysis_version"]
         review_key = dict(
-            collection_id=context.collection_id,
+            workspace_id=context.workspace_id,
             objective_id=arguments.objective_id,
             analysis_version=version,
             finding_id=arguments.finding_id,
@@ -308,7 +308,7 @@ class InspectPublishedFindingCapability:
             **review_key, user_id=context.user_id
         )
         evidence = await objective_analysis_service.list_evidence(
-            context.collection_id,
+            context.workspace_id,
             arguments.objective_id,
             analysis_version=version,
             finding_id=arguments.finding_id,
@@ -329,7 +329,7 @@ class InspectPublishedFindingCapability:
         offset = 0
         while pending_ids:
             candidates = await objective_analysis_service.list_evidence(
-                context.collection_id,
+                context.workspace_id,
                 arguments.objective_id,
                 analysis_version=version,
                 offset=offset,
@@ -354,7 +354,7 @@ class InspectPublishedFindingCapability:
                 "inspect the next evidence_offset before proposing a complete review.",
             )
         finding_ref = QueryPublishedFindingsCapability._finding_ref(
-            context.collection_id,
+            context.workspace_id,
             arguments.objective_id,
             version,
             arguments.finding_id,
@@ -369,7 +369,7 @@ class InspectPublishedFindingCapability:
                 "feedback_records": [
                     {
                         "feedback_id": item.feedback_id,
-                        "collection_id": item.collection_id,
+                        "workspace_id": item.workspace_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
                         "finding_id": item.finding_id,
@@ -384,13 +384,13 @@ class InspectPublishedFindingCapability:
                 "curation_records": [
                     {
                         "curation_id": item.curation_id,
-                        "collection_id": item.collection_id,
+                        "workspace_id": item.workspace_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
                         "finding_id": item.finding_id,
                         "curated_status": item.curated_status,
                         "curated_finding": {
-                            "collection_id": item.curated_finding.collection_id,
+                            "workspace_id": item.curated_finding.workspace_id,
                             "objective_id": item.curated_finding.objective_id,
                             "analysis_version": item.curated_finding.analysis_version,
                             "finding_id": item.curated_finding.finding_id,
@@ -580,7 +580,7 @@ class InspectPublishedFindingCapability:
                 finding_ref,
                 *(
                     QueryPublishedFindingsCapability._evidence_ref(
-                        context.collection_id,
+                        context.workspace_id,
                         arguments.objective_id,
                         item["document_id"],
                         item["evidence_id"],

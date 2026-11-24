@@ -244,13 +244,13 @@ async def test_authoring_prepare_rejects_measurement_without_a_reported_result(
     request = PaperExperimentDraftToolRequest(
         objective_id="objective-1", document_id="paper-1", **draft
     )
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     with pytest.raises(PaperExperimentDraftValidationError, match="has no result"):
         await service.prepare_paper_experiment_draft(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             user_id="user-1",
             document_id=request.document_id,
             raw_draft=request.raw_draft(),
@@ -305,12 +305,12 @@ async def test_agent_request_parameters_survive_authoring_prepare() -> None:
     request = PaperExperimentDraftToolRequest(
         objective_id="objective-1", document_id="paper-1", **draft
     )
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     prepared = await service.prepare_paper_experiment_draft(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         user_id="user-1",
         document_id=request.document_id,
         raw_draft=request.raw_draft(),
@@ -353,14 +353,14 @@ async def test_prepare_reports_comparison_outcome_validation_as_repairable_error
             "binding_source_labels": ["S001"],
         }
     ]
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
 
     with pytest.raises(PaperExperimentDraftValidationError) as error:
         await service.prepare_paper_experiment_draft(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             user_id="user-1",
             document_id="paper-1",
             raw_draft=draft,
@@ -371,11 +371,11 @@ async def test_prepare_reports_comparison_outcome_validation_as_repairable_error
     assert "comparison outcome does not match" in str(error.value)
 
 
-class _CollectionService:
-    async def get_collection_for_user(self, collection_id, user_id):
-        return {"collection_id": collection_id, "owner_user_id": user_id}
+class _WorkspaceService:
+    async def get_workspace_for_user(self, workspace_id, user_id):
+        return {"workspace_id": workspace_id, "owner_user_id": user_id}
 
-    async def get_document(self, collection_id, document_id):
+    async def get_document(self, workspace_id, document_id):
         return SimpleNamespace(
             document=SimpleNamespace(
                 preparation_fingerprint="prep-1",
@@ -385,18 +385,18 @@ class _CollectionService:
 
 
 async def test_review_digest_is_stable_without_objective_context():
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     first = await service.prepare_paper_experiment_draft(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         user_id="user-1",
         document_id="paper-1",
         raw_draft=_draft(),
     )
     second = await service.prepare_paper_experiment_draft(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         user_id="user-1",
         document_id="paper-1",
         raw_draft=_draft(),
@@ -407,7 +407,7 @@ async def test_review_digest_is_stable_without_objective_context():
 class _SourceRepository:
     text = "The control treatment was measured."
 
-    async def read_document(self, collection_id, document_id):
+    async def read_document(self, workspace_id, document_id):
         return SimpleNamespace(
             metadata={},
             blocks=(
@@ -432,15 +432,15 @@ class _Writer:
         return SimpleNamespace(revisions=(), selections=(), groups=(), findings=())
 
 
-@pytest.mark.parametrize("change", ["source", "payload", "collection"])
+@pytest.mark.parametrize("change", ["source", "payload", "workspace"])
 async def test_review_digest_invalidated_by_content_or_scope_change(change):
     sources = _SourceRepository()
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = sources
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     arguments = dict(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         user_id="user-1",
         document_id="paper-1",
         raw_draft=_draft(),
@@ -451,24 +451,24 @@ async def test_review_digest_invalidated_by_content_or_scope_change(change):
     elif change == "payload":
         arguments["raw_draft"]["experiments"][0]["measurements"][0]["value"] = 2
     else:
-        arguments["collection_id"] = "collection-2"
+        arguments["workspace_id"] = "workspace-2"
     second = await service.prepare_paper_experiment_draft(**arguments)
     assert first.source_fingerprint == second.source_fingerprint
     assert first.draft_digest != second.draft_digest
 
 
-async def test_prepare_rejects_foreign_collection_before_reading_sources():
-    class DeniedCollection(_CollectionService):
-        async def get_collection_for_user(self, collection_id, user_id):
-            raise PermissionError("not the collection owner")
+async def test_prepare_rejects_foreign_workspace_before_reading_sources():
+    class DeniedWorkspace(_WorkspaceService):
+        async def get_workspace_for_user(self, workspace_id, user_id):
+            raise PermissionError("not the workspace owner")
 
-    paper_experiment_authoring_service.collection_service = DeniedCollection()
+    paper_experiment_authoring_service.workspace_service = DeniedWorkspace()
     paper_experiment_authoring_service.SourceArtifactRepo = object()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     with pytest.raises(PermissionError):
         await service.prepare_paper_experiment_draft(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             user_id="other-user",
             document_id="paper-1",
             raw_draft=_draft(),
@@ -511,12 +511,12 @@ async def test_write_saves_paper_experiment_without_objective_analysis(
         "application.core.objectives.paper_experiment_authoring_service.AsyncSessionLocal",
         transactions,
     )
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = writer
     service = paper_experiment_authoring_service
     prepared = await service.prepare_paper_experiment_draft(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         user_id="user-1",
         document_id="paper-1",
         raw_draft=_draft(),
@@ -524,7 +524,7 @@ async def test_write_saves_paper_experiment_without_objective_analysis(
 
     result = await service.write_prepared_paper_experiments(
         prepared=prepared,
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         created_by="user-1",
     )
 
@@ -537,12 +537,12 @@ async def test_write_saves_paper_experiment_without_objective_analysis(
 
 @pytest.mark.anyio
 async def test_prepare_reloads_source_context_and_rejects_formal_ids():
-    paper_experiment_authoring_service.collection_service = _CollectionService()
+    paper_experiment_authoring_service.workspace_service = _WorkspaceService()
     paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     prepared = await service.prepare_paper_experiment_draft(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         user_id="user-1",
         document_id="paper-1",
         raw_draft=_draft(),
@@ -555,7 +555,7 @@ async def test_prepare_reloads_source_context_and_rejects_formal_ids():
     invalid["experiments"][0]["experiment_id"] = "model-owned-id"
     with pytest.raises(ValueError, match="formal identity"):
         await service.prepare_paper_experiment_draft(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             user_id="user-1",
             document_id="paper-1",
             raw_draft=invalid,
@@ -673,7 +673,7 @@ async def test_experiment_draft_requires_current_complete_read_for_every_cited_s
         CapabilityExecutionContext(
             session_id="session-1",
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             tool_call_id="draft-1",
         ),
         PaperExperimentDraftToolRequest(
@@ -709,7 +709,7 @@ async def test_experiment_draft_does_not_treat_one_read_as_coverage_for_another_
         CapabilityExecutionContext(
             session_id="session-1",
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             tool_call_id="draft-1",
         ),
         PaperExperimentDraftToolRequest(
@@ -733,7 +733,7 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
     context = CapabilityExecutionContext(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         tool_call_id="call-propose",
     )
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
@@ -765,7 +765,7 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
         context.__class__(
             session_id="session-1",
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             tool_call_id="call-create",
         ),
         PaperExperimentRevisionToolRequest(
@@ -787,7 +787,7 @@ async def test_agent_save_rejects_stale_or_unapproved_draft(change):
     context = CapabilityExecutionContext(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         tool_call_id="call-1",
     )
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
@@ -835,7 +835,7 @@ async def test_agent_experiment_revision_rejects_unknown_or_changed_draft():
     context = CapabilityExecutionContext(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         tool_call_id="call-create",
     )
     with pytest.raises(ValueError, match="not found"):

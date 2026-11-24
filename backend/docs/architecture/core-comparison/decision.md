@@ -9,7 +9,7 @@ The maintained rule is:
 
 `Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`
 
-The retired comparison rows, comparable results, collection overlays, Evidence
+The retired comparison rows, comparable results, workspace overlays, Evidence
 cards, Materials, and Graph projections cannot become a parallel conclusion
 identity.
 
@@ -31,7 +31,7 @@ identity.
 - `Finding` records the published cross-paper conclusion and its uncertainty.
 
 Published Finding and ObjectiveEvidence records are the evaluation and export
-inputs. They do not depend on a comparison row, comparable result, collection
+inputs. They do not depend on a comparison row, comparable result, workspace
 overlay, or material-first reassessment policy.
 
 ## Ownership Rules

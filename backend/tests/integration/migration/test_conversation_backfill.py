@@ -4,7 +4,7 @@ from hashlib import sha256
 import pytest
 from sqlalchemy import select
 
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import (
     ConversationORM,
     MessageFeedbackORM,
@@ -22,8 +22,8 @@ async def test_backfill_is_idempotent_and_preserves_feedback(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="migration-v2-workspace",
+            WorkspaceORM(
+                workspace_id="migration-v2-workspace",
                 owner_user_id="migration-v2-owner",
                 name="Migration V2",
                 status="idle",
@@ -118,8 +118,8 @@ async def test_backfill_reports_non_contiguous_history(postgres_session_factory)
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="migration-v2-gap-workspace",
+            WorkspaceORM(
+                workspace_id="migration-v2-gap-workspace",
                 owner_user_id="migration-v2-gap-owner",
                 name="Migration V2 Gap",
                 status="idle",

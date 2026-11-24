@@ -29,8 +29,8 @@ _SYSTEM_TASKS: tuple[tuple[DatasetTaskType, str], ...] = (
 )
 
 
-def system_dataset_id(collection_id: str, task_type: str) -> str:
-    digest = sha256(f"{collection_id}\x1f{task_type}".encode("utf-8")).hexdigest()[:32]
+def system_dataset_id(workspace_id: str, task_type: str) -> str:
+    digest = sha256(f"{workspace_id}\x1f{task_type}".encode("utf-8")).hexdigest()[:32]
     return f"fdset_system_{digest}"
 
 
@@ -42,7 +42,7 @@ class FeedbackDatasetRepository:
             now = datetime.now(timezone.utc)
             row = FeedbackDatasetORM(
                 dataset_id=dataset.dataset_id,
-                collection_id=dataset.collection_id,
+                workspace_id=dataset.workspace_id,
                 name=dataset.name,
                 task_type=dataset.task_type,
                 construction_spec=dataset.construction_spec,
@@ -62,7 +62,7 @@ class FeedbackDatasetRepository:
                 return None
             return Dataset(
                 dataset_id=row.dataset_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 name=row.name,
                 task_type=row.task_type,
                 construction_spec=row.construction_spec,
@@ -78,7 +78,7 @@ class FeedbackDatasetRepository:
             return StoredDataset(
                 dataset=Dataset(
                     dataset_id=row.dataset_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     name=row.name,
                     task_type=row.task_type,
                     construction_spec=row.construction_spec,
@@ -89,16 +89,16 @@ class FeedbackDatasetRepository:
                 updated_at=_datetime(row.updated_at),
             )
 
-    async def list_records_for_collection(
+    async def list_records_for_workspace(
         self,
         *,
-        collection_id: str,
+        workspace_id: str,
         limit: int,
         offset: int,
     ) -> tuple[StoredDataset, ...]:
         statement = (
             select(FeedbackDatasetORM)
-            .where(FeedbackDatasetORM.collection_id == collection_id)
+            .where(FeedbackDatasetORM.workspace_id == workspace_id)
             .order_by(
                 FeedbackDatasetORM.created_at.desc(), FeedbackDatasetORM.dataset_id
             )
@@ -110,7 +110,7 @@ class FeedbackDatasetRepository:
                 StoredDataset(
                     dataset=Dataset(
                         dataset_id=row.dataset_id,
-                        collection_id=row.collection_id,
+                        workspace_id=row.workspace_id,
                         name=row.name,
                         task_type=row.task_type,
                         construction_spec=row.construction_spec,
@@ -127,19 +127,19 @@ class FeedbackDatasetRepository:
 async def ensure_system_datasets(
     db: AsyncSession,
     *,
-    collection_id: str,
+    workspace_id: str,
     owner_user_id: str,
     now: datetime,
 ) -> tuple[Dataset, ...]:
-    """Use the caller's transaction for collection creation and case writes."""
+    """Use the caller's transaction for workspace creation and case writes."""
     records: list[Dataset] = []
     for task_type, name in _SYSTEM_TASKS:
-        dataset_id = system_dataset_id(collection_id, task_type)
+        dataset_id = system_dataset_id(workspace_id, task_type)
         row = await db.get(FeedbackDatasetORM, dataset_id)
         if row is None:
             dataset = Dataset(
                 dataset_id=dataset_id,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 name=name,
                 task_type=task_type,
                 construction_spec={
@@ -154,7 +154,7 @@ async def ensure_system_datasets(
                     db.add(
                         FeedbackDatasetORM(
                             dataset_id=dataset.dataset_id,
-                            collection_id=dataset.collection_id,
+                            workspace_id=dataset.workspace_id,
                             name=dataset.name,
                             task_type=dataset.task_type,
                             construction_spec=dataset.construction_spec,
@@ -177,7 +177,7 @@ async def ensure_system_datasets(
         records.append(
             Dataset(
                 dataset_id=row.dataset_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 name=row.name,
                 task_type=row.task_type,
                 construction_spec=row.construction_spec,

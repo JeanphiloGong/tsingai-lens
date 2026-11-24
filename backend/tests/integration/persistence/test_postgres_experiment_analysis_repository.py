@@ -136,7 +136,7 @@ def _group(*, analysis_version: int) -> ComparisonGroup:
 
 def _finding(*, analysis_version: int, with_group: bool) -> Finding:
     return Finding(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id=OBJECTIVE_ID or "",
         analysis_version=analysis_version,
         finding_id="finding-strength-across-papers",
@@ -197,7 +197,7 @@ async def test_complete_analysis_graph_commits_once_and_is_idempotent(
         analysis_version=analysis.analysis_version,
     )
     graph = ExperimentAnalysisWrite(
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         objective_id=OBJECTIVE_ID,
         analysis_version=analysis.analysis_version,
         revisions=(revision_a, revision_b),
@@ -258,7 +258,7 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
 
     with pytest.raises(ValueError, match="requires a comparison group"):
         async with database.AsyncSessionLocal() as db, db.begin():
-            await repository.write_graph(db, ExperimentAnalysisWrite(collection_id=COLLECTION_ID, objective_id=OBJECTIVE_ID, analysis_version=analysis.analysis_version, revisions=(revision_a, revision_b), selections=(selection_a, selection_b), groups=(), findings=(invalid_finding,), created_by='test-agent'))
+            await repository.write_graph(db, ExperimentAnalysisWrite(workspace_id=COLLECTION_ID, objective_id=OBJECTIVE_ID, analysis_version=analysis.analysis_version, revisions=(revision_a, revision_b), selections=(selection_a, selection_b), groups=(), findings=(invalid_finding,), created_by='test-agent'))
 
     experiments = PaperExperimentRepository()
     selections = ObjectiveExperimentSelectionRepository()
@@ -309,7 +309,7 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
         analysis_version=analysis.analysis_version,
     )
     graph = ExperimentAnalysisWrite(
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         objective_id=OBJECTIVE_ID,
         analysis_version=analysis.analysis_version,
         revisions=(revision_a, revision_b),
@@ -364,7 +364,7 @@ async def test_same_experiment_selections_cannot_publish_independent_support(
         measurement_key="strength-a", analysis_version=analysis.analysis_version,
     )
     graph = ExperimentAnalysisWrite(
-        collection_id=COLLECTION_ID, objective_id=OBJECTIVE_ID,
+        workspace_id=COLLECTION_ID, objective_id=OBJECTIVE_ID,
         analysis_version=analysis.analysis_version, revisions=(revision,),
         selections=(first, replace(first, selection_id="selection-b")),
         groups=(_group(analysis_version=analysis.analysis_version),) if with_group else (),

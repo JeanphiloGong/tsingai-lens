@@ -218,7 +218,7 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 			: [];
 		const internalHref = (value: unknown) => {
 			const href = text(value);
-			return href.startsWith('/collections/') ? href : '';
+			return href.startsWith('/workspaces/') ? href : '';
 		};
 		const sectionSources = Array.isArray(data.sources)
 			? data.sources.filter(

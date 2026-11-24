@@ -17,37 +17,37 @@ from domain.evaluation import (
 class CoreArtifactsNotReadyForEvaluationError(RuntimeError):
     """Raised when Core artifacts cannot produce an evaluation snapshot."""
 
-    def __init__(self, collection_id: str, fact_source: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, fact_source: str) -> None:
+        self.workspace_id = workspace_id
         self.fact_source = fact_source
         super().__init__(
-            f"core artifacts not ready for evaluation: {collection_id}/{fact_source}"
+            f"core artifacts not ready for evaluation: {workspace_id}/{fact_source}"
         )
 
 
 from repositories.evaluation_repository import EvaluationRepo
 from repositories.objective_repository import ObjectiveRepo
-from application.source import collection_service
+from application.source import workspace_service
 from application.core.objectives.analysis import experiment_projection
 
 
 async def create_core_snapshot(
     *,
-    collection_id: str,
+    workspace_id: str,
     fact_source: str = "objective_first",
     snapshot_id: str | None = None,
     system_context: dict[str, Any] | None = None,
 ) -> EvaluationPredictionSnapshot:
-    await collection_service.get_collection(collection_id)
+    await workspace_service.get_workspace(workspace_id)
     if fact_source != "objective_first":
         raise ValueError(f"unsupported fact_source: {fact_source}")
-    items, objective_counts = await _objective_first_items(collection_id)
+    items, objective_counts = await _objective_first_items(workspace_id)
     if not items:
-        raise CoreArtifactsNotReadyForEvaluationError(collection_id, fact_source)
+        raise CoreArtifactsNotReadyForEvaluationError(workspace_id, fact_source)
     snapshot = EvaluationPredictionSnapshot(
         snapshot_id=snapshot_id
-        or f"pred_{collection_id}_{fact_source}_{_timestamp_id()}",
-        collection_id=collection_id,
+        or f"pred_{workspace_id}_{fact_source}_{_timestamp_id()}",
+        workspace_id=workspace_id,
         target_layer="core",
         fact_source=fact_source,
         system_context=system_context or {},
@@ -59,24 +59,24 @@ async def create_core_snapshot(
 
 
 async def _objective_first_items(
-    collection_id: str,
+    workspace_id: str,
 ) -> tuple[list[EvaluationPredictionItem], dict[str, int]]:
     items: list[EvaluationPredictionItem] = []
     published_analysis_count = 0
     exported_evidence_keys: set[tuple[str, int, str]] = set()
-    for objective in await ObjectiveRepo.list_objectives(collection_id):
+    for objective in await ObjectiveRepo.list_objectives(workspace_id):
         analysis_version = objective.published_analysis_version
         if analysis_version is None:
             continue
         published_analysis_count += 1
         experiment_backed = await should_read_experiment_projection(
-            collection_id=collection_id, objective_id=objective.objective_id,
+            workspace_id=workspace_id, objective_id=objective.objective_id,
             analysis_version=analysis_version,
         )
         finding_offset = 0
         while True:
             findings, finding_total = await _list_findings(
-                collection_id,
+                workspace_id,
                 objective.objective_id,
                 analysis_version,
                 offset=finding_offset,
@@ -91,7 +91,7 @@ async def _objective_first_items(
                 evidence_offset = 0
                 while True:
                     evidence_page, evidence_total = await _list_evidence(
-                        collection_id,
+                        workspace_id,
                         objective.objective_id,
                         analysis_version,
                         finding_id=finding_id,
@@ -122,7 +122,7 @@ async def _objective_first_items(
                 )
                 payload = (
                     {
-                        "collection_id": finding.collection_id,
+                        "workspace_id": finding.workspace_id,
                         "objective_id": finding.objective_id,
                         "analysis_version": finding.analysis_version,
                         "finding_id": finding.finding_id,
@@ -292,7 +292,7 @@ async def _objective_first_items(
                 payload["evidence"] = [
                     (
                         {
-                            "collection_id": evidence.collection_id,
+                            "workspace_id": evidence.workspace_id,
                             "objective_id": evidence.objective_id,
                             "analysis_version": evidence.analysis_version,
                             "evidence_id": evidence.evidence_id,
@@ -534,7 +534,7 @@ async def _objective_first_items(
 
 
 async def _list_findings(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -544,14 +544,14 @@ async def _list_findings(
 ) -> tuple[tuple[Any, ...], int]:
     if experiment_backed:
         return await experiment_projection.list_analysis_findings(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             offset=offset,
             limit=limit,
         )
     return await ObjectiveRepo.list_findings(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
         offset=offset,
@@ -560,7 +560,7 @@ async def _list_findings(
 
 
 async def _list_evidence(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -571,7 +571,7 @@ async def _list_evidence(
 ) -> tuple[tuple[Any, ...], int]:
     if experiment_backed:
         return await experiment_projection.list_analysis_evidence(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             finding_id=finding_id,
@@ -579,7 +579,7 @@ async def _list_evidence(
             limit=limit,
         )
     return await ObjectiveRepo.list_evidence(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
         finding_id=finding_id,

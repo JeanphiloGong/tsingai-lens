@@ -16,7 +16,7 @@ from application.chat.session_service import RepositoryModelCallObserver
 from domain.chat import ChatMessage, ChatSession
 from infra.llm.chat_model import OpenAIChatModel
 from repositories.chat_repository import ChatRepository
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -138,12 +138,12 @@ async def test_audit_records_provider_failure_without_persisting_error_body() ->
 async def test_sdk_audit_persists_outcome_and_keeps_completed_call_immutable(
     postgres_session_factory, streaming, status, error_code,
 ) -> None:
-    await seed_collection(postgres_session_factory, "audit-collection")
+    await seed_workspace(postgres_session_factory, "audit-workspace")
     repository = ChatRepository()
     observer = RepositoryModelCallObserver()
     context = _context(observer)
     await repository.add_session(ChatSession.create(
-        session_id="session-1", user_id="user-1", collection_id="audit-collection",
+        session_id="session-1", user_id="user-1", workspace_id="audit-workspace",
         created_at=context.messages[0].created_at,
     ))
     requests = []

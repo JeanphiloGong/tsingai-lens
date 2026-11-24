@@ -205,7 +205,7 @@ def _artifacts_for_scenario(
         blocks=document.blocks,
         tables=document.tables,
         figures=document.figures,
-        collection_id="collection-test",
+        workspace_id="workspace-test",
     )
     return artifacts, tree
 
@@ -220,7 +220,7 @@ def test_tc4_multi_axis_map_reads_results_after_a_visible_relationship():
     extractor = _MultiAxisExtractor()
 
     paper_map = paper_research_map_service.build_document_paper_map(
-        "collection-test",
+        "workspace-test",
         document=artifacts[0],
         profile=None,
         document_tree=tree,
@@ -267,7 +267,7 @@ def test_tc4_paper_map_caps_expansion_sources_and_keeps_round_ids_distinct():
     extractor = _BoundedExpansionExtractor()
 
     paper_research_map_service.build_document_paper_map(
-        "collection-test",
+        "workspace-test",
         document=artifacts[0],
         profile=None,
         document_tree=tree,
@@ -321,7 +321,7 @@ def test_tc4_expansion_prioritizes_specific_metrics_for_a_broad_outcome():
     extractor = _MultiAxisExtractor()
 
     paper_map = paper_research_map_service.build_document_paper_map(
-        "collection-test",
+        "workspace-test",
         document=artifacts[0],
         profile=None,
         document_tree=tree,
@@ -357,7 +357,7 @@ def test_tc4_concrete_relationship_resolves_same_source_broad_signals():
     extractor = _MultiAxisExtractor()
 
     paper_map = paper_research_map_service.build_document_paper_map(
-        "collection-test",
+        "workspace-test",
         document=artifacts[0],
         profile=None,
         document_tree=tree,
@@ -397,7 +397,7 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
     extractor = _MultiAxisExtractor()
 
     paper_map = paper_research_map_service.build_document_paper_map(
-        "collection-test",
+        "workspace-test",
         document=artifacts[0],
         profile=None,
         document_tree=tree,
@@ -624,7 +624,7 @@ def test_tc4_later_expansion_reads_methods_after_finding_a_specific_outcome():
     extractor = _MultiAxisExtractor()
 
     paper_research_map_service.build_document_paper_map(
-        "collection-test",
+        "workspace-test",
         document=artifacts[0],
         profile=None,
         document_tree=tree,

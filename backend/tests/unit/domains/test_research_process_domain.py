@@ -22,7 +22,7 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
     scientific_context = getattr(core_domain, "ScientificContext")
     observation = SourceObservation(
         observation_id="obs-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         document_id="doc-1",
         source_kind="table",
@@ -49,7 +49,7 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
         confidence=0.9,
     )
     evidence = ObjectiveEvidence(
-        collection_id=observation.collection_id,
+        workspace_id=observation.workspace_id,
         objective_id=observation.objective_id,
         analysis_version=1,
         evidence_id="evd-1",
@@ -90,7 +90,7 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
 
 def test_source_observation_has_no_legacy_anchor_ids() -> None:
     observation = SourceObservation(
-        observation_id="obs-1", collection_id="col-1", objective_id="obj-1",
+        observation_id="obs-1", workspace_id="col-1", objective_id="obj-1",
         document_id="doc-1", source_kind="table", source_ref="table-2",
         observation_role="direct_result",
         source_excerpt="Elongation was 82% for the preheated sample.",
@@ -111,7 +111,7 @@ def test_source_observation_has_no_legacy_anchor_ids() -> None:
 def test_source_observation_rejects_missing_provenance() -> None:
     with pytest.raises(ValueError, match="source_ref"):
         SourceObservation(
-            observation_id="obs-1", collection_id="col-1", objective_id="obj-1",
+            observation_id="obs-1", workspace_id="col-1", objective_id="obj-1",
             document_id="doc-1", source_kind="table", source_ref="",
             observation_role="direct_result", source_excerpt="A result.",
             reported_result=ScientificResult(
@@ -124,7 +124,7 @@ def test_source_observation_rejects_missing_provenance() -> None:
 
 def test_source_observation_keeps_source_reference_and_evidence_identity() -> None:
     observation = SourceObservation(
-        observation_id="evd-1", collection_id="col-1", objective_id="obj-1",
+        observation_id="evd-1", workspace_id="col-1", objective_id="obj-1",
         document_id="doc-1", source_kind="table", source_ref="table-1",
         observation_role="direct_result", selection_status="extracted",
         source_excerpt="Yield strength was 900 MPa.",
@@ -140,14 +140,14 @@ def test_source_observation_keeps_source_reference_and_evidence_identity() -> No
     )
 
     assert observation.evidence_id == "evd-1"
-    assert observation.collection_id == "col-1"
+    assert observation.workspace_id == "col-1"
     assert observation.source_refs[0]["source_ref"] == "table-1"
     assert observation.source_excerpt == "Yield strength was 900 MPa."
 
 
 def test_rejected_source_observation_can_record_read_failure_without_excerpt() -> None:
     observation = SourceObservation(
-        observation_id="failed-1", collection_id="col-1", objective_id="obj-1",
+        observation_id="failed-1", workspace_id="col-1", objective_id="obj-1",
         document_id="doc-1", source_kind="table", source_ref="table-1",
         observation_role="irrelevant", source_excerpt="", selection_status="failed",
         failure_reason="provider unavailable", status="rejected", confidence=0,

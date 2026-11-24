@@ -3,22 +3,22 @@
 from datetime import timedelta
 from infra.persistence import database
 from repositories.document_profile_repository import DocumentProfileRepo
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core.document_profile import DocumentProfile
 
 
 async def claim_analysis_fixture(
-    repository, collection_id, objective_id, analysis_version
+    repository, workspace_id, objective_id, analysis_version
 ):
     job = await repository.claim_next_objective_analysis_job(
         worker_id="scientific-fixture", lease_duration=timedelta(seconds=300)
     )
     if job is None:
         return None
-    assert job.analysis.key == (collection_id, objective_id, analysis_version)
+    assert job.analysis.key == (workspace_id, objective_id, analysis_version)
     for item in job.analysis.document_inputs:
         await DocumentProfileRepo.replace(
-            collection_id,
+            workspace_id,
             DocumentProfile(
                 document_id=item.document_id,
                 title=item.document_id,
@@ -29,8 +29,8 @@ async def claim_analysis_fixture(
                 profile_fingerprint=item.preparation_fingerprint,
             ),
         )
-        await collection_service.update_document_preparation(
-            collection_id, item.document_id, status="ready"
+        await workspace_service.update_document_preparation(
+            workspace_id, item.document_id, status="ready"
         )
     if not hasattr(repository, "_fixture_jobs"):
         repository._fixture_jobs = {}
@@ -38,8 +38,8 @@ async def claim_analysis_fixture(
     return job.analysis
 
 
-def analysis_job_fixture(repository, collection_id, objective_id, analysis_version):
-    return repository._fixture_jobs[(collection_id, objective_id, analysis_version)]
+def analysis_job_fixture(repository, workspace_id, objective_id, analysis_version):
+    return repository._fixture_jobs[(workspace_id, objective_id, analysis_version)]
 
 
 async def update_pipeline_fixture(repository, run):

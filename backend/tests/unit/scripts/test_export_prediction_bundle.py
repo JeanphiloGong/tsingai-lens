@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from infra.persistence import database
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 from tests.support.source_artifacts import build_source_documents
 
@@ -50,7 +50,7 @@ class _PublishedObjectiveRepository:
             status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot"
         )
 
-    async def list_objectives(self, collection_id: str):
+    async def list_objectives(self, workspace_id: str):
         if not self.published:
             return ()
         return (
@@ -65,7 +65,7 @@ class _PublishedObjectiveRepository:
             return (), 0
         records = (
             ObjectiveEvidence(
-                collection_id="col-test",
+                workspace_id="col-test",
                 objective_id="obj-1",
                 analysis_version=2,
                 evidence_id="ev-1",
@@ -95,7 +95,7 @@ class _PublishedObjectiveRepository:
             return (), 0
         records = (
             Finding(
-                collection_id="col-test",
+                workspace_id="col-test",
                 objective_id="obj-1",
                 analysis_version=2,
                 finding_id="finding-1",
@@ -140,7 +140,7 @@ async def test_export_prediction_bundle_uses_current_published_results(tmp_path,
             }
         ]
     )[0]
-    await seed_collection(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
     profile_repository = DocumentProfileRepository()
     await profile_repository.replace(
@@ -178,7 +178,7 @@ async def test_export_prediction_bundle_uses_current_published_results(tmp_path,
 
     result = await exporter.export_prediction_bundle(
         backend_root=tmp_path,
-        collection_id="col-test",
+        workspace_id="col-test",
         output_path=output,
     )
 
@@ -213,7 +213,7 @@ def test_prediction_bundle_preserves_exact_evidence_and_uncertainty(tmp_path):
     ]
 
     bundle = exporter.build_prediction_bundle(
-        collection_id="col-test",
+        workspace_id="col-test",
         source_output_dir=tmp_path,
         records_by_artifact=records,
         missing_artifacts=[],
@@ -278,7 +278,7 @@ def test_prediction_bundle_projects_source_backed_samples_measurements_and_compa
     ]
 
     bundle = exporter.build_prediction_bundle(
-        collection_id="col-test",
+        workspace_id="col-test",
         source_output_dir=tmp_path,
         records_by_artifact=records,
         missing_artifacts=[],
@@ -324,7 +324,7 @@ def test_prediction_bundle_preserves_scalar_measurement_when_target_value_is_nul
     ]
 
     bundle = exporter.build_prediction_bundle(
-        collection_id="col-test",
+        workspace_id="col-test",
         source_output_dir=tmp_path,
         records_by_artifact=records,
         missing_artifacts=[],
@@ -363,7 +363,7 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_pat
 
     await exporter.export_prediction_bundle(
         backend_root=tmp_path,
-        collection_id="col-empty",
+        workspace_id="col-empty",
         output_path=output,
     )
 
@@ -381,6 +381,6 @@ def test_prediction_bundle_rejects_missing_evidence_identity(tmp_path):
     records["objective_evidence"] = [{"evidence_id": "ev-1"}]
     with pytest.raises(KeyError, match="document_id"):
         exporter.build_prediction_bundle(
-            collection_id="col-test", source_output_dir=tmp_path,
+            workspace_id="col-test", source_output_dir=tmp_path,
             records_by_artifact=records, missing_artifacts=[],
         )

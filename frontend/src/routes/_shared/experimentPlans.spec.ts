@@ -25,7 +25,7 @@ describe('experimentPlans api helper', () => {
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse({
 				plan_id: 'exp_1',
-				collection_id: 'col_1',
+				workspace_id: 'col_1',
 				objective_id: 'obj_1',
 				title: 'Preheating matrix',
 				content: 'Compare 25 C and 150 C builds.',
@@ -45,7 +45,7 @@ describe('experimentPlans api helper', () => {
 		});
 		const [path, init] = fetchMock.mock.calls[0];
 
-		expect(path).toBe('/api/v1/collections/col_1/objectives/obj_1/experiment-plans');
+		expect(path).toBe('/api/v1/workspaces/col_1/objectives/obj_1/experiment-plans');
 		expect(init.method).toBe('POST');
 		expect(JSON.parse(init.body as string)).toEqual({
 			title: 'Preheating matrix',
@@ -57,12 +57,12 @@ describe('experimentPlans api helper', () => {
 	it('lists and updates objective-scoped experiment plans', async () => {
 		fetchMock
 			.mockResolvedValueOnce(
-				jsonResponse({ collection_id: 'col_1', objective_id: 'obj_1', items: [] })
+				jsonResponse({ workspace_id: 'col_1', objective_id: 'obj_1', items: [] })
 			)
 			.mockResolvedValueOnce(
 				jsonResponse({
 					plan_id: 'exp_1',
-					collection_id: 'col_1',
+					workspace_id: 'col_1',
 					objective_id: 'obj_1',
 					title: 'Edited plan',
 					content: 'Add controls.',
@@ -84,10 +84,10 @@ describe('experimentPlans api helper', () => {
 		});
 
 		expect(fetchMock.mock.calls[0][0]).toBe(
-			'/api/v1/collections/col_1/objectives/obj_1/experiment-plans'
+			'/api/v1/workspaces/col_1/objectives/obj_1/experiment-plans'
 		);
 		expect(fetchMock.mock.calls[1][0]).toBe(
-			'/api/v1/collections/col_1/objectives/obj_1/experiment-plans/exp_1'
+			'/api/v1/workspaces/col_1/objectives/obj_1/experiment-plans/exp_1'
 		);
 		expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
 		expect(updated.status).toBe('ready_for_review');

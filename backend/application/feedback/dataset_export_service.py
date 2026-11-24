@@ -190,7 +190,7 @@ async def publish_dataset_export_for_user(
         "dataset_type": dataset.task_type,
         "dataset_id": dataset_id,
         "dataset_name": dataset.name,
-        "collection_id": dataset.collection_id,
+        "workspace_id": dataset.workspace_id,
         "export_id": export_id,
         "preview_id": preview_id,
         "preview_digest": preview_digest,

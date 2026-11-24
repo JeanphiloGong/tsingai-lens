@@ -83,7 +83,7 @@ class SftSampleBuilder:
         )
         provenance = {
             "builder": self.generator.model_name if generated else self.model_name,
-            "collection_id": dataset.collection_id,
+            "workspace_id": dataset.workspace_id,
             "dataset_id": dataset.dataset_id,
             "source_case_id": case.case_id,
             "session_id": case.session_id,

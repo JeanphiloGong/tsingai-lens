@@ -123,7 +123,7 @@ def _cross_paper_finding(
     selection_ids: tuple[str, str],
 ) -> Finding:
     return Finding(
-        collection_id=COLLECTION_ID or "",
+        workspace_id=COLLECTION_ID or "",
         objective_id=OBJECTIVE_ID or "",
         analysis_version=analysis_version,
         finding_id="finding-transaction",
@@ -254,7 +254,7 @@ async def test_single_study_finding_persists_without_a_comparison_group(
     revision = _revision()
     selection = _selection(analysis.analysis_version)
     finding = Finding(
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         objective_id=OBJECTIVE_ID,
         analysis_version=analysis.analysis_version,
         finding_id="finding-single-study",

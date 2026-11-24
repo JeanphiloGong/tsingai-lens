@@ -36,9 +36,9 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import (
+from infra.persistence.postgres.models.workspace import (
     DocumentORM,
-    CollectionORM,
+    WorkspaceORM,
     DocumentPreparationORM,
 )
 from exceptions import ResourceConflictException, ResourceNotFoundException
@@ -82,7 +82,7 @@ def _datetime_or_none(value: datetime | str | None) -> datetime | None:
 
 @dataclass(frozen=True)
 class ObjectiveAnalysis:
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     document_inputs: tuple[PreparedDocumentInput, ...]
@@ -111,8 +111,8 @@ class ObjectiveAnalysis:
     abstention_note: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.collection_id or not self.objective_id:
-            raise ValueError("objective analysis requires collection and objective IDs")
+        if not self.workspace_id or not self.objective_id:
+            raise ValueError("objective analysis requires workspace and objective IDs")
         if self.analysis_version < 1:
             raise ValueError("analysis_version must be a positive integer")
         document_ids = [item.document_id for item in self.document_inputs]
@@ -186,7 +186,7 @@ class ObjectiveAnalysis:
 
     @property
     def key(self) -> tuple[str, str, int]:
-        return (self.collection_id, self.objective_id, self.analysis_version)
+        return (self.workspace_id, self.objective_id, self.analysis_version)
 
     def start(self, *, started_at: datetime | None = None) -> "ObjectiveAnalysis":
         return self._transition(
@@ -294,33 +294,33 @@ class ObjectiveRepository:
 
     async def replace(
         self,
-        collection_id: str,
+        workspace_id: str,
         facts: ObjectiveFactSet,
         *,
         db: AsyncSession | None = None,
     ) -> None:
         for objective in facts.research_objectives:
-            if objective.collection_id != collection_id:
-                raise ValueError("objective belongs to another collection")
+            if objective.workspace_id != workspace_id:
+                raise ValueError("objective belongs to another workspace")
             if objective.origin != "system_discovered":
                 raise ValueError("Objective discovery can only replace system candidates")
 
         now = datetime.now(timezone.utc)
         objective_ids = [item.objective_id for item in facts.research_objectives]
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            collection = await db.get(CollectionORM, collection_id, with_for_update=True)
-            if collection is None:
-                raise FileNotFoundError(f"collection not found: {collection_id}")
-            collection.discovery_ready = facts.research_objectives_ready
-            collection.discovery_document_inputs = [
+            workspace = await db.get(WorkspaceORM, workspace_id, with_for_update=True)
+            if workspace is None:
+                raise FileNotFoundError(f"workspace not found: {workspace_id}")
+            workspace.discovery_ready = facts.research_objectives_ready
+            workspace.discovery_document_inputs = [
                 {
                     "document_id": item.document_id,
                     "preparation_fingerprint": item.preparation_fingerprint,
                 }
                 for item in facts.document_inputs
             ]
-            collection.discovery_objective_ids = objective_ids
-            collection.discovery_study_dispositions = [
+            workspace.discovery_objective_ids = objective_ids
+            workspace.discovery_study_dispositions = [
                 {
                     "document_id": item.document_id,
                     "study_id": item.study_id,
@@ -331,12 +331,12 @@ class ObjectiveRepository:
                 }
                 for item in facts.study_dispositions
             ]
-            collection.discovery_updated_at = now
+            workspace.discovery_updated_at = now
 
             existing_system_rows = tuple(
                 await db.scalars(
                     select(ObjectiveResearchORM).where(
-                        ObjectiveResearchORM.collection_id == collection_id,
+                        ObjectiveResearchORM.workspace_id == workspace_id,
                         ObjectiveResearchORM.origin == "system_discovered",
                     )
                 )
@@ -352,7 +352,7 @@ class ObjectiveRepository:
             for objective in facts.research_objectives:
                 row = await db.get(
                     ObjectiveResearchORM,
-                    (collection_id, objective.objective_id),
+                    (workspace_id, objective.objective_id),
                 )
                 if row is not None:
                     if row.origin != "system_discovered":
@@ -375,7 +375,7 @@ class ObjectiveRepository:
                     continue
                 db.add(
                     ObjectiveResearchORM(
-                        collection_id=objective.collection_id,
+                        workspace_id=objective.workspace_id,
                         objective_id=objective.objective_id,
                         rank=objective.rank or 1,
                         origin=objective.origin,
@@ -387,24 +387,24 @@ class ObjectiveRepository:
                 )
 
 
-    async def read(self, collection_id: str) -> ObjectiveFactSet:
+    async def read(self, workspace_id: str) -> ObjectiveFactSet:
         async with AsyncSessionLocal() as db:
-            collection = await db.get(CollectionORM, collection_id)
-            if collection is None or not collection.discovery_objective_ids:
+            workspace = await db.get(WorkspaceORM, workspace_id)
+            if workspace is None or not workspace.discovery_objective_ids:
                 return ObjectiveFactSet()
             rows = tuple(
                 await db.scalars(
                     select(ObjectiveResearchORM).where(
-                        ObjectiveResearchORM.collection_id == collection_id,
+                        ObjectiveResearchORM.workspace_id == workspace_id,
                         ObjectiveResearchORM.objective_id.in_(
-                            collection.discovery_objective_ids or [""]
+                            workspace.discovery_objective_ids or [""]
                         ),
                     )
                 )
             )
             by_id = {
                 row.objective_id: ResearchObjective(
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     objective_id=row.objective_id,
                     question=row.payload["question"],
                     material_scope=tuple(row.payload.get("material_scope", ())),
@@ -438,17 +438,17 @@ class ObjectiveRepository:
                 for row in rows
             }
             return ObjectiveFactSet(
-                research_objectives_ready=collection.discovery_ready,
+                research_objectives_ready=workspace.discovery_ready,
                 document_inputs=tuple(
                     PreparedDocumentInput(
                         document_id=item["document_id"],
                         preparation_fingerprint=item["preparation_fingerprint"],
                     )
-                    for item in collection.discovery_document_inputs
+                    for item in workspace.discovery_document_inputs
                 ),
                 research_objectives=tuple(
                     by_id[objective_id]
-                    for objective_id in collection.discovery_objective_ids
+                    for objective_id in workspace.discovery_objective_ids
                     if objective_id in by_id
                 ),
                 study_dispositions=tuple(
@@ -460,19 +460,19 @@ class ObjectiveRepository:
                         objective_id=item.get("objective_id"),
                         reason=item.get("reason"),
                     )
-                    for item in collection.discovery_study_dispositions
+                    for item in workspace.discovery_study_dispositions
                 ),
             )
 
     async def list_objectives(
         self,
-        collection_id: str,
+        workspace_id: str,
     ) -> tuple[ResearchObjective, ...]:
         async with AsyncSessionLocal() as db:
             rows = tuple(
                 await db.scalars(
                     select(ObjectiveResearchORM)
-                    .where(ObjectiveResearchORM.collection_id == collection_id)
+                    .where(ObjectiveResearchORM.workspace_id == workspace_id)
                     .order_by(
                         ObjectiveResearchORM.rank,
                         ObjectiveResearchORM.created_at,
@@ -482,7 +482,7 @@ class ObjectiveRepository:
             )
             return tuple(
                 ResearchObjective(
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     objective_id=row.objective_id,
                     question=row.payload["question"],
                     material_scope=tuple(row.payload.get("material_scope", ())),
@@ -518,13 +518,13 @@ class ObjectiveRepository:
 
     async def list_objective_records(
         self,
-        collection_id: str,
+        workspace_id: str,
     ) -> tuple[StoredObjective, ...]:
         async with AsyncSessionLocal() as db:
             rows = tuple(
                 await db.scalars(
                     select(ObjectiveResearchORM)
-                    .where(ObjectiveResearchORM.collection_id == collection_id)
+                    .where(ObjectiveResearchORM.workspace_id == workspace_id)
                     .order_by(
                         ObjectiveResearchORM.rank,
                         ObjectiveResearchORM.created_at,
@@ -535,7 +535,7 @@ class ObjectiveRepository:
             return tuple(
                 StoredObjective(
                     objective=ResearchObjective(
-                        collection_id=row.collection_id,
+                        workspace_id=row.workspace_id,
                         objective_id=row.objective_id,
                         question=row.payload["question"],
                         material_scope=tuple(row.payload.get("material_scope", ())),
@@ -603,7 +603,7 @@ class ObjectiveRepository:
             )
             if prior is not None:
                 existing = ResearchObjective(
-                    collection_id=prior.collection_id,
+                    workspace_id=prior.workspace_id,
                     objective_id=prior.objective_id,
                     question=prior.payload["question"],
                     material_scope=tuple(prior.payload.get("material_scope", ())),
@@ -641,7 +641,7 @@ class ObjectiveRepository:
                     ),
                 )
                 if (
-                    existing.collection_id != objective.collection_id
+                    existing.workspace_id != objective.workspace_id
                     or existing.objective_id != objective.objective_id
                     or existing.created_by_user_id != created_by_user_id
                     or replace(existing, rank=None) != replace(objective, rank=None)
@@ -653,7 +653,7 @@ class ObjectiveRepository:
                 return existing
             collision = await db.get(
                 ObjectiveResearchORM,
-                (objective.collection_id, objective.objective_id),
+                (objective.workspace_id, objective.objective_id),
             )
             if collision is not None:
                 raise ResourceConflictException(
@@ -662,7 +662,7 @@ class ObjectiveRepository:
                 )
             maximum_rank = await db.scalar(
                 select(func.max(ObjectiveResearchORM.rank)).where(
-                    ObjectiveResearchORM.collection_id == objective.collection_id
+                    ObjectiveResearchORM.workspace_id == objective.workspace_id
                 )
             )
             created = replace(
@@ -671,7 +671,7 @@ class ObjectiveRepository:
             )
             db.add(
                 ObjectiveResearchORM(
-                    collection_id=created.collection_id,
+                    workspace_id=created.workspace_id,
                     objective_id=created.objective_id,
                     rank=created.rank or 1,
                     origin=created.origin,
@@ -685,17 +685,17 @@ class ObjectiveRepository:
 
     async def read_objective(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
     ) -> ResearchObjective | None:
         async with AsyncSessionLocal() as db:
             row = await db.get(
                 ObjectiveResearchORM,
-                (collection_id, objective_id),
+                (workspace_id, objective_id),
             )
             return (
                 ResearchObjective(
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     objective_id=row.objective_id,
                     question=row.payload["question"],
                     material_scope=tuple(row.payload.get("material_scope", ())),
@@ -732,18 +732,18 @@ class ObjectiveRepository:
 
     async def read_objective_record(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
     ) -> StoredObjective | None:
         async with AsyncSessionLocal() as db:
             row = await db.get(
                 ObjectiveResearchORM,
-                (collection_id, objective_id),
+                (workspace_id, objective_id),
             )
             return (
                 StoredObjective(
                     objective=ResearchObjective(
-                        collection_id=row.collection_id,
+                        workspace_id=row.workspace_id,
                         objective_id=row.objective_id,
                         question=row.payload["question"],
                         material_scope=tuple(row.payload.get("material_scope", ())),
@@ -791,13 +791,13 @@ class ObjectiveRepository:
 
     async def confirm_objective(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
     ) -> ResearchObjective:
         async with AsyncSessionLocal() as db, db.begin():
-            row = await self._locked_objective(db, collection_id, objective_id)
+            row = await self._locked_objective(db, workspace_id, objective_id)
             objective = ResearchObjective(
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 objective_id=row.objective_id,
                 question=row.payload["question"],
                 material_scope=tuple(row.payload.get("material_scope", ())),
@@ -840,7 +840,7 @@ class ObjectiveRepository:
 
     async def queue_analysis(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         *,
         document_inputs: tuple[PreparedDocumentInput, ...],
@@ -855,9 +855,9 @@ class ObjectiveRepository:
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            row = await self._locked_objective(db, collection_id, objective_id)
+            row = await self._locked_objective(db, workspace_id, objective_id)
             objective = ResearchObjective(
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 objective_id=row.objective_id,
                 question=row.payload["question"],
                 material_scope=tuple(row.payload.get("material_scope", ())),
@@ -894,7 +894,7 @@ class ObjectiveRepository:
             active_row = await db.scalar(
                 select(ObjectiveAnalysisORM)
                 .where(
-                    ObjectiveAnalysisORM.collection_id == collection_id,
+                    ObjectiveAnalysisORM.workspace_id == workspace_id,
                     ObjectiveAnalysisORM.objective_id == objective_id,
                     ObjectiveAnalysisORM.status.in_(("queued", "running")),
                 )
@@ -903,7 +903,7 @@ class ObjectiveRepository:
             )
             if active_row is not None:
                 active = ObjectiveAnalysis(
-                    collection_id=active_row.payload["collection_id"],
+                    workspace_id=active_row.payload["workspace_id"],
                     objective_id=active_row.payload["objective_id"],
                     analysis_version=active_row.payload["analysis_version"],
                     document_inputs=tuple(
@@ -1000,13 +1000,13 @@ class ObjectiveRepository:
                 return objective, active
             maximum_version = await db.scalar(
                 select(func.max(ObjectiveAnalysisORM.analysis_version)).where(
-                    ObjectiveAnalysisORM.collection_id == collection_id,
+                    ObjectiveAnalysisORM.workspace_id == workspace_id,
                     ObjectiveAnalysisORM.objective_id == objective_id,
                 )
             )
             version = int(maximum_version or 0) + 1
             analysis = ObjectiveAnalysis(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective_id=objective_id,
                 analysis_version=version,
                 document_inputs=document_inputs,
@@ -1033,7 +1033,7 @@ class ObjectiveRepository:
             row.payload = asdict(objective)
             row.updated_at = now
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -1091,7 +1091,7 @@ class ObjectiveRepository:
             next_analysis_payload["diagnostics"] = analysis.diagnostics
             db.add(
                 ObjectiveAnalysisORM(
-                    collection_id=analysis.collection_id,
+                    workspace_id=analysis.workspace_id,
                     objective_id=analysis.objective_id,
                     analysis_version=analysis.analysis_version,
                     status=analysis.status,
@@ -1111,7 +1111,7 @@ class ObjectiveRepository:
         execution_id: str,
     ) -> ObjectiveAnalysisJobSnapshot:
         objective = await self._locked_objective(
-            db, analysis.collection_id, analysis.objective_id
+            db, analysis.workspace_id, analysis.objective_id
         )
         row = await self._locked_analysis(db, *analysis.key)
         if (
@@ -1159,8 +1159,8 @@ class ObjectiveRepository:
                 .where(
                     exists(
                         select(ObjectiveAnalysisORM.analysis_version).where(
-                            ObjectiveAnalysisORM.collection_id
-                            == ObjectiveResearchORM.collection_id,
+                            ObjectiveAnalysisORM.workspace_id
+                            == ObjectiveResearchORM.workspace_id,
                             ObjectiveAnalysisORM.objective_id
                             == ObjectiveResearchORM.objective_id,
                             ObjectiveAnalysisORM.analysis_version
@@ -1184,7 +1184,7 @@ class ObjectiveRepository:
             row = await db.scalar(
                 select(ObjectiveAnalysisORM)
                 .where(
-                    ObjectiveAnalysisORM.collection_id == objective.collection_id,
+                    ObjectiveAnalysisORM.workspace_id == objective.workspace_id,
                     ObjectiveAnalysisORM.objective_id == objective.objective_id,
                     ObjectiveAnalysisORM.analysis_version
                     == objective.payload["active_analysis_version"],
@@ -1199,7 +1199,7 @@ class ObjectiveRepository:
             row.lease_expires_at = now + lease_duration
             row.heartbeat_at = now
             analysis = ObjectiveAnalysis(
-                collection_id=row.payload["collection_id"],
+                workspace_id=row.payload["workspace_id"],
                 objective_id=row.payload["objective_id"],
                 analysis_version=row.payload["analysis_version"],
                 document_inputs=tuple(
@@ -1277,7 +1277,7 @@ class ObjectiveRepository:
             row.status = analysis.status
             previous = dict(row.payload or {})
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -1350,7 +1350,7 @@ class ObjectiveRepository:
             changed = await db.execute(
                 update(ObjectiveAnalysisORM)
                 .where(
-                    ObjectiveAnalysisORM.collection_id == job.analysis.collection_id,
+                    ObjectiveAnalysisORM.workspace_id == job.analysis.workspace_id,
                     ObjectiveAnalysisORM.objective_id == job.analysis.objective_id,
                     ObjectiveAnalysisORM.analysis_version
                     == job.analysis.analysis_version,
@@ -1368,7 +1368,7 @@ class ObjectiveRepository:
         self, db: AsyncSession, job: ObjectiveAnalysisJobSnapshot
     ) -> None:
         objective = await self._locked_objective(
-            db, job.analysis.collection_id, job.analysis.objective_id
+            db, job.analysis.workspace_id, job.analysis.objective_id
         )
         row = await self._locked_analysis(db, *job.analysis.key)
         now = datetime.now(timezone.utc)
@@ -1393,7 +1393,7 @@ class ObjectiveRepository:
             )
             if (
                 document is None
-                or document.collection_id != analysis.collection_id
+                or document.workspace_id != analysis.workspace_id
                 or document.status != "ready"
                 or preparation is None
                 or not preparation.profile_json
@@ -1404,7 +1404,7 @@ class ObjectiveRepository:
 
     async def update_analysis_progress(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -1416,12 +1416,12 @@ class ObjectiveRepository:
         progress_message: str | None,
     ) -> ObjectiveAnalysis:
         async with AsyncSessionLocal() as db, db.begin():
-            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+            if (workspace_id, objective_id, analysis_version) != job.analysis.key:
                 raise ValueError("analysis mutation belongs to another job")
             await self.lock_analysis_job(db, job)
             row = await self._locked_analysis(db, *job.analysis.key)
             analysis = ObjectiveAnalysis(
-                collection_id=row.payload["collection_id"],
+                workspace_id=row.payload["workspace_id"],
                 objective_id=row.payload["objective_id"],
                 analysis_version=row.payload["analysis_version"],
                 document_inputs=tuple(
@@ -1498,7 +1498,7 @@ class ObjectiveRepository:
             row.status = analysis.status
             previous = dict(row.payload or {})
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -1563,7 +1563,7 @@ class ObjectiveRepository:
 
     async def update_analysis_execution_stats(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -1574,13 +1574,13 @@ class ObjectiveRepository:
         diagnostics: tuple[dict[str, Any], ...],
     ) -> ObjectiveAnalysis:
         async with AsyncSessionLocal() as db, db.begin():
-            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+            if (workspace_id, objective_id, analysis_version) != job.analysis.key:
                 raise ValueError("analysis mutation belongs to another job")
             await self.lock_analysis_job(db, job)
             row = await self._locked_analysis(db, *job.analysis.key)
             analysis = replace(
                 ObjectiveAnalysis(
-                    collection_id=row.payload["collection_id"],
+                    workspace_id=row.payload["workspace_id"],
                     objective_id=row.payload["objective_id"],
                     analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
@@ -1658,7 +1658,7 @@ class ObjectiveRepository:
             row.status = analysis.status
             previous = dict(row.payload or {})
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -1723,7 +1723,7 @@ class ObjectiveRepository:
 
     async def fail_analysis(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -1734,12 +1734,12 @@ class ObjectiveRepository:
         contributions: tuple[PaperContribution, ...] = (),
     ) -> ObjectiveAnalysis:
         async with AsyncSessionLocal() as db, db.begin():
-            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+            if (workspace_id, objective_id, analysis_version) != job.analysis.key:
                 raise ValueError("analysis mutation belongs to another job")
             await self.lock_analysis_job(db, job)
             row = await self._locked_analysis(db, *job.analysis.key)
             analysis = ObjectiveAnalysis(
-                collection_id=row.payload["collection_id"],
+                workspace_id=row.payload["workspace_id"],
                 objective_id=row.payload["objective_id"],
                 analysis_version=row.payload["analysis_version"],
                 document_inputs=tuple(
@@ -1809,7 +1809,7 @@ class ObjectiveRepository:
             )
             if expected_status is not None and analysis.status != expected_status:
                 return analysis
-            key = (collection_id, objective_id, analysis_version)
+            key = (workspace_id, objective_id, analysis_version)
             if contributions:
                 if any(item.key[:3] != key for item in contributions):
                     raise ValueError("analysis artifact belongs to another version")
@@ -1825,7 +1825,7 @@ class ObjectiveRepository:
             row.status = analysis.status
             previous = dict(row.payload or {})
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -1891,7 +1891,7 @@ class ObjectiveRepository:
 
     async def publish_analysis(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -1902,17 +1902,17 @@ class ObjectiveRepository:
         abstention_reason: str | None = None,
         abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
-        key = (collection_id, objective_id, analysis_version)
+        key = (workspace_id, objective_id, analysis_version)
         async with AsyncSessionLocal() as db, db.begin():
             await self.lock_analysis_job(db, job)
             analysis_row = await self._locked_analysis(db, *job.analysis.key)
-            if (collection_id, objective_id, analysis_version) != job.analysis.key:
+            if (workspace_id, objective_id, analysis_version) != job.analysis.key:
                 raise ValueError("analysis publication belongs to another job")
             await self.check_analysis_inputs(db, job.analysis)
-            objective_row = await self._locked_objective(db, collection_id, objective_id)
+            objective_row = await self._locked_objective(db, workspace_id, objective_id)
 
             analysis = ObjectiveAnalysis(
-                collection_id=analysis_row.payload["collection_id"],
+                workspace_id=analysis_row.payload["workspace_id"],
                 objective_id=analysis_row.payload["objective_id"],
                 analysis_version=analysis_row.payload["analysis_version"],
                 document_inputs=tuple(
@@ -1996,7 +1996,7 @@ class ObjectiveRepository:
             if {item.document_id for item in evidence_records} - contribution_documents:
                 raise ValueError("objective evidence lacks owning paper contribution")
             for evidence in evidence_records:
-                await self._require_source_locator(db, collection_id, evidence)
+                await self._require_source_locator(db, workspace_id, evidence)
             for finding in findings:
                 finding.validate_sources(evidence_records, contributions)
 
@@ -2016,7 +2016,7 @@ class ObjectiveRepository:
                 abstention_note=abstention_note,
             )
             objective = ResearchObjective(
-                collection_id=objective_row.collection_id,
+                workspace_id=objective_row.workspace_id,
                 objective_id=objective_row.objective_id,
                 question=objective_row.payload["question"],
                 material_scope=tuple(objective_row.payload.get("material_scope", ())),
@@ -2053,7 +2053,7 @@ class ObjectiveRepository:
                     "created_by_tool_call_id"
                 ),
             ).publish_analysis(
-                collection_id=analysis.collection_id,
+                workspace_id=analysis.workspace_id,
                 objective_id=analysis.objective_id,
                 analysis_version=analysis.analysis_version,
                 status=analysis.status,
@@ -2061,7 +2061,7 @@ class ObjectiveRepository:
             analysis_row.status = analysis.status
             previous = dict(analysis_row.payload or {})
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -2132,7 +2132,7 @@ class ObjectiveRepository:
     async def publish_experiment_analysis(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -2150,14 +2150,14 @@ class ObjectiveRepository:
 
         await self.lock_analysis_job(db, job)
         analysis_row = await self._locked_analysis(db, *job.analysis.key)
-        if (collection_id, objective_id, analysis_version) != job.analysis.key:
+        if (workspace_id, objective_id, analysis_version) != job.analysis.key:
             raise ValueError("analysis publication belongs to another job")
         if job.analysis.origin == "system_generated":
             await self.check_analysis_inputs(db, job.analysis)
-        objective_row = await self._locked_objective(db, collection_id, objective_id)
+        objective_row = await self._locked_objective(db, workspace_id, objective_id)
 
         analysis = ObjectiveAnalysis(
-            collection_id=analysis_row.payload["collection_id"],
+            workspace_id=analysis_row.payload["workspace_id"],
             objective_id=analysis_row.payload["objective_id"],
             analysis_version=analysis_row.payload["analysis_version"],
             document_inputs=tuple(
@@ -2233,7 +2233,7 @@ class ObjectiveRepository:
             if contribution_documents != input_documents:
                 raise ValueError("paper contributions must cover every analysis input")
             if any(
-                item.key[:3] != (collection_id, objective_id, analysis_version)
+                item.key[:3] != (workspace_id, objective_id, analysis_version)
                 for item in contributions
             ):
                 raise ValueError("paper contribution belongs to another analysis")
@@ -2248,7 +2248,7 @@ class ObjectiveRepository:
             abstention_note=abstention_note,
         )
         objective = ResearchObjective(
-            collection_id=objective_row.collection_id,
+            workspace_id=objective_row.workspace_id,
             objective_id=objective_row.objective_id,
             question=objective_row.payload["question"],
             material_scope=tuple(objective_row.payload.get("material_scope", ())),
@@ -2279,7 +2279,7 @@ class ObjectiveRepository:
             created_by_user_id=objective_row.payload.get("created_by_user_id"),
             created_by_tool_call_id=objective_row.payload.get("created_by_tool_call_id"),
         ).publish_analysis(
-            collection_id=analysis.collection_id,
+            workspace_id=analysis.workspace_id,
             objective_id=analysis.objective_id,
             analysis_version=analysis.analysis_version,
             status=analysis.status,
@@ -2287,7 +2287,7 @@ class ObjectiveRepository:
         analysis_row.status = analysis.status
         previous = dict(analysis_row.payload or {})
         next_analysis_payload = {
-            "collection_id": analysis.collection_id,
+            "workspace_id": analysis.workspace_id,
             "objective_id": analysis.objective_id,
             "analysis_version": analysis.analysis_version,
             "document_inputs": [
@@ -2353,7 +2353,7 @@ class ObjectiveRepository:
 
     async def publish_authored_analysis(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         source_analysis_version: int,
         *,
@@ -2364,10 +2364,10 @@ class ObjectiveRepository:
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         async with AsyncSessionLocal() as db, db.begin():
             objective_row = await self._locked_objective(
-                db, collection_id, objective_id
+                db, workspace_id, objective_id
             )
             objective = ResearchObjective(
-                collection_id=objective_row.collection_id,
+                workspace_id=objective_row.workspace_id,
                 objective_id=objective_row.objective_id,
                 question=objective_row.payload["question"],
                 material_scope=tuple(objective_row.payload.get("material_scope", ())),
@@ -2411,14 +2411,14 @@ class ObjectiveRepository:
             if objective.published_analysis_version != source_analysis_version:
                 raise ValueError("source analysis version is stale")
             source_row = await self._locked_analysis(
-                db, collection_id, objective_id, source_analysis_version
+                db, workspace_id, objective_id, source_analysis_version
             )
             active_version = (
                 objective.active_analysis_version or source_analysis_version
             )
             if active_version != source_analysis_version:
                 active_row = await self._locked_analysis(
-                    db, collection_id, objective_id, active_version
+                    db, workspace_id, objective_id, active_version
                 )
                 if active_row.status in {"queued", "running"}:
                     raise ValueError("objective analysis is currently running")
@@ -2446,13 +2446,13 @@ class ObjectiveRepository:
             if {item.document_id for item in evidence_records} - contribution_documents:
                 raise ValueError("objective evidence lacks owning paper contribution")
             for evidence in evidence_records:
-                await self._require_source_locator(db, collection_id, evidence)
+                await self._require_source_locator(db, workspace_id, evidence)
             for finding in findings:
                 finding.validate_sources(evidence_records, contributions)
 
             now = datetime.now(timezone.utc)
             next_analysis_payload = {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -2511,7 +2511,7 @@ class ObjectiveRepository:
             }
             next_analysis_payload["diagnostics"] = analysis.diagnostics
             analysis_row = ObjectiveAnalysisORM(
-                collection_id=analysis.collection_id,
+                workspace_id=analysis.workspace_id,
                 objective_id=analysis.objective_id,
                 analysis_version=analysis.analysis_version,
                 status=analysis.status,
@@ -2524,7 +2524,7 @@ class ObjectiveRepository:
             db.add(analysis_row)
             objective = objective.queue_analysis(analysis.analysis_version)
             objective = objective.publish_analysis(
-                collection_id=analysis.collection_id,
+                workspace_id=analysis.workspace_id,
                 objective_id=analysis.objective_id,
                 analysis_version=analysis.analysis_version,
                 status=analysis.status,
@@ -2538,7 +2538,7 @@ class ObjectiveRepository:
 
     async def read_analysis(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int | None = None,
     ) -> ObjectiveAnalysis | None:
@@ -2546,7 +2546,7 @@ class ObjectiveRepository:
             if analysis_version is None:
                 objective_row = await db.get(
                     ObjectiveResearchORM,
-                    (collection_id, objective_id),
+                    (workspace_id, objective_id),
                 )
                 if objective_row is None:
                     return None
@@ -2555,11 +2555,11 @@ class ObjectiveRepository:
                 return None
             row = await db.get(
                 ObjectiveAnalysisORM,
-                (collection_id, objective_id, analysis_version),
+                (workspace_id, objective_id, analysis_version),
             )
             return (
                 ObjectiveAnalysis(
-                    collection_id=row.payload["collection_id"],
+                    workspace_id=row.payload["workspace_id"],
                     objective_id=row.payload["objective_id"],
                     analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
@@ -2641,13 +2641,13 @@ class ObjectiveRepository:
 
     async def read_published_analysis(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
     ) -> ObjectiveAnalysis | None:
         async with AsyncSessionLocal() as db:
             objective_row = await db.get(
                 ObjectiveResearchORM,
-                (collection_id, objective_id),
+                (workspace_id, objective_id),
             )
             if objective_row is None:
                 return None
@@ -2656,11 +2656,11 @@ class ObjectiveRepository:
                 return None
             row = await db.get(
                 ObjectiveAnalysisORM,
-                (collection_id, objective_id, version),
+                (workspace_id, objective_id, version),
             )
             return (
                 ObjectiveAnalysis(
-                    collection_id=row.payload["collection_id"],
+                    workspace_id=row.payload["workspace_id"],
                     objective_id=row.payload["objective_id"],
                     analysis_version=row.payload["analysis_version"],
                     document_inputs=tuple(
@@ -2742,20 +2742,20 @@ class ObjectiveRepository:
 
     async def list_contributions(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> tuple[PaperContribution, ...]:
         async with AsyncSessionLocal() as db:
             row = await db.get(
                 ObjectiveAnalysisORM,
-                (collection_id, objective_id, analysis_version),
+                (workspace_id, objective_id, analysis_version),
             )
             if row is None:
                 return ()
             return tuple(
                 PaperContribution(
-                    collection_id=item.get("collection_id", ""),
+                    workspace_id=item.get("workspace_id", ""),
                     objective_id=item.get("objective_id", ""),
                     analysis_version=item.get("analysis_version", 0),
                     document_id=item.get("document_id", ""),
@@ -2800,7 +2800,7 @@ class ObjectiveRepository:
 
     async def list_findings(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -2810,7 +2810,7 @@ class ObjectiveRepository:
         async with AsyncSessionLocal() as db:
             row = await db.get(
                 ObjectiveAnalysisORM,
-                (collection_id, objective_id, analysis_version),
+                (workspace_id, objective_id, analysis_version),
             )
             if row is None:
                 return (), 0
@@ -2820,7 +2820,7 @@ class ObjectiveRepository:
             return (
                 tuple(
                     Finding(
-                        collection_id=item["collection_id"],
+                        workspace_id=item["workspace_id"],
                         objective_id=item["objective_id"],
                         analysis_version=item["analysis_version"],
                         finding_id=item["finding_id"],
@@ -2964,7 +2964,7 @@ class ObjectiveRepository:
 
     async def read_finding(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         finding_id: str,
@@ -2972,14 +2972,14 @@ class ObjectiveRepository:
         async with AsyncSessionLocal() as db:
             row = await db.get(
                 ObjectiveAnalysisORM,
-                (collection_id, objective_id, analysis_version),
+                (workspace_id, objective_id, analysis_version),
             )
             if row is None:
                 return None
             for item in (row.payload or {}).get("findings", ()):
                 if item.get("finding_id") == finding_id:
                     return Finding(
-                        collection_id=item["collection_id"],
+                        workspace_id=item["workspace_id"],
                         objective_id=item["objective_id"],
                         analysis_version=item["analysis_version"],
                         finding_id=item["finding_id"],
@@ -3120,7 +3120,7 @@ class ObjectiveRepository:
 
     async def list_evidence(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -3132,7 +3132,7 @@ class ObjectiveRepository:
             evidence_ids: set[str] | None = None
             row = await db.get(
                 ObjectiveAnalysisORM,
-                (collection_id, objective_id, analysis_version),
+                (workspace_id, objective_id, analysis_version),
             )
             if row is None:
                 return (), 0
@@ -3189,13 +3189,13 @@ class ObjectiveRepository:
                 context = item.get("scientific_context") or {}
                 evidence.append(
                     ObjectiveEvidence(
-                        collection_id=item.get("collection_id", ""),
+                        workspace_id=item.get("workspace_id", ""),
                         objective_id=item.get("objective_id", ""),
                         analysis_version=item.get("analysis_version", 0),
                         evidence_id=item.get("evidence_id")
                         or objective_scoped_id(
                             "oev",
-                            item.get("collection_id", ""),
+                            item.get("workspace_id", ""),
                             item.get("objective_id", ""),
                             item.get("analysis_version", 0),
                             item.get("document_id", ""),
@@ -3284,7 +3284,7 @@ class ObjectiveRepository:
         payload = dict(row.payload or {})
         payload["paper_contributions"] = [
             {
-                "collection_id": item.collection_id,
+                "workspace_id": item.workspace_id,
                 "objective_id": item.objective_id,
                 "analysis_version": item.analysis_version,
                 "document_id": item.document_id,
@@ -3331,7 +3331,7 @@ class ObjectiveRepository:
         payload = dict(row.payload or {})
         payload["evidence_records"] = [
             {
-                "collection_id": item.collection_id,
+                "workspace_id": item.workspace_id,
                 "objective_id": item.objective_id,
                 "analysis_version": item.analysis_version,
                 "evidence_id": item.evidence_id,
@@ -3500,7 +3500,7 @@ class ObjectiveRepository:
         ]
         payload["findings"] = [
             {
-                "collection_id": item.collection_id,
+                "workspace_id": item.workspace_id,
                 "objective_id": item.objective_id,
                 "analysis_version": item.analysis_version,
                 "finding_id": item.finding_id,
@@ -3659,13 +3659,13 @@ class ObjectiveRepository:
     @staticmethod
     async def _locked_objective(
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
     ) -> ObjectiveResearchORM:
         row = await db.scalar(
             select(ObjectiveResearchORM)
             .where(
-                ObjectiveResearchORM.collection_id == collection_id,
+                ObjectiveResearchORM.workspace_id == workspace_id,
                 ObjectiveResearchORM.objective_id == objective_id,
             )
             .with_for_update()
@@ -3673,21 +3673,21 @@ class ObjectiveRepository:
         if row is None:
             raise ResourceNotFoundException(
                 "The research Objective was not found.",
-                data={"code": "objective_not_found", "collection_id": collection_id, "objective_id": objective_id},
+                data={"code": "objective_not_found", "workspace_id": workspace_id, "objective_id": objective_id},
             )
         return row
 
     @staticmethod
     async def _locked_analysis(
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> ObjectiveAnalysisORM:
         row = await db.scalar(
             select(ObjectiveAnalysisORM)
             .where(
-                ObjectiveAnalysisORM.collection_id == collection_id,
+                ObjectiveAnalysisORM.workspace_id == workspace_id,
                 ObjectiveAnalysisORM.objective_id == objective_id,
                 ObjectiveAnalysisORM.analysis_version == analysis_version,
             )
@@ -3696,14 +3696,14 @@ class ObjectiveRepository:
         if row is None:
             raise FileNotFoundError(
                 "objective analysis not found: "
-                f"{collection_id}/{objective_id}/{analysis_version}"
+                f"{workspace_id}/{objective_id}/{analysis_version}"
             )
         return row
 
     @staticmethod
     async def _require_source_locator(
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         evidence: ObjectiveEvidence,
     ) -> None:
         row = await db.scalar(
@@ -3713,7 +3713,7 @@ class ObjectiveRepository:
         )
         if row is None:
             raise FileNotFoundError(
-                f"source document not found: {collection_id}/{evidence.document_id}"
+                f"source document not found: {workspace_id}/{evidence.document_id}"
             )
         artifact = dict(row.artifact_json or {})
         source_rows = {
@@ -3733,7 +3733,7 @@ class ObjectiveRepository:
         if not any(item[identity_key] == evidence.source_ref for item in source_rows):
             raise FileNotFoundError(
                 "objective evidence source not found: "
-                f"{collection_id}/{evidence.document_id}/"
+                f"{workspace_id}/{evidence.document_id}/"
                 f"{evidence.source_kind}/{evidence.source_ref}"
             )
 

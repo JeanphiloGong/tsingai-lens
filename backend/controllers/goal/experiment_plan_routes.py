@@ -54,7 +54,7 @@ class ExperimentPlanUpdateRequest(BaseModel):
 
 class ExperimentPlanResponse(BaseModel):
     plan_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     title: str
     content: str
@@ -72,27 +72,27 @@ class ExperimentPlanResponse(BaseModel):
 
 
 class ExperimentPlanListResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     items: list[ExperimentPlanResponse] = Field(default_factory=list)
 
 
-experiment_plan_router = APIRouter(prefix="/collections", tags=["experiment-plans"])
+experiment_plan_router = APIRouter(prefix="/workspaces", tags=["experiment-plans"])
 
 
 @experiment_plan_router.post(
-    "/{collection_id}/objectives/{objective_id}/experiment-plans",
+    "/{workspace_id}/objectives/{objective_id}/experiment-plans",
     response_model=ApiResponse[ExperimentPlanResponse],
     summary="Save an Objective-scoped experiment plan draft",
 )
 async def create_experiment_plan(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     payload: ExperimentPlanCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     plan = await experiment_plan_service.create_plan(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         title=payload.title,
         content=payload.content,
@@ -109,23 +109,23 @@ async def create_experiment_plan(
 
 
 @experiment_plan_router.get(
-    "/{collection_id}/objectives/{objective_id}/experiment-plans",
+    "/{workspace_id}/objectives/{objective_id}/experiment-plans",
     response_model=ApiResponse[ExperimentPlanListResponse],
     summary="List Objective-scoped experiment plan drafts",
 )
 async def list_experiment_plans(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     plans = await experiment_plan_service.list_plans(
-        collection_id,
+        workspace_id,
         objective_id,
         user_id=user_id,
     )
     return make_api_response(
         data=ExperimentPlanListResponse(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             items=[
                 ExperimentPlanResponse.model_validate(plan, from_attributes=True)
@@ -136,18 +136,18 @@ async def list_experiment_plans(
 
 
 @experiment_plan_router.get(
-    "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
+    "/{workspace_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
     response_model=ApiResponse[ExperimentPlanResponse],
     summary="Read one experiment plan revision",
 )
 async def read_experiment_plan(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     plan_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     plan = await experiment_plan_service.read_plan(
-        collection_id,
+        workspace_id,
         objective_id,
         plan_id,
         user_id=user_id,
@@ -158,19 +158,19 @@ async def read_experiment_plan(
 
 
 @experiment_plan_router.patch(
-    "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
+    "/{workspace_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
     response_model=ApiResponse[ExperimentPlanResponse],
     summary="Edit an Objective-scoped experiment plan draft",
 )
 async def update_experiment_plan(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     plan_id: str,
     payload: ExperimentPlanUpdateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     plan = await experiment_plan_service.update_plan(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         plan_id=plan_id,
         title=payload.title,

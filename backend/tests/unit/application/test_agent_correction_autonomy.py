@@ -37,12 +37,12 @@ async def test_known_finding_outside_last_query_reaches_its_handler():
     assert result.pending_approval is None
 
 
-async def test_real_finding_handler_checks_collection_before_loading_records():
+async def test_real_finding_handler_checks_workspace_before_loading_records():
     from application.chat.capabilities.published_findings import InspectPublishedFindingCapability
 
-    collection = SimpleNamespace(get_collection_for_user=AsyncMock(side_effect=PermissionError()))
+    workspace = SimpleNamespace(get_workspace_for_user=AsyncMock(side_effect=PermissionError()))
     analysis = SimpleNamespace(get_finding=AsyncMock())
-    published_findings.collection_service = collection
+    published_findings.workspace_service = workspace
     published_findings.objective_analysis_service = analysis
     published_findings.finding_feedback_service = SimpleNamespace()
     handler = InspectPublishedFindingCapability()
@@ -55,7 +55,7 @@ async def test_real_finding_handler_checks_collection_before_loading_records():
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((handler,))).run_turn(
         context=_context(), previous_messages=(), user_message="Inspect finding-2; do not save.",
     )
-    collection.get_collection_for_user.assert_awaited_once_with("col-1", "user-1")
+    workspace.get_workspace_for_user.assert_awaited_once_with("col-1", "user-1")
     analysis.get_finding.assert_not_awaited()
     assert result.tool_results[-1].status == "failed"
     assert result.pending_approval is None

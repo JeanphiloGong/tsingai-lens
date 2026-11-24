@@ -50,11 +50,11 @@ describe('API business response contract', () => {
 	});
 
 	it('unwraps successful data and sends session credentials', async () => {
-		const fetch = vi.fn().mockResolvedValue(apiResponse(200, { collection_id: 'col_1' }));
+		const fetch = vi.fn().mockResolvedValue(apiResponse(200, { workspace_id: 'col_1' }));
 		vi.stubGlobal('fetch', fetch);
-		await expect(requestJson('/collections')).resolves.toEqual({ collection_id: 'col_1' });
+		await expect(requestJson('/workspaces')).resolves.toEqual({ workspace_id: 'col_1' });
 		expect(fetch).toHaveBeenCalledWith(
-			'/api/v1/collections',
+			'/api/v1/workspaces',
 			expect.objectContaining({ credentials: 'same-origin' })
 		);
 	});
@@ -66,7 +66,7 @@ describe('API business response contract', () => {
 				'fetch',
 				vi.fn().mockResolvedValue(apiResponse(code, { code: 'rejected' }, 'Rejected.'))
 			);
-			await expect(requestJson('/collections')).rejects.toMatchObject({
+			await expect(requestJson('/workspaces')).rejects.toMatchObject({
 				code,
 				message: 'Rejected.',
 				data: { code: 'rejected' }
@@ -113,7 +113,7 @@ describe('API business response contract', () => {
 			status: 'authenticated',
 			user: { user_id: 'user_1', email: 'researcher@example.test' }
 		});
-		vi.stubGlobal('window', { location: { pathname: '/collections/col_1', replace } });
+		vi.stubGlobal('window', { location: { pathname: '/workspaces/col_1', replace } });
 		vi.stubGlobal(
 			'fetch',
 			vi
@@ -122,7 +122,7 @@ describe('API business response contract', () => {
 					apiResponse(200301, { code: 'authentication_required' }, 'Authentication is required.')
 				)
 		);
-		await expect(requestJson('/collections')).rejects.toMatchObject({ code: 200301 });
+		await expect(requestJson('/workspaces')).rejects.toMatchObject({ code: 200301 });
 		expect(replace).toHaveBeenCalledWith('/login');
 		expect(get(authState)).toEqual({ status: 'anonymous', user: null });
 	});
@@ -152,7 +152,7 @@ describe('API business response contract', () => {
 		vi.stubGlobal('fetch', fetch);
 		expect(
 			await (
-				await requestBlob('/collections/col_1/source-archives', {
+				await requestBlob('/workspaces/col_1/source-archives', {
 					method: 'POST',
 					body: JSON.stringify({ document_ids: ['doc_1'] })
 				})
@@ -213,6 +213,6 @@ describe('API business response contract', () => {
 
 	it('rejects the retired raw JSON protocol', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"items":[]}')));
-		await expect(requestJson('/collections')).rejects.toThrow('error.requestFailed');
+		await expect(requestJson('/workspaces')).rejects.toThrow('error.requestFailed');
 	});
 });

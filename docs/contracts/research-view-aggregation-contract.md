@@ -8,12 +8,12 @@ research-facing aggregation views.
 It follows the direction in
 [`rfc-research-view-aggregation-layer.md`](../decisions/rfc-research-view-aggregation-layer.md):
 raw paper facts remain traceable, paper pages should render sample matrices and
-condition series, and collection pages should use material profiles as the
+condition series, and workspace pages should use material profiles as the
 primary research surface.
 
 ## Status
 
-The backend first slice is now an active runtime API surface for collection and
+The backend first slice is now an active runtime API surface for workspace and
 paper research-view reads. Frontend adoption is still tracked by the frontend
 implementation plan.
 
@@ -25,7 +25,7 @@ the shared shape while the UI migrates away from raw result-card lists.
 - Research aggregation is a derived view over `document_profiles`, the
   `paper_facts` family, `comparison_rows`, and evidence anchors.
 - Raw `measurement_results` should not be listed directly as the primary
-  collection or paper result surface.
+  workspace or paper result surface.
 - The backend owns material canonicalization, grouping, deduplication,
   condition-series assembly, and evidence-preserving aggregation.
 - The frontend owns rendering, interaction state, evidence drawers, and tab
@@ -42,10 +42,10 @@ The target contract should expose four read surfaces.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/v1/collections/{collection_id}/research-view` | Collection-level aggregation for overview, material summaries, paper coverage, advanced comparison links, trends, and debug links. |
-| `GET /api/v1/collections/{collection_id}/materials` | Collection-level material summaries for the primary `Materials` tab. |
-| `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view` | Collection-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, evidence, and warnings. |
-| `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view` | Paper-level aggregation for paper overview, paper-scoped materials, sample matrix, condition series, and paper-scoped evidence/debug links. |
+| `GET /api/v1/workspaces/{workspace_id}/research-view` | Workspace-level aggregation for overview, material summaries, paper coverage, advanced comparison links, trends, and debug links. |
+| `GET /api/v1/workspaces/{workspace_id}/materials` | Workspace-level material summaries for the primary `Materials` tab. |
+| `GET /api/v1/workspaces/{workspace_id}/materials/{material_id}/research-view` | Workspace-scoped material profile with papers, samples, process ranges, properties, comparisons, condition series, evidence, and warnings. |
+| `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/research-view` | Paper-level aggregation for paper overview, paper-scoped materials, sample matrix, condition series, and paper-scoped evidence/debug links. |
 
 These endpoints should not require the browser to reconstruct sample matrices or
 material profiles from raw `measurement_results`.
@@ -56,8 +56,8 @@ paper:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials` | Paper-scoped materials detected in one document. |
-| `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view` | Paper-scoped material profile for one document. This is not a collection material profile. |
+| `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/materials` | Paper-scoped materials detected in one document. |
+| `GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/materials/{material_id}/research-view` | Paper-scoped material profile for one document. This is not a workspace material profile. |
 
 Optional query parameters may be added only when they are directly needed by
 the UI:
@@ -73,7 +73,7 @@ All aggregation responses should use the same top-level state meanings.
 
 | State | Meaning |
 | --- | --- |
-| `empty` | The collection, material, or document has no source material to aggregate. |
+| `empty` | The workspace, material, or document has no source material to aggregate. |
 | `processing` | The required upstream artifacts are still being built. |
 | `partial` | Enough data exists to render the view, but important context is missing or weak. |
 | `ready` | The view has enough structured facts and evidence to support normal use. |
@@ -153,7 +153,7 @@ Minimum shape:
 
 ```text
 PaperAggregation
-- collection_id
+- workspace_id
 - document_id
 - paper_title
 - state
@@ -180,7 +180,7 @@ The paper overview should summarize:
 ### Paper Materials
 
 `PaperMaterialSummary` is the material entry inside one paper. It is scoped by
-`document_id`, not by the whole collection.
+`document_id`, not by the whole workspace.
 
 Minimum shape:
 
@@ -200,13 +200,13 @@ PaperMaterialSummary
 
 `DocumentMaterialProfile` is the optional drilldown object for one material
 inside one paper. It should answer how the paper studied that material without
-performing collection-wide material merging or cross-paper comparison.
+performing workspace-wide material merging or cross-paper comparison.
 
 Minimum shape:
 
 ```text
 DocumentMaterialProfile
-- collection_id
+- workspace_id
 - document_id
 - material_id
 - canonical_name
@@ -225,11 +225,11 @@ DocumentMaterialProfile
 ```
 
 The same canonical material may link from `DocumentMaterialProfile` to the
-collection-scoped `MaterialProfile`, but the two objects have different
+workspace-scoped `MaterialProfile`, but the two objects have different
 ownership boundaries:
 
 - `DocumentMaterialProfile` is one paper's view of one material.
-- `MaterialProfile` is the collection's cross-paper view of one material.
+- `MaterialProfile` is the workspace's cross-paper view of one material.
 
 ### Sample Matrix
 
@@ -297,16 +297,16 @@ ConditionSeriesPoint
 - warnings
 ```
 
-## Collection Aggregation
+## Workspace Aggregation
 
-`CollectionAggregation` is the target response object for the collection
+`WorkspaceAggregation` is the target response object for the workspace
 workspace research view.
 
 Minimum shape:
 
 ```text
-CollectionAggregation
-- collection_id
+WorkspaceAggregation
+- workspace_id
 - state
 - overview
 - materials
@@ -321,7 +321,7 @@ CollectionAggregation
 
 ### Material Summary
 
-`MaterialSummary` is the row or card object for the collection `Materials` tab.
+`MaterialSummary` is the row or card object for the workspace `Materials` tab.
 
 Minimum shape:
 
@@ -341,13 +341,13 @@ MaterialSummary
 - warnings
 ```
 
-`material_id` should be stable within the collection and derived from the
+`material_id` should be stable within the workspace and derived from the
 canonical material key. It should not be the display name when aliases or
 normalization may change.
 
 ### Material Profile
 
-`MaterialProfile` is the collection-scoped research object for one material.
+`MaterialProfile` is the workspace-scoped research object for one material.
 It is the normal parent surface for material-specific sample matrices,
 process summaries, property summaries, comparable groups, condition series, and
 evidence.
@@ -356,7 +356,7 @@ Minimum shape:
 
 ```text
 MaterialProfile
-- collection_id
+- workspace_id
 - material_id
 - canonical_name
 - aliases
@@ -516,7 +516,7 @@ warnings
 
 ## Frontend Navigation Mapping
 
-The collection tabs should map to this contract as follows.
+The workspace tabs should map to this contract as follows.
 
 | Tab | Localized label | Contract data |
 | --- | --- | --- |
@@ -526,14 +526,14 @@ The collection tabs should map to this contract as follows.
 | Graph | 图谱 | Existing graph endpoints; graph remains a secondary exploration surface. |
 | More | 更多 | all comparisons, `evidence_links`, `debug_links`, exports, evaluation reports, and settings. |
 
-Paper detail pages should use `PaperAggregation` rather than collection
+Paper detail pages should use `PaperAggregation` rather than workspace
 navigation to show sample matrices and condition series for one document.
 
 Material detail pages should use `MaterialProfile` rather than a global
 comparison list. The comparison module inside material detail should render
 `comparison_groups`, `cross_paper_matrices`, and `trend_series` filtered to
 that material. `More / All Comparisons` may render global comparison search and
-debugging, but it is not the primary collection navigation.
+debugging, but it is not the primary workspace navigation.
 
 ## Migration Boundary
 
@@ -541,7 +541,7 @@ This contract should be added as a direct product contract, not as a browser
 compatibility layer over old raw-result card pages.
 
 During migration, existing endpoints may remain available for evidence, debug,
-and deep-link stability, but the primary collection and paper pages should move
+and deep-link stability, but the primary workspace and paper pages should move
 to this contract once the backend and frontend plans are implemented.
 
 ## Verification Expectations
@@ -555,7 +555,7 @@ Backend contract verification should cover:
   cross-paper facts
 - duplicate `measurement_results` do not duplicate matrix rows
 - every observed value has evidence references or a warning
-- collection aggregation exposes material summaries before advanced comparison
+- workspace aggregation exposes material summaries before advanced comparison
   links
 - material summaries merge aliases instead of splitting one material into many
   rows
@@ -566,11 +566,11 @@ Backend contract verification should cover:
 
 Frontend verification should cover:
 
-- collection tabs render as `Overview / Materials / Papers / Graph / More`
+- workspace tabs render as `Overview / Materials / Papers / Graph / More`
 - `Materials` links to material profile pages
 - `Papers` links to paper detail rather than duplicating paper internals
 - paper detail can render document-scoped material views without treating them
-  as collection material profiles
+  as workspace material profiles
 - material detail renders comparison groups and matrices rather than raw fact
   cards
 - `More / All Comparisons` remains available for global comparison browsing

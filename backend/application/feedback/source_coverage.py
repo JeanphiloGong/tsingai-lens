@@ -22,7 +22,7 @@ from domain.feedback import EvidenceCoverage
 _SOURCE_TOOL_NAMES = frozenset(
     {"read_source", "inspect_table", "inspect_document_sources"}
 )
-_NAVIGATION_TOOL_NAMES = frozenset({"search_sources", "browse_collection_papers"})
+_NAVIGATION_TOOL_NAMES = frozenset({"search_sources", "browse_workspace_papers"})
 
 
 @dataclass(frozen=True)
@@ -124,7 +124,7 @@ def build_evidence_coverage(
                         "resource_id": source.resource_ref.resource_id,
                         "href": source.resource_ref.href,
                     },
-                    "collection_id": source.collection_id,
+                    "workspace_id": source.workspace_id,
                     "document_id": source.document_id,
                     "document_title": source.document_title,
                     "source_kind": source.source_kind,
@@ -553,7 +553,7 @@ def _add_navigation_scope(
         for match in data.get("matches") or ():
             if isinstance(match, Mapping):
                 add_requested(dict(match), origin="search_result")
-    elif name == "browse_collection_papers":
+    elif name == "browse_workspace_papers":
         for paper in data.get("papers") or ():
             if isinstance(paper, Mapping):
                 add_requested(dict(paper), origin="tool_requested")

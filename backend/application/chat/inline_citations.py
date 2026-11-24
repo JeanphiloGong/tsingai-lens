@@ -276,7 +276,7 @@ def _render_raw_locator(reference: str, aliases: Mapping[str, list[_CitationTarg
 
 def _render_target(target: _CitationTarget) -> str:
     label = _escape_label(target.label)
-    if target.eligible and target.href and target.href.startswith("/collections/"):
+    if target.eligible and target.href and target.href.startswith("/workspaces/"):
         return f"[{label}]({target.href})"
     return label
 

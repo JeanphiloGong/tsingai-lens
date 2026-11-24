@@ -115,7 +115,7 @@ class _Samples:
 
 
 def _dataset() -> Dataset:
-    return Dataset("fdset-1", "collection-1", "SFT", "sft", {}, 1, "user-1")
+    return Dataset("fdset-1", "workspace-1", "SFT", "sft", {}, 1, "user-1")
 
 
 def _sample() -> DatasetSample:
@@ -132,7 +132,7 @@ def _sample() -> DatasetSample:
 def _case() -> FeedbackCase:
     return FeedbackCase(
         case_id="case-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=(),
@@ -307,7 +307,7 @@ async def test_worker_rejects_source_changed_after_collect() -> None:
 
     assert result.status == "succeeded"
     assert samples.completed["outcome"] == "needs_input"
-    assert samples.completed["missing_reasons"] == ("source_changed_since_collection",)
+    assert samples.completed["missing_reasons"] == ("source_changed_since_workspace",)
     assert samples.revision is None
 
 

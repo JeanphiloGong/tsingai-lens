@@ -9,11 +9,11 @@ from domain.core import DocumentProfile, PaperResearchMap
 from infra.persistence import database
 
 
-from infra.persistence.postgres.models.collection import (
+from infra.persistence.postgres.models.workspace import (
     DocumentPreparationORM,
 )
-from repositories.collection_repository import (
-    CollectionRepository,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
 )
 from repositories.document_profile_repository import (
     DocumentProfileRepository,
@@ -27,7 +27,7 @@ from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,
     _source,
 )
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -79,11 +79,11 @@ async def test_profiles_and_paper_maps_are_current_per_document(
     await profiles.replace(COLLECTION_ID, revised_profile)
     await paper_maps.replace(COLLECTION_ID, revised_map)
 
-    assert await profiles.list_collection(COLLECTION_ID) == (
+    assert await profiles.list_workspace(COLLECTION_ID) == (
         revised_profile,
         second_profile,
     )
-    assert await paper_maps.list_collection(COLLECTION_ID) == (
+    assert await paper_maps.list_workspace(COLLECTION_ID) == (
         revised_map,
         second_map,
     )
@@ -107,7 +107,7 @@ async def test_profile_replacement_does_not_relabel_current_source(
 ) -> None:
     profiles = DocumentProfileRepository()
     source = _source("doc_a", title="Current source")
-    await seed_collection(
+    await seed_workspace(
         database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,)
     )
     await source_repository.replace_document(COLLECTION_ID, source)
@@ -118,10 +118,10 @@ async def test_profile_replacement_does_not_relabel_current_source(
         _profile("doc_a", "Previous profile"), source_fingerprint="old-source"
     )
     await profiles.replace(COLLECTION_ID, stale_profile)
-    collection_repository = CollectionRepository()
-    collection = await collection_repository.read_collection(COLLECTION_ID)
-    document = collection.documents[0]
-    await collection_repository.update_document(
+    workspace_repository = WorkspaceRepository()
+    workspace = await workspace_repository.read_workspace(COLLECTION_ID)
+    document = workspace.documents[0]
+    await workspace_repository.update_document(
         replace(document, document=replace(document.document, status="processing"))
     )
     async with database.AsyncSessionLocal() as session:
@@ -138,7 +138,7 @@ async def test_profile_only_preparation_is_not_a_source(source_repository) -> No
     profiles = DocumentProfileRepository()
     await profiles.replace(COLLECTION_ID, _profile("doc_a", "Imported profile"))
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") is None
-    assert await source_repository.read_collection_documents(COLLECTION_ID) == ()
+    assert await source_repository.read_workspace_documents(COLLECTION_ID) == ()
 
 
 async def test_paper_map_requires_a_profile_in_the_shared_row(
@@ -166,7 +166,7 @@ async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_read
     runs = PipelineRunRepository()
     pipeline_run_service.PipelineRunRepo = runs
     run, _ = await pipeline_run_service.get_or_create_document_run(
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         document_id="doc_a",
         pipeline_name="document_preparation",
         input_fingerprint="restart-input",
@@ -201,7 +201,7 @@ async def test_expired_preparation_is_claimed_by_new_worker_and_remains_api_read
 
     assert PipelineRunResponse(**pipeline_run_response(finished)).status == "failed"
     retry, created = await pipeline_run_service.get_or_create_document_run(
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         document_id="doc_a",
         pipeline_name="document_preparation",
         input_fingerprint="restart-input",

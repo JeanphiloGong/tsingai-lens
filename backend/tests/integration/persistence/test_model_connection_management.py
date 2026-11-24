@@ -26,7 +26,7 @@ from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.pipeline_run_repository import PipelineRunRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 from scripts.benchmarks import source_text_unit_retrieval as benchmark
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -121,17 +121,17 @@ def profile_provider():
 
 
 async def test_document_profile_assignment_through_http_and_worker(
-    management, profile_provider, collection_workspace, monkeypatch
+    management, profile_provider, workspace_files, monkeypatch
 ):
     client, factory = management
     base_url, model_requests = profile_provider
-    await seed_collection(factory, "porosity", document_ids=("paper-a",))
+    await seed_workspace(factory, "porosity", document_ids=("paper-a",))
     parse = AsyncMock(return_value=SourceDocument(
         "paper-a", 0, "Laser power and porosity", "Methods: vary laser power. Results: porosity decreases.",
     ))
     monkeypatch.setattr(preparation, "_parse_document_sources", parse)
     assignment = "/api/v1/admin/model-assignments/document_profile"
-    document = "/api/v1/collections/porosity/documents/paper-a/preparation"
+    document = "/api/v1/workspaces/porosity/documents/paper-a/preparation"
 
     assert (await client.get(assignment, headers={"Cookie": "lens_session=reader"})).status_code == 403
     assert (await client.get(assignment)).json()["data"] == {"connection_id": None, "version": 0}
@@ -174,7 +174,7 @@ async def test_document_profile_assignment_through_http_and_worker(
         assert job.run.run_id == expected["run_id"]
         assert job.run.context["model_connection_id"] == connection_id
         result = await preparation.execute_document_preparation_job(
-            job, workspace=collection_workspace, object_store=object(), source_artifact_builder=object()
+            job, workspace=workspace_files, object_store=object(), source_artifact_builder=object()
         )
         assert result.status == "completed"
         return await DocumentProfileRepo.read("porosity", "paper-a")
@@ -238,7 +238,7 @@ async def test_embedding_assignment_drives_benchmark_without_entering_chat_catal
         )
     assert completion.model == "research"
 
-    await seed_collection(factory, "benchmark", document_ids=("paper",))
+    await seed_workspace(factory, "benchmark", document_ids=("paper",))
     await SourceArtifactRepo.replace_document("benchmark", SourceDocument(
         "paper", 0, "LPBF", "Laser power affects porosity.",
         text_units=(SourceTextUnit("tu", 0, "Laser power affects porosity.", 5, ("paper",)),),
@@ -246,15 +246,15 @@ async def test_embedding_assignment_drives_benchmark_without_entering_chat_catal
     ))
     fixture = tmp_path / "benchmark.json"
     fixture.write_text(json.dumps({
-        "schema_version": 1, "name": "porosity", "collection_id": "benchmark",
-        "filters": {"collection_id": "benchmark", "document_ids": ["paper"]},
+        "schema_version": 1, "name": "porosity", "workspace_id": "benchmark",
+        "filters": {"workspace_id": "benchmark", "document_ids": ["paper"]},
         "queries": [{
             "id": "question", "query": "laser power porosity", "relevant_text_unit_ids": ["tu"],
             "source_locators": [{"text_unit_id": "tu", "document_id": "paper", "block_id": "block", "page": 1}],
         }],
     }))
     monkeypatch.setattr(database, "build_database_engine", lambda _: factory.kw["bind"])
-    monkeypatch.setattr(sys, "argv", ["benchmark", "--collection-id", "benchmark", "--fixture", str(fixture)])
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--workspace-id", "benchmark", "--fixture", str(fixture)])
     assert await benchmark.main_async() == 0
     result = json.loads(capsys.readouterr().out)
     assert result["embedding_connection_id"] == vector_id

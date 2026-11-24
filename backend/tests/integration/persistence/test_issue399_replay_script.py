@@ -11,7 +11,7 @@ from application.chat.session_service import ChatSessionService
 from domain.source import SourceBlock, SourceDocument
 from repositories.source_artifact_repository import SourceArtifactRepo
 from scripts.evaluation.research_agent import run_inconel_four_turns as replay
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 from tests.unit.application.test_research_agent_runner import _Model
 from tests.support.chat_model_connections import scripted_chat_runner
 
@@ -26,7 +26,7 @@ async def test_freeze_and_replay_use_current_lifespan_without_scientific_writes(
     scripted_chat_runner,
 ):
     document_ids = tuple(f"doc-{i:03d}" for i in range(100))
-    await seed_collection(
+    await seed_workspace(
         postgres_session_factory, "col-cli", document_ids=document_ids
     )
     for index, document_id in enumerate(document_ids):
@@ -75,7 +75,7 @@ async def test_freeze_and_replay_use_current_lifespan_without_scientific_writes(
     )
     snapshot_path = tmp_path / "prepared.json"
     args = SimpleNamespace(
-        collection_id="col-cli",
+        workspace_id="col-cli",
         user_id="user-1",
         output=snapshot_path,
         snapshot=True,

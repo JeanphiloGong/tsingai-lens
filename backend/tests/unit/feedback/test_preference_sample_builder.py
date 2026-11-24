@@ -29,7 +29,7 @@ def anyio_backend() -> str:
 
 def _dataset() -> Dataset:
     return Dataset(
-        "fdset-preference", "collection-1", "偏好", "preference", {}, 1, "user-1"
+        "fdset-preference", "workspace-1", "偏好", "preference", {}, 1, "user-1"
     )
 
 
@@ -47,7 +47,7 @@ def _sample() -> DatasetSample:
 def _case(snapshot: dict) -> FeedbackCase:
     return FeedbackCase(
         case_id="case-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=(),

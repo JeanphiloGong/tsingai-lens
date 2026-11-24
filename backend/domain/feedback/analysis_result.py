@@ -26,7 +26,7 @@ class AnalysisResult:
     job_id: str
     feedback_id: str
     session_id: str
-    collection_id: str
+    workspace_id: str
     anchor_message_id: str
     problem_type: FeedbackProblemType
     confidence: float

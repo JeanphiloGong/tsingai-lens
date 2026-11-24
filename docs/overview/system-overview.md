@@ -65,7 +65,7 @@ for the shared boundary and object model.
 
 - `frontend/src/routes/+page.svelte`
   Collection list and creation entry flow.
-- `frontend/src/routes/collections/`
+- `frontend/src/routes/workspaces/`
   Collection workspace route family.
 - `frontend/src/routes/_shared/`
   Shared browser-side API wrappers, route support logic, and i18n.

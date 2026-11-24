@@ -5,7 +5,7 @@ import pytest
 
 from application.evaluation import gold_service
 from repositories.evaluation_repository import EvaluationRepository
-from tests.unit.services.test_evaluation_services import FakeCollectionService
+from tests.unit.services.test_evaluation_services import FakeWorkspaceService
 
 pytestmark = pytest.mark.anyio
 
@@ -17,10 +17,10 @@ def anyio_backend():
 
 @pytest.mark.parametrize("target_layer", ["invalid-layer", "", "CORE"])
 async def test_gold_registration_rejects_unknown_target_before_persistence(target_layer):
-    gold_service.collection_service = FakeCollectionService()
+    gold_service.workspace_service = FakeWorkspaceService()
     gold_service.EvaluationRepo = EvaluationRepository()
     service = gold_service
     with pytest.raises(ValueError, match="unsupported evaluation target layer"):
         await service.register_gold_set(
-            collection_id="col-gold", gold_id="gold-v1", target_layer=target_layer, items=(),
+            workspace_id="col-gold", gold_id="gold-v1", target_layer=target_layer, items=(),
         )

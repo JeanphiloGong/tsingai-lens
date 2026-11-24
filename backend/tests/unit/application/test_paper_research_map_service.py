@@ -243,7 +243,7 @@ def _artifacts(
         blocks=document.blocks,
         tables=document.tables,
         figures=document.figures,
-        collection_id="collection-test",
+        workspace_id="workspace-test",
     )
     return artifacts, tree
 
@@ -291,8 +291,8 @@ def _build_skims(
     *,
     progress: list[dict[str, Any]] | None = None,
 ) -> tuple[PaperResearchMap, ...]:
-    return paper_research_map_service.build_collection_paper_maps(
-        "collection-test",
+    return paper_research_map_service.build_workspace_paper_maps(
+        "workspace-test",
         documents=artifacts,
         profiles_by_document_id={},
         document_trees_by_document_id={artifacts[0].document_id: tree},
@@ -1679,8 +1679,8 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
             )
 
     extractor = ReviewExtractor()
-    skim = paper_research_map_service.build_collection_paper_maps(
-        "collection-test",
+    skim = paper_research_map_service.build_workspace_paper_maps(
+        "workspace-test",
         documents=artifacts,
         profiles_by_document_id={
             "paper-1": SimpleNamespace(

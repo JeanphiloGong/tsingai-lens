@@ -55,7 +55,7 @@ async def _prepare_case(chain) -> object:
     terminal_job = await worker.run_once()
     assert terminal_job is not None and terminal_job.result_id is not None
     cases = await chain.cases.list_cases(
-        collection_id=chain.session.collection_id, status="needs_annotation"
+        workspace_id=chain.session.workspace_id, status="needs_annotation"
     )
     assert len(cases) == 1
     return cases[0]
@@ -124,7 +124,7 @@ def _annotation_payload(*, expected_digest: str | None = None, reason: str = "ch
     }
 
 
-async def test_feedback_api_requires_auth_and_hides_collection_from_other_user(
+async def test_feedback_api_requires_auth_and_hides_workspace_from_other_user(
     feedback_api,
 ):
     fixture = feedback_api
@@ -134,7 +134,7 @@ async def test_feedback_api_requires_auth_and_hides_collection_from_other_user(
     assert rejection.json()["code"] == 200301
 
     listing = await fixture.owner.get(
-        path, params={"collection_id": fixture.case.collection_id}
+        path, params={"workspace_id": fixture.case.workspace_id}
     )
     assert listing.status_code == 200, listing.text
     assert [item["case_id"] for item in listing.json()["data"]["items"]] == [
@@ -146,7 +146,7 @@ async def test_feedback_api_requires_auth_and_hides_collection_from_other_user(
     assert detail.json()["data"]["case_id"] == fixture.case.case_id
 
     rejection = await fixture.other.get(
-        path, params={"collection_id": fixture.case.collection_id}
+        path, params={"workspace_id": fixture.case.workspace_id}
     )
     assert rejection.status_code == 200
     assert rejection.json()["code"] == 200201

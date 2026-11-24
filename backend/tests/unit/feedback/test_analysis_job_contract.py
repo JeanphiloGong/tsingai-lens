@@ -20,14 +20,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-class _Collections:
-    async def get_collection_for_user(self, collection_id: str, user_id: str):
-        if collection_id != "collection-1" or user_id != "user-1":
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id}
+class _Workspaces:
+    async def get_workspace_for_user(self, workspace_id: str, user_id: str):
+        if workspace_id != "workspace-1" or user_id != "user-1":
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id}
 
-    async def collection_belongs_to_user(self, collection_id: str, user_id: str):
-        return collection_id == "collection-1" and user_id == "user-1"
+    async def workspace_belongs_to_user(self, workspace_id: str, user_id: str):
+        return workspace_id == "workspace-1" and user_id == "user-1"
 
 
 class _Chat:
@@ -35,7 +35,7 @@ class _Chat:
         self.session = ChatSession.create(
             session_id="session-1",
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             created_at="2026-09-24T00:00:00+00:00",
         )
         self.answer = ChatMessage.assistant(
@@ -106,8 +106,8 @@ class _Jobs:
 
 
 def _service(chat: _Chat, jobs: _Jobs) -> chat_session_service.ChatSessionService:
-    chat_session_service.collection_service = _Collections()
-    chat_session_service.CollectionRepo = _Collections()
+    chat_session_service.workspace_service = _Workspaces()
+    chat_session_service.WorkspaceRepo = _Workspaces()
     chat_session_service.SourceArtifactRepo = object()
     chat_session_service.ChatRepo = chat
     chat_session_service.AnalysisJobRepo = jobs

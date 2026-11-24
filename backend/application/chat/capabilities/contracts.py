@@ -14,14 +14,14 @@ from domain.chat import ChatToolResult, ToolRisk
 class AgentContext:
     session_id: str
     user_id: str
-    collection_id: str
+    workspace_id: str
 
 
 @dataclass(frozen=True)
 class CapabilityExecutionContext:
     session_id: str
     user_id: str
-    collection_id: str
+    workspace_id: str
     tool_call_id: str
     max_result_tokens: int = 12_000
 
@@ -34,7 +34,7 @@ class CapabilityExecutionContext:
         return cls(
             session_id=context.session_id,
             user_id=context.user_id,
-            collection_id=context.collection_id,
+            workspace_id=context.workspace_id,
             tool_call_id=tool_call_id,
         )
 

@@ -10,10 +10,10 @@ contracts.
 
 ## Decision
 
-The collection document route remains the source-verification surface:
+The workspace document route remains the source-verification surface:
 
 ```text
-/collections/[id]/documents/[document_id]
+/workspaces/[id]/documents/[document_id]
 ```
 
 Its three regions are:
@@ -59,7 +59,7 @@ Evidence anchors expose:
   "source_type": "text",
   "page": 6,
   "quote": "The optimized sample reached 940 MPa.",
-  "deep_link": "/collections/col_xxx/documents/doc_xxx?anchor_id=anchor_xxx"
+  "deep_link": "/workspaces/col_xxx/documents/doc_xxx?anchor_id=anchor_xxx"
 }
 ```
 
@@ -95,10 +95,10 @@ region highlights without a stable persisted region contract.
 
 ## Source File Behavior
 
-The backend serves the original collection document through:
+The backend serves the original workspace document through:
 
 ```text
-GET /api/v1/collections/{collection_id}/documents/{document_id}/source
+GET /api/v1/workspaces/{workspace_id}/documents/{document_id}/source
 ```
 
 The browser uses the original PDF when available and parsed Markdown/text as a
@@ -126,17 +126,17 @@ The maintained checks cover:
 
 - Source domain and persistence round trips without geometry;
 - evidence API responses containing only stable source references;
-- collection document content without offsets or coordinate payloads;
+- workspace document content without offsets or coordinate payloads;
 - frontend normalization and navigation by `sourceKind/sourceRef`;
 - page-level PDF navigation without synthetic region highlighting.
 
 The long-lived HTTP details belong in
 [`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md). The
 frontend route behavior belongs under
-[`../../frontend/src/routes/collections/`](../../frontend/src/routes/collections/).
+[`../../frontend/src/routes/workspaces/`](../../frontend/src/routes/workspaces/).
 
 ## Related Docs
 
 - [RFC Comparison-Result-Document Product Flow](rfc-comparison-result-document-product-flow.md)
 - [Research Objective Workspace Contract](../contracts/research-objective-workspace-contract.md)
-- [Claim Traceback Navigation Contract](../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)
+- [Claim Traceback Navigation Contract](../../frontend/src/routes/workspaces/claim-traceback-navigation-contract.md)

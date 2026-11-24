@@ -89,7 +89,7 @@ output contract are documented.
 
 ## Dataset Sample Worker
 
-Run the worker that turns automatically queued Collection cases into
+Run the worker that turns automatically queued Workspace cases into
 task-specific SFT, preference, or evaluation candidate revisions:
 
 ```bash
@@ -97,7 +97,7 @@ cd backend
 ./.venv/bin/python scripts/dataset_sample_worker.py --once
 ```
 
-The Collection workbench creates one internal queue per task type. The worker
+The Workspace workbench creates one internal queue per task type. The worker
 only builds a candidate; a human must still edit or confirm it before an
 export can be published. Use `--interval <seconds>` for a long-running
 process. Docker Compose starts this worker as `dataset-sample-worker`.
@@ -125,12 +125,12 @@ python3 scripts/evaluation/expert_gold/convert_expert_gold.py \
   --input tests/fixtures/local_expert_gold
 ```
 
-Export prediction output from a built collection:
+Export prediction output from a built workspace:
 
 ```bash
 cd backend
 python3 scripts/evaluation/expert_gold/export_prediction_bundle.py \
-  --collection-id <collection_id>
+  --workspace-id <workspace_id>
 ```
 
 Evaluate the generated gold and prediction bundles:
@@ -152,9 +152,9 @@ review; it never modifies Fast Path automatically.
 ## Extraction Trace Export
 
 Use `export_extraction_trace.py` when you want to inspect the concrete Source
-and Core extraction artifacts for one built collection.
+and Core extraction artifacts for one built workspace.
 
-The script is read-only against collection artifacts. It reads Source/Core
+The script is read-only against workspace artifacts. It reads Source/Core
 records from the repository and writes normalized JSON, CSV, and Markdown
 review files under `backend/data/traces/`.
 
@@ -163,7 +163,7 @@ Example:
 ```bash
 cd backend
 ./.venv/bin/python scripts/export_extraction_trace.py \
-  --collection-id col_1acbd377905b
+  --workspace-id col_1acbd377905b
 ```
 
 For a direct output directory:
@@ -171,7 +171,7 @@ For a direct output directory:
 ```bash
 cd backend
 ./.venv/bin/python scripts/export_extraction_trace.py \
-  --output-dir data/collections/col_1acbd377905b/output
+  --output-dir data/workspaces/col_1acbd377905b/output
 ```
 
 Optional filters and naming:
@@ -179,7 +179,7 @@ Optional filters and naming:
 ```bash
 cd backend
 ./.venv/bin/python scripts/export_extraction_trace.py \
-  --collection-id col_1acbd377905b \
+  --workspace-id col_1acbd377905b \
   --document-id <document_id> \
   --trace-name manual-review
 ```
@@ -189,7 +189,7 @@ cd backend
 Each run writes a directory like:
 
 ```text
-backend/data/traces/<collection-or-output-name>-<timestamp>/
+backend/data/traces/<workspace-or-output-name>-<timestamp>/
 ```
 
 Important files:
@@ -210,34 +210,34 @@ Important files:
   Spreadsheet-friendly artifact records.
 
 `backend/data/traces/` is gitignored because it is local runtime output and may
-contain source-paper text, extracted claims, and other collection-specific
+contain source-paper text, extracted claims, and other workspace-specific
 content.
 
 ## Expected Inputs
 
-The script exports whatever artifacts exist. It does not rebuild a collection.
+The script exports whatever artifacts exist. It does not rebuild a workspace.
 
-If a collection was built before a newer Source/Core artifact existed, the
-trace will show missing sections. For example, a collection built before
+If a workspace was built before a newer Source/Core artifact existed, the
+trace will show missing sections. For example, a workspace built before
 `tables` existed will show:
 
 ```text
 No `tables` rows found.
 ```
 
-Rebuild the collection first when you need to inspect newly added artifact
+Rebuild the workspace first when you need to inspect newly added artifact
 families.
 
 ## Source Table Split Preview
 
 Use `export_source_tables.py` when you want to inspect only the Source table
-split output. It can read existing artifacts or reparse collection input PDFs
-with the current Source code without writing back to the collection.
+split output. It can read existing artifacts or reparse workspace input PDFs
+with the current Source code without writing back to the workspace.
 
 ```bash
 cd backend
 ./.venv/bin/python scripts/export_source_tables.py \
-  --collection-id col_ed3ea76e79c3 \
+  --workspace-id col_ed3ea76e79c3 \
   --destination /tmp/source-table-preview \
   --reparse-inputs
 ```

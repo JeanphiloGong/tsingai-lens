@@ -241,7 +241,7 @@ class PaperStudyDispositionStatus(StrEnum):
 
 @dataclass(frozen=True)
 class PaperStudyDisposition:
-    """Collection-level accounting result for one paper-study relationship."""
+    """Workspace-level accounting result for one paper-study relationship."""
 
     document_id: str
     study_id: str
@@ -398,7 +398,7 @@ class PreparedDocumentInput:
 
 @dataclass(frozen=True)
 class ResearchObjective:
-    collection_id: str
+    workspace_id: str
     objective_id: str
     question: str
     material_scope: tuple[str, ...]
@@ -424,8 +424,8 @@ class ResearchObjective:
     created_by_tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not self.collection_id:
-            raise ValueError("research objective requires collection_id")
+        if not self.workspace_id:
+            raise ValueError("research objective requires workspace_id")
         if not self.objective_id:
             raise ValueError("research objective requires objective_id")
         if not self.question:
@@ -530,13 +530,13 @@ class ResearchObjective:
     def publish_analysis(
         self,
         *,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         status: str,
     ) -> "ResearchObjective":
-        if collection_id != self.collection_id:
-            raise ValueError("analysis belongs to another collection")
+        if workspace_id != self.workspace_id:
+            raise ValueError("analysis belongs to another workspace")
         if objective_id != self.objective_id:
             raise ValueError("analysis belongs to another objective")
         if analysis_version != self.active_analysis_version:
@@ -557,7 +557,7 @@ class InspectedObjectiveSourceRef:
 
 @dataclass(frozen=True)
 class PaperContribution:
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     document_id: str
@@ -587,7 +587,7 @@ class PaperContribution:
     def __post_init__(self) -> None:
         if not all(
             value
-            for value in (self.collection_id, self.objective_id, self.document_id)
+            for value in (self.workspace_id, self.objective_id, self.document_id)
         ):
             raise ValueError("paper contribution requires scoped identity")
         if self.analysis_version < 1:
@@ -727,7 +727,7 @@ class PaperContribution:
     @property
     def key(self) -> tuple[str, str, int, str]:
         return (
-            self.collection_id,
+            self.workspace_id,
             self.objective_id,
             self.analysis_version,
             self.document_id,
@@ -736,7 +736,7 @@ class PaperContribution:
 
 @dataclass(frozen=True)
 class ObjectiveEvidence:
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     evidence_id: str
@@ -779,7 +779,7 @@ class ObjectiveEvidence:
         if not all(
             value
             for value in (
-                self.collection_id,
+                self.workspace_id,
                 self.objective_id,
                 self.evidence_id,
                 self.document_id,
@@ -842,7 +842,7 @@ class ObjectiveEvidence:
     @property
     def key(self) -> tuple[str, str, int, str]:
         return (
-            self.collection_id,
+            self.workspace_id,
             self.objective_id,
             self.analysis_version,
             self.evidence_id,
@@ -1049,7 +1049,7 @@ class ObjectiveFactSet:
             for _document_id, _study_id, relationship_id in relationship_keys
         }
         if len(relationship_ids) != len(relationship_keys):
-            raise ValueError("paper study relationship ids must be collection-unique")
+            raise ValueError("paper study relationship ids must be workspace-unique")
         disposition_keys = [
             (item.document_id, item.study_id, item.relationship_id)
             for item in self.study_dispositions

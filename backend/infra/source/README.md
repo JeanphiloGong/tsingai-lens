@@ -18,7 +18,7 @@ Document bytes
 
 `SourceArtifactBundle` is the parser interchange type. The Document preparation
 service converts and persists its output as the current Source aggregate owned
-by the same `document_id`. There is no collection-wide Source snapshot and no
+by the same `document_id`. There is no workspace-wide Source snapshot and no
 `build_id` in Source reads or writes.
 
 A parser failure is technical failure for that Document. It does not claim that

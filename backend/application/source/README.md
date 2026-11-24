@@ -1,11 +1,11 @@
 # Source Application Layer
 
-This package owns Collection lifecycle, current Document membership, and
+This package owns Workspace lifecycle, current Document membership, and
 one-Document preparation orchestration.
 
 ## Start Here
 
-- HTTP upload: `controllers/source/collection_routes.py:upload_collection_document`
+- HTTP upload: `controllers/source/workspace_routes.py:upload_workspace_document`
 - Import implementation: `source_import_service.add_document()`
 - Queue preparation: `document_preparation_service.queue_document_preparation()`
 - Execute preparation: `document_preparation_service.execute_document_preparation_job()`
@@ -13,7 +13,7 @@ one-Document preparation orchestration.
 
 The preparation input is one stored Document. The output is the current
 `SourceDocument`, its `DocumentProfile`, and a `ready` Document status. PDF
-parsing uses Docling; Profile classification calls the configured LLM. Collection
+parsing uses Docling; Profile classification calls the configured LLM. Workspace
 and Document membership do not call the LLM. This package owns Pipeline Run progress for this
 flow; it does not form Objectives or create Evidence.
 
@@ -21,7 +21,7 @@ flow; it does not form Objectives or create Evidence.
 
 | Concern | Owner | Persistent result |
 |---|---|---|
-| Collection and Document membership | `collection_service.py` | Collection/Document records |
+| Workspace and Document membership | `workspace_service.py` | Workspace/Document records |
 | Upload | `source_import_service.py` | stored Document records |
 | Source/Profile preparation | `document_preparation_service.py` | Source artifact, Profile, run |
 | Display Markdown | `document_markdown_service.py` | none |
@@ -63,10 +63,10 @@ worker ID and lease version remain current. The entry point owns its operation
 and heartbeat tasks and closes the client and database engine on exit. Run more
 worker processes for concurrency. A Web restart does not interrupt live workers.
 
-The app runtime creates one actual workspace and object store. Collection creation
+The app runtime creates one actual workspace and object store. Workspace creation
 and deletion receive that workspace explicitly. Uploads, original-file downloads,
 archives, and Figure/Markdown reads receive the actual object store. Database-only
-reads use the concrete repositories directly. The collection module holds no file
+reads use the concrete repositories directly. The workspace module holds no file
 resources and has no runtime configuration hook.
 
 A technical Profile classification failure keeps the parsed Source readable,
@@ -78,20 +78,20 @@ classification. A completed but scientifically uncertain Profile is reusable.
 
 ## Files
 
-- `collection_service.py`: Collection and current Document lifecycle, Figure
+- `workspace_service.py`: Workspace and current Document lifecycle, Figure
   assets, and preparation-state updates.
 - `source_import_service.py`: Upload validation, original-byte storage, and
   Document registration. Duplicate retries reuse the existing Document; failed
   registration removes only bytes that were not registered.
 - `source_archive_service.py`: Original-file lookup and bounded reproduction
-  archives. It verifies stored bytes but does not change Collection state.
+  archives. It verifies stored bytes but does not change Workspace state.
 - `document_preparation_service.py`: Source/Profile preparation sequence,
   fingerprinting, staged publication, and failure handling.
 - `artifact_input_service.py`: current Source loading for downstream consumers.
 - `document_markdown_service.py`: display Markdown from the current Source tree.
 - `reference_extraction_service.py`: deterministic references from one prepared
   Document through `extract_source_references()`. The reference workflow's
-  `get_collection_references()` reads the saved references after checking that
+  `get_workspace_references()` reads the saved references after checking that
   Sources are ready; it does not re-extract or write them.
 
 The parser implementation lives in [`../../infra/source/README.md`](../../infra/source/README.md).
@@ -103,9 +103,9 @@ For upload behavior, start with `source_import_service`.
 For reproduction downloads, start with `source_archive_service`. For readiness,
 retry, or stage reuse, start with `document_preparation_service`; its fingerprints
 decide which existing artifacts can be reused. Do not put these responsibilities
-back into `collection_service` or reproduce them in an Agent capability.
+back into `workspace_service` or reproduce them in an Agent capability.
 
-The HTTP handler checks the authenticated user's Collection ownership. A
+The HTTP handler checks the authenticated user's Workspace ownership. A
 background preparation task inherits the existing request trace context, even
 after the request returns; it does not accept a separate unused request ID.
 Preparation failure leaves that Document retryable and does not imply a paper
@@ -124,7 +124,7 @@ remain in internal logs linked by run ID.
 From `backend/`, run:
 
 ```bash
-.venv/bin/python -m pytest -q tests/unit/services/test_collection_service.py tests/unit/services/test_document_preparation_service.py tests/integration/test_app_layer_api.py
+.venv/bin/python -m pytest -q tests/unit/services/test_workspace_service.py tests/unit/services/test_document_preparation_service.py tests/integration/test_app_layer_api.py
 ```
 
 These cases cover upload, original-byte archive retrieval,
@@ -132,8 +132,8 @@ partial preparation failure, stage reuse, and HTTP responses. Parser-specific
 tests live under `tests/unit/infra/source/`; fixture and database setup are
 described in [`../../tests/README.md`](../../tests/README.md).
 
-Collection reads, creation and updates return `StoredCollection`; uploads return
+Workspace reads, creation and updates return `StoredWorkspace`; uploads return
 `StoredDocument`. Application callers read the domain value and storage metadata
-directly. The Collection controller constructs the existing HTTP responses, and
+directly. The Workspace controller constructs the existing HTTP responses, and
 Agent capabilities construct their own observations. Markdown, archives and
-research use cases do not consume an HTTP-shaped Collection dictionary.
+research use cases do not consume an HTTP-shaped Workspace dictionary.

@@ -4,7 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from infra.identity.client import SESSION_COOKIE_NAME
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 from main import app
 
@@ -25,8 +25,8 @@ async def test_conversation_commands_tree_and_fork(
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(
-            CollectionORM(
-                collection_id="v4-workspace",
+            WorkspaceORM(
+                workspace_id="v4-workspace",
                 owner_user_id=owner["user_id"],
                 name="Conversation V4",
                 status="idle",

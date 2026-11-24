@@ -95,14 +95,14 @@ def test_plan_uses_legacy_ascii_digest_and_stable_new_identities() -> None:
         {
             "dataset_id": "dataset_old_snapshot",
             "owner_id": "user-1",
-            "collection_id": "collection-1",
+            "workspace_id": "workspace-1",
             "dataset_type": "sft",
             "rows": [row],
             "provenance": {"items": [{"case_id": "case-1", "row_digest": legacy_digest}]},
             "created_at": "2026-09-28T00:00:00+00:00",
         }
     ]
-    cases = [{"case_id": "case-1", "collection_id": "collection-1", "status": "accepted"}]
+    cases = [{"case_id": "case-1", "workspace_id": "workspace-1", "status": "accepted"}]
 
     first = build_plan_from_records(snapshots=snapshots, cases=cases, annotations=(), reviews=(), now="2026-09-29T00:00:00+00:00")
     second = build_plan_from_records(snapshots=snapshots, cases=cases, annotations=(), reviews=(), now="2026-09-29T00:00:00+00:00")
@@ -126,14 +126,14 @@ def test_plan_deduplicates_same_snapshot_item() -> None:
     snapshot = {
         "dataset_id": "old",
         "owner_id": "user-1",
-        "collection_id": "collection-1",
+        "workspace_id": "workspace-1",
         "dataset_type": "sft",
         "rows": [row],
         "provenance": {"items": [{"case_id": "case-1"}, {"case_id": "case-1"}]},
     }
     plan = build_plan_from_records(
         snapshots=(snapshot,),
-        cases=({"case_id": "case-1", "collection_id": "collection-1"},),
+        cases=({"case_id": "case-1", "workspace_id": "workspace-1"},),
         annotations=(),
         reviews=(),
         now="2026-09-29T00:00:00+00:00",

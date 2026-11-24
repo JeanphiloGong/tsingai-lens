@@ -20,7 +20,7 @@ def anyio_backend():
 @pytest.fixture
 def analysis():
     return ObjectiveAnalysis(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=2,
         document_inputs=(PreparedDocumentInput("doc-1", "source-1"),),
@@ -57,7 +57,7 @@ async def test_completed_analysis_selects_its_saved_scientific_record_source(
     monkeypatch.setattr(analysis_record_source, "ObjectiveRepo", repository)
 
     assert await analysis_record_source.should_read_experiment_projection(
-        collection_id="col-1", objective_id="obj-1", analysis_version=2,
+        workspace_id="col-1", objective_id="obj-1", analysis_version=2,
     ) is expected
     repository.read_analysis.assert_awaited_once_with("col-1", "obj-1", 2)
 
@@ -78,7 +78,7 @@ async def test_missing_or_unfinished_analysis_cannot_select_any_scientific_recor
     exception = ResourceConflictException if status else ResourceNotFoundException
     with pytest.raises(exception) as caught:
         await analysis_record_source.should_read_experiment_projection(
-            collection_id="col-1", objective_id="obj-1", analysis_version=2,
+            workspace_id="col-1", objective_id="obj-1", analysis_version=2,
         )
     assert caught.value.data["code"] == (
         "analysis_snapshot_not_completed" if status else "analysis_snapshot_not_found"

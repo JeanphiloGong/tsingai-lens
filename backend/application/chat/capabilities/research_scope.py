@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from repositories.paper_map_repository import PaperMapRepo
 
 from domain.chat import ToolResultStatus
@@ -47,12 +47,12 @@ class PreviewResearchScopeCapability:
         context: CapabilityExecutionContext,
         arguments: PreviewResearchScopeToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
-        paper_maps = await PaperMapRepo.list_collection(
-            context.collection_id
+        paper_maps = await PaperMapRepo.list_workspace(
+            context.workspace_id
         )
         if not paper_maps:
             return ChatToolResult(
@@ -60,8 +60,8 @@ class PreviewResearchScopeCapability:
                 status=ToolResultStatus.FAILED,
                 error_code="paper_map_not_ready",
                 error_message=(
-                    "The collection Paper Map is not ready. Prepare the literature "
-                    "collection before previewing question-specific scope."
+                    "The workspace Paper Map is not ready. Prepare the literature "
+                    "workspace before previewing question-specific scope."
                 ),
             )
 
@@ -129,7 +129,7 @@ class PreviewResearchScopeCapability:
                 resource_type="document",
                 resource_id=record["document_id"],
                 href=(
-                    f"/collections/{context.collection_id}/documents/"
+                    f"/workspaces/{context.workspace_id}/documents/"
                     f"{record['document_id']}"
                 ),
             )

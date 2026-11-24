@@ -145,7 +145,7 @@ def _revision() -> PaperExperimentRevision:
 
 
 class _Selections:
-    async def list_selections(self, db, collection_id, objective_id, analysis_version):
+    async def list_selections(self, db, workspace_id, objective_id, analysis_version):
         return (
             ObjectiveExperimentSelection(
                 selection_id="selection-1",
@@ -161,15 +161,15 @@ class _Selections:
 
 
 class _Groups:
-    async def list_groups(self, db, collection_id, objective_id, analysis_version):
+    async def list_groups(self, db, workspace_id, objective_id, analysis_version):
         return ()
 
 
 class _Findings:
-    async def list_findings(self, db, collection_id, objective_id, analysis_version):
+    async def list_findings(self, db, workspace_id, objective_id, analysis_version):
         return (
             Finding(
-                collection_id=collection_id or "",
+                workspace_id=workspace_id or "",
                 objective_id=objective_id or "",
                 analysis_version=analysis_version,
                 finding_id="finding-1",
@@ -201,10 +201,10 @@ class _Experiments:
 
 
 class _ObjectiveRepository:
-    async def read_analysis(self, collection_id, objective_id, analysis_version):
+    async def read_analysis(self, workspace_id, objective_id, analysis_version):
         return None if analysis_version == 99 else SimpleNamespace(status="succeeded")
 
-    async def list_contributions(self, collection_id, objective_id, analysis_version):
+    async def list_contributions(self, workspace_id, objective_id, analysis_version):
         return ()
 
 
@@ -232,10 +232,10 @@ async def test_projection_preserves_existing_finding_and_evidence_shapes() -> No
     service = _service()
 
     findings, total = await service.list_analysis_findings(
-        "collection-1", "objective-1", 1, offset=0, limit=50
+        "workspace-1", "objective-1", 1, offset=0, limit=50
     )
     evidence, evidence_total = await service.list_analysis_evidence(
-        "collection-1", "objective-1", 1, finding_id="finding-1", offset=0, limit=50
+        "workspace-1", "objective-1", 1, finding_id="finding-1", offset=0, limit=50
     )
 
     assert total == 1
@@ -264,7 +264,7 @@ async def test_projection_retains_saved_experiment_synthesis(monkeypatch, status
     )
 
     findings, total = await service.list_analysis_findings(
-        "collection-1", "objective-1", 1, offset=0, limit=50,
+        "workspace-1", "objective-1", 1, offset=0, limit=50,
     )
 
     assert total == 1
@@ -278,7 +278,7 @@ async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> No
     service = _service()
 
     evidence, total = await service.list_analysis_evidence(
-        "collection-1", "objective-1", 1, finding_id="missing", offset=0, limit=50
+        "workspace-1", "objective-1", 1, finding_id="missing", offset=0, limit=50
     )
 
     assert evidence == ()
@@ -306,14 +306,14 @@ async def test_projection_rejects_unknown_analysis_snapshot() -> None:
 
     with pytest.raises(ResourceNotFoundException, match="Analysis snapshot not found"):
         await service.list_analysis_findings(
-            "collection-1", "objective-1", 99, offset=0, limit=50
+            "workspace-1", "objective-1", 99, offset=0, limit=50
         )
 
 
 async def test_projection_builds_the_existing_evidence_map_contract() -> None:
     service = _service()
     objective = SimpleNamespace(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         published_analysis_version=1,
         question="Does preheat change elongation?",
@@ -348,8 +348,8 @@ async def test_projection_keeps_captured_response_and_typed_review_values(monkey
     from application.core.objectives import analysis_service
 
     monkeypatch.setattr(analysis_service, "experiment_projection", service)
-    monkeypatch.setattr(analysis_service, "collection_service", SimpleNamespace(
-        get_collection_for_user=AsyncMock(),
+    monkeypatch.setattr(analysis_service, "workspace_service", SimpleNamespace(
+        get_workspace_for_user=AsyncMock(),
     ))
     monkeypatch.setattr(analysis_service, "_published_version", AsyncMock(return_value=1))
     monkeypatch.setattr(analysis_service, "should_read_experiment_projection", AsyncMock(return_value=True))
@@ -365,14 +365,14 @@ async def test_projection_keeps_captured_response_and_typed_review_values(monkey
         read_objective_record=AsyncMock(return_value=SimpleNamespace(objective=objective)),
         read_analysis=AsyncMock(return_value=analysis),
     ))
-    collection_id, objective_id, version = identity
+    workspace_id, objective_id, version = identity
     findings_view = await analysis_service.list_findings(
-        collection_id, objective_id, analysis_version=version, user_id="user-1",
+        workspace_id, objective_id, analysis_version=version, user_id="user-1",
     )
     evidence_view = await analysis_service.list_evidence(
-        collection_id, objective_id, analysis_version=version, user_id="user-1",
+        workspace_id, objective_id, analysis_version=version, user_id="user-1",
     )
-    state = await analysis_service._result(collection_id, objective_id)
+    state = await analysis_service._result(workspace_id, objective_id)
     payload = {
         "findings": findings_view["items"],
         "evidence": evidence_view["items"],
@@ -421,15 +421,15 @@ async def test_partial_measurement_keeps_missing_context_in_read_view(monkeypatc
     projection = _service()
     monkeypatch.setattr(projection.experiment_query_service, "PaperExperimentRepo", PartialExperiments())
     monkeypatch.setattr(projection.experiment_query_service, "ObjectiveExperimentSelectionRepo", PartialSelections())
-    records, total = await projection.list_analysis_evidence("collection-1", "objective-1", 1)
+    records, total = await projection.list_analysis_evidence("workspace-1", "objective-1", 1)
     assert total == 1
     assert records[0].resolution_status == "partial"
     assert records[0].reported_result.value == 72
     monkeypatch.setattr(analysis_service, "experiment_projection", projection)
-    monkeypatch.setattr(analysis_service, "collection_service", SimpleNamespace(get_collection_for_user=AsyncMock()))
+    monkeypatch.setattr(analysis_service, "workspace_service", SimpleNamespace(get_workspace_for_user=AsyncMock()))
     monkeypatch.setattr(analysis_service, "_published_version", AsyncMock(return_value=1))
     monkeypatch.setattr(analysis_service, "should_read_experiment_projection", AsyncMock(return_value=True))
-    response = await analysis_service.list_evidence("collection-1", "objective-1", user_id="user-1")
+    response = await analysis_service.list_evidence("workspace-1", "objective-1", user_id="user-1")
     item, = response["items"]
     assert item["evidence_status"] == "needs_context"
     assert item["evidence_status_reason"] == "The selected measurement has incomplete binding context."
@@ -440,7 +440,7 @@ async def test_partial_measurement_keeps_missing_context_in_read_view(monkeypatc
     monkeypatch.setattr(objective_authoring_service, "experiment_projection", projection)
     monkeypatch.setattr(objective_authoring_service, "should_read_experiment_projection", AsyncMock(return_value=True))
     basis = await objective_authoring_service._canonicalize_derived_objective_basis(
-        collection_id="collection-1", parent_objective_id="objective-1",
+        workspace_id="workspace-1", parent_objective_id="objective-1",
         parent_analysis_version=1,
         derivation_basis=[{
             "kind": "evidence_gap", "reference_id": records[0].evidence_id,

@@ -24,29 +24,29 @@ class _ImmediateDocumentPreparationService:
     """Complete the HTTP boundary test without invoking parser or LLM providers."""
 
     def __init__(
-        self, collection_service, pipeline_run_service, object_store
+        self, workspace_service, pipeline_run_service, object_store
     ) -> None:  # noqa: ANN001
-        self.collection_service = collection_service
+        self.workspace_service = workspace_service
         self.pipeline_run_service = pipeline_run_service
         self.object_store = object_store
 
     async def queue_document_preparation(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
         *,
         user_id: str,
     ) -> PipelineRun:
-        await self.collection_service.get_collection_for_user(collection_id, user_id)
-        document = await self.collection_service.get_document(
-            collection_id,
+        await self.workspace_service.get_workspace_for_user(workspace_id, user_id)
+        document = await self.workspace_service.get_document(
+            workspace_id,
             document_id,
         )
         fingerprint = sha256(
             f"{document.document.sha256}:test-parser:test-analysis".encode("utf-8")
         ).hexdigest()
         run, created = await self.pipeline_run_service.get_or_create_document_run(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document_id=document_id,
             pipeline_name="document_preparation",
             input_fingerprint=fingerprint,
@@ -60,7 +60,7 @@ class _ImmediateDocumentPreparationService:
             worker_id="test-worker", lease_duration=timedelta(seconds=300)
         )
         await SourceArtifactRepository().replace_document(
-            collection_id,
+            workspace_id,
             SourceDocument(
                 document_id=document_id,
                 document_order=0,
@@ -73,7 +73,7 @@ class _ImmediateDocumentPreparationService:
             ),
         )
         await DocumentProfileRepository().replace(
-            collection_id,
+            workspace_id,
             DocumentProfile(
                 document_id=document_id,
                 title=document.document.original_filename,
@@ -85,8 +85,8 @@ class _ImmediateDocumentPreparationService:
                 profile_fingerprint=fingerprint,
             ),
         )
-        await self.collection_service.update_document_preparation(
-            collection_id,
+        await self.workspace_service.update_document_preparation(
+            workspace_id,
             document_id,
             status="ready",
             preparation_fingerprint=fingerprint,
@@ -112,7 +112,7 @@ def app_client(
     monkeypatch,
     tmp_path,
     identity_subjects,
-    collection_service,
+    workspace_service,
     *,
     postgres_session_factory,
 ):
@@ -133,7 +133,7 @@ def app_client(
         monkeypatch.setattr(
             "controllers.source.pipeline_run_routes.queue_document_preparation",
             _ImmediateDocumentPreparationService(
-                collection_service,
+                workspace_service,
                 pipeline_run_service,
                 store_module.Store,
             ).queue_document_preparation,
@@ -143,22 +143,22 @@ def app_client(
         yield client
 
 
-def _create_collection(
+def _create_workspace(
     app_client, name: str = "Ti-6Al-4V papers"
 ) -> str:  # noqa: ANN001
     response = app_client.post(
-        f"{API_V1_PREFIX}/collections",
+        f"{API_V1_PREFIX}/workspaces",
         json={"name": name},
     )
     assert response.status_code == 200
-    return response.json()["data"]["collection_id"]
+    return response.json()["data"]["workspace_id"]
 
 
 def _upload(
-    app_client, collection_id: str, filename: str, content: bytes
+    app_client, workspace_id: str, filename: str, content: bytes
 ) -> dict:  # noqa: ANN001
     response = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents",
         files={"file": (filename, content, "text/plain")},
     )
     assert response.status_code == 200
@@ -166,18 +166,18 @@ def _upload(
 
 
 def test_request_id_is_generated_and_echoed(app_client) -> None:
-    response = app_client.get(f"{API_V1_PREFIX}/collections")
+    response = app_client.get(f"{API_V1_PREFIX}/workspaces")
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"].startswith("req_")
 
 
 def test_lost_upload_response_can_be_retried_then_prepared_once(app_client) -> None:
-    collection_id = _create_collection(app_client)
+    workspace_id = _create_workspace(app_client)
     original = _upload(
-        app_client, collection_id, "paper.txt", b"Methods\nLPBF treatment"
+        app_client, workspace_id, "paper.txt", b"Methods\nLPBF treatment"
     )
-    path = f"{API_V1_PREFIX}/collections/{collection_id}/documents"
+    path = f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents"
     recovered = app_client.post(
         path,
         params={"reuse_existing": "true"},
@@ -196,9 +196,9 @@ def test_lost_upload_response_can_be_retried_then_prepared_once(app_client) -> N
     assert documents[0]["status"] == "ready"
 
 
-def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> None:
-    collection_id = _create_collection(app_client)
-    _upload(app_client, collection_id, "private.txt", b"Private LPBF treatment")
+def test_upload_recovery_is_restricted_to_the_workspace_owner(app_client) -> None:
+    workspace_id = _create_workspace(app_client)
+    _upload(app_client, workspace_id, "private.txt", b"Private LPBF treatment")
     asyncio.run(
         auth_service.create_subject(
             email="other@example.test",
@@ -207,7 +207,7 @@ def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> No
     app_client.cookies.clear()
     app_client.cookies.set("lens_session", "fixture:" + "other@example.test")
     response = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents",
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents",
         params={"reuse_existing": "true"},
         files={"file": ("private.txt", b"Private LPBF treatment", "text/plain")},
     )
@@ -215,11 +215,11 @@ def test_upload_recovery_is_restricted_to_the_collection_owner(app_client) -> No
     assert response.json()["code"] == 200201
 
 
-def test_collection_list_returns_compact_document_rows(app_client) -> None:
-    collection_id = _create_collection(app_client)
-    uploaded = _upload(app_client, collection_id, "paper-a.txt", b"Methods\nPaper A")
+def test_workspace_list_returns_compact_document_rows(app_client) -> None:
+    workspace_id = _create_workspace(app_client)
+    uploaded = _upload(app_client, workspace_id, "paper-a.txt", b"Methods\nPaper A")
 
-    response = app_client.get(f"{API_V1_PREFIX}/collections")
+    response = app_client.get(f"{API_V1_PREFIX}/workspaces")
 
     assert response.status_code == 200
     document = response.json()["data"]["items"][0]["documents"][0]
@@ -235,12 +235,12 @@ def test_collection_list_returns_compact_document_rows(app_client) -> None:
 def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_work(
     app_client,
 ) -> None:
-    collection_id = _create_collection(app_client)
-    first = _upload(app_client, collection_id, "paper-a.txt", b"Methods\nPaper A")
-    second = _upload(app_client, collection_id, "paper-b.txt", b"Results\nPaper B")
+    workspace_id = _create_workspace(app_client)
+    first = _upload(app_client, workspace_id, "paper-a.txt", b"Methods\nPaper A")
+    second = _upload(app_client, workspace_id, "paper-b.txt", b"Results\nPaper B")
 
     prepared = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents/"
         f"{first['document_id']}/preparation",
     )
     assert prepared.status_code == 200
@@ -249,16 +249,16 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     assert prepared.json()["data"]["scope_id"] == first["document_id"]
 
     after_first_preparation = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}"
     ).json()["data"]
     by_id = {item["document_id"]: item for item in after_first_preparation["documents"]}
     assert by_id[first["document_id"]]["status"] == "ready"
     assert by_id[first["document_id"]]["preparation_fingerprint"]
     assert by_id[second["document_id"]]["status"] == "stored"
 
-    third = _upload(app_client, collection_id, "paper-c.txt", b"Discussion\nPaper C")
+    third = _upload(app_client, workspace_id, "paper-c.txt", b"Discussion\nPaper C")
     after_addition = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}"
     ).json()["data"]
     by_id = {item["document_id"]: item for item in after_addition["documents"]}
     assert after_addition["paper_count"] == 3
@@ -267,14 +267,14 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     assert by_id[third["document_id"]]["status"] == "stored"
 
     repeated = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents/"
         f"{first['document_id']}/preparation",
     )
     assert repeated.status_code == 200
     assert repeated.json()["data"]["run_id"] == prepared.json()["data"]["run_id"]
 
     run_list = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/pipeline-runs"
     )
     assert run_list.status_code == 200
     assert run_list.json()["data"]["count"] == 1
@@ -299,7 +299,7 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
     )
     assert run_detail.status_code == 200
     assert {
-        "collection_id",
+        "workspace_id",
         "mode",
         "input_fingerprint",
         "nodes",
@@ -313,10 +313,10 @@ def test_documents_prepare_independently_and_new_uploads_do_not_rebuild_ready_wo
 
 
 def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
-    collection_id = _create_collection(app_client, "Private pipeline run")
-    document = _upload(app_client, collection_id, "paper.txt", b"Methods")
+    workspace_id = _create_workspace(app_client, "Private pipeline run")
+    document = _upload(app_client, workspace_id, "paper.txt", b"Methods")
     prepared = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents/"
         f"{document['document_id']}/preparation",
     )
     assert prepared.status_code == 200
@@ -336,13 +336,13 @@ def test_pipeline_run_detail_is_hidden_from_non_owner(app_client) -> None:
     assert response.json()["code"] == 200201
 
 
-def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(
+def test_pipeline_run_workspace_endpoints_are_hidden_from_non_owner(
     app_client,
 ) -> None:
-    collection_id = _create_collection(app_client, "Private pipeline history")
-    document = _upload(app_client, collection_id, "paper.txt", b"Methods")
+    workspace_id = _create_workspace(app_client, "Private pipeline history")
+    document = _upload(app_client, workspace_id, "paper.txt", b"Methods")
     prepared = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents/"
         f"{document['document_id']}/preparation",
     )
     assert prepared.status_code == 200
@@ -356,12 +356,12 @@ def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(
     app_client.cookies.set("lens_session", "fixture:" + "other@example.com")
 
     listed = app_client.get(
-        f"{API_V1_PREFIX}/collections/{collection_id}/pipeline-runs"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/pipeline-runs"
     )
     assert listed.status_code == 200
     assert listed.json()["code"] == 200201
     queued = app_client.post(
-        f"{API_V1_PREFIX}/collections/{collection_id}/documents/"
+        f"{API_V1_PREFIX}/workspaces/{workspace_id}/documents/"
         f"{document['document_id']}/preparation",
     )
     assert queued.status_code == 200
@@ -370,7 +370,7 @@ def test_pipeline_run_collection_endpoints_are_hidden_from_non_owner(
 
 def test_document_preparation_contract_has_no_request_body(app_client) -> None:
     operation = app_client.get("/api/openapi.json").json()["paths"][
-        "/api/v1/collections/{collection_id}/documents/{document_id}/preparation"
+        "/api/v1/workspaces/{workspace_id}/documents/{document_id}/preparation"
     ]["post"]
 
     assert "requestBody" not in operation
@@ -380,20 +380,20 @@ def test_document_preparation_contract_has_no_request_body(app_client) -> None:
     "retired_path",
     (
         "/comparable-results",
-        "/collections/{collection_id}/research-view",
-        "/collections/{collection_id}/materials",
-        "/collections/{collection_id}/results",
-        "/collections/{collection_id}/evidence/cards",
-        "/collections/{collection_id}/graph",
-        "/collections/{collection_id}/graphml",
+        "/workspaces/{workspace_id}/research-view",
+        "/workspaces/{workspace_id}/materials",
+        "/workspaces/{workspace_id}/results",
+        "/workspaces/{workspace_id}/evidence/cards",
+        "/workspaces/{workspace_id}/graph",
+        "/workspaces/{workspace_id}/graphml",
     ),
 )
 def test_retired_build_and_projection_routes_are_not_registered(
     app_client,
     retired_path,
 ) -> None:
-    collection_id = _create_collection(app_client, "Current routes only")
-    path = retired_path.format(collection_id=collection_id)
+    workspace_id = _create_workspace(app_client, "Current routes only")
+    path = retired_path.format(workspace_id=workspace_id)
     response = (
         app_client.post(f"{API_V1_PREFIX}{path}", json={})
         if "/pipeline-runs/" in path
@@ -409,7 +409,7 @@ def test_objective_experiment_plan_routes_are_registered(app_client) -> None:
     assert openapi.status_code == 200
     paths = openapi.json()["paths"]
     plan_list_path = (
-        f"{API_V1_PREFIX}/collections/{{collection_id}}/objectives/"
+        f"{API_V1_PREFIX}/workspaces/{{workspace_id}}/objectives/"
         "{objective_id}/experiment-plans"
     )
     plan_detail_path = f"{plan_list_path}/{{plan_id}}"
@@ -419,7 +419,7 @@ def test_objective_experiment_plan_routes_are_registered(app_client) -> None:
     assert "patch" in paths[plan_detail_path]
 
 
-def test_goal_intake_creates_a_collection_with_no_documents(app_client) -> None:
+def test_goal_intake_creates_a_workspace_with_no_documents(app_client) -> None:
     response = app_client.post(
         f"{API_V1_PREFIX}/goals/intake",
         json={
@@ -431,21 +431,21 @@ def test_goal_intake_creates_a_collection_with_no_documents(app_client) -> None:
     )
 
     assert response.status_code == 200
-    collection_id = response.json()["data"]["seed_collection"]["collection_id"]
-    collection = app_client.get(f"{API_V1_PREFIX}/collections/{collection_id}")
-    assert collection.status_code == 200
-    assert collection.json()["data"]["collection_id"] == collection_id
-    assert collection.json()["data"]["documents"] == []
-    assert collection.json()["data"]["paper_count"] == 0
+    workspace_id = response.json()["data"]["seed_workspace"]["workspace_id"]
+    workspace = app_client.get(f"{API_V1_PREFIX}/workspaces/{workspace_id}")
+    assert workspace.status_code == 200
+    assert workspace.json()["data"]["workspace_id"] == workspace_id
+    assert workspace.json()["data"]["documents"] == []
+    assert workspace.json()["data"]["paper_count"] == 0
 
 
-def test_delete_collection_removes_current_documents(app_client) -> None:
-    collection_id = _create_collection(app_client, "Delete current documents")
-    _upload(app_client, collection_id, "paper.txt", b"Paper")
+def test_delete_workspace_removes_current_documents(app_client) -> None:
+    workspace_id = _create_workspace(app_client, "Delete current documents")
+    _upload(app_client, workspace_id, "paper.txt", b"Paper")
 
-    deleted = app_client.delete(f"{API_V1_PREFIX}/collections/{collection_id}")
+    deleted = app_client.delete(f"{API_V1_PREFIX}/workspaces/{workspace_id}")
 
     assert deleted.status_code == 200
-    assert deleted.json()["data"]["collection_id"] == collection_id
-    assert app_client.get(f'{API_V1_PREFIX}/collections/{collection_id}').status_code == 200
-    assert app_client.get(f'{API_V1_PREFIX}/collections/{collection_id}').json()["code"] == 200201
+    assert deleted.json()["data"]["workspace_id"] == workspace_id
+    assert app_client.get(f'{API_V1_PREFIX}/workspaces/{workspace_id}').status_code == 200
+    assert app_client.get(f'{API_V1_PREFIX}/workspaces/{workspace_id}').json()["code"] == 200201

@@ -179,7 +179,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
     )
 
     routes = evidence_routing.route_sources(
-        collection_id="collection-review",
+        workspace_id="workspace-review",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={frame.document_id: [review_block]},
@@ -230,7 +230,7 @@ def test_irrelevant_primary_experiment_is_recalled_when_source_has_direct_result
 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
-            collection_id="col-test",
+            workspace_id="col-test",
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={"paper-1": blocks},
@@ -291,7 +291,7 @@ def test_irrelevant_primary_experiment_without_objective_signal_stays_skipped() 
 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
-            collection_id="col-test",
+            workspace_id="col-test",
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={"paper-1": blocks},
@@ -341,7 +341,7 @@ def test_primary_experiment_with_outcome_but_no_objective_variable_stays_visible
 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
-            collection_id="col-test",
+            workspace_id="col-test",
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={frame.document_id: blocks},
@@ -410,7 +410,7 @@ def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() ->
         ),
     ]
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={frame.document_id: blocks},
@@ -457,7 +457,7 @@ def test_explicit_relationship_lineage_preserves_abbreviated_result_scope() -> N
     ]
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={frame.document_id: blocks},
@@ -596,7 +596,7 @@ def test_direct_result_source_is_recalled_when_router_returns_empty_selection() 
 
     with capture_analysis_diagnostics() as diagnostics:
         routes = evidence_routing.route_sources(
-            collection_id="col-test",
+            workspace_id="col-test",
             objectives=(objective,),
             objective_paper_frames=(frame,),
             blocks_by_document_id={"paper-1": result_blocks},
@@ -1178,7 +1178,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
     )
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-independent": []},
@@ -1733,7 +1733,7 @@ def test_research_objective_routing_uses_document_tree_order():
     ]
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes={
             "root": SourceDocumentNode(
@@ -1791,7 +1791,7 @@ def test_research_objective_routing_uses_document_tree_order():
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": blocks},
@@ -1836,7 +1836,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision():
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1897,7 +1897,7 @@ def test_research_objective_routing_uses_compact_prompt_payload():
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1935,7 +1935,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
     long_text = "Heat treatment changed yield strength. " + ("x" * 1000)
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes={
             "root": SourceDocumentNode(
@@ -1963,7 +1963,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2000,7 +2000,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree():
     )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes={
             "root": SourceDocumentNode(
@@ -2082,7 +2082,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree():
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2125,7 +2125,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
     )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes={
             "root": SourceDocumentNode(
@@ -2185,7 +2185,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2253,14 +2253,14 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text()
         )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes=nodes,
     )
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2328,14 +2328,14 @@ def test_research_objective_tree_routing_keeps_late_document_nodes():
         )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes=nodes,
     )
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2417,14 +2417,14 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes():
         )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes=nodes,
     )
     extractor = _ObjectiveExtractor()
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2496,7 +2496,7 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text():
         )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes=nodes,
     )
@@ -2610,7 +2610,7 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs():
     )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes={
             "root": SourceDocumentNode(
@@ -2810,7 +2810,7 @@ def test_research_objective_routing_reads_late_result_in_complete_source_block()
     )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
-        collection_id="col-test",
+        workspace_id="col-test",
         root_node_id="root",
         nodes={
             "root": SourceDocumentNode(
@@ -2837,7 +2837,7 @@ def test_research_objective_routing_reads_late_result_in_complete_source_block()
     )
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -2891,7 +2891,7 @@ def test_research_objective_routing_reads_target_result_in_late_table_row():
     )
 
     routes = evidence_routing.route_sources(
-        collection_id="col-test",
+        workspace_id="col-test",
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},

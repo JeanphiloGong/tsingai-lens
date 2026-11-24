@@ -4,7 +4,7 @@ import { requestJson } from './api';
 import {
 	createFindingCuration,
 	createFindingFeedback,
-	fetchCollectionObjectives,
+	fetchWorkspaceObjectives,
 	fetchExperimentAnalysis,
 	fetchFindingCurations,
 	fetchFindingFeedback,
@@ -14,7 +14,7 @@ import {
 	fetchObjectiveFinding,
 	fetchObjectiveFindings,
 	fetchObjectiveScope,
-	collectionFindingDatasetUrl,
+	workspaceFindingDatasetUrl,
 	findingGoldDraftUrl,
 	objectiveFindingDatasetUrl,
 	runObjectiveAnalysis
@@ -24,7 +24,7 @@ vi.mock('./api', () => ({ requestJson: vi.fn() }));
 const request = vi.mocked(requestJson);
 
 const objective = {
-	collection_id: 'col_123',
+	workspace_id: 'col_123',
 	objective_id: 'obj_1',
 	question: 'How does temperature affect strength?',
 	material_scope: ['Alloy A'],
@@ -45,7 +45,7 @@ const objective = {
 };
 
 const analysis = {
-	collection_id: 'col_123',
+	workspace_id: 'col_123',
 	objective_id: 'obj_1',
 	analysis_version: 1,
 	document_inputs: [{ document_id: 'paper-1', preparation_fingerprint: 'fingerprint-paper-1' }],
@@ -66,7 +66,7 @@ const analysis = {
 };
 
 const finding = {
-	collection_id: 'col_123',
+	workspace_id: 'col_123',
 	objective_id: 'obj_1',
 	analysis_version: 1,
 	finding_id: 'finding-1',
@@ -109,11 +109,11 @@ describe('objective Finding API', () => {
 	beforeEach(() => request.mockReset());
 
 	it('loads Objective definitions without workspace counters', async () => {
-		request.mockResolvedValue({ collection_id: 'col_123', objectives: [objective] });
+		request.mockResolvedValue({ workspace_id: 'col_123', objectives: [objective] });
 
-		const result = await fetchCollectionObjectives('col_123');
+		const result = await fetchWorkspaceObjectives('col_123');
 
-		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives');
+		expect(request).toHaveBeenCalledWith('/workspaces/col_123/objectives');
 		expect(result.objectives[0].confirmation_status).toBe('confirmed');
 		expect(result.objectives[0].published_analysis_version).toBe(1);
 		expect(result.objectives[0].mechanisms).toEqual(['precipitate evolution']);
@@ -123,7 +123,7 @@ describe('objective Finding API', () => {
 
 	it('uses the same lifecycle response for queue and poll', async () => {
 		request.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective,
 			active_analysis: analysis,
 			published_analysis: analysis,
@@ -142,11 +142,11 @@ describe('objective Finding API', () => {
 		await runObjectiveAnalysis('col_123', 'obj_1', ['paper-1']);
 		const result = await fetchObjectiveAnalysis('col_123', 'obj_1');
 
-		expect(request).toHaveBeenNthCalledWith(1, '/collections/col_123/objectives/obj_1/analysis', {
+		expect(request).toHaveBeenNthCalledWith(1, '/workspaces/col_123/objectives/obj_1/analysis', {
 			method: 'POST',
 			body: JSON.stringify({ document_ids: ['paper-1'] })
 		});
-		expect(request).toHaveBeenNthCalledWith(2, '/collections/col_123/objectives/obj_1/analysis');
+		expect(request).toHaveBeenNthCalledWith(2, '/workspaces/col_123/objectives/obj_1/analysis');
 		expect(result.objective.confirmation_status).toBe('confirmed');
 		expect(result.active_analysis?.status).toBe('succeeded');
 		expect(result.active_analysis?.document_inputs).toEqual([
@@ -161,20 +161,20 @@ describe('objective Finding API', () => {
 				dataset_use_status: 'training_ready'
 			})
 		).toBe(
-			'/api/v1/collections/col%2F1/objectives/obj%201/finding-dataset?label_status=gold&dataset_use_status=training_ready&format=training_jsonl'
+			'/api/v1/workspaces/col%2F1/objectives/obj%201/finding-dataset?label_status=gold&dataset_use_status=training_ready&format=training_jsonl'
 		);
 	});
 
-	it('builds collection-level dataset and gold-draft export URLs', () => {
-		expect(collectionFindingDatasetUrl('col/1', 'json')).toBe(
-			'/api/v1/collections/col%2F1/finding-dataset?format=json'
+	it('builds workspace-level dataset and gold-draft export URLs', () => {
+		expect(workspaceFindingDatasetUrl('col/1', 'json')).toBe(
+			'/api/v1/workspaces/col%2F1/finding-dataset?format=json'
 		);
-		expect(findingGoldDraftUrl('col/1')).toBe('/api/v1/collections/col%2F1/finding-gold-draft');
+		expect(findingGoldDraftUrl('col/1')).toBe('/api/v1/workspaces/col%2F1/finding-gold-draft');
 	});
 
 	it('preserves the complete Objective scope preview', async () => {
 		const payload = {
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective_id: 'obj_1',
 			counts: {
 				likely_relevant: 2,
@@ -202,7 +202,7 @@ describe('objective Finding API', () => {
 
 		const result = await fetchObjectiveScope('col_123', 'obj_1');
 
-		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/scope');
+		expect(request).toHaveBeenCalledWith('/workspaces/col_123/objectives/obj_1/scope');
 		expect(result.recommended_document_ids).toEqual(['paper-1', 'paper-3']);
 		expect(result.review_document_ids).toEqual(['paper-2']);
 		expect(result.decisions).toHaveLength(1);
@@ -215,24 +215,24 @@ describe('objective Finding API', () => {
 		expect(result).toBe(payload);
 	});
 
-	it('rejects an Objective list from another collection', async () => {
-		request.mockResolvedValue({ collection_id: 'col_999', objectives: [] });
-		await expect(fetchCollectionObjectives('col_123')).rejects.toThrow(
+	it('rejects an Objective list from another workspace', async () => {
+		request.mockResolvedValue({ workspace_id: 'col_999', objectives: [] });
+		await expect(fetchWorkspaceObjectives('col_123')).rejects.toThrow(
 			'Objective list response does not match'
 		);
 	});
 
 	it('returns the declared Objective list shape without item revalidation', async () => {
-		request.mockResolvedValue({ collection_id: 'col_123', objectives: [null] });
-		await expect(fetchCollectionObjectives('col_123')).resolves.toEqual({
-			collection_id: 'col_123',
+		request.mockResolvedValue({ workspace_id: 'col_123', objectives: [null] });
+		await expect(fetchWorkspaceObjectives('col_123')).resolves.toEqual({
+			workspace_id: 'col_123',
 			objectives: [null]
 		});
 	});
 
 	it('rejects a scope response from another objective', async () => {
 		request.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective_id: 'obj_2'
 		});
 		await expect(fetchObjectiveScope('col_123', 'obj_1')).rejects.toThrow(
@@ -241,7 +241,7 @@ describe('objective Finding API', () => {
 	});
 
 	it('rejects missing analysis data for both queue and read instead of inventing an Objective', async () => {
-		request.mockResolvedValue({ collection_id: 'col_123' });
+		request.mockResolvedValue({ workspace_id: 'col_123' });
 		await expect(runObjectiveAnalysis('col_123', 'obj_1', ['paper-1'])).rejects.toThrow(
 			'Objective analysis response does not match'
 		);
@@ -253,7 +253,7 @@ describe('objective Finding API', () => {
 	it('requests versioned Finding and exact Evidence pages', async () => {
 		request
 			.mockResolvedValueOnce({
-				collection_id: 'col_123',
+				workspace_id: 'col_123',
 				objective_id: 'obj_1',
 				analysis_version: 1,
 				items: [],
@@ -262,13 +262,13 @@ describe('objective Finding API', () => {
 				total: 0
 			})
 			.mockResolvedValueOnce({
-				collection_id: 'col_123',
+				workspace_id: 'col_123',
 				objective_id: 'obj_1',
 				analysis_version: 1,
 				finding
 			})
 			.mockResolvedValueOnce({
-				collection_id: 'col_123',
+				workspace_id: 'col_123',
 				objective_id: 'obj_1',
 				analysis_version: 1,
 				finding_id: 'finding-1',
@@ -283,19 +283,19 @@ describe('objective Finding API', () => {
 		await fetchObjectiveEvidence('col_123', 'obj_1', 1, 'finding-1');
 
 		expect(request.mock.calls[0][0]).toBe(
-			'/collections/col_123/objectives/obj_1/findings?analysis_version=1&offset=0&limit=20'
+			'/workspaces/col_123/objectives/obj_1/findings?analysis_version=1&offset=0&limit=20'
 		);
 		expect(request.mock.calls[1][0]).toBe(
-			'/collections/col_123/objectives/obj_1/findings/finding-1?analysis_version=1'
+			'/workspaces/col_123/objectives/obj_1/findings/finding-1?analysis_version=1'
 		);
 		expect(request.mock.calls[2][0]).toBe(
-			'/collections/col_123/objectives/obj_1/evidence?analysis_version=1&finding_id=finding-1&offset=0&limit=100'
+			'/workspaces/col_123/objectives/obj_1/evidence?analysis_version=1&finding_id=finding-1&offset=0&limit=100'
 		);
 	});
 
 	it('loads the published Objective evidence map from the Objective subresource', async () => {
 		request.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective_id: 'obj_1',
 			analysis_version: 1,
 			projection_version: 'objective-evidence-map.v1',
@@ -317,13 +317,13 @@ describe('objective Finding API', () => {
 
 		const result = await fetchObjectiveEvidenceMap('col_123', 'obj_1');
 
-		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/evidence-map');
+		expect(request).toHaveBeenCalledWith('/workspaces/col_123/objectives/obj_1/evidence-map');
 		expect(result.projection_version).toBe('objective-evidence-map.v1');
 	});
 
 	it('rejects a stale Finding version and missing experiment containers', async () => {
 		request.mockResolvedValueOnce({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective_id: 'obj_1',
 			analysis_version: 2,
 			items: [finding]
@@ -339,7 +339,7 @@ describe('objective Finding API', () => {
 
 	it('returns an experiment projection without rewriting its values', async () => {
 		const payload = {
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective_id: 'obj_1',
 			analysis_version: 1,
 			selections: [],
@@ -353,7 +353,7 @@ describe('objective Finding API', () => {
 
 	it('builds the LlamaFactory Alpaca dataset export URL', () => {
 		expect(objectiveFindingDatasetUrl('col/1', 'obj 1', 'llamafactory_alpaca')).toBe(
-			'/api/v1/collections/col%2F1/objectives/obj%201/finding-dataset?format=llamafactory_alpaca'
+			'/api/v1/workspaces/col%2F1/objectives/obj%201/finding-dataset?format=llamafactory_alpaca'
 		);
 	});
 
@@ -367,7 +367,7 @@ describe('objective Finding API', () => {
 		});
 
 		expect(request).toHaveBeenCalledWith(
-			'/collections/col_123/objectives/obj_1/findings/finding-1/feedback',
+			'/workspaces/col_123/objectives/obj_1/findings/finding-1/feedback',
 			{
 				method: 'POST',
 				body: JSON.stringify({
@@ -381,7 +381,7 @@ describe('objective Finding API', () => {
 
 	it('lists feedback and curations for one exact Finding version', async () => {
 		request.mockResolvedValue({
-			collection_id: 'col_123',
+			workspace_id: 'col_123',
 			objective_id: 'obj_1',
 			analysis_version: 1,
 			finding_id: 'finding-1',
@@ -409,7 +409,7 @@ describe('objective Finding API', () => {
 		});
 
 		expect(request).toHaveBeenCalledWith(
-			'/collections/col_123/objectives/obj_1/findings/finding-1/curation',
+			'/workspaces/col_123/objectives/obj_1/findings/finding-1/curation',
 			expect.objectContaining({ method: 'PUT' })
 		);
 	});

@@ -75,7 +75,7 @@ class _Service:
             from exceptions import RequestInvalidException
             raise RequestInvalidException("Finding requires an experiment selection")
         analysis = ObjectiveAnalysis(
-            collection_id=kwargs["collection_id"] or "",
+            workspace_id=kwargs["workspace_id"] or "",
             objective_id=kwargs["objective_id"] or "",
             analysis_version=int(2),
             document_inputs=(
@@ -103,7 +103,7 @@ class _Service:
             ),
         )
         finding = Finding(
-            collection_id=_finding_record().get("collection_id", None) or "",
+            workspace_id=_finding_record().get("workspace_id", None) or "",
             objective_id=_finding_record().get("objective_id", None) or "",
             analysis_version=2,
             finding_id="finding-manual-1",
@@ -442,15 +442,15 @@ class _Service:
         )
 
     async def export_dataset(self, **kwargs):
-        return _dataset(kwargs["collection_id"], kwargs["objective_id"])
+        return _dataset(kwargs["workspace_id"], kwargs["objective_id"])
 
-    async def export_collection_dataset(self, **kwargs):
-        return _dataset(kwargs["collection_id"], None)
+    async def export_workspace_dataset(self, **kwargs):
+        return _dataset(kwargs["workspace_id"], None)
 
     async def export_gold_draft(self, **kwargs):
         return {
             "gold_id": "gold-1",
-            "collection_id": kwargs["collection_id"],
+            "workspace_id": kwargs["workspace_id"],
             "version": "objective_finding_dataset.v2",
             "target_layer": "core",
             "metric_profile": "objective_findings_v1",
@@ -458,12 +458,12 @@ class _Service:
         }
 
 
-def _dataset(collection_id: str, objective_id: str | None) -> dict:
+def _dataset(workspace_id: str, objective_id: str | None) -> dict:
     finding = _finding_record()
     evidence = _evidence_record()
     return {
         "schema_version": "objective_finding_dataset.v2",
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "items": [
             {
@@ -499,7 +499,7 @@ def _dataset(collection_id: str, objective_id: str | None) -> dict:
 
 def _finding_record(statement: str = "Temperature affects strength.") -> dict:
     expected_finding = Finding(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -524,7 +524,7 @@ def _finding_record(statement: str = "Temperature affects strength.") -> dict:
         ),
     )
     return {
-        "collection_id": expected_finding.collection_id,
+        "workspace_id": expected_finding.workspace_id,
         "objective_id": expected_finding.objective_id,
         "analysis_version": expected_finding.analysis_version,
         "finding_id": expected_finding.finding_id,
@@ -668,7 +668,7 @@ def _finding_record(statement: str = "Temperature affects strength.") -> dict:
 
 def _evidence_record() -> dict:
     expected_objective_evidence = ObjectiveEvidence(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         analysis_version=1,
         evidence_id="evidence-1",
@@ -706,7 +706,7 @@ def _evidence_record() -> dict:
         confidence=0.9,
     )
     return {
-        "collection_id": expected_objective_evidence.collection_id,
+        "workspace_id": expected_objective_evidence.workspace_id,
         "objective_id": expected_objective_evidence.objective_id,
         "analysis_version": expected_objective_evidence.analysis_version,
         "evidence_id": expected_objective_evidence.evidence_id,
@@ -882,7 +882,7 @@ def _client(service: _Service | None = None) -> TestClient:
 
 def test_author_finding_api_rejects_legacy_evidence_bindings() -> None:
     response = _client().post(
-        "/collections/col-1/objectives/obj-1/findings",
+        "/workspaces/col-1/objectives/obj-1/findings",
         json={
             "source_analysis_version": 1,
             "supporting_evidence_ids": ["evidence-1"],
@@ -897,7 +897,7 @@ def test_author_finding_api_rejects_legacy_evidence_bindings() -> None:
 
 def test_author_finding_api_requires_experiment_selection() -> None:
     response = _client().post(
-        "/collections/col-1/objectives/obj-1/findings",
+        "/workspaces/col-1/objectives/obj-1/findings",
         json={
             "source_analysis_version": 1,
             "selection_ids": [],
@@ -911,7 +911,7 @@ def test_author_finding_api_requires_experiment_selection() -> None:
 def test_author_finding_api_preserves_parent_and_limitations() -> None:
     service = _Service()
     response = _client(service).post(
-        "/collections/col-1/objectives/obj-1/findings",
+        "/workspaces/col-1/objectives/obj-1/findings",
         json={
             "source_analysis_version": 1,
             "selection_ids": ["selection-1"],
@@ -928,7 +928,7 @@ def test_author_finding_api_preserves_parent_and_limitations() -> None:
 
 def test_author_finding_api_records_abstention_without_placeholder() -> None:
     response = _client().post(
-        "/collections/col-1/objectives/obj-1/findings",
+        "/workspaces/col-1/objectives/obj-1/findings",
         json={
             "source_analysis_version": 1,
             "abstention_reason": "insufficient_evidence",
@@ -945,7 +945,7 @@ def test_author_finding_api_records_abstention_without_placeholder() -> None:
 
 def test_author_evidence_api_is_removed() -> None:
     response = _client().post(
-        "/collections/col-1/objectives/obj-1/evidence",
+        "/workspaces/col-1/objectives/obj-1/evidence",
         json={"source_analysis_version": 1},
     )
     assert response.status_code == 200
@@ -954,7 +954,7 @@ def test_author_evidence_api_is_removed() -> None:
 
 def test_feedback_api_requires_explicit_analysis_version() -> None:
     response = _client().post(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/feedback",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/feedback",
         json={
             "analysis_version": 1,
             "review_status": "correct",
@@ -971,7 +971,7 @@ def test_feedback_api_rejects_inconsistent_status_and_issue() -> None:
     client = _client()
 
     correct_with_issue = client.post(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/feedback",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/feedback",
         json={
             "analysis_version": 1,
             "review_status": "correct",
@@ -979,7 +979,7 @@ def test_feedback_api_rejects_inconsistent_status_and_issue() -> None:
         },
     )
     partial_without_issue = client.post(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/feedback",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/feedback",
         json={
             "analysis_version": 1,
             "review_status": "partial",
@@ -995,7 +995,7 @@ def test_feedback_api_rejects_inconsistent_status_and_issue() -> None:
 
 def test_curation_api_uses_finding_evidence_ids() -> None:
     response = _client().put(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/curation",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/curation",
         json={
             "analysis_version": 1,
             "curated_status": "limited",
@@ -1025,7 +1025,7 @@ def test_curation_timestamp_is_parsed_by_request_and_preserves_json(timestamp, e
     )
 
     response = _client().put(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/curation", json=payload,
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/curation", json=payload,
     )
 
     assert response.json()["code"] == 200
@@ -1037,7 +1037,7 @@ def test_curation_invalid_timestamp_stops_at_request_boundary_without_writing():
     service.record_curation = AsyncMock()
 
     response = _client(service).put(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/curation",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/curation",
         json={
             "analysis_version": 1,
             "curated_finding": {**_finding_record(), "created_at": "not-a-date"},
@@ -1057,7 +1057,7 @@ def test_curation_api_rejects_retired_finding_fields() -> None:
     curated_finding["finding_level"] = "paper"
 
     response = _client().put(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/curation",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/curation",
         json={
             "analysis_version": 1,
             "curated_status": "limited",
@@ -1075,7 +1075,7 @@ def test_curation_api_rejects_missing_canonical_finding_fields() -> None:
     curated_finding["paper_contributions"][0].pop("context_evidence_ids")
 
     response = _client().put(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/curation",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/curation",
         json={
             "analysis_version": 1,
             "curated_status": "limited",
@@ -1091,11 +1091,11 @@ def test_review_gets_reject_stale_analysis_version() -> None:
     client = _client()
 
     feedback = client.get(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/feedback",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/feedback",
         params={"analysis_version": 2},
     )
     curations = client.get(
-        "/collections/col-1/objectives/obj-1/findings/finding-1/curation",
+        "/workspaces/col-1/objectives/obj-1/findings/finding-1/curation",
         params={"analysis_version": 2},
     )
 
@@ -1107,7 +1107,7 @@ def test_review_gets_reject_stale_analysis_version() -> None:
 
 def test_training_jsonl_contains_messages_and_versioned_metadata() -> None:
     response = _client().get(
-        "/collections/col-1/objectives/obj-1/finding-dataset",
+        "/workspaces/col-1/objectives/obj-1/finding-dataset",
         params={"format": "training_jsonl"},
     )
 
@@ -1126,7 +1126,7 @@ def test_training_jsonl_excludes_non_training_ready_samples() -> None:
             return payload
 
     response = _client(_RejectedDatasetService()).get(
-        "/collections/col-1/objectives/obj-1/finding-dataset",
+        "/workspaces/col-1/objectives/obj-1/finding-dataset",
         params={"format": "training_jsonl"},
     )
 
@@ -1136,7 +1136,7 @@ def test_training_jsonl_excludes_non_training_ready_samples() -> None:
 
 def test_llamafactory_alpaca_jsonl_maps_training_messages_and_keeps_lineage() -> None:
     response = _client().get(
-        "/collections/col-1/objectives/obj-1/finding-dataset",
+        "/workspaces/col-1/objectives/obj-1/finding-dataset",
         params={"format": "llamafactory_alpaca"},
     )
 
@@ -1156,7 +1156,7 @@ def test_llamafactory_alpaca_jsonl_excludes_non_training_ready_samples() -> None
             return payload
 
     response = _client(_RejectedDatasetService()).get(
-        "/collections/col-1/objectives/obj-1/finding-dataset",
+        "/workspaces/col-1/objectives/obj-1/finding-dataset",
         params={"format": "llamafactory_alpaca"},
     )
 

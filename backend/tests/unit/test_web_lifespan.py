@@ -9,7 +9,7 @@ import pytest
 import main
 from application.chat import session_service as shared_chat_service
 from infra.persistence import database as shared_database
-from infra.persistence.file import collection_workspace as workspace_module, object_store as store_module
+from infra.persistence.file import workspace_files as workspace_module, object_store as store_module
 
 
 @pytest.fixture

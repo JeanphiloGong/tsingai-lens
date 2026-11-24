@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 from uuid import uuid4
 
-from application.source import collection_service
+from application.source import workspace_service
 from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
 from domain.feedback.dataset_sample import DatasetSample, SampleAction
 from domain.feedback.feedback_case import FeedbackCase
@@ -78,7 +78,7 @@ class DatasetSampleDetail:
     source_case: FeedbackCase
 
 
-class DatasetCollectionResult:
+class DatasetWorkspaceResult:
     """The durable result of explicitly collecting source cases."""
 
     def __init__(
@@ -109,12 +109,12 @@ from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampl
 async def create_dataset_for_user(
     *,
     user_id: str,
-    collection_id: str,
+    workspace_id: str,
     name: str,
     task_type: str,
     construction_spec: dict[str, Any],
 ) -> StoredDataset:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     if task_type not in DATASET_TASK_TYPES:
         raise FeedbackDatasetError("dataset_task_type_not_available")
     cleaned_name = name.strip()
@@ -125,7 +125,7 @@ async def create_dataset_for_user(
     _validate_public_spec(construction_spec)
     dataset = Dataset(
         dataset_id=f"fdset_{uuid4().hex[:32]}",
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         name=cleaned_name,
         task_type=cast(DatasetTaskType, task_type),
         construction_spec=deepcopy(construction_spec),
@@ -142,8 +142,8 @@ async def get_dataset_for_user(*, user_id: str, dataset_id: str) -> Dataset:
             "Dataset not found.",
             data={"code": "dataset_not_found", "dataset_id": dataset_id},
         )
-    await collection_service.get_collection_for_user(
-        dataset.collection_id,
+    await workspace_service.get_workspace_for_user(
+        dataset.workspace_id,
         user_id,
     )
     return dataset
@@ -156,8 +156,8 @@ async def read_dataset_record_for_user(*, user_id: str, dataset_id: str) -> Stor
             "Dataset not found.",
             data={"code": "dataset_not_found", "dataset_id": dataset_id},
         )
-    await collection_service.get_collection_for_user(
-        record.dataset.collection_id, user_id
+    await workspace_service.get_workspace_for_user(
+        record.dataset.workspace_id, user_id
     )
     return record
 
@@ -165,15 +165,15 @@ async def read_dataset_record_for_user(*, user_id: str, dataset_id: str) -> Stor
 async def list_dataset_records_for_user(
     *,
     user_id: str,
-    collection_id: str,
+    workspace_id: str,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[StoredDataset, ...]:
     if limit < 1 or limit > 200 or offset < 0:
         raise FeedbackDatasetError("pagination_invalid")
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    return await FeedbackDatasetRepo.list_records_for_collection(
-        collection_id=collection_id,
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    return await FeedbackDatasetRepo.list_records_for_workspace(
+        workspace_id=workspace_id,
         limit=limit,
         offset=offset,
     )
@@ -184,7 +184,7 @@ async def collect_dataset_cases_for_user(
     user_id: str,
     dataset_id: str,
     source_case_ids: tuple[str, ...],
-) -> DatasetCollectionResult:
+) -> DatasetWorkspaceResult:
     """Freeze selected cases and enqueue one build job per new sample."""
 
     dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
@@ -203,7 +203,7 @@ async def collect_dataset_cases_for_user(
     jobs: list[AnalysisJob] = []
     for case_id in case_ids:
         case = await FeedbackCaseRepo.read_case(case_id)
-        if case is None or case.collection_id != dataset.collection_id:
+        if case is None or case.workspace_id != dataset.workspace_id:
             raise ResourceNotFoundException(
                 "Feedback case not found.",
                 data={"code": "feedback_case_not_found", "case_id": case_id},
@@ -255,7 +255,7 @@ async def collect_dataset_cases_for_user(
         )
     except DatasetSampleRevisionConflict as exc:
         raise FeedbackDatasetConflict(str(exc)) from exc
-    return DatasetCollectionResult(
+    return DatasetWorkspaceResult(
         operation_id=f"collect_{uuid4().hex[:24]}",
         items=collected,
     )
@@ -325,7 +325,7 @@ async def get_dataset_sample_for_user(
     )
     case_repository = FeedbackCaseRepo
     source_case = await case_repository.read_case(sample.source_case_id)
-    if source_case is None or source_case.collection_id != dataset.collection_id:
+    if source_case is None or source_case.workspace_id != dataset.workspace_id:
         raise FeedbackDatasetError("sample_source_case_missing")
     return DatasetSampleDetail(
         dataset=dataset,
@@ -429,7 +429,7 @@ async def update_dataset_sample(
     if parsed.schema_version != _schema_for_task(dataset.task_type):
         raise FeedbackDatasetError("sample_content_task_type_mismatch")
     case = await FeedbackCaseRepo.read_case(sample.source_case_id)
-    if case is None or case.collection_id != dataset.collection_id:
+    if case is None or case.workspace_id != dataset.workspace_id:
         raise FeedbackDatasetError("sample_source_case_missing")
     if case.status == "withdrawn":
         raise FeedbackDatasetError("sample_source_case_withdrawn")
@@ -480,7 +480,7 @@ async def update_dataset_sample(
         )
     provenance = {
         **prior_provenance,
-        "collection_id": dataset.collection_id,
+        "workspace_id": dataset.workspace_id,
         "source_case_id": case.case_id,
         "session_id": case.session_id,
         "anchor_message_id": case.anchor_message_id,
@@ -552,7 +552,7 @@ async def confirm_dataset_sample(
     if revision.content.schema_version != _schema_for_task(dataset.task_type):
         raise FeedbackDatasetError("sample_content_invalid")
     case = await FeedbackCaseRepo.read_case(sample.source_case_id)
-    if case is None or case.collection_id != dataset.collection_id:
+    if case is None or case.workspace_id != dataset.workspace_id:
         raise FeedbackDatasetError("sample_source_case_missing")
     if case.status == "withdrawn":
         raise FeedbackDatasetError("sample_source_case_withdrawn")
@@ -608,7 +608,7 @@ async def apply_dataset_sample_action_for_user(
     source_digest: str | None = None
     if action in {"rebuild", "retry", "restore"}:
         case = await FeedbackCaseRepo.read_case(sample.source_case_id)
-        if case is None or case.collection_id != dataset.collection_id:
+        if case is None or case.workspace_id != dataset.workspace_id:
             raise FeedbackDatasetError("sample_source_case_missing")
         if case.status == "withdrawn":
             raise FeedbackDatasetError("sample_source_case_withdrawn")
@@ -711,7 +711,7 @@ def _validate_public_spec(value: dict[str, Any]) -> None:
 
 
 __all__ = [
-    "DatasetCollectionResult",
+    "DatasetWorkspaceResult",
     "DatasetSampleDetail",
     "DatasetSampleListResult",
     "FeedbackDatasetConflict",

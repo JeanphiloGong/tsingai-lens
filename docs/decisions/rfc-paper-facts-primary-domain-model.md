@@ -130,7 +130,7 @@ Role:
 
 - coarse routing only
 - document type and suitability signaling
-- collection-level warning support
+- workspace-level warning support
 
 This object should remain tightly controlled and enum-like. It should not
 become a free-form summary layer.
@@ -154,7 +154,7 @@ Recommended minimum field family:
 
 - `method_id`
 - `document_id`
-- `collection_id`
+- `workspace_id`
 - `method_role`
   Allowed values should begin with `process | characterization | test`
 - `method_name`
@@ -311,7 +311,7 @@ before expanding harder interpretation layers.
 
 The recommended flow becomes:
 
-1. ingest documents into a collection
+1. ingest documents into a workspace
 2. build neutral source artifacts and anchors
 3. build `document_profiles`
 4. extract `paper facts family`

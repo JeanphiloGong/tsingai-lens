@@ -34,7 +34,7 @@ def _objective(
     *, seed_document_ids: tuple[str, ...] = ("paper-seed",)
 ) -> ResearchObjective:
     return ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="obj-1",
         question="How does laser power affect elongation?",
         material_scope=("Ti-6Al-4V",),
@@ -163,7 +163,7 @@ def test_unregistered_material_identity_requires_inspection_instead_of_exclusion
     assert preview.decisions[0].reason == "partial_scope_match"
 
 
-def test_scope_preview_does_not_truncate_a_131_paper_collection() -> None:
+def test_scope_preview_does_not_truncate_a_131_paper_workspace() -> None:
     maps = tuple(_experimental_map(f"paper-{position:03d}") for position in range(131))
 
     preview = screen_objective_scope(
@@ -241,24 +241,24 @@ def test_explicit_objective_exclusion_never_reenters_recommended_scope() -> None
     assert preview.decisions[0].reason == "objective_explicit_exclusion"
 
 
-async def test_service_loads_the_persisted_objective_and_every_collection_map() -> None:
+async def test_service_loads_the_persisted_objective_and_every_workspace_map() -> None:
     objective = _objective()
     paper_maps = (
         _experimental_map("paper-seed"),
         _experimental_map("paper-not-a-seed"),
     )
-    collection_service = SimpleNamespace(
-        get_collection_for_user=lambda collection_id, user_id: _async_value(
-            {"collection_id": collection_id}
+    workspace_service = SimpleNamespace(
+        get_workspace_for_user=lambda workspace_id, user_id: _async_value(
+            {"workspace_id": workspace_id}
         )
     )
     objective_repository = SimpleNamespace(
-        read_objective=lambda collection_id, objective_id: _async_value(objective)
+        read_objective=lambda workspace_id, objective_id: _async_value(objective)
     )
     paper_map_repository = SimpleNamespace(
-        list_collection=lambda collection_id: _async_value(paper_maps)
+        list_workspace=lambda workspace_id: _async_value(paper_maps)
     )
-    experiment_analysis_service.collection_service = collection_service
+    experiment_analysis_service.workspace_service = workspace_service
     experiment_analysis_service.PaperMapRepo = paper_map_repository
     experiment_analysis_service.ObjectiveRepo = objective_repository
     experiment_analysis_service.objective_input_service = SimpleNamespace()
@@ -272,17 +272,17 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
     )
 
 
-async def test_service_reports_scope_not_ready_without_collection_paper_maps() -> None:
-    experiment_analysis_service.collection_service = SimpleNamespace(
-        get_collection_for_user=lambda collection_id, user_id: _async_value(
-            {"collection_id": collection_id}
+async def test_service_reports_scope_not_ready_without_workspace_paper_maps() -> None:
+    experiment_analysis_service.workspace_service = SimpleNamespace(
+        get_workspace_for_user=lambda workspace_id, user_id: _async_value(
+            {"workspace_id": workspace_id}
         )
     )
     experiment_analysis_service.PaperMapRepo = SimpleNamespace(
-        list_collection=lambda collection_id: _async_value(())
+        list_workspace=lambda workspace_id: _async_value(())
     )
     experiment_analysis_service.ObjectiveRepo = SimpleNamespace(
-        read_objective=lambda collection_id, objective_id: _async_value(_objective())
+        read_objective=lambda workspace_id, objective_id: _async_value(_objective())
     )
     experiment_analysis_service.objective_input_service = SimpleNamespace()
     service = experiment_analysis_service

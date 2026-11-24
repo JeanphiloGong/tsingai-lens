@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const collectionId = 'col_feedback';
+const workspaceId = 'col_feedback';
 const datasetId = 'fdset_sft';
 const sampleId = 'sample_1';
 
@@ -52,12 +52,12 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 				})
 			});
 		}
-		if (path === '/api/v1/collections' && request.method() === 'GET') {
+		if (path === '/api/v1/workspaces' && request.method() === 'GET') {
 			return route.fulfill(
 				json({
 					items: [
 						{
-							collection_id: collectionId,
+							workspace_id: workspaceId,
 							name: 'Feedback fixture',
 							status: 'ready',
 							documents: []
@@ -66,10 +66,10 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}` && request.method() === 'GET') {
+		if (path === `/api/v1/workspaces/${workspaceId}` && request.method() === 'GET') {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: 'Feedback fixture',
 					status: 'ready',
 					documents: []
@@ -80,7 +80,7 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 			const items = [
 				{
 					dataset_id: datasetId,
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '文献问答 SFT',
 					task_type: 'sft',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -91,7 +91,7 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 				},
 				{
 					dataset_id: 'fdset_preference',
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '回答偏好',
 					task_type: 'preference',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -102,7 +102,7 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 				},
 				{
 					dataset_id: 'fdset_evaluation',
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '评测',
 					task_type: 'evaluation',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -118,7 +118,7 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 			return route.fulfill(
 				json({
 					dataset_id: datasetId,
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '预热条件问答纠错',
 					task_type: 'sft',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -178,7 +178,7 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 					},
 					source_case: {
 						case_id: 'case_1',
-						collection_id: collectionId,
+						workspace_id: workspaceId,
 						session_id: 'session_1',
 						anchor_message_id: 'answer_1',
 						status: 'needs_annotation',
@@ -315,7 +315,7 @@ async function mockTaskDataset(page: Page, startEmpty = false, language = 'zh') 
 
 test('open the fixed SFT workbench and receive a Worker candidate', async ({ page }) => {
 	await mockTaskDataset(page);
-	await page.goto(`/collections/${collectionId}/feedback`);
+	await page.goto(`/workspaces/${workspaceId}/feedback`);
 	await expect(page.getByRole('button', { name: /回答偏好/ })).toBeVisible();
 	await expect(page.getByRole('button', { name: /评测/ })).toBeVisible();
 	await page.getByRole('button', { name: /文献问答.*SFT/ }).click();
@@ -331,7 +331,7 @@ for (const width of [1440, 390]) {
 	test(`SFT sample editor is usable at ${width}px`, async ({ page }, testInfo) => {
 		await mockTaskDataset(page);
 		await page.setViewportSize({ width, height: 900 });
-		await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+		await page.goto(`/workspaces/${workspaceId}/feedback/datasets/${datasetId}`);
 
 		await expect(page.getByRole('heading', { name: '文献问答 · SFT' })).toBeVisible();
 		await expect(page.getByRole('heading', { name: '正确回答' })).toBeVisible();
@@ -409,7 +409,7 @@ test('a mobile reviewer can scan and select seven candidates without compressed 
 			})
 		);
 	});
-	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+	await page.goto(`/workspaces/${workspaceId}/feedback/datasets/${datasetId}`);
 	await expect(page.locator('.queue-item')).toHaveCount(7);
 	const queue = await page.locator('.queue-list').evaluate((element) => ({
 		width: element.clientWidth,
@@ -429,7 +429,7 @@ test('a mobile reviewer can scan and select seven candidates without compressed 
 
 test('a sample can be rebuilt, discarded, restored, and retried', async ({ page }) => {
 	const mock = await mockTaskDataset(page);
-	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+	await page.goto(`/workspaces/${workspaceId}/feedback/datasets/${datasetId}`);
 	await expect(page.getByRole('heading', { name: '正确回答' })).toBeVisible();
 	await page.locator('.sample-options > summary').click();
 	await page.getByRole('textbox', { name: '退回意见' }).fill('重新核对文献 B 的图注。');
@@ -460,7 +460,7 @@ test('English workbench labels persist on reload while Chinese source content st
 	page
 }) => {
 	await mockTaskDataset(page, false, 'en');
-	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+	await page.goto(`/workspaces/${workspaceId}/feedback/datasets/${datasetId}`);
 	await expect(
 		page.getByRole('heading', { name: 'Literature question answering · SFT' })
 	).toBeVisible();

@@ -29,7 +29,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "b71000000004"
+HEAD_REVISION = "b71000000005"
 IDENTITY_REVISION = "20261104_0099"
 # Keep historical rollback cases before the irreversible PostgreSQL identity cutover.
 PRE_IDENTITY_REVISION = "20261102_0098"
@@ -45,7 +45,11 @@ AFTER_IDENTITY_TABLES = {
 
 def _expected_pre_identity_tables() -> list[str]:
     tables = set(Base.metadata.tables) - AFTER_IDENTITY_TABLES - {"chat_conversations"}
-    return sorted(tables | {"chat_sessions", "auth_users", "auth_sessions", "alembic_version"})
+    tables.discard("workspaces")
+    tables.add("collections")
+    return sorted(
+        tables | {"chat_sessions", "auth_users", "auth_sessions", "alembic_version"}
+    )
 
 
 def test_model_connection_migration_creates_schema_and_protects_records(

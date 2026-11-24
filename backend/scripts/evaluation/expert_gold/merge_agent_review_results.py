@@ -136,14 +136,14 @@ def _identity(row: dict[str, Any]) -> tuple[str, str, int, str]:
     except (TypeError, ValueError):
         analysis_version = 0
     identity = (
-        _text(row.get("collection_id")),
+        _text(row.get("workspace_id")),
         _text(row.get("objective_id")),
         analysis_version,
         _text(row.get("finding_id")),
     )
     if not identity[0] or not identity[1] or identity[2] < 1 or not identity[3]:
         raise ValueError(
-            "collection_id, objective_id, analysis_version, and finding_id are required"
+            "workspace_id, objective_id, analysis_version, and finding_id are required"
         )
     return identity
 

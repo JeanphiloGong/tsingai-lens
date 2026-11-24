@@ -28,10 +28,10 @@ class _FeedbackService:
         self.validation_calls: list[dict[str, Any]] = []
 
     async def export_dataset(
-        self, *, collection_id: str, objective_id: str, user_id: str
+        self, *, workspace_id: str, objective_id: str, user_id: str
     ) -> dict:
         self.export_calls.append(
-            {"collection_id": collection_id, "objective_id": objective_id}
+            {"workspace_id": workspace_id, "objective_id": objective_id}
         )
         return {
             "items": [
@@ -57,7 +57,7 @@ class _FeedbackService:
         self.validation_calls.append(payload)
         candidate = payload["curated_finding"]
         if candidate.key != (
-            payload["collection_id"],
+            payload["workspace_id"],
             payload["objective_id"],
             payload["analysis_version"],
             payload["finding_id"],
@@ -68,7 +68,7 @@ class _FeedbackService:
 
 def _identity(**extra: Any) -> dict[str, Any]:
     return {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 3,
         "finding_id": "finding-density",
@@ -78,7 +78,7 @@ def _identity(**extra: Any) -> dict[str, Any]:
 
 def _finding() -> dict[str, Any]:
     return {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 3,
         "finding_id": "finding-density",
@@ -161,11 +161,11 @@ async def test_import_accepts_canonical_finding_identity() -> None:
     assert result["status"] == "pass"
     assert result["written_count"] == 1
     assert feedback.export_calls == [
-        {"collection_id": "col-1", "objective_id": "objective-1"}
+        {"workspace_id": "col-1", "objective_id": "objective-1"}
     ]
     assert feedback.feedback_calls == [
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 3,
             "finding_id": "finding-density",
@@ -231,7 +231,7 @@ async def test_import_applies_curation_with_version_local_evidence() -> None:
     assert result["written_count"] == 1
     assert feedback.curation_calls == [
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 3,
             "finding_id": "finding-density",
@@ -243,7 +243,7 @@ async def test_import_applies_curation_with_version_local_evidence() -> None:
     ]
     assert feedback.validation_calls == [
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective_id": "objective-1",
             "analysis_version": 3,
             "finding_id": "finding-density",

@@ -28,8 +28,8 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetExportMemberORM,
     FeedbackDatasetMigrationRunORM,
 )
-from infra.persistence.postgres.models.collection import (
-    CollectionORM,
+from infra.persistence.postgres.models.workspace import (
+    WorkspaceORM,
     DocumentORM,
     DocumentPreparationORM,
 )
@@ -73,7 +73,7 @@ __all__ = [
     "AgentTaskORM",
     "AgentTaskStepORM",
     "ChatToolCallORM",
-    "CollectionORM",
+    "WorkspaceORM",
     "ComparisonGroupMemberORM",
     "ComparisonGroupORM",
     "ExperimentFindingORM",

@@ -31,7 +31,7 @@ from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
 )
 from application.pipeline import pipeline_run_service
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core import PreparedDocumentInput
 from infra.persistence.database import AsyncSessionLocal
 from repositories.objective_repository import ObjectiveRepo
@@ -50,20 +50,20 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 async def start_objective_discovery(
-    collection_id: str,
+    workspace_id: str,
     document_ids: tuple[str, ...],
     *,
     user_id: str,
 ) -> PipelineRun:
-    """Queue or reuse one collection-level Objective Discovery run."""
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    """Queue or reuse one workspace-level Objective Discovery run."""
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
 
     document_inputs = await objective_input_service.resolve_prepared_document_inputs(
-        collection_id,
+        workspace_id,
         document_ids,
     )
-    run, _ = await pipeline_run_service.get_or_create_collection_run(
-        collection_id=collection_id,
+    run, _ = await pipeline_run_service.get_or_create_workspace_run(
+        workspace_id=workspace_id,
         pipeline_name="objective_discovery",
         input_fingerprint=_objective_discovery_fingerprint(document_inputs),
         context={
@@ -87,8 +87,8 @@ async def _check_discovery_inputs(
         PreparedDocumentInput(**item) for item in job.run.context["document_inputs"]
     )
     for item in sorted(document_inputs, key=lambda item: item.document_id):
-        record = await collection_service.get_document(
-            job.run.collection_id, item.document_id, db=db
+        record = await workspace_service.get_document(
+            job.run.workspace_id, item.document_id, db=db
         )
         if (
             record.document.status != "ready"
@@ -104,7 +104,7 @@ async def execute_objective_discovery_job(
     job: PipelineRunJobSnapshot, *, client: StructuredResponseClient | None = None
 ) -> PipelineRun:
     run_id = job.run.run_id
-    collection_id = job.run.collection_id
+    workspace_id = job.run.workspace_id
     pending_progress_updates: list[Any] = []
     progress_callback = _build_discovery_progress_callback(
         job, pending_progress_updates
@@ -117,12 +117,12 @@ async def execute_objective_discovery_job(
                 run_id, job=job, db=db, current_node="paper_map", progress_percent=5
             )
         source_inputs = await objective_input_service.load_source_inputs(
-            collection_id, document_inputs=document_inputs
+            workspace_id, document_inputs=document_inputs
         )
         if client is None:
             client = await build_research_response_client()
         paper_maps = await objective_input_service.load_or_build_paper_maps(
-            collection_id,
+            workspace_id,
             document_inputs=document_inputs,
             source_inputs=source_inputs,
             paper_map_extractor=PaperResearchMapExtractor(client),
@@ -131,11 +131,11 @@ async def execute_objective_discovery_job(
         async with AsyncSessionLocal() as db, db.begin():
             await _check_discovery_inputs(db, job)
             for paper_map in paper_maps:
-                await PaperMapRepo.replace(collection_id, paper_map, db=db)
+                await PaperMapRepo.replace(workspace_id, paper_map, db=db)
         candidate_task = asyncio.create_task(
             to_thread(
                 objective_candidate_service.discover_candidate_facts,
-                collection_id,
+                workspace_id,
                 paper_maps=paper_maps,
                 document_inputs=document_inputs,
                 axis_equivalence_classifier=ResearchAxisEquivalenceClassifier(client),
@@ -150,7 +150,7 @@ async def execute_objective_discovery_job(
         await _flush_progress_updates(pending_progress_updates)
         async with AsyncSessionLocal() as db, db.begin():
             await _check_discovery_inputs(db, job)
-            await ObjectiveRepo.replace(collection_id, facts, db=db)
+            await ObjectiveRepo.replace(workspace_id, facts, db=db)
             return await pipeline_run_service.finish_run(
                 run_id,
                 job=job,

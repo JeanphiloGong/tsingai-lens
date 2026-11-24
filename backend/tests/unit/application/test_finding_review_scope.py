@@ -18,7 +18,7 @@ def _context() -> CapabilityExecutionContext:
     return CapabilityExecutionContext(
         session_id="session-1",
         user_id="user-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         tool_call_id="call-1",
     )
 
@@ -30,7 +30,7 @@ def anyio_backend():
 
 @pytest.mark.anyio
 async def test_child_empty_feedback_does_not_erase_parent_review():
-    async def detail(collection, objective, finding, *, analysis_version, user_id):
+    async def detail(workspace, objective, finding, *, analysis_version, user_id):
         return {
             "analysis_version": analysis_version,
             "finding": {
@@ -44,7 +44,7 @@ async def test_child_empty_feedback_does_not_erase_parent_review():
             [
                 FindingFeedback(
                     feedback_id="feedback-1",
-                    collection_id="col-1",
+                    workspace_id="col-1",
                     objective_id="objective-1",
                     analysis_version=1,
                     finding_id="parent",
@@ -59,7 +59,7 @@ async def test_child_empty_feedback_does_not_erase_parent_review():
             else []
         )
 
-    published_findings.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+    published_findings.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock())
     published_findings.objective_analysis_service = SimpleNamespace(
             get_finding=detail,
             list_evidence=AsyncMock(return_value={"items": [], "total": 0}),
@@ -86,7 +86,7 @@ async def test_child_empty_feedback_does_not_erase_parent_review():
     )
     assert child.data["feedback_records"] == []
     assert child.data["review_scope"] == {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 3,
         "finding_id": "child",
@@ -112,7 +112,7 @@ async def test_large_finding_evidence_is_paged_without_losing_complete_records()
         return {"items": items[offset : offset + limit], "total": len(items)}
 
     finding = {"finding_id": "finding-1", "selection_ids": ["selection-1"]}
-    published_findings.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+    published_findings.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock())
     published_findings.objective_analysis_service = SimpleNamespace(
             get_finding=AsyncMock(
                 return_value={"analysis_version": 1, "finding": finding}

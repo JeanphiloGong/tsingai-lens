@@ -264,7 +264,7 @@ def test_paper_map_retains_unique_source_unit_coverage() -> None:
 
 def _objective(**overrides) -> ResearchObjective:
     payload = {
-        "collection_id": "collection-1",
+        "workspace_id": "workspace-1",
         "objective_id": "objective-1",
         "question": "How does heat treatment affect strength?",
         "material_scope": ["316L"],
@@ -276,7 +276,7 @@ def _objective(**overrides) -> ResearchObjective:
     }
     payload.update(overrides)
     return ResearchObjective(
-        collection_id=payload.get("collection_id") or "",
+        workspace_id=payload.get("workspace_id") or "",
         objective_id=payload.get("objective_id")
         or build_research_objective_id(
             question=payload.get("question") or "",
@@ -321,7 +321,7 @@ def _objective(**overrides) -> ResearchObjective:
 def _analysis(**overrides) -> ObjectiveAnalysis:
     total_document_count = int(overrides.get("total_document_count", 2))
     payload = {
-        "collection_id": "collection-1",
+        "workspace_id": "workspace-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "document_inputs": tuple(
@@ -342,7 +342,7 @@ def _analysis(**overrides) -> ObjectiveAnalysis:
 
 def _candidate_evidence(**overrides) -> ObjectiveEvidence:
     values = {
-        "collection_id": "collection-1",
+        "workspace_id": "workspace-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "document_id": "paper-1",
@@ -367,7 +367,7 @@ def _candidate_evidence(**overrides) -> ObjectiveEvidence:
     values["related_source_refs_explicit"] = "related_source_refs" in overrides
     values["evidence_id"] = overrides.get("evidence_id") or objective_scoped_id(
         "oev",
-        values["collection_id"],
+        values["workspace_id"],
         values["objective_id"],
         values["analysis_version"],
         values["document_id"],
@@ -422,7 +422,7 @@ def test_build_research_objective_id_covers_complete_scientific_intent() -> None
 
 def test_research_objective_normalizes_scope_and_round_trips() -> None:
     objective = ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id=build_research_objective_id(
             question="How does heat treatment affect corrosion resistance?",
             material_scope=("316L",),
@@ -449,7 +449,7 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
 
     record = asdict(objective)
 
-    assert record["collection_id"] == "collection-1"
+    assert record["workspace_id"] == "workspace-1"
     assert record["objective_id"] == build_research_objective_id(
         question=record["question"],
         material_scope=tuple(record["material_scope"]),
@@ -508,7 +508,7 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     queued = confirmed.queue_analysis(1)
     succeeded = _analysis().start().succeed()
     published = queued.publish_analysis(
-        collection_id=succeeded.collection_id,
+        workspace_id=succeeded.workspace_id,
         objective_id=succeeded.objective_id,
         analysis_version=succeeded.analysis_version,
         status=succeeded.status,
@@ -525,7 +525,7 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
 async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping(monkeypatch) -> None:
     analysis = _analysis()
     payload = {
-        "collection_id": analysis.collection_id,
+        "workspace_id": analysis.workspace_id,
         "objective_id": analysis.objective_id,
         "analysis_version": analysis.analysis_version,
         "document_inputs": [
@@ -592,7 +592,7 @@ async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping(m
     factory = MagicMock()
     factory.return_value.__aenter__.return_value = session
     monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)
-    authored = await ObjectiveRepository().read_analysis("collection-1", "objective-1", 2)
+    authored = await ObjectiveRepository().read_analysis("workspace-1", "objective-1", 2)
 
     assert authored.scientific_record_source == "authored_snapshot"
 
@@ -629,7 +629,7 @@ def test_research_objective_rejects_cross_objective_publication() -> None:
 
     with pytest.raises(ValueError, match="another objective"):
         objective.publish_analysis(
-            collection_id=analysis.collection_id,
+            workspace_id=analysis.workspace_id,
             objective_id=analysis.objective_id,
             analysis_version=analysis.analysis_version,
             status=analysis.status,
@@ -671,7 +671,7 @@ def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
     )
 
     analysis = ObjectiveAnalysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_inputs=document_inputs,
@@ -687,7 +687,7 @@ def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
 def test_objective_analysis_rejects_document_count_that_differs_from_manifest() -> None:
     with pytest.raises(ValueError, match="document input count"):
         ObjectiveAnalysis(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             objective_id="objective-1",
             analysis_version=1,
             document_inputs=(
@@ -748,7 +748,7 @@ def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> 
 
 def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
     contribution = PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id="paper-1",
@@ -766,7 +766,7 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
     )
 
     assert contribution.key == (
-        "collection-1",
+        "workspace-1",
         "objective-1",
         1,
         "paper-1",
@@ -776,7 +776,7 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
 
 def test_paper_contribution_records_auditable_evidence_disposition() -> None:
     contribution = PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id="paper-1",
@@ -808,7 +808,7 @@ def test_paper_contribution_records_auditable_evidence_disposition() -> None:
 
 def test_paper_contribution_preserves_inspected_source_lineage_without_evidence() -> None:
     contribution = PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id="paper-1",
@@ -850,7 +850,7 @@ def test_paper_contribution_preserves_inspected_source_lineage_without_evidence(
 
 def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
     base = {
-        "collection_id": "collection-1",
+        "workspace_id": "workspace-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "document_id": "paper-1",
@@ -887,7 +887,7 @@ def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting(
 def test_excluded_paper_contribution_requires_reason() -> None:
     with pytest.raises(ValueError, match="requires a reason"):
         PaperContribution(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             objective_id="objective-1",
             analysis_version=1,
             document_id="paper-1",

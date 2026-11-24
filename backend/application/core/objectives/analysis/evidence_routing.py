@@ -126,7 +126,7 @@ def _progress_document_metadata(
 
 def route_sources(
     *,
-    collection_id: str,
+    workspace_id: str,
     objectives: tuple[ResearchObjective, ...],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...],
     blocks_by_document_id: dict[str, list[Any]],
@@ -155,8 +155,8 @@ def route_sources(
     routes: list[EvidenceCandidate] = []
     seen: set[tuple[str, str, str, str, str]] = set()
     logger.info(
-        "Research objective evidence routing started collection_id=%s frame_count=%s",
-        collection_id,
+        "Research objective evidence routing started workspace_id=%s frame_count=%s",
+        workspace_id,
         len(objective_paper_frames),
     )
     frame_count = len(objective_paper_frames)
@@ -178,8 +178,8 @@ def route_sources(
             active_objective_id=frame.objective_id,
         )
         logger.info(
-            "Research objective evidence routing frame started collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s relevance=%s completed_frames=%s remaining_frames=%s",
-            collection_id,
+            "Research objective evidence routing frame started workspace_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s relevance=%s completed_frames=%s remaining_frames=%s",
+            workspace_id,
             frame.objective_id,
             frame.document_id,
             frame.document_id,
@@ -192,8 +192,8 @@ def route_sources(
         objective = objective_by_id.get(frame.objective_id)
         if objective is None:
             logger.info(
-                "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=missing_objective completed_frames=%s remaining_frames=%s",
-                collection_id,
+                "Research objective evidence routing frame skipped workspace_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=missing_objective completed_frames=%s remaining_frames=%s",
+                workspace_id,
                 frame.objective_id,
                 frame.document_id,
                 frame.document_id,
@@ -231,7 +231,7 @@ def route_sources(
                     record_analysis_diagnostic(
                         {
                             "trace_type": "objective_frame_recall_override",
-                            "collection_id": collection_id,
+                            "workspace_id": workspace_id,
                             "objective_id": frame.objective_id,
                             "document_id": frame.document_id,
                             "reason": "primary_experiment_contains_direct_objective_signal",
@@ -242,8 +242,8 @@ def route_sources(
                     source_candidates = None
             if source_candidates is None:
                 logger.info(
-                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
-                    collection_id,
+                    "Research objective evidence routing frame skipped workspace_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
+                    workspace_id,
                     frame.objective_id,
                     frame.document_id,
                     frame.document_id,
@@ -258,7 +258,7 @@ def route_sources(
             record_analysis_diagnostic(
                 {
                     "trace_type": "objective_review_routing",
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                     "objective_id": frame.objective_id,
                     "document_id": frame.document_id,
                     "paper_role": frame.paper_role,
@@ -267,8 +267,8 @@ def route_sources(
                 }
             )
             logger.info(
-                "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=review_sources_are_not_primary_evidence completed_frames=%s remaining_frames=%s",
-                collection_id,
+                "Research objective evidence routing frame skipped workspace_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=review_sources_are_not_primary_evidence completed_frames=%s remaining_frames=%s",
+                workspace_id,
                 frame.objective_id,
                 frame.document_id,
                 frame_position,
@@ -289,8 +289,8 @@ def route_sources(
             )
         if not source_candidates:
             logger.info(
-                "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=0 route_count=0 extractable_route_count=0 completed_frames=%s remaining_frames=%s",
-                collection_id,
+                "Research objective evidence routing frame finished workspace_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=0 route_count=0 extractable_route_count=0 completed_frames=%s remaining_frames=%s",
+                workspace_id,
                 frame.objective_id,
                 frame.document_id,
                 frame.document_id,
@@ -313,7 +313,7 @@ def route_sources(
                 record_analysis_diagnostic(
                     {
                         "trace_type": "objective_paper_scope_review",
-                        "collection_id": collection_id,
+                        "workspace_id": workspace_id,
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
                         "paper_role": frame.paper_role,
@@ -443,7 +443,7 @@ def route_sources(
         record_analysis_diagnostic(
             {
                 "trace_type": "objective_source_coverage_audit",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": frame.objective_id,
                 "document_id": frame.document_id,
                 "paper_role": frame.paper_role,
@@ -470,7 +470,7 @@ def route_sources(
             record_analysis_diagnostic(
                 {
                     "trace_type": "objective_initial_context_scope_bounded",
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                     "objective_id": frame.objective_id,
                     "document_id": frame.document_id,
                     "context_candidate_count": len(context_candidates),
@@ -489,8 +489,8 @@ def route_sources(
                 }
             )
         logger.info(
-            "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
-            collection_id,
+            "Research objective evidence routing frame finished workspace_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
+            workspace_id,
             frame.objective_id,
             frame.document_id,
             frame.document_id,
@@ -503,8 +503,8 @@ def route_sources(
             max(frame_count - frame_position, 0),
         )
     logger.info(
-        "Research objective evidence routing finished collection_id=%s route_count=%s",
-        collection_id,
+        "Research objective evidence routing finished workspace_id=%s route_count=%s",
+        workspace_id,
         len(routes),
     )
     return tuple(routes)

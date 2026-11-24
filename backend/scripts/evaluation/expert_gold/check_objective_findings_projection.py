@@ -128,7 +128,7 @@ def parse_args() -> argparse.Namespace:
             "Source locators for materials-expert review readiness."
         )
     )
-    parser.add_argument("--collection-id", required=True)
+    parser.add_argument("--workspace-id", required=True)
     parser.add_argument(
         "--user-id", help="Acting user; required for local database reads."
     )
@@ -159,7 +159,7 @@ async def main_async() -> None:
     args = parse_args()
     manifest = load_acceptance_manifest(args.acceptance_manifest)
     summary = await check_objective_findings_projection(
-        collection_id=args.collection_id,
+        workspace_id=args.workspace_id,
         objective_ids=tuple(args.objective_ids),
         api_base_url=args.api_base_url,
         user_id=args.user_id,
@@ -172,14 +172,14 @@ async def main_async() -> None:
 
 async def check_objective_findings_projection(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_ids: tuple[str, ...],
     api_base_url: str | None = None,
     user_id: str | None = None,
     acceptance_manifest: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if not collection_id.strip():
-        raise ValueError("collection_id is required")
+    if not workspace_id.strip():
+        raise ValueError("workspace_id is required")
     if not objective_ids:
         raise ValueError("at least one objective_id is required")
     if acceptance_manifest is None:
@@ -198,12 +198,12 @@ async def check_objective_findings_projection(
     required_review_statuses: set[str] = set()
     manifest_objectives = acceptance_manifest["objectives"] or []
     document_ids_by_paper = await _resolve_manifest_document_ids(
-        collection_id,
+        workspace_id,
         (acceptance_manifest["documents"] or []),
     )
     expected_document_ids = set(document_ids_by_paper.values())
     required_review_statuses = set(acceptance_manifest["required_review_statuses"])
-    source_index = await _load_source_index(collection_id)
+    source_index = await _load_source_index(workspace_id)
     cookie = _api_login_cookie(api_base_url.rstrip("/")) if api_base_url else ""
     objectives = []
     checks: list[dict[str, str]] = []
@@ -213,12 +213,12 @@ async def check_objective_findings_projection(
             payload = _api_objective_bundle(
                 api_base_url=api_base_url or "",
                 cookie=cookie,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective_id=objective_id,
             )
         else:
             payload = await _local_objective_bundle(
-                collection_id, objective_id, user_id=user_id
+                workspace_id, objective_id, user_id=user_id
             )
         expectation = (
             _manifest_objective_for_question(
@@ -282,7 +282,7 @@ async def check_objective_findings_projection(
             [item["verdict"] for item in objectives]
             + [_checks_verdict(checks[-1:]) if required_review_statuses else "pass"]
         ),
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "acceptance_schema_version": acceptance_manifest.get("schema_version"),
         "objective_count": len(objectives),
         "objectives": objectives,
@@ -321,7 +321,7 @@ def evaluate_objective_bundle(
         for item in (payload.get("dataset_items") or [])
     }
     training_rows = payload.get("training_jsonl_rows") or []
-    collection_id = _text(objective.get("collection_id"))
+    workspace_id = _text(objective.get("workspace_id"))
     objective_id = _text(objective.get("objective_id"))
     analysis_version = _int(analysis.get("analysis_version"))
     processed_document_count = _int(analysis.get("processed_document_count"))
@@ -356,8 +356,8 @@ def evaluate_objective_bundle(
         _check(
             objective_id,
             "published analysis uses the Objective composite identity",
-            bool(collection_id)
-            and analysis.get("collection_id") == collection_id
+            bool(workspace_id)
+            and analysis.get("workspace_id") == workspace_id
             and analysis.get("objective_id") == objective_id
             and analysis_version > 0,
             blocker=True,
@@ -518,7 +518,7 @@ def evaluate_objective_bundle(
                     objective_id,
                     f"Finding {finding_id} uses the published composite identity",
                     bool(finding_id)
-                    and finding.get("collection_id") == collection_id
+                    and finding.get("workspace_id") == workspace_id
                     and finding.get("objective_id") == objective_id
                     and _int(finding.get("analysis_version")) == analysis_version,
                     blocker=True,
@@ -528,7 +528,7 @@ def evaluate_objective_bundle(
                     f"Finding {finding_id} Evidence uses the published composite identity",
                     bool(evidence)
                     and all(
-                        item.get("collection_id") == collection_id
+                        item.get("workspace_id") == workspace_id
                         and item.get("objective_id") == objective_id
                         and _int(item.get("analysis_version")) == analysis_version
                         for item in evidence
@@ -658,7 +658,7 @@ def evaluate_objective_bundle(
         training_issues = _training_export_issues(
             dataset_items=(payload.get("dataset_items") or []),
             training_rows=training_rows,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
             evidence_by_finding=evidence_by_finding,
@@ -884,7 +884,7 @@ def evaluate_objective_bundle(
 
 
 async def _local_objective_bundle(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     *,
     user_id: str,
@@ -909,23 +909,23 @@ async def _local_objective_bundle(
         try:
             repository = ObjectiveRepository()
             review_repository = FindingReviewRepository()
-            objective = await repository.read_objective(collection_id, objective_id)
+            objective = await repository.read_objective(workspace_id, objective_id)
             if objective is None or objective.published_analysis_version is None:
                 raise FileNotFoundError(
-                    f"published research objective not found: {collection_id}/{objective_id}"
+                    f"published research objective not found: {workspace_id}/{objective_id}"
                 )
             version = objective.published_analysis_version
             analysis = await repository.read_analysis(
-                collection_id, objective_id, version
+                workspace_id, objective_id, version
             )
             paper_contributions = await repository.list_contributions(
-                collection_id, objective_id, version
+                workspace_id, objective_id, version
             )
             findings, _ = await repository.list_findings(
-                collection_id, objective_id, version, offset=0, limit=500
+                workspace_id, objective_id, version, offset=0, limit=500
             )
             published_evidence, _ = await repository.list_evidence(
-                collection_id,
+                workspace_id,
                 objective_id,
                 version,
                 offset=0,
@@ -936,7 +936,7 @@ async def _local_objective_bundle(
             curations_by_finding = {}
             for finding in findings:
                 finding_evidence, _ = await repository.list_evidence(
-                    collection_id,
+                    workspace_id,
                     objective_id,
                     version,
                     finding_id=finding.finding_id,
@@ -945,7 +945,7 @@ async def _local_objective_bundle(
                 )
                 evidence_by_finding[finding.finding_id] = [
                     {
-                        "collection_id": item.collection_id,
+                        "workspace_id": item.workspace_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
                         "evidence_id": item.evidence_id,
@@ -1118,7 +1118,7 @@ async def _local_objective_bundle(
                 feedback_by_finding[finding.finding_id] = [
                     {
                         "feedback_id": item.feedback_id,
-                        "collection_id": item.collection_id,
+                        "workspace_id": item.workspace_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
                         "finding_id": item.finding_id,
@@ -1129,19 +1129,19 @@ async def _local_objective_bundle(
                         "created_at": item.created_at,
                     }
                     for item in await review_repository.list_feedback(
-                        collection_id, objective_id, version, finding.finding_id
+                        workspace_id, objective_id, version, finding.finding_id
                     )
                 ]
                 curations_by_finding[finding.finding_id] = [
                     {
                         "curation_id": item.curation_id,
-                        "collection_id": item.collection_id,
+                        "workspace_id": item.workspace_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
                         "finding_id": item.finding_id,
                         "curated_status": item.curated_status,
                         "curated_finding": {
-                            "collection_id": item.curated_finding.collection_id,
+                            "workspace_id": item.curated_finding.workspace_id,
                             "objective_id": item.curated_finding.objective_id,
                             "analysis_version": item.curated_finding.analysis_version,
                             "finding_id": item.curated_finding.finding_id,
@@ -1316,11 +1316,11 @@ async def _local_objective_bundle(
                         "updated_at": item.updated_at,
                     }
                     for item in await review_repository.list_curations(
-                        collection_id, objective_id, version, finding.finding_id
+                        workspace_id, objective_id, version, finding.finding_id
                     )
                 ]
             dataset = await finding_dataset_service.export_dataset(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective_id=objective_id,
                 user_id=user_id,
             )
@@ -1333,7 +1333,7 @@ async def _local_objective_bundle(
         },
         "published_analysis": (
             {
-                "collection_id": analysis.collection_id,
+                "workspace_id": analysis.workspace_id,
                 "objective_id": analysis.objective_id,
                 "analysis_version": analysis.analysis_version,
                 "document_inputs": [
@@ -1395,7 +1395,7 @@ async def _local_objective_bundle(
         ),
         "paper_contributions": [
             {
-                "collection_id": item.collection_id,
+                "workspace_id": item.workspace_id,
                 "objective_id": item.objective_id,
                 "analysis_version": item.analysis_version,
                 "document_id": item.document_id,
@@ -1433,7 +1433,7 @@ async def _local_objective_bundle(
         ],
         "findings": [
             {
-                "collection_id": item.collection_id,
+                "workspace_id": item.workspace_id,
                 "objective_id": item.objective_id,
                 "analysis_version": item.analysis_version,
                 "finding_id": item.finding_id,
@@ -1589,7 +1589,7 @@ async def _local_objective_bundle(
         ],
         "evidence": [
             {
-                "collection_id": item.collection_id,
+                "workspace_id": item.workspace_id,
                 "objective_id": item.objective_id,
                 "analysis_version": item.analysis_version,
                 "evidence_id": item.evidence_id,
@@ -1776,13 +1776,13 @@ def _api_objective_bundle(
     *,
     api_base_url: str,
     cookie: str,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
 ) -> dict[str, Any]:
     base = api_base_url.rstrip("/")
     state = _api_json_request(
         base,
-        f"/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis",
+        f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis",
         cookie=cookie,
     )
     analysis = state.get("published_analysis") or {}
@@ -1792,7 +1792,7 @@ def _api_objective_bundle(
     query = urlencode({"analysis_version": version, "offset": 0, "limit": 200})
     finding_page = _api_json_request(
         base,
-        f"/api/v1/collections/{collection_id}/objectives/{objective_id}/findings?{query}",
+        f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/findings?{query}",
         cookie=cookie,
     )
     findings = finding_page.get("items") or []
@@ -1800,7 +1800,7 @@ def _api_objective_bundle(
     evidence_page = _api_json_request(
         base,
         (
-            f"/api/v1/collections/{collection_id}/objectives/{objective_id}/"
+            f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/"
             f"evidence?{evidence_query}"
         ),
         cookie=cookie,
@@ -1823,7 +1823,7 @@ def _api_objective_bundle(
         )
         page = _api_json_request(
             base,
-            f"/api/v1/collections/{collection_id}/objectives/{objective_id}/evidence?{evidence_query}",
+            f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/evidence?{evidence_query}",
             cookie=cookie,
         )
         evidence_by_finding[finding_id] = page.get("items") or []
@@ -1831,7 +1831,7 @@ def _api_objective_bundle(
         feedback_page = _api_json_request(
             base,
             (
-                f"/api/v1/collections/{collection_id}/objectives/{objective_id}/"
+                f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/"
                 f"findings/{finding_id}/feedback?{review_query}"
             ),
             cookie=cookie,
@@ -1840,7 +1840,7 @@ def _api_objective_bundle(
         curation_page = _api_json_request(
             base,
             (
-                f"/api/v1/collections/{collection_id}/objectives/{objective_id}/"
+                f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/"
                 f"findings/{finding_id}/curation?{review_query}"
             ),
             cookie=cookie,
@@ -1848,13 +1848,13 @@ def _api_objective_bundle(
         curations_by_finding[finding_id] = curation_page.get("items") or []
     dataset = _api_json_request(
         base,
-        f"/api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset",
+        f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/finding-dataset",
         cookie=cookie,
     )
     training_rows = _api_jsonl_request(
         base,
         (
-            f"/api/v1/collections/{collection_id}/objectives/{objective_id}/"
+            f"/api/v1/workspaces/{workspace_id}/objectives/{objective_id}/"
             "finding-dataset?format=training_jsonl"
         ),
         cookie=cookie,
@@ -1874,7 +1874,7 @@ def _api_objective_bundle(
 
 
 async def _load_source_index(
-    collection_id: str,
+    workspace_id: str,
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     with contextlib.redirect_stdout(io.StringIO()):
         from infra.persistence.database import (  # noqa: PLC0415
@@ -1889,8 +1889,8 @@ async def _load_source_index(
         engine = build_database_engine(DatabaseSettings())
         AsyncSessionLocal.configure(bind=engine)
         try:
-            documents = await SourceArtifactRepository().read_collection_documents(
-                collection_id
+            documents = await SourceArtifactRepository().read_workspace_documents(
+                workspace_id
             )
         finally:
             await engine.dispose()
@@ -1926,7 +1926,7 @@ async def _load_source_index(
 
 
 async def _resolve_manifest_document_ids(
-    collection_id: str,
+    workspace_id: str,
     documents: list[dict[str, Any]],
 ) -> dict[str, str]:
     expected_hashes = {_text(item.get("sha256")) for item in documents}
@@ -1936,7 +1936,7 @@ async def _resolve_manifest_document_ids(
             DatabaseSettings,
             build_database_engine,
         )
-        from infra.persistence.postgres.models.collection import (  # noqa: PLC0415
+        from infra.persistence.postgres.models.workspace import (  # noqa: PLC0415
             DocumentORM,
             DocumentPreparationORM,
         )
@@ -1954,7 +1954,7 @@ async def _resolve_manifest_document_ids(
                             DocumentORM.document_id == DocumentPreparationORM.document_id,
                         )
                         .where(
-                            DocumentORM.collection_id == collection_id,
+                            DocumentORM.workspace_id == workspace_id,
                             DocumentORM.sha256.in_(expected_hashes),
                         )
                     )
@@ -2954,7 +2954,7 @@ def _training_export_issues(
     *,
     dataset_items: list[dict[str, Any]],
     training_rows: list[dict[str, Any]],
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     evidence_by_finding: dict[str, list[dict[str, Any]]],
@@ -2974,7 +2974,7 @@ def _training_export_issues(
             continue
         actual[finding_id] = row
         if (
-            metadata.get("collection_id") != collection_id
+            metadata.get("workspace_id") != workspace_id
             or metadata.get("objective_id") != objective_id
             or _int(metadata.get("analysis_version")) != analysis_version
         ):

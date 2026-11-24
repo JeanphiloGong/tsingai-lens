@@ -1,8 +1,8 @@
-"""Transient Objective drafts supported by collection proposal context."""
+"""Transient Objective drafts supported by workspace proposal context."""
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from repositories.objective_repository import ObjectiveRepo
 from repositories.paper_map_repository import PaperMapRepo
 
@@ -101,15 +101,15 @@ class ProposeObjectiveDraftsCapability:
         context: CapabilityExecutionContext,
         arguments: ProposeObjectiveDraftsToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
-        paper_maps = await PaperMapRepo.list_collection(
-            context.collection_id
+        paper_maps = await PaperMapRepo.list_workspace(
+            context.workspace_id
         )
         existing = await ObjectiveRepo.list_objectives(
-            context.collection_id
+            context.workspace_id
         )
         records: list[dict[str, Any]] = []
         refs: list[ChatResourceRef] = []

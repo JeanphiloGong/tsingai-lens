@@ -19,9 +19,9 @@ class EvaluationGoldSetORM(Base):
     __tablename__ = "evaluation_gold_sets"
 
     gold_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -43,13 +43,13 @@ class EvaluationGoldSetORM(Base):
 class EvaluationPredictionSnapshotORM(Base):
     __tablename__ = "evaluation_prediction_snapshots"
     __table_args__ = (
-        Index("ix_evaluation_snapshots_collection", "collection_id", "fact_source"),
+        Index("ix_evaluation_snapshots_workspace", "workspace_id", "fact_source"),
     )
 
     snapshot_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
     )
     target_layer: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -71,13 +71,13 @@ class EvaluationPredictionSnapshotORM(Base):
 class EvaluationRunORM(Base):
     __tablename__ = "evaluation_runs"
     __table_args__ = (
-        Index("ix_evaluation_runs_collection", "collection_id", "created_at"),
+        Index("ix_evaluation_runs_workspace", "workspace_id", "created_at"),
     )
 
     evaluation_run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
     )
     gold_id: Mapped[str] = mapped_column(

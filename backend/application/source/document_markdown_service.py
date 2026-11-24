@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from infra.persistence.file import object_store as object_store_module
 
-from repositories.collection_repository import StoredCollection
+from repositories.workspace_repository import StoredWorkspace
 
 import re
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
-from application.source import collection_service
+from application.source import workspace_service
 from domain.source import (
     SourceDocument,
     SourceDocumentNode,
@@ -29,28 +29,28 @@ from repositories.object_store import ObjectStore
 class DocumentMarkdownNotReadyError(ResourceConflictException):
     """Raised when Source artifacts are not ready for Markdown projection."""
 
-    def __init__(self, collection_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str) -> None:
+        self.workspace_id = workspace_id
         super().__init__(
-            "The collection does not have parsed Markdown yet. Finish preparation first.",
+            "The workspace does not have parsed Markdown yet. Finish preparation first.",
             data={
                 "code": "document_markdown_not_ready",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
             },
         )
 
 
 class SourceDocumentNotFoundError(ResourceNotFoundException):
-    """Raised when a Source document cannot be found in a collection."""
+    """Raised when a Source document cannot be found in a workspace."""
 
-    def __init__(self, collection_id: str, document_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, document_id: str) -> None:
+        self.workspace_id = workspace_id
         self.document_id = document_id
         super().__init__(
-            "Document not found in this collection.",
+            "Document not found in this workspace.",
             data={
                 "code": "document_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "document_id": document_id,
             },
         )
@@ -59,15 +59,15 @@ class SourceDocumentNotFoundError(ResourceNotFoundException):
 class SourceFigureImageNotFoundError(ResourceNotFoundException):
     """Raised when a Source figure image cannot be found for a document."""
 
-    def __init__(self, collection_id: str, document_id: str, figure_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, document_id: str, figure_id: str) -> None:
+        self.workspace_id = workspace_id
         self.document_id = document_id
         self.figure_id = figure_id
         super().__init__(
             "Figure image not found in this document.",
             data={
                 "code": "figure_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "document_id": document_id,
                 "figure_id": figure_id,
             },
@@ -79,21 +79,21 @@ class SourceFigureImageUnavailableError(ResourceConflictException):
 
     def __init__(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
         figure_id: str,
         *,
         code: str = "figure_image_unavailable",
         message: str = "The extracted figure image is not available for this document.",
     ) -> None:
-        self.collection_id = collection_id
+        self.workspace_id = workspace_id
         self.document_id = document_id
         self.figure_id = figure_id
         super().__init__(
             message,
             data={
                 "code": code,
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "document_id": document_id,
                 "figure_id": figure_id,
             },
@@ -104,25 +104,25 @@ from repositories.source_artifact_repository import SourceArtifactRepo
 
 
 async def get_document_markdown(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
     object_store = object_store_module.Store
-    collection = await collection_service.get_collection_for_user(
-        collection_id, user_id
+    workspace = await workspace_service.get_workspace_for_user(
+        workspace_id, user_id
     )
-    documents = await _load_source_documents(collection_id)
-    document = _find_document(documents, collection_id, document_id)
+    documents = await _load_source_documents(workspace_id)
+    document = _find_document(documents, workspace_id, document_id)
     document_tree = await SourceArtifactRepo.read_document_tree(
-        collection_id,
+        workspace_id,
         document_id,
     )
-    display_names = _document_display_names(collection, document)
+    display_names = _document_display_names(workspace, document)
 
     markdown, source_map, warnings = await _project_markdown_from_tree(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         document=document,
         document_tree=document_tree,
         tables_by_id={table.table_id: table for table in document.tables},
@@ -135,7 +135,7 @@ async def get_document_markdown(
         warnings.append("markdown_content_empty")
 
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "document_id": document.document_id,
         "title": display_names["title"],
         "source_filename": display_names["source_filename"],
@@ -147,19 +147,19 @@ async def get_document_markdown(
 
 
 async def resolve_figure_image_file(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     figure_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
     object_store = object_store_module.Store
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     document_key = str(document_id or "").strip()
     figure_key = str(figure_id or "").strip()
     if not document_key or not figure_key:
         raise SourceFigureImageNotFoundError(
-            collection_id,
+            workspace_id,
             document_key,
             figure_key,
         )
@@ -168,7 +168,7 @@ async def resolve_figure_image_file(
         (
             item
             for item in await SourceArtifactRepo.list_figures(
-                collection_id,
+                workspace_id,
                 document_key,
             )
             if item.figure_id == figure_key
@@ -176,12 +176,12 @@ async def resolve_figure_image_file(
         None,
     )
     if figure is None:
-        raise SourceFigureImageNotFoundError(collection_id, document_key, figure_key)
-    return _figure_image_payload(collection_id, document_key, figure, object_store=object_store)
+        raise SourceFigureImageNotFoundError(workspace_id, document_key, figure_key)
+    return _figure_image_payload(workspace_id, document_key, figure, object_store=object_store)
 
 
 def _figure_image_payload(
-    collection_id: str,
+    workspace_id: str,
     document_key: str,
     figure: SourceFigure,
     *,
@@ -190,18 +190,18 @@ def _figure_image_payload(
     figure_key = figure.figure_id
     image_path = normalize_display_text(figure.image_path)
     if not image_path:
-        raise SourceFigureImageUnavailableError(collection_id, document_key, figure_key)
+        raise SourceFigureImageUnavailableError(workspace_id, document_key, figure_key)
 
     try:
-        content = collection_service.read_figure_asset(
-            collection_id,
+        content = workspace_service.read_figure_asset(
+            workspace_id,
             image_path,
             normalize_display_text(figure.asset_sha256),
             object_store=object_store,
         )
     except ValueError as exc:
         raise SourceFigureImageUnavailableError(
-            collection_id,
+            workspace_id,
             document_key,
             figure_key,
             code="figure_image_path_invalid",
@@ -209,12 +209,12 @@ def _figure_image_payload(
         ) from exc
     except (FileNotFoundError, OSError) as exc:
         raise SourceFigureImageUnavailableError(
-            collection_id,
+            workspace_id,
             document_key,
             figure_key,
         ) from exc
     if figure.image_size_bytes is not None and len(content) != figure.image_size_bytes:
-        raise SourceFigureImageUnavailableError(collection_id, document_key, figure_key)
+        raise SourceFigureImageUnavailableError(workspace_id, document_key, figure_key)
     media_type = (
         normalize_display_text(figure.image_mime_type) or "application/octet-stream"
     )
@@ -226,27 +226,27 @@ def _figure_image_payload(
     }
 
 
-async def _load_source_documents(collection_id: str) -> tuple[SourceDocument, ...]:
-    documents = await SourceArtifactRepo.read_collection_documents(collection_id)
+async def _load_source_documents(workspace_id: str) -> tuple[SourceDocument, ...]:
+    documents = await SourceArtifactRepo.read_workspace_documents(workspace_id)
     if not documents:
-        raise DocumentMarkdownNotReadyError(collection_id)
+        raise DocumentMarkdownNotReadyError(workspace_id)
     return documents
 
 
 def _find_document(
     documents: tuple[SourceDocument, ...],
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
 ) -> SourceDocument:
     for document in documents:
         if str(document.document_id) == str(document_id):
             return document
-    raise SourceDocumentNotFoundError(collection_id, document_id)
+    raise SourceDocumentNotFoundError(workspace_id, document_id)
 
 
 async def _project_markdown_from_tree(
     *,
-    collection_id: str,
+    workspace_id: str,
     document: SourceDocument,
     document_tree: SourceDocumentTree,
     tables_by_id: Mapping[str, SourceTable],
@@ -282,7 +282,7 @@ async def _project_markdown_from_tree(
                 warnings=warnings,
                 tables_by_id=tables_by_id,
                 figures_by_id=figures_by_id,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 document_id=document.document_id,
                 has_document_title=bool(title),
                 object_store=object_store,
@@ -306,7 +306,7 @@ async def _append_tree_node_markdown(
     warnings: list[str],
     tables_by_id: Mapping[str, SourceTable],
     figures_by_id: Mapping[str, SourceFigure],
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     has_document_title: bool,
     object_store: ObjectStore,
@@ -328,7 +328,7 @@ async def _append_tree_node_markdown(
                     warnings=warnings,
                     tables_by_id=tables_by_id,
                     figures_by_id=figures_by_id,
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     document_id=document_id,
                     has_document_title=has_document_title,
                     object_store=object_store,
@@ -369,7 +369,7 @@ async def _append_tree_node_markdown(
             return False
         figure_markdown = await _render_figure(
             figure,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document_id=document_id,
             object_store=object_store,
         )
@@ -445,7 +445,7 @@ def _render_table(table: SourceTable) -> str | None:
 async def _render_figure(
     figure: SourceFigure,
     *,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     object_store: ObjectStore,
 ) -> str | None:
@@ -453,7 +453,7 @@ async def _render_figure(
     label = normalize_display_text(figure.figure_label)
     image_markdown = None
     if _figure_image_available(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         document_id=document_id,
         figure=figure,
         object_store=object_store,
@@ -461,7 +461,7 @@ async def _render_figure(
         alt_text = label or caption or "Figure"
         image_markdown = (
             f"![{_escape_markdown_image_alt(alt_text)}]"
-            f"({_figure_image_url(collection_id, document_id, figure.figure_id)})"
+            f"({_figure_image_url(workspace_id, document_id, figure.figure_id)})"
         )
     caption_markdown = None
     if caption and label and not caption.casefold().startswith(label.casefold()):
@@ -477,29 +477,29 @@ async def _render_figure(
 
 def _figure_image_available(
     *,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     figure: SourceFigure,
     object_store: ObjectStore,
 ) -> bool:
     try:
-        _figure_image_payload(collection_id, document_id, figure, object_store=object_store)
+        _figure_image_payload(workspace_id, document_id, figure, object_store=object_store)
     except SourceFigureImageUnavailableError:
         return False
     return True
 
 
 def _figure_image_url(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     figure_id: str,
 ) -> str:
-    encoded_collection_id = quote(collection_id, safe="")
+    encoded_workspace_id = quote(workspace_id, safe="")
     encoded_document_id = quote(document_id, safe="")
     encoded_figure_id = quote(figure_id, safe="")
     return (
-        "/api/v1/collections/"
-        f"{encoded_collection_id}/documents/{encoded_document_id}/figures/"
+        "/api/v1/workspaces/"
+        f"{encoded_workspace_id}/documents/{encoded_document_id}/figures/"
         f"{encoded_figure_id}/image"
     )
 
@@ -589,10 +589,10 @@ def _source_filename(document: SourceDocument) -> str | None:
 
 
 def _document_display_names(
-    collection: StoredCollection,
+    workspace: StoredWorkspace,
     document: SourceDocument,
 ) -> dict[str, str | None]:
-    stored_to_original = _stored_to_original_filenames(collection)
+    stored_to_original = _stored_to_original_filenames(workspace)
     source_filename = _source_filename(document)
     display_source_filename = (
         stored_to_original.get(source_filename, source_filename)
@@ -611,9 +611,9 @@ def _document_display_names(
     }
 
 
-def _stored_to_original_filenames(collection: StoredCollection) -> dict[str, str]:
+def _stored_to_original_filenames(workspace: StoredWorkspace) -> dict[str, str]:
     filenames: dict[str, str] = {}
-    for record in collection.documents:
+    for record in workspace.documents:
         original = normalize_display_text(record.document.original_filename)
         stored = normalize_display_text(record.stored_filename)
         if original and stored:

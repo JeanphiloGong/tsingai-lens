@@ -5,10 +5,10 @@ export function capabilityName(toolName: string | null, translate: Translate) {
 	switch (toolName) {
 		case 'discover_research_tools':
 			return translate('researchAgent.capability.discoverResearchTools');
-		case 'get_collection_context':
-			return translate('researchAgent.capability.collection');
-		case 'browse_collection_papers':
-			return translate('researchAgent.capability.browseCollectionPapers');
+		case 'get_workspace_context':
+			return translate('researchAgent.capability.workspace');
+		case 'browse_workspace_papers':
+			return translate('researchAgent.capability.browseWorkspacePapers');
 		case 'search_sources':
 			return translate('researchAgent.capability.searchSources');
 		case 'read_source':
@@ -106,8 +106,8 @@ export function paperSourceIssues(message: ChatMessage | null) {
 				title: typeof title === 'string' ? title : '',
 				status,
 				failed: ['preparation_failed', 'unavailable', 'read_failed'].includes(status),
-				href: resource?.href?.startsWith('/collections/')
-					? (resource.href as `/collections/${string}`)
+				href: resource?.href?.startsWith('/workspaces/')
+					? (resource.href as `/workspaces/${string}`)
 					: null
 			}
 		];
@@ -127,18 +127,18 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 	if (result.status === 'queued') {
 		return translate('researchAgent.capability.queuedDescription');
 	}
-	if (name === 'get_collection_context') {
-		const collection = result.data.collection;
+	if (name === 'get_workspace_context') {
+		const workspace = result.data.workspace;
 		const papers =
-			collection && typeof collection === 'object' && 'paper_count' in collection
-				? numberValue(collection as Record<string, unknown>, 'paper_count')
+			workspace && typeof workspace === 'object' && 'paper_count' in workspace
+				? numberValue(workspace as Record<string, unknown>, 'paper_count')
 				: '--';
 		return translate('researchAgent.capability.paperCount', {
 			papers,
 			objectives: numberValue(result.data, 'objective_count')
 		});
 	}
-	if (name === 'browse_collection_papers') {
+	if (name === 'browse_workspace_papers') {
 		const count = numberValue(result.data, 'returned_paper_count');
 		if (count === 0 && result.data.query) {
 			return translate('researchAgent.capability.paperQueryNoMatch');

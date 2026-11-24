@@ -19,11 +19,11 @@ from domain.chat import (
     ToolCallStatus,
     ToolRisk,
 )
-from domain.source import Collection
+from domain.source import Workspace
 from repositories.chat_repository import ChatRepository
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
 )
 
 pytestmark = pytest.mark.anyio
@@ -39,30 +39,30 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "password_hash": "synthetic-password-hash",
         "created_at": "2026-08-19T00:00:00+00:00",
     }
-    collection = StoredCollection(
-        collection=Collection(
-            collection_id="col-chat",
+    workspace = StoredWorkspace(
+        workspace=Workspace(
+            workspace_id="col-chat",
             owner_user_id=user["user_id"],
-            name="Agent collection",
+            name="Agent workspace",
             description=None,
             status="idle",
         ),
         created_at="2026-08-19T00:00:00+00:00",
         updated_at="2026-08-19T00:00:00+00:00",
     )
-    await CollectionRepository().add_collection(collection)
+    await WorkspaceRepository().add_workspace(workspace)
     repository = ChatRepository()
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=user["user_id"],
-        collection_id=collection.collection.collection_id,
+        workspace_id=workspace.workspace.workspace_id,
         created_at="2026-08-19T00:00:00+00:00",
     )
     await repository.add_session(chat)
     empty_chat = ChatSession.create(
         session_id="chat-empty",
         user_id=chat.user_id,
-        collection_id=chat.collection_id,
+        workspace_id=chat.workspace_id,
         created_at=chat.created_at,
     )
     await repository.add_session(empty_chat)
@@ -70,7 +70,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     user_message = ChatMessage.user(
         message_id="msg-1",
         session_id=chat.session_id,
-        content="  读取 collection\n保持实验状态独立。",
+        content="  读取 workspace\n保持实验状态独立。",
         created_at="2026-08-19T00:00:01+00:00",
         source_contexts=(
             ChatSourceContext(
@@ -78,11 +78,11 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
                     resource_type="source",
                     resource_id="doc-source:results",
                     href=(
-                        "/collections/col-chat/documents/doc-source"
+                        "/workspaces/col-chat/documents/doc-source"
                         "?view=parsed-paper&source_ref=results&page=3"
                     ),
                 ),
-                collection_id="col-chat",
+                workspace_id="col-chat",
                 document_id="doc-source",
                 document_title="Paper A",
                 source_kind="text_window",
@@ -102,7 +102,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         tool_calls=(
             ChatToolRequest(
                 tool_call_id="call-read",
-                name="get_collection_context",
+                name="get_workspace_context",
                 arguments={},
                 position=0,
             ),
@@ -114,7 +114,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
             tool_call_id="call-read",
             session_id=chat.session_id,
             assistant_message_id=assistant_call.message_id,
-            name="get_collection_context",
+            name="get_workspace_context",
             arguments={},
             risk=ToolRisk.READ,
         )
@@ -134,7 +134,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
             ChatResourceRef(
                 resource_type="document",
                 resource_id="doc-source",
-                href="/collections/col-chat/documents/doc-source",
+                href="/workspaces/col-chat/documents/doc-source",
             ),
         ),
         warnings=("Some papers still require researcher review.",),
@@ -155,13 +155,13 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     final_message = ChatMessage.assistant(
         message_id="msg-4",
         session_id=chat.session_id,
-        content="当前 collection 有 10 篇文献。",
+        content="当前 workspace 有 10 篇文献。",
         created_at="2026-08-19T00:00:06+00:00",
     )
     await repository.save_trajectory(
         chat_session=chat.update(
             user_id=chat.user_id,
-            collection_id=chat.collection_id,
+            workspace_id=chat.workspace_id,
             updated_at="2026-08-19T00:00:06+00:00",
         ),
         messages=(user_message, assistant_call, tool_message, final_message),
@@ -181,19 +181,19 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
 
     stored_chat = await repository.read_session(chat.session_id)
     assert stored_chat is not None
-    assert stored_chat.collection_id == chat.collection_id
+    assert stored_chat.workspace_id == chat.workspace_id
     history = await repository.list_sessions(
         user_id=chat.user_id,
-        collection_id=chat.collection_id,
+        workspace_id=chat.workspace_id,
     )
     assert [(item.session.session_id, item.title) for item in history] == [
-        (chat.session_id, "读取 collection"),
+        (chat.session_id, "读取 workspace"),
         (empty_chat.session_id, None),
     ]
     assert (
         await repository.list_sessions(
             user_id=chat.user_id,
-            collection_id=chat.collection_id,
+            workspace_id=chat.workspace_id,
             limit=1,
             offset=1,
         )
@@ -216,7 +216,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     await repository.save_trajectory(
         chat_session=chat.update(
             user_id=chat.user_id,
-            collection_id=chat.collection_id,
+            workspace_id=chat.workspace_id,
             updated_at="2026-08-19T00:00:06+00:00",
         ),
         messages=(user_message, assistant_call, tool_message, final_message),
@@ -226,7 +226,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     assert (await repository.read_session(chat.session_id)).title == "IN718 comparison"
     assert (
         await repository.list_sessions(
-            user_id=chat.user_id, collection_id=chat.collection_id
+            user_id=chat.user_id, workspace_id=chat.workspace_id
         )
     )[0].title == "IN718 comparison"
 
@@ -255,7 +255,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     await repository.save_trajectory(
         chat_session=chat.update(
             user_id=chat.user_id,
-            collection_id=chat.collection_id,
+            workspace_id=chat.workspace_id,
             updated_at="2026-08-19T00:01:00+00:00",
         ),
         messages=(*(await repository.read_messages(chat.session_id)), write_message),

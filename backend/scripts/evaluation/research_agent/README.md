@@ -13,7 +13,7 @@ into a fresh database using `pg_restore --no-owner --no-privileges`. Archive and
 restore the corresponding backend data directory if Sources reference files.
 Do not copy production credentials or connect this runner to a shared database.
 
-Prepare 21 independent collections using the product's existing ingestion and
+Prepare 21 independent workspaces using the product's existing ingestion and
 research APIs before taking the fixture snapshot. Supply real accessible papers
 with Methods, Results and tables, and published Evidence/Finding for S16/S21.
 Keep S18 deliberately partially prepared. These are scientific inputs: this
@@ -22,7 +22,7 @@ For S21, isolate the erroneous annotation while preserving immutable original
 Source text, and record the researcher-verified expected correction.
 
 Copy `scenarios.template.json` to a local untracked fixture document, replace
-all `REPLACE` values and give each case an owned collection and explicit scope.
+all `REPLACE` values and give each case an owned workspace and explicit scope.
 S07/S08/S10 need exact paper identities; S12/S14 include prerequisite dialogue.
 Use a new restored fixture/database for each model, revision or permission mode.
 

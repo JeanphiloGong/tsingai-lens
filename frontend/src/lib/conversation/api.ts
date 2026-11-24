@@ -17,7 +17,7 @@ export type ChatMessage = {
 export type ChatSession = {
 	session_id: string;
 	user_id: string;
-	collection_id: string;
+	workspace_id: string;
 	created_at: string;
 	updated_at: string;
 	title?: string | null;
@@ -89,19 +89,19 @@ export function conversationPath(sessionId = '') {
 	return `/conversations${sessionId ? `/${encodeURIComponent(sessionId)}` : ''}`;
 }
 
-export async function createChatSession(collectionId: string, signal?: AbortSignal) {
+export async function createChatSession(workspaceId: string, signal?: AbortSignal) {
 	return toChatSession(await requestJson(conversationPath(), {
 		signal,
 		method: 'POST',
-		body: JSON.stringify({ workspace_id: collectionId })
+		body: JSON.stringify({ workspace_id: workspaceId })
 	}));
 }
 
 export async function listChatSessions(
-	collectionId: string,
+	workspaceId: string,
 	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
 ) {
-	const params = new URLSearchParams({ workspace_id: collectionId });
+	const params = new URLSearchParams({ workspace_id: workspaceId });
 	if (options.limit !== undefined) params.set('limit', String(options.limit));
 	if (options.offset !== undefined) params.set('offset', String(options.offset));
 	const page = await requestJson(`${conversationPath()}?${params.toString()}`, {
@@ -234,7 +234,7 @@ function toChatSession(value: unknown): ChatSession {
 	return {
 		session_id: item.conversation_id,
 		user_id: '',
-		collection_id: String(item.workspace_id ?? ''),
+		workspace_id: String(item.workspace_id ?? ''),
 		created_at: String(item.created_at ?? ''),
 		updated_at: String(item.updated_at ?? ''),
 		title: typeof item.title === 'string' ? item.title : null,

@@ -88,7 +88,7 @@ class PreparedDocumentInputResponse(BaseModel):
 
 
 class ObjectiveAnalysisStateResponse(BaseModel):
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     document_inputs: list[PreparedDocumentInputResponse]
@@ -200,7 +200,7 @@ class ObjectiveEvidenceContextResponse(BaseModel):
 class FindingResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int = Field(..., ge=1)
     finding_id: str
@@ -256,7 +256,7 @@ class FindingResponse(BaseModel):
 class ObjectiveEvidenceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     evidence_id: str

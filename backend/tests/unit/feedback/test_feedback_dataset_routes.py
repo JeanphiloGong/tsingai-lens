@@ -45,7 +45,7 @@ def _request(service, user_id: str = "user-1"):
 def _dataset() -> Dataset:
     return Dataset(
         dataset_id="fdset_1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         name="SFT",
         task_type="sft",
         construction_spec={},
@@ -98,7 +98,7 @@ def _revision() -> SampleRevision:
 def _case() -> FeedbackCase:
     return FeedbackCase(
         case_id="case-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=(),
@@ -168,7 +168,7 @@ class _Service:
 def test_task_dataset_routes_create_list_and_detail() -> None:
     request = _request(_Service())
     payload = TaskDatasetCreateRequest(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         name="SFT",
         task_type="sft",
         construction_spec={},
@@ -191,7 +191,7 @@ def test_task_dataset_routes_create_list_and_detail() -> None:
                 asyncio.run(
                     task_datasets.list_feedback_datasets(
                         user_id=request.state.current_user["user_id"],
-                        collection_id="collection-1",
+                        workspace_id="workspace-1",
                         limit=50,
                         offset=0,
                     )
@@ -212,7 +212,7 @@ def test_task_dataset_routes_create_list_and_detail() -> None:
             ).body
         )["data"]
     )
-    assert detail.collection_id == "collection-1"
+    assert detail.workspace_id == "workspace-1"
 
 
 def test_legacy_snapshot_routes_are_not_registered_after_d7_cutover() -> None:
@@ -266,7 +266,7 @@ def test_export_preview_maps_stale_source_to_conflict() -> None:
 def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> None:
     preference = TaskDatasetCreateRequest.model_validate(
         {
-            "collection_id": "collection-1",
+            "workspace_id": "workspace-1",
             "name": "Preference",
             "task_type": "preference",
         }
@@ -275,7 +275,7 @@ def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> N
     with pytest.raises(ValidationError):
         TaskDatasetCreateRequest.model_validate(
             {
-                "collection_id": "collection-1",
+                "workspace_id": "workspace-1",
                 "name": "SFT",
                 "task_type": "sft",
                 "owner_id": "user-1",
@@ -283,7 +283,7 @@ def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> N
         )
 
 
-def test_task_dataset_collection_returns_accepted_operation() -> None:
+def test_task_dataset_workspace_returns_accepted_operation() -> None:
     class Service(_Service):
         async def collect_dataset_cases_for_user(self, **kwargs):
             from domain.feedback import DatasetSample
@@ -314,15 +314,15 @@ def test_task_dataset_collection_returns_accepted_operation() -> None:
                 },
             )()
 
-    from controllers.feedback.task_dataset_schemas import DatasetCollectionRequest
+    from controllers.feedback.task_dataset_schemas import DatasetWorkspaceRequest
 
-    response = task_datasets.DatasetCollectionResponse.model_validate(
+    response = task_datasets.DatasetWorkspaceResponse.model_validate(
         json.loads(
             (
                 asyncio.run(
                     task_datasets.collect_feedback_cases(
                         dataset_id="fdset_1",
-                        payload=DatasetCollectionRequest(source_case_ids=["case-1"]),
+                        payload=DatasetWorkspaceRequest(source_case_ids=["case-1"]),
                         user_id=_request(Service()).state.current_user["user_id"],
                     )
                 )

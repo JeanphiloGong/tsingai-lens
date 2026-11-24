@@ -34,7 +34,7 @@ class ConversationORM(Base):
     __table_args__ = (
         CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
         Index(
-            "ix_chat_sessions_user_collection_updated",
+            "ix_chat_sessions_user_workspace_updated",
             "user_id",
             "workspace_id",
             "updated_at",
@@ -83,7 +83,7 @@ class ConversationORM(Base):
     )
     workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

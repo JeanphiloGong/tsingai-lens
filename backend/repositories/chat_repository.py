@@ -299,7 +299,7 @@ class ChatRepository:
                 select(ConversationORM)
                 .where(
                     ConversationORM.user_id == chat_session.user_id,
-                    ConversationORM.workspace_id == chat_session.collection_id,
+                    ConversationORM.workspace_id == chat_session.workspace_id,
                     or_(
                         ConversationORM.conversation_id == root_id,
                         ConversationORM.root_session_id == root_id,
@@ -311,7 +311,7 @@ class ChatRepository:
                 ChatSession(
                     session_id=row.conversation_id,
                     user_id=row.user_id,
-                    collection_id=row.workspace_id,
+                    workspace_id=row.workspace_id,
                     created_at=_iso(row.created_at),
                     updated_at=_iso(row.updated_at),
                     status=(
@@ -352,7 +352,7 @@ class ChatRepository:
             )
             if source is None or (source.user_id, source.workspace_id) != (
                 chat_session.user_id,
-                chat_session.collection_id,
+                chat_session.workspace_id,
             ):
                 raise ChatWriteConflict(
                     "chat_branch_invalid", "branch source must be an owned conversation"
@@ -362,7 +362,7 @@ class ChatRepository:
                 saved = ChatSession(
                     session_id=existing.conversation_id,
                     user_id=existing.user_id,
-                    collection_id=existing.workspace_id,
+                    workspace_id=existing.workspace_id,
                     created_at=_iso(existing.created_at),
                     updated_at=_iso(existing.updated_at),
                     status=(
@@ -380,13 +380,13 @@ class ChatRepository:
                 )
                 if (
                     saved.user_id,
-                    saved.collection_id,
+                    saved.workspace_id,
                     saved.parent_session_id,
                     saved.fork_message_id,
                     saved.fork_content,
                 ) != (
                     chat_session.user_id,
-                    chat_session.collection_id,
+                    chat_session.workspace_id,
                     chat_session.parent_session_id,
                     chat_session.fork_message_id,
                     chat_session.fork_content,
@@ -438,7 +438,7 @@ class ChatRepository:
                 ConversationORM(
                     conversation_id=chat_session.session_id,
                     user_id=chat_session.user_id,
-                    workspace_id=chat_session.collection_id,
+                    workspace_id=chat_session.workspace_id,
                     created_at=_datetime(chat_session.created_at),
                     updated_at=_datetime(chat_session.updated_at),
                     root_session_id=chat_session.root_session_id,
@@ -488,7 +488,7 @@ class ChatRepository:
                 ConversationORM(
                     conversation_id=record.session_id,
                     user_id=record.user_id,
-                    workspace_id=record.collection_id,
+                    workspace_id=record.workspace_id,
                     created_at=_datetime(record.created_at),
                     updated_at=_datetime(record.updated_at),
                     is_pinned=record.is_pinned,
@@ -503,7 +503,7 @@ class ChatRepository:
                 ChatSession(
                     session_id=row.conversation_id,
                     user_id=row.user_id,
-                    collection_id=row.workspace_id,
+                    workspace_id=row.workspace_id,
                     created_at=_iso(row.created_at),
                     updated_at=_iso(row.updated_at),
                     status=(
@@ -568,7 +568,7 @@ class ChatRepository:
             return ChatSession(
                 session_id=row.conversation_id,
                 user_id=row.user_id,
-                collection_id=row.workspace_id,
+                workspace_id=row.workspace_id,
                 created_at=_iso(row.created_at),
                 updated_at=_iso(row.updated_at),
                 status=(
@@ -600,7 +600,7 @@ class ChatRepository:
             return ChatSession(
                 session_id=row.conversation_id,
                 user_id=row.user_id,
-                collection_id=row.workspace_id,
+                workspace_id=row.workspace_id,
                 created_at=_iso(row.created_at),
                 updated_at=_iso(row.updated_at),
                 status=(
@@ -628,7 +628,7 @@ class ChatRepository:
             ).values(title=title))
 
     async def list_sessions(
-        self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
+        self, *, user_id: str, workspace_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSessionSummary, ...]:
         async with AsyncSessionLocal() as db:
             first_user_message = (
@@ -645,7 +645,7 @@ class ChatRepository:
                 select(ConversationORM, first_user_message.label("first_message_title"))
                 .where(
                     ConversationORM.user_id == user_id,
-                    ConversationORM.workspace_id == collection_id,
+                    ConversationORM.workspace_id == workspace_id,
                 )
                 .order_by(
                     ConversationORM.is_pinned.desc(),
@@ -660,7 +660,7 @@ class ChatRepository:
                     session=ChatSession(
                         session_id=row.conversation_id,
                         user_id=row.user_id,
-                        collection_id=row.workspace_id,
+                        workspace_id=row.workspace_id,
                         created_at=_iso(row.created_at),
                         updated_at=_iso(row.updated_at),
                         status=(
@@ -749,7 +749,7 @@ class ChatRepository:
                             resource_id=item["resource_ref"]["resource_id"],
                             href=item["resource_ref"].get("href"),
                         ),
-                        collection_id=item["collection_id"],
+                        workspace_id=item["workspace_id"],
                         document_id=item["document_id"],
                         document_title=item["document_title"],
                         source_kind=item["source_kind"],
@@ -830,7 +830,7 @@ class ChatRepository:
                         resource_id=item["resource_ref"]["resource_id"],
                         href=item["resource_ref"].get("href"),
                     ),
-                    collection_id=item["collection_id"],
+                    workspace_id=item["workspace_id"],
                     document_id=item["document_id"],
                     document_title=item["document_title"],
                     source_kind=item["source_kind"],
@@ -1274,7 +1274,7 @@ class ChatRepository:
                 raise ValueError(f"chat session not found: {chat_session.session_id}")
             if (
                 session_row.user_id != chat_session.user_id
-                or session_row.workspace_id != chat_session.collection_id
+                or session_row.workspace_id != chat_session.workspace_id
             ):
                 raise ValueError("session identity cannot be reassigned")
 
@@ -1311,7 +1311,7 @@ class ChatRepository:
                                     "resource_id": item.resource_ref.resource_id,
                                     "href": item.resource_ref.href,
                                 },
-                                "collection_id": item.collection_id,
+                                "workspace_id": item.workspace_id,
                                 "document_id": item.document_id,
                                 "document_title": item.document_title,
                                 "source_kind": item.source_kind,

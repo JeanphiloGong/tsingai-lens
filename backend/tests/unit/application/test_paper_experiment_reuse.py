@@ -101,7 +101,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     objective_repository = SimpleNamespace(
         read_objective=AsyncMock(return_value=objective)
     )
-    experiment_analysis_service.collection_service = object()
+    experiment_analysis_service.workspace_service = object()
     experiment_analysis_service.PaperMapRepo = object()
     experiment_analysis_service.ObjectiveRepo = objective_repository
     experiment_analysis_service.PaperExperimentRepo = repository
@@ -160,7 +160,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
         lambda **kwargs: bundles[kwargs["document_id"]],
     )
     artifacts = await service.generate_experiment_analysis_artifacts(
-        "collection-1",
+        "workspace-1",
         analysis,
         job=ObjectiveAnalysisJobSnapshot(analysis, "test-worker", 1),
         response_client=SimpleNamespace(model="test-model"),
@@ -183,7 +183,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     )
     assert all(item.uninspected_source_count == 0 for item in artifacts.contributions)
     first = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=objective,
         analysis=analysis,
         experiment_outputs=(),
@@ -207,7 +207,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     )
     other_objective = replace(objective, objective_id="objective-2")
     second = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=other_objective,
         analysis=replace(analysis, objective_id="objective-2"),
         experiment_outputs=(),

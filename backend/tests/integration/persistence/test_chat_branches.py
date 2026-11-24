@@ -24,7 +24,7 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat import session_service as chat_session_service
-from application.source import collection_service
+from application.source import workspace_service
 from controllers.chat.chat_session_routes import chat_session_router as router
 from controllers.exception_router import (
     general_exception_handler,
@@ -44,7 +44,7 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
-from domain.source import Collection, Document, SourceBlock, SourceDocument
+from domain.source import Workspace, Document, SourceBlock, SourceDocument
 from exceptions import ProjectException
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -52,9 +52,9 @@ from httpx import ASGITransport, AsyncClient
 
 
 from repositories.chat_repository import ChatRepository
-from repositories.collection_repository import (
-    CollectionRepository,
-    StoredCollection,
+from repositories.workspace_repository import (
+    WorkspaceRepository,
+    StoredWorkspace,
     StoredDocument,
 )
 from sqlalchemy import inspect
@@ -95,10 +95,10 @@ class _Sources:
             ),
         )
 
-    async def read_document(self, collection_id, document_id):
+    async def read_document(self, workspace_id, document_id):
         return (
             self.document
-            if (collection_id, document_id) == ("collection", "paper")
+            if (workspace_id, document_id) == ("workspace", "paper")
             else None
         )
 
@@ -121,11 +121,11 @@ async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
                 )
             )["session_id"]
         )
-    collections = CollectionRepository()
-    await collections.add_collection(
-        StoredCollection(
-            collection=Collection(
-                collection_id="collection",
+    workspaces = WorkspaceRepository()
+    await workspaces.add_workspace(
+        StoredWorkspace(
+            workspace=Workspace(
+                workspace_id="workspace",
                 owner_user_id=users[0]["user_id"],
                 name="LPBF comparison",
                 description=None,
@@ -135,8 +135,8 @@ async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
             updated_at=NOW,
         )
     )
-    await collections.add_documents(
-        "collection",
+    await workspaces.add_documents(
+        "workspace",
         (
             StoredDocument(
                 document=Document(
@@ -158,7 +158,7 @@ async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
     chat = ChatSession.create(
         session_id="original",
         user_id=users[0]["user_id"],
-        collection_id="collection",
+        workspace_id="workspace",
         created_at=NOW,
     )
     await repository.add_session(chat)
@@ -186,7 +186,7 @@ async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
         resource_ref=ChatResourceRef(
             resource_type="source", resource_id="paper:methods"
         ),
-        collection_id="collection",
+        workspace_id="workspace",
         document_id="paper",
         document_title="LPBF tensile test conditions",
         source_kind="text_window",
@@ -274,10 +274,10 @@ async def branch_app(postgres_session_factory, tmp_path, monkeypatch):
     write = _WriteCapability()
     sources = _Sources()
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,)))
-    chat_session_service.collection_service = collection_service
+    chat_session_service.workspace_service = workspace_service
     chat_session_service.SourceArtifactRepo = sources
     chat_session_service.ChatRepo = repository
-    collection_service.CollectionRepo = collections
+    workspace_service.WorkspaceRepo = workspaces
     service = make_scripted_chat_service(runner)
     app = FastAPI()
     monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
@@ -335,7 +335,7 @@ async def _send(app, branch, *, streaming=False):
 async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(branch_app):
     app = branch_app
     newer = await app.service.create_session(
-        collection_id="collection", user_id=app.owner
+        workspace_id="workspace", user_id=app.owner
     )
     original = await app.repository.read_session("original")
     messages = await app.repository.read_messages("original")
@@ -362,10 +362,10 @@ async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(bran
     assert (await reloaded.read_session("original")).is_pinned is True
     assert await reloaded.read_messages("original") == messages
     first = await app.client.get(
-        BASE, params={"collection_id": "collection", "limit": 1}
+        BASE, params={"workspace_id": "workspace", "limit": 1}
     )
     second = await app.client.get(
-        BASE, params={"collection_id": "collection", "limit": 1, "offset": 1}
+        BASE, params={"workspace_id": "workspace", "limit": 1, "offset": 1}
     )
     assert first.json()["data"]["items"][0]["session_id"] == "original"
     assert first.json()["data"]["items"][0]["is_pinned"] is True
@@ -376,7 +376,7 @@ async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(bran
     response = await app.client.put(f"{BASE}/original/pin", json={"is_pinned": False})
     assert response.status_code == 200, response.text
     assert response.json()["data"]["updated_at"] == original.updated_at
-    items = (await app.client.get(BASE, params={"collection_id": "collection"})).json()[
+    items = (await app.client.get(BASE, params={"workspace_id": "workspace"})).json()[
         "data"
     ]["items"]
     assert items[-1]["session_id"] == "original"
@@ -620,7 +620,7 @@ async def test_alternatives_and_nested_edits_keep_separate_version_groups(branch
     await _send(app, second)
     earlier = (await app.repository.read_messages(second["session_id"]))[0]
     third = await _branch(
-        app, second["session_id"], earlier.message_id, "Explain the collection scope."
+        app, second["session_id"], earlier.message_id, "Explain the workspace scope."
     )
     assert third["parent_session_id"] == "original" and third["fork_position"] == 0
     await _send(app, third)
@@ -698,7 +698,7 @@ async def test_deletion_checks_ownership_execution_and_repeated_requests(branch_
     rejection = await app.client.delete(f"{BASE}/original")
     assert rejection.status_code == 200
     assert rejection.json()["code"] == 200201
-    assert (await app.client.get(BASE, params={"collection_id": "collection"})).json()[
+    assert (await app.client.get(BASE, params={"workspace_id": "workspace"})).json()[
         "data"
     ]["items"] == []
 

@@ -70,13 +70,13 @@ def _worker(
     from sqlalchemy.pool import NullPool
     from repositories import (
         chat_repository,
-        collection_repository,
+        workspace_repository,
         model_connection_repository,
     )
     from infra.persistence.postgres.models.model_connection import ModelConnectionORM
     from infra.llm import chat_model
     from sqlalchemy.dialects.postgresql import insert
-    from application.source import collection_service
+    from application.source import workspace_service
     from infra.identity import client as identity
     from tests.support.identity import IdentitySubjects
     from controllers.exception_router import http_exception_handler, project_exception_handler
@@ -88,7 +88,7 @@ def _worker(
         engine = create_async_engine(database_url, poolclass=NullPool)
         factory = async_sessionmaker(engine, expire_on_commit=False)
         chat_repository.AsyncSessionLocal = factory
-        collection_repository.AsyncSessionLocal = factory
+        workspace_repository.AsyncSessionLocal = factory
         model_connection_repository.AsyncSessionLocal = factory
         now = datetime.now(timezone.utc)
         async with factory.begin() as db:
@@ -107,8 +107,8 @@ def _worker(
                 .on_conflict_do_nothing(index_elements=["connection_id"])
             )
 
-        collection_service.CollectionRepo = collection_repository.CollectionRepository()
-        chat_session_service.collection_service = collection_service
+        workspace_service.WorkspaceRepo = workspace_repository.WorkspaceRepository()
+        chat_session_service.workspace_service = workspace_service
         chat_session_service.SourceArtifactRepo = sources
         chat_session_service.ChatRepo = ChatRepository()
         model = _ProcessPausedModel(resume, finish, calls)
@@ -212,7 +212,7 @@ async def test_real_http_disconnect_resumes_on_another_worker_without_duplicate_
             AsyncClient(base_url=first_url, cookies=cookies, timeout=15) as first,
             AsyncClient(base_url=second_url, cookies=cookies, timeout=15) as second,
         ):
-            created = await first.post("/api/v1/chat-sessions", json={"collection_id": "collection"})
+            created = await first.post("/api/v1/chat-sessions", json={"workspace_id": "workspace"})
             assert created.status_code == 200 and created.json()["code"] == 200, created.text
             session_id = created.json()["data"]["session_id"]
             path = f"/api/v1/chat-sessions/{session_id}"

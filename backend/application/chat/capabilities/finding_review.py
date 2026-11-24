@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from application.evaluation import finding_feedback_service
 
 from typing import Any, Literal
@@ -64,7 +64,7 @@ class CurateFindingToolRequest(BaseModel):
         description=(
             "The complete canonical Finding object read from the published analysis, "
             "with only the researcher-reviewed scientific fields revised. Required "
-            "top-level keys include collection_id, objective_id, analysis_version, "
+            "top-level keys include workspace_id, objective_id, analysis_version, "
             "finding_id, statement, factors, outcome, direction, assertion_strength, "
             "attribution_scope, synthesis_status, certainty, display_rank, mechanisms, "
             "scientific_context, limitations, paper_contributions, origin, "
@@ -115,13 +115,13 @@ class RecordFindingFeedbackCapability:
         context: CapabilityExecutionContext,
         arguments: RecordFindingFeedbackToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         try:
             feedback = await finding_feedback_service.record_feedback(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 analysis_version=arguments.analysis_version,
                 finding_id=arguments.finding_id,
@@ -147,7 +147,7 @@ class RecordFindingFeedbackCapability:
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "feedback_id": feedback.feedback_id,
-                "collection_id": feedback.collection_id,
+                "workspace_id": feedback.workspace_id,
                 "objective_id": feedback.objective_id,
                 "analysis_version": feedback.analysis_version,
                 "finding_id": feedback.finding_id,
@@ -159,7 +159,7 @@ class RecordFindingFeedbackCapability:
             },
             resource_refs=(
                 _finding_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     arguments.objective_id,
                     arguments.analysis_version,
                     arguments.finding_id,
@@ -188,21 +188,21 @@ class CurateFindingCapability:
         context: CapabilityExecutionContext,
         arguments: CurateFindingToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         candidate = arguments._parsed_finding
-        if candidate.collection_id != context.collection_id:
+        if candidate.workspace_id != context.workspace_id:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status=ToolResultStatus.FAILED,
-                error_code="finding_collection_mismatch",
-                error_message="The curated Finding belongs to another collection. Reopen the target Finding in the current collection.",
+                error_code="finding_workspace_mismatch",
+                error_message="The curated Finding belongs to another workspace. Reopen the target Finding in the current workspace.",
             )
         try:
             curation = await finding_feedback_service.record_curation(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 analysis_version=arguments.analysis_version,
                 finding_id=arguments.finding_id,
@@ -228,13 +228,13 @@ class CurateFindingCapability:
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "curation_id": curation.curation_id,
-                "collection_id": curation.collection_id,
+                "workspace_id": curation.workspace_id,
                 "objective_id": curation.objective_id,
                 "analysis_version": curation.analysis_version,
                 "finding_id": curation.finding_id,
                 "curated_status": curation.curated_status,
                 "curated_finding": {
-                    "collection_id": curation.curated_finding.collection_id,
+                    "workspace_id": curation.curated_finding.workspace_id,
                     "objective_id": curation.curated_finding.objective_id,
                     "analysis_version": curation.curated_finding.analysis_version,
                     "finding_id": curation.curated_finding.finding_id,
@@ -406,7 +406,7 @@ class CurateFindingCapability:
             },
             resource_refs=(
                 _finding_ref(
-                    context.collection_id,
+                    context.workspace_id,
                     arguments.objective_id,
                     arguments.analysis_version,
                     arguments.finding_id,
@@ -416,7 +416,7 @@ class CurateFindingCapability:
 
 
 def _finding_ref(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     finding_id: str,
@@ -425,7 +425,7 @@ def _finding_ref(
         resource_type="finding",
         resource_id=f"{objective_id}:{analysis_version}:{finding_id}",
         href=(
-            f"/collections/{collection_id}/objectives/{objective_id}"
+            f"/workspaces/{workspace_id}/objectives/{objective_id}"
             f"?finding_id={finding_id}"
         ),
     )

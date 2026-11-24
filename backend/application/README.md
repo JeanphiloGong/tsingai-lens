@@ -8,7 +8,7 @@ lower-level runtime or persistence implementations.
 - application-level orchestration for Goal, Source, Core, Chat, Evaluation,
   and Derived flows
 - wiring between controllers and domain or infra concerns
-- collection-facing workflows that should stay testable above engine level
+- workspace-facing workflows that should stay testable above engine level
 
 ## Responsibilities
 
@@ -24,17 +24,17 @@ Inside it, business responsibilities are now grouped as:
 - [`goal/README.md`](goal/README.md)
   Goal Brief intake and research-intent shaping
 - [`source/README.md`](source/README.md)
-  Collection lifecycle, current Document membership, per-document preparation,
+  Workspace lifecycle, current Document membership, per-document preparation,
   and Source loading
 - [`chat/README.md`](chat/README.md)
-  Collection-bound Research Agent trajectory, capabilities, and write approval
+  Workspace-bound Research Agent trajectory, capabilities, and write approval
 - [`pipeline/README.md`](pipeline/README.md)
   Pipeline Run admission, telemetry, persistence, and recovery; scientific
   workflow ordering stays in owning services
 - [`core/README.md`](core/README.md)
   Document profiles, Paper Maps, Objectives, Evidence, and Findings
 - [`evaluation/README.md`](evaluation/README.md)
-  Collection-bound Core/Goal quality evaluation over existing artifacts,
+  Workspace-bound Core/Goal quality evaluation over existing artifacts,
   gold answers, prediction snapshots, summary scores, and failure records
 - [`derived/README.md`](derived/README.md)
   Retired parallel projection boundary
@@ -66,7 +66,7 @@ resources, claims and lease heartbeats. Feedback and sample worker scripts also
 create only their own resources and never construct the Web runtime.
 Shared instances live beside their owning implementations:
 `application.chat.session_service.ChatService`,
-`infra.persistence.file.collection_workspace.Workspace`, and
+`infra.persistence.file.workspace_files.Workspace`, and
 `infra.persistence.file.object_store.Store`. `main.py` initializes these values
 and the database engine at startup; importing their modules does not initialize
 resources. Chat controllers call the shared Chat service directly. File-facing

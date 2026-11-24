@@ -7,7 +7,7 @@ This node owns browser-side helpers shared across frontend routes.
 - keep business requests on same-origin `/api/*` and `/api/v1/*`, and account
   requests on same-origin `/user-api/v1/*`;
 - centralize authentication expiry and API error handling;
-- expose typed clients for Collection, Document preparation, Source,
+- expose typed clients for Workspace, Document preparation, Source,
   Objective/Finding, and Assistant resources;
 - keep formatting, translations, and Pipeline Run state presentation out
   of route components.
@@ -27,11 +27,11 @@ This node owns browser-side helpers shared across frontend routes.
   errors remain ordinary errors. `requestBlob` rejects JSON failures before
   saving, unwraps ordinary JSON exports, and preserves file bytes identified
   by Content-Disposition. `buildApiUrl` owns URLs for requests and streams.
-- `collectionDocuments.ts`, `pipelineRuns.ts`
-  Collection upload, current Document, independent preparation, and Pipeline
-  Run progress contracts. Collection history uses compact run summaries; one
+- `workspaceDocuments.ts`, `pipelineRuns.ts`
+  Workspace upload, current Document, independent preparation, and Pipeline
+  Run progress contracts. Workspace history uses compact run summaries; one
   run read retains complete diagnostic state. `pipelineRuns.ts` also queues
-  collection-level research-question formation and reads its persisted
+  workspace-level research-question formation and reads its persisted
   `objective_discovery` Pipeline Run directly. Clients reject invalid response
   identities and required containers at the request boundary; they do not
   fabricate missing states or rebuild valid server responses.
@@ -39,17 +39,17 @@ This node owns browser-side helpers shared across frontend routes.
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated
   versioned Evidence. It also reads one Objective's complete deterministic
-  collection Paper Map scope. Seed IDs remain question provenance; only the
+  workspace Paper Map scope. Seed IDs remain question provenance; only the
   returned recommended IDs are the default analysis selection, while papers
   requiring inspection remain a user decision. Its analysis command atomically
   confirms candidate Objectives and queues analysis over exact selected ready
   `document_ids` through the same endpoint. It also reads the
   deterministic Evidence Map for one Objective's published analysis; that read
   model does not create a second research identity. Feedback, curation, and
-  dataset export use only `(collection_id, objective_id, analysis_version,
+  dataset export use only `(workspace_id, objective_id, analysis_version,
 finding_id)`. Dataset URLs preserve the selected label and dataset-use
-  filters for JSON or training JSONL downloads; collection-level dataset and
-  gold-draft URLs serve the corresponding collection exports.
+  filters for JSON or training JSONL downloads; workspace-level dataset and
+  gold-draft URLs serve the corresponding workspace exports.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans
   may retain source provenance returned by the API.

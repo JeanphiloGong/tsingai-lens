@@ -26,7 +26,7 @@ from domain.core.scientific_fact import (
 
 def _objective() -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="collection-1",
         objective_id="objective-1",
         question="Does preheat affect elongation?",
         material_scope=("316L",),
@@ -184,7 +184,7 @@ def _selection(experiment_id: str, suffix: str) -> ObjectiveExperimentSelection:
 
 def _synthesize(revisions, selections):
     return experiment_finding_synthesis_service.synthesize_experiment_findings(
-        collection_id="collection-1",
+        workspace_id="collection-1",
         objective=_objective(),
         analysis_version=1,
         revisions=revisions,
@@ -408,7 +408,7 @@ def test_does_not_merge_incompatible_methods_or_invent_measurement_only_finding(
 
 def test_matches_non_ascii_objective_terms_without_dropping_them() -> None:
     objective = ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="预热是否影响延伸率？",
         material_scope=(),
@@ -430,7 +430,7 @@ def test_matches_non_ascii_objective_terms_without_dropping_them() -> None:
     )
 
     result = experiment_finding_synthesis_service.synthesize_experiment_findings(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=objective,
         analysis_version=1,
         revisions=(revision,),

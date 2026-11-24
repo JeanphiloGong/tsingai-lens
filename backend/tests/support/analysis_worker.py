@@ -18,16 +18,16 @@ class AnalysisWorkerFixture:
         self.client = client
 
     async def execute_queued_analysis(
-        self, collection_id, objective_id, analysis_version
+        self, workspace_id, objective_id, analysis_version
     ):
         job = await analysis_service.ObjectiveRepo.claim_next_objective_analysis_job(
             worker_id="test-worker", lease_duration=timedelta(seconds=300)
         )
         if job is None:
             return await analysis_service.get_analysis_state(
-                collection_id, objective_id, user_id="user-1"
+                workspace_id, objective_id, user_id="user-1"
             )
-        assert job.analysis.key == (collection_id, objective_id, analysis_version)
+        assert job.analysis.key == (workspace_id, objective_id, analysis_version)
         return await analysis_service.execute_objective_analysis_job(
             job,
             response_client=self.client,

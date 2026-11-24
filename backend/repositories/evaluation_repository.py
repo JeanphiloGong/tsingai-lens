@@ -50,12 +50,12 @@ class EvaluationRepository:
         ]
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.get(EvaluationGoldSetORM, gold_set.gold_id)
-            if row is not None and row.collection_id != gold_set.collection_id:
+            if row is not None and row.workspace_id != gold_set.workspace_id:
                 raise ValueError("gold set identity cannot be reassigned")
             if row is None:
                 row = EvaluationGoldSetORM(
                     gold_id=gold_set.gold_id,
-                    collection_id=gold_set.collection_id,
+                    workspace_id=gold_set.workspace_id,
                     version=gold_set.version,
                     target_layer=gold_set.target_layer,
                     metric_profile=gold_set.metric_profile,
@@ -81,7 +81,7 @@ class EvaluationRepository:
                 return None
             return EvaluationGoldSet(
                 gold_id=row.gold_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 version=row.version,
                 target_layer=row.target_layer,
                 metric_profile=row.metric_profile,
@@ -128,12 +128,12 @@ class EvaluationRepository:
         ]
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.get(EvaluationPredictionSnapshotORM, snapshot.snapshot_id)
-            if row is not None and row.collection_id != snapshot.collection_id:
+            if row is not None and row.workspace_id != snapshot.workspace_id:
                 raise ValueError("prediction snapshot identity cannot be reassigned")
             if row is None:
                 row = EvaluationPredictionSnapshotORM(
                     snapshot_id=snapshot.snapshot_id,
-                    collection_id=snapshot.collection_id,
+                    workspace_id=snapshot.workspace_id,
                     target_layer=snapshot.target_layer,
                     fact_source=snapshot.fact_source,
                     system_context=dict(snapshot.system_context),
@@ -159,7 +159,7 @@ class EvaluationRepository:
                 return None
             return EvaluationPredictionSnapshot(
                 snapshot_id=row.snapshot_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 target_layer=row.target_layer,
                 fact_source=row.fact_source,
                 system_context=dict(row.system_context),
@@ -231,17 +231,17 @@ class EvaluationRepository:
             if gold is None or snapshot is None:
                 raise ValueError("evaluation parents do not exist")
             if (
-                gold.collection_id != run.collection_id
-                or snapshot.collection_id != run.collection_id
+                gold.workspace_id != run.workspace_id
+                or snapshot.workspace_id != run.workspace_id
             ):
-                raise ValueError("evaluation parents must share collection")
+                raise ValueError("evaluation parents must share workspace")
             row = await db.get(EvaluationRunORM, run.evaluation_run_id)
-            if row is not None and row.collection_id != run.collection_id:
+            if row is not None and row.workspace_id != run.workspace_id:
                 raise ValueError("evaluation run identity cannot be reassigned")
             if row is None:
                 row = EvaluationRunORM(
                     evaluation_run_id=run.evaluation_run_id,
-                    collection_id=run.collection_id,
+                    workspace_id=run.workspace_id,
                     gold_id=run.gold_id,
                     prediction_snapshot_id=run.prediction_snapshot_id,
                     target_layer=run.target_layer,
@@ -272,7 +272,7 @@ class EvaluationRepository:
                 return None
             return EvaluationRun(
                 evaluation_run_id=row.evaluation_run_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 gold_id=row.gold_id,
                 prediction_snapshot_id=row.prediction_snapshot_id,
                 target_layer=row.target_layer,
@@ -318,11 +318,11 @@ class EvaluationRepository:
                 ),
             )
 
-    async def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]:
+    async def list_evaluation_runs(self, workspace_id: str) -> tuple[EvaluationRun, ...]:
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(
                 select(EvaluationRunORM)
-                .where(EvaluationRunORM.collection_id == collection_id)
+                .where(EvaluationRunORM.workspace_id == workspace_id)
                 .order_by(
                     EvaluationRunORM.created_at.desc(),
                     EvaluationRunORM.evaluation_run_id.desc(),
@@ -331,7 +331,7 @@ class EvaluationRepository:
             return tuple(
                 EvaluationRun(
                     evaluation_run_id=row.evaluation_run_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     gold_id=row.gold_id,
                     prediction_snapshot_id=row.prediction_snapshot_id,
                     target_layer=row.target_layer,

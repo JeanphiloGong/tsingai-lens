@@ -41,39 +41,39 @@ class FindingSummaryRequest(BaseModel):
 
 
 research_objective_router = APIRouter(
-    prefix="/collections", tags=["research-objectives"]
+    prefix="/workspaces", tags=["research-objectives"]
 )
 
 
 @research_objective_router.post(
-    "/{collection_id}/objective-discovery",
+    "/{workspace_id}/objective-discovery",
     response_model=ApiResponse[PipelineRunResponse],
     summary="Queue research question formation from selected ready documents",
 )
-async def discover_collection_objectives(
+async def discover_workspace_objectives(
     request: Request,
-    collection_id: str,
+    workspace_id: str,
     payload: DocumentSelectionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     run = await start_objective_discovery(
-        collection_id, tuple(payload.document_ids), user_id=user_id
+        workspace_id, tuple(payload.document_ids), user_id=user_id
     )
     return make_api_response(data=PipelineRunResponse(**pipeline_run_response(run)))
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives",
+    "/{workspace_id}/objectives",
     response_model=ApiResponse[PaginatedObjectiveListResponse],
-    summary="List collection research objectives",
+    summary="List workspace research objectives",
 )
-async def list_collection_objectives(
-    collection_id: str,
+async def list_workspace_objectives(
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     offset: int = Query(default=0, ge=0),
     limit: int | None = Query(default=None, ge=1, le=100),
 ) -> Response:
-    objectives = await list_objectives(collection_id, user_id=user_id)
+    objectives = await list_objectives(workspace_id, user_id=user_id)
     ranked_objectives = list(objectives)
     page = (
         ranked_objectives[offset:]
@@ -82,7 +82,7 @@ async def list_collection_objectives(
     )
     return make_api_response(
         data=PaginatedObjectiveListResponse(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objectives=[
                 {
                     **asdict(item.objective),
@@ -103,21 +103,21 @@ async def list_collection_objectives(
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/scope",
+    "/{workspace_id}/objectives/{objective_id}/scope",
     response_model=ApiResponse[ObjectiveScopeResponse],
-    summary="Preview the collection paper scope for one research objective",
+    summary="Preview the workspace paper scope for one research objective",
 )
-async def preview_collection_objective_scope(
-    collection_id: str,
+async def preview_workspace_objective_scope(
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     preview = await objective_scope_service.preview_objective_scope(
-        collection_id, objective_id, user_id=user_id
+        workspace_id, objective_id, user_id=user_id
     )
     return make_api_response(
         data=ObjectiveScopeResponse(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             counts=preview.counts,
             recommended_document_ids=list(preview.recommended_document_ids),
@@ -130,20 +130,20 @@ async def preview_collection_objective_scope(
 
 
 @research_objective_router.post(
-    "/{collection_id}/objectives/{objective_id}/analysis",
+    "/{workspace_id}/objectives/{objective_id}/analysis",
     response_model=ApiResponse[ObjectiveAnalysisResponse],
     summary="Confirm a research objective and start analysis",
-    name="run_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
+    name="run_workspace_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
-async def start_collection_objective_analysis(
+async def start_workspace_objective_analysis(
     request: Request,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     payload: DocumentSelectionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     result = await objective_analysis_service.start_objective_analysis(
-        collection_id,
+        workspace_id,
         objective_id,
         tuple(payload.document_ids),
         user_id=user_id,
@@ -152,34 +152,34 @@ async def start_collection_objective_analysis(
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/analysis/status",
+    "/{workspace_id}/objectives/{objective_id}/analysis/status",
     response_model=ApiResponse[ObjectiveAnalysisStatusResponse],
     summary="Read lightweight research objective analysis progress",
 )
-async def get_collection_objective_analysis_status(
-    collection_id: str,
+async def get_workspace_objective_analysis_status(
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await objective_analysis_service.get_analysis_status(
-        collection_id, objective_id, user_id=user_id
+        workspace_id, objective_id, user_id=user_id
     )
     return make_api_response(data=ObjectiveAnalysisStatusResponse(**payload))
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/analysis",
+    "/{workspace_id}/objectives/{objective_id}/analysis",
     response_model=ApiResponse[ObjectiveAnalysisResponse],
     summary="Read research objective analysis state",
-    name="get_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
+    name="get_workspace_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
-async def get_collection_objective_analysis_state(
-    collection_id: str,
+async def get_workspace_objective_analysis_state(
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     result = await objective_analysis_service.get_analysis_state(
-        collection_id,
+        workspace_id,
         objective_id,
         user_id=user_id,
     )
@@ -187,12 +187,12 @@ async def get_collection_objective_analysis_state(
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/findings",
+    "/{workspace_id}/objectives/{objective_id}/findings",
     response_model=ApiResponse[FindingListResponse],
     summary="List published findings",
 )
 async def list_objective_findings(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int | None = Query(default=None, ge=1),
@@ -200,7 +200,7 @@ async def list_objective_findings(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> Response:
     payload = await objective_analysis_service.list_findings(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version=analysis_version,
         offset=offset,
@@ -211,19 +211,19 @@ async def list_objective_findings(
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}",
+    "/{workspace_id}/objectives/{objective_id}/findings/{finding_id}",
     response_model=ApiResponse[FindingDetailResponse],
     summary="Read one published finding",
 )
 async def get_objective_finding(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int | None = Query(default=None, ge=1),
 ) -> Response:
     payload = await objective_analysis_service.get_finding(
-        collection_id,
+        workspace_id,
         objective_id,
         finding_id,
         analysis_version=analysis_version,
@@ -233,20 +233,20 @@ async def get_objective_finding(
 
 
 @research_objective_router.post(
-    "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary",
+    "/{workspace_id}/objectives/{objective_id}/findings/{finding_id}/summary",
     response_model=ApiResponse[FindingSummaryResponse],
     summary="Generate a cited reading summary of a published Finding",
 )
 async def summarize_objective_finding(
     request: Request,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     finding_id: str,
     body: FindingSummaryRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await objective_analysis_service.summarize_objective_finding(
-        collection_id,
+        workspace_id,
         objective_id,
         finding_id,
         analysis_version=body.analysis_version,
@@ -257,12 +257,12 @@ async def summarize_objective_finding(
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/evidence",
+    "/{workspace_id}/objectives/{objective_id}/evidence",
     response_model=ApiResponse[ObjectiveEvidenceListResponse],
     summary="List published objective evidence",
 )
 async def list_objective_evidence(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int | None = Query(default=None, ge=1),
@@ -271,7 +271,7 @@ async def list_objective_evidence(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Response:
     payload = await objective_analysis_service.list_evidence(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
@@ -283,17 +283,17 @@ async def list_objective_evidence(
 
 
 @research_objective_router.get(
-    "/{collection_id}/objectives/{objective_id}/evidence-map",
+    "/{workspace_id}/objectives/{objective_id}/evidence-map",
     response_model=ApiResponse[ObjectiveEvidenceMapResponse],
     summary="Read the published Objective evidence map",
 )
 async def get_objective_evidence_map(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await objective_analysis_service.get_evidence_map(
-        collection_id, objective_id, user_id=user_id
+        workspace_id, objective_id, user_id=user_id
     )
     return make_api_response(data=ObjectiveEvidenceMapResponse(**payload))
 
@@ -301,7 +301,7 @@ async def get_objective_evidence_map(
 def _analysis_response(result: dict) -> ObjectiveAnalysisResponse:
     stored = result["objective"]
     return ObjectiveAnalysisResponse(
-        collection_id=result["collection_id"],
+        workspace_id=result["workspace_id"],
         objective={
             **asdict(stored.objective),
             "created_at": stored.created_at.isoformat() if stored.created_at else None,

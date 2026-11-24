@@ -105,9 +105,9 @@ class PipelineRunORM(Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(
+    workspace_id: Mapped[str] = mapped_column(
         String(64),
-        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        ForeignKey("workspaces.workspace_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

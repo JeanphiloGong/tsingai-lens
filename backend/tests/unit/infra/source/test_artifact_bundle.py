@@ -198,7 +198,7 @@ def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
         figure_assets={},
     )
     document = bundle.to_documents()[0]
-    document_profile_service.collection_service = None
+    document_profile_service.workspace_service = None
     document_profile_service.SourceArtifactRepo = None
     document_profile_service.DocumentProfileRepo = None
     content = document_profile_service._build_document_content_blocks(

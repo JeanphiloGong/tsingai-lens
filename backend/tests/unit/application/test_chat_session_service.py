@@ -50,7 +50,7 @@ from infra.persistence import database
 from pydantic import BaseModel, ConfigDict
 from repositories.chat_repository import ChatRepository, ChatResponseSnapshot
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.postgres import read_tool_calls, read_tool_results, seed_collection
+from tests.support.postgres import read_tool_calls, read_tool_results, seed_workspace
 from tests.unit.application.test_research_agent_runner import _Model
 
 from tests.support.chat_model_connections import make_scripted_chat_service, scripted_chat_runner  # noqa: F401
@@ -93,36 +93,36 @@ class _WriteCapability:
         )
 
 
-class _CollectionService:
+class _WorkspaceService:
     def __init__(self) -> None:
         self.full_reads = 0
 
-    async def get_agent_default_permission_for_user(self, collection_id, user_id):
-        if collection_id != "col-1" or user_id != "user-1":
-            raise FileNotFoundError("collection not found")
+    async def get_agent_default_permission_for_user(self, workspace_id, user_id):
+        if workspace_id != "col-1" or user_id != "user-1":
+            raise FileNotFoundError("workspace not found")
         return {"mode": "confirm"}
 
-    async def get_collection_for_user(
+    async def get_workspace_for_user(
         self,
-        collection_id: str,
+        workspace_id: str,
         user_id: str,
     ) -> dict:
         self.full_reads += 1
-        if collection_id != "col-1" or user_id != "user-1":
-            raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id, "owner_user_id": user_id}
+        if workspace_id != "col-1" or user_id != "user-1":
+            raise FileNotFoundError("workspace not found")
+        return {"workspace_id": workspace_id, "owner_user_id": user_id}
 
-    async def get_document(self, collection_id: str, document_id: str) -> dict:
-        if collection_id != "col-1" or document_id != "doc-1":
+    async def get_document(self, workspace_id: str, document_id: str) -> dict:
+        if workspace_id != "col-1" or document_id != "doc-1":
             raise ResourceNotFoundException("document not found")
-        return {"collection_id": collection_id, "document_id": document_id}
+        return {"workspace_id": workspace_id, "document_id": document_id}
 
 
 @pytest.fixture(autouse=True)
 async def research_sources(postgres_session_factory):
-    from tests.support.postgres import seed_collection
+    from tests.support.postgres import seed_workspace
 
-    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+    await seed_workspace(postgres_session_factory, "col-1", document_ids=("doc-1",))
     await SourceArtifactRepository().replace_document(
         "col-1",
         SourceDocument(
@@ -150,7 +150,7 @@ def _service(
     repository: ChatRepository,
     *capabilities,
 ) -> chat_session_service.ChatSessionService:
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     chat_session_service.ChatRepo = repository
     runner = ResearchAgentRunner(
@@ -164,7 +164,7 @@ async def test_chat_session_service_persists_ordinary_conversation(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="你好，我可以帮助你。")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
 
     result = await service.send_message(
         session.session_id,
@@ -179,17 +179,17 @@ async def test_chat_session_service_persists_ordinary_conversation(
         await service.get_session_for_user(session.session_id, "user-2")
 
 
-async def test_chat_session_access_uses_collection_owner_probe(
+async def test_chat_session_access_uses_workspace_owner_probe(
     *, postgres_session_factory
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="answer")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
 
     await service.get_session_for_user(session.session_id, "user-1")
-    await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
+    await service.list_sessions_for_user(workspace_id="col-1", user_id="user-1")
 
-    assert chat_session_service.collection_service.full_reads == 0
+    assert chat_session_service.workspace_service.full_reads == 0
 
 
 class _FailingAnalysisJobs:
@@ -201,7 +201,7 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(
     *, postgres_session_factory
 ) -> None:
     repository = ChatRepository()
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     chat_session_service.ChatRepo = repository
     runner = ResearchAgentRunner(
@@ -209,7 +209,7 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(
     )
     chat_session_service.AnalysisJobRepo = _FailingAnalysisJobs()
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     await repository.save_trajectory(
         chat_session=session,
         messages=(
@@ -249,17 +249,17 @@ async def test_chat_session_service_persists_selected_source_with_user_message(
     service = _service(
         _Model(ModelTurn(content="这段原文报告了一个测量结果。")), repository
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
             resource_id="doc-1:results",
             href=(
-                "/collections/col-1/documents/doc-1"
+                "/workspaces/col-1/documents/doc-1"
                 "?view=parsed-paper&source_ref=results&page=3"
             ),
         ),
-        collection_id="col-1",
+        workspace_id="col-1",
         document_id="doc-1",
         document_title="Client supplied title",
         source_kind="text_window",
@@ -287,7 +287,7 @@ async def test_chat_session_service_persists_selected_source_with_user_message(
         == sha256(b"Conductivity improved to 12 mS/cm under EIS.").hexdigest()
     )
     assert canonical_context.resource_ref.href == (
-        "/collections/col-1/documents/doc-1"
+        "/workspaces/col-1/documents/doc-1"
         "?view=parsed-paper&source_ref=results&page=3"
     )
     assert stored[1].source_contexts == ()
@@ -310,11 +310,11 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(
     )
     document = await sources.read_document("col-1", "doc-1")
     document = replace(document, blocks=(*document.blocks, methods))
-    await seed_collection(
+    await seed_workspace(
         database.AsyncSessionLocal, "col-1", document_ids=(document.document_id,)
     )
     await sources.replace_document("col-1", document)
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = sources
     chat_session_service.ChatRepo = repository
     runner = ResearchAgentRunner(
@@ -322,13 +322,13 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(
         capabilities=CapabilityRegistry(()),
     )
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     contexts = tuple(
         ChatSourceContext(
             resource_ref=ChatResourceRef(
                 resource_type="source", resource_id=f"doc-1:{block.block_id}", href=None
             ),
-            collection_id="col-1",
+            workspace_id="col-1",
             document_id="doc-1",
             document_title="Untrusted client label",
             source_kind="text_window",
@@ -371,25 +371,25 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(
     assert stored[-1].role.value == "assistant"
 
 
-async def test_chat_session_service_rejects_source_from_another_collection(
+async def test_chat_session_service_rejects_source_from_another_workspace(
     *, postgres_session_factory
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     foreign_source = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
             resource_id="doc-2:results",
-            href="/collections/col-2/documents/doc-2?source_ref=results",
+            href="/workspaces/col-2/documents/doc-2?source_ref=results",
         ),
-        collection_id="col-2",
+        workspace_id="col-2",
         document_id="doc-2",
         document_title="Foreign Paper",
         source_kind="text_window",
         source_ref="results",
         page=1,
-        quote="A result from another collection.",
+        quote="A result from another workspace.",
         heading_path="Results",
     )
 
@@ -409,23 +409,23 @@ async def test_chat_session_service_rejects_unknown_document_source(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     unknown_source = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
             resource_id="doc-missing:results",
             href=(
-                "/collections/col-1/documents/doc-missing"
+                "/workspaces/col-1/documents/doc-missing"
                 "?view=parsed-paper&source_ref=results"
             ),
         ),
-        collection_id="col-1",
+        workspace_id="col-1",
         document_id="doc-missing",
         document_title="Unknown Paper",
         source_kind="text_window",
         source_ref="results",
         page=1,
-        quote="A client-supplied passage without a Collection document.",
+        quote="A client-supplied passage without a Workspace document.",
         heading_path="Results",
     )
 
@@ -473,17 +473,17 @@ async def test_chat_session_service_rejects_forged_source_context(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
             resource_id=f"doc-1:{source_ref}",
             href=(
-                "/collections/col-1/documents/doc-1"
+                "/workspaces/col-1/documents/doc-1"
                 f"?view=parsed-paper&source_ref={source_ref}"
             ),
         ),
-        collection_id="col-1",
+        workspace_id="col-1",
         document_id="doc-1",
         document_title="Paper A",
         source_kind=source_kind,
@@ -511,13 +511,13 @@ async def test_chat_session_service_accepts_a_bounded_canonical_quote(
     service = _service(
         _Model(ModelTurn(content="This is a partial Source quote.")), repository
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
             resource_id="doc-1:results",
         ),
-        collection_id="col-1",
+        workspace_id="col-1",
         document_id="doc-1",
         document_title="Paper A",
         source_kind="text_window",
@@ -544,13 +544,13 @@ async def test_chat_session_service_rejects_a_stale_source_digest(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
             resource_id="doc-1:results",
         ),
-        collection_id="col-1",
+        workspace_id="col-1",
         document_id="doc-1",
         document_title="Paper A",
         source_kind="text_window",
@@ -576,7 +576,7 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="逐段回复")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
 
     stream = await service.send_message_stream(
         session.session_id,
@@ -633,8 +633,8 @@ async def test_chat_shutdown_keeps_another_apps_stream_running(
     second_model = _PausedResponseModel()
     first = _service(first_model, repository)
     second = _service(second_model, repository)
-    first_session = await first.create_session(collection_id="col-1", user_id="user-1")
-    second_session = await second.create_session(collection_id="col-1", user_id="user-1")
+    first_session = await first.create_session(workspace_id="col-1", user_id="user-1")
+    second_session = await second.create_session(workspace_id="col-1", user_id="user-1")
     first_stream = await first.send_message_stream(
         first_session.session_id, "user-1", message="Explain matched tensile conditions."
     )
@@ -679,7 +679,7 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
     model = _PausedResponseModel()
     service = _service(model, repository)
     reader = _service(model, repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     original = await service.send_message_stream(
         session.session_id,
         "user-1",
@@ -736,7 +736,7 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
     repository = ChatRepository()
     model = _PausedResponseModel()
     service = _service(model, repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     original = await service.send_message_stream(
         session.session_id,
         "user-1",
@@ -802,7 +802,7 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(
         ),
     )
     service = _service(model, repository, capability)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     stream = await service.send_message_stream(
         session.session_id,
         "user-1",
@@ -866,7 +866,7 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(
     repository = ChatRepository()
     model = _Model(ModelTurn(content="The previous interruption was recovered."))
     service = _service(model, repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     user_message = ChatMessage.user(
         message_id="user-1-message",
         session_id=session.session_id,
@@ -1010,7 +1010,7 @@ async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="unused")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     snapshot = ChatResponseSnapshot(
         response_id="response-1",
         sequence=1,
@@ -1064,7 +1064,7 @@ async def test_approved_continuation_captures_text_without_repeating_the_write(
         repository,
         capability,
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     initial = await service.send_message(
         session.session_id,
         "user-1",
@@ -1133,7 +1133,7 @@ async def test_approved_write_response_failure_preserves_saved_result_but_fails_
         repository,
         capability,
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     proposed = await service.send_message(
         session.session_id,
         "user-1",
@@ -1185,8 +1185,8 @@ async def test_chat_session_service_checkpoints_every_agent_step(
     monkeypatch.setattr(repository, "save_trajectory", save_trajectory)
     capability = _WriteCapability()
     capability.spec = ToolSpec(
-        name="get_collection_context",
-        description="Read collection context.",
+        name="get_workspace_context",
+        description="Read workspace context.",
         risk=ToolRisk.READ,
         input_model=_Question,
     )
@@ -1195,22 +1195,22 @@ async def test_chat_session_service_checkpoints_every_agent_step(
             ModelTurn(
                 tool_calls=(
                     ModelToolCall(
-                        name="get_collection_context",
-                        arguments={"question": "What is in this collection?"},
+                        name="get_workspace_context",
+                        arguments={"question": "What is in this workspace?"},
                     ),
                 )
             ),
-            ModelTurn(content="The collection contains relevant papers."),
+            ModelTurn(content="The workspace contains relevant papers."),
         ),
         repository,
         capability,
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
 
     result = await service.send_message(
         session.session_id,
         "user-1",
-        message="What is in this collection?",
+        message="What is in this workspace?",
     )
 
     assert result["status"] == "completed"
@@ -1259,8 +1259,8 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
     monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
     repository = ChatRepository()
     sources = SourceArtifactRepository()
-    collection = _CollectionService()
-    document_sources.collection_service = collection
+    workspace = _WorkspaceService()
+    document_sources.workspace_service = workspace
     document_sources.SourceArtifactRepo = sources
     read = ReadSourceCapability()
     cancelled = asyncio.Event()
@@ -1304,10 +1304,10 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
         limits=AgentRunLimits(max_elapsed_seconds=0.5, max_model_tokens=100),
     )
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = collection
+    chat_session_service.workspace_service = workspace
     chat_session_service.SourceArtifactRepo = sources
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     stream = await service.send_message_stream(
         session.session_id,
         "user-1",
@@ -1381,7 +1381,7 @@ async def test_chat_session_service_approves_exact_write_and_resumes(
         repository,
         capability,
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     pending_turn = await service.send_message(
         session.session_id,
         "user-1",
@@ -1467,7 +1467,7 @@ async def test_chat_session_service_rejection_never_executes_write(
         repository,
         capability,
     )
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     pending = (
         await service.send_message(
             session.session_id,
@@ -1510,7 +1510,7 @@ async def test_rename_survives_continuation_and_rejects_non_owner(
 ) -> None:
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="Evidence retained.")), repository)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     saved = await service.set_session_title_for_user(
         session.session_id, "user-1", title="  IN718 comparison  "
     )
@@ -1532,7 +1532,7 @@ async def test_rename_survives_continuation_and_rejects_non_owner(
         await service.get_session_for_user(session.session_id, "user-1")
     ).title == "IN718 comparison"
     assert (
-        await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
+        await service.list_sessions_for_user(workspace_id="col-1", user_id="user-1")
     )[0].title == "IN718 comparison"
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
 
@@ -1585,7 +1585,7 @@ async def test_approval_continuation_recovers_context_without_repeating_write(
     capability = _WriteCapability()
     model = RecoveringModel()
     service = _service(model, repository, capability)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     # Persist the preceding investigation before the approval request.
     history = tuple(
         replace(message, session_id=session.session_id)

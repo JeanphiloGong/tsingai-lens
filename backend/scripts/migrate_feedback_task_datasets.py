@@ -36,7 +36,7 @@ LEGACY_SNAPSHOT_TABLE = "feedback_dataset_snapshots"
 @dataclass(frozen=True)
 class DatasetMigrationSpec:
     dataset_id: str
-    collection_id: str
+    workspace_id: str
     owner_id: str
     name: str
     task_type: str
@@ -232,11 +232,11 @@ def build_plan_from_records(
             continue
         task_type = _text(snapshot.get("dataset_type"))
         owner_id = _text(snapshot.get("owner_id"))
-        collection_id = _text(snapshot.get("collection_id"))
+        workspace_id = _text(snapshot.get("workspace_id"))
         if task_type not in {"sft", "preference", "evaluation"}:
             skipped.append({"legacy_snapshot_id": legacy_id, "reason": "legacy_task_type_invalid"})
             continue
-        if not owner_id or not collection_id:
+        if not owner_id or not workspace_id:
             skipped.append({"legacy_snapshot_id": legacy_id, "reason": "legacy_snapshot_scope_missing"})
             continue
         dataset_id = stable_id("fdset_mig", legacy_id)
@@ -246,7 +246,7 @@ def build_plan_from_records(
             _dataset_spec(
                 dataset_id=dataset_id,
                 owner_id=owner_id,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 task_type=task_type,
                 created_at=_text(snapshot.get("created_at")) or timestamp,
                 legacy_id=legacy_id,
@@ -348,15 +348,15 @@ def build_plan_from_records(
         if not _accepted_review(case_id, annotation, review_map):
             continue
         owner_id = _text(annotation.get("created_by"))
-        collection_id = _text(case.get("collection_id"))
-        if not owner_id or not collection_id:
+        workspace_id = _text(case.get("workspace_id"))
+        if not owner_id or not workspace_id:
             skipped.append({"case_id": case_id, "reason": "legacy_case_scope_missing"})
             continue
         for task_type in _texts(annotation.get("dataset_uses")):
             if task_type not in {"sft", "preference", "evaluation"}:
                 continue
-            dataset_key = f"case:{owner_id}:{collection_id}:{task_type}"
-            dataset_id = stable_id("fdset_mig_case", owner_id, collection_id, task_type)
+            dataset_key = f"case:{owner_id}:{workspace_id}:{task_type}"
+            dataset_id = stable_id("fdset_mig_case", owner_id, workspace_id, task_type)
             if (case_id, task_type) in covered_case_tasks:
                 continue
             datasets.setdefault(
@@ -364,7 +364,7 @@ def build_plan_from_records(
                 _dataset_spec(
                     dataset_id=dataset_id,
                     owner_id=owner_id,
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     task_type=task_type,
                     created_at=_text(case.get("created_at")) or timestamp,
                     legacy_id=case_id,
@@ -467,7 +467,7 @@ async def apply_plan(
             db.add(
                 FeedbackDatasetORM(
                     dataset_id=spec.dataset_id,
-                    collection_id=spec.collection_id,
+                    workspace_id=spec.workspace_id,
                     name=spec.name,
                     task_type=spec.task_type,
                     construction_spec=dict(spec.construction_spec),
@@ -693,7 +693,7 @@ def _dataset_spec(
     *,
     dataset_id: str,
     owner_id: str,
-    collection_id: str,
+    workspace_id: str,
     task_type: str,
     created_at: str,
     legacy_id: str,
@@ -703,7 +703,7 @@ def _dataset_spec(
     name = f"Migrated {label} {legacy_id[-24:]}"[:120]
     return DatasetMigrationSpec(
         dataset_id=dataset_id,
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         owner_id=owner_id,
         name=name,
         task_type=task_type,
@@ -858,7 +858,7 @@ def _snapshot_record(row: Any) -> dict[str, Any]:
     return {
         "dataset_id": row.dataset_id,
         "owner_id": row.owner_id,
-        "collection_id": row.collection_id,
+        "workspace_id": row.workspace_id,
         "dataset_type": row.dataset_type,
         "rows": row.rows or [],
         "provenance": row.provenance or {},
@@ -869,7 +869,7 @@ def _snapshot_record(row: Any) -> dict[str, Any]:
 def _case_record(row: Any) -> dict[str, Any]:
     return {
         "case_id": row.case_id,
-        "collection_id": row.collection_id,
+        "workspace_id": row.workspace_id,
         "session_id": row.session_id,
         "anchor_message_id": row.anchor_message_id,
         "context_snapshot": row.context_snapshot or {},
@@ -904,7 +904,7 @@ def _review_record(row: Any) -> dict[str, Any]:
 
 def _assert_dataset_identity(row: Any, spec: DatasetMigrationSpec) -> None:
     expected = {
-        "collection_id": spec.collection_id,
+        "workspace_id": spec.workspace_id,
         "task_type": spec.task_type,
         "created_by": spec.owner_id,
     }

@@ -17,7 +17,7 @@ ProfileStatus = Literal["completed", "extraction_failed"]
 
 
 class DocumentProfileSummaryResponse(BaseModel):
-    """Collection-level rollup derived from document profiles."""
+    """Workspace-level rollup derived from document profiles."""
 
     total_documents: int = 0
     by_doc_type: dict[str, int] = Field(default_factory=dict)
@@ -37,9 +37,9 @@ class DocumentProfileItemResponse(BaseModel):
 
 
 class DocumentProfileListResponse(BaseModel):
-    """Collection-scoped document profile listing."""
+    """Workspace-scoped document profile listing."""
 
-    collection_id: str
+    workspace_id: str
     total: int
     count: int
     summary: DocumentProfileSummaryResponse
@@ -60,9 +60,9 @@ class DocumentContentBlockResponse(BaseModel):
 
 
 class DocumentContentResponse(BaseModel):
-    """Collection-scoped document viewer payload."""
+    """Workspace-scoped document viewer payload."""
 
-    collection_id: str
+    workspace_id: str
     document_id: str
     title: str | None = None
     source_filename: str | None = None
@@ -89,7 +89,7 @@ class DocumentMarkdownSourceMapResponse(BaseModel):
 class DocumentMarkdownResponse(BaseModel):
     """Markdown-first display projection for one parsed document."""
 
-    collection_id: str
+    workspace_id: str
     document_id: str
     title: str | None = None
     source_filename: str | None = None
@@ -99,16 +99,16 @@ class DocumentMarkdownResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-document_router = APIRouter(prefix="/collections", tags=["documents"])
+document_router = APIRouter(prefix="/workspaces", tags=["documents"])
 
 
 @document_router.get(
-    "/{collection_id}/documents/profiles",
+    "/{workspace_id}/documents/profiles",
     response_model=ApiResponse[DocumentProfileListResponse],
-    summary="List document profiles in a collection",
+    summary="List document profiles in a workspace",
 )
-async def list_collection_document_profiles(
-    collection_id: str,
+async def list_workspace_document_profiles(
+    workspace_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     limit: Annotated[int, Query(ge=1, le=500, description="Number to return")] = 50,
     offset: Annotated[int, Query(ge=0, description="Result offset")] = 0,
@@ -129,7 +129,7 @@ async def list_collection_document_profiles(
     ] = None,
 ) -> Response:
     payload = await document_profile_service.list_document_profiles(
-        collection_id,
+        workspace_id,
         offset=offset,
         limit=limit,
         query=query,
@@ -141,55 +141,55 @@ async def list_collection_document_profiles(
 
 
 @document_router.get(
-    "/{collection_id}/documents/{document_id}/profile",
+    "/{workspace_id}/documents/{document_id}/profile",
     response_model=ApiResponse[DocumentProfileItemResponse],
-    summary="Read a document profile from a collection",
+    summary="Read a document profile from a workspace",
 )
-async def get_collection_document_profile(
-    collection_id: str,
+async def get_workspace_document_profile(
+    workspace_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await document_profile_service.get_document_profile(
-        collection_id, document_id, user_id=user_id
+        workspace_id, document_id, user_id=user_id
     )
     return make_api_response(data=DocumentProfileItemResponse(**payload))
 
 
 @document_router.get(
-    "/{collection_id}/documents/{document_id}/content",
+    "/{workspace_id}/documents/{document_id}/content",
     response_model=ApiResponse[DocumentContentResponse],
-    summary="Read document viewer content from a collection",
+    summary="Read document viewer content from a workspace",
 )
-async def get_collection_document_content(
-    collection_id: str,
+async def get_workspace_document_content(
+    workspace_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await document_profile_service.get_document_content(
-        collection_id, document_id, user_id=user_id
+        workspace_id, document_id, user_id=user_id
     )
     return make_api_response(data=DocumentContentResponse(**payload))
 
 
 @document_router.get(
-    "/{collection_id}/documents/{document_id}/markdown",
+    "/{workspace_id}/documents/{document_id}/markdown",
     response_model=ApiResponse[DocumentMarkdownResponse],
-    summary="Read a document Markdown projection from a collection",
+    summary="Read a document Markdown projection from a workspace",
 )
-async def get_collection_document_markdown(
-    collection_id: str,
+async def get_workspace_document_markdown(
+    workspace_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await document_markdown_service.get_document_markdown(
-        collection_id, document_id, user_id=user_id,
+        workspace_id, document_id, user_id=user_id,
     )
     return make_api_response(data=DocumentMarkdownResponse(**payload))
 
 
 @document_router.get(
-    "/{collection_id}/documents/{document_id}/source",
+    "/{workspace_id}/documents/{document_id}/source",
     summary="Stream the original source file for one document",
     response_class=Response,
     responses={
@@ -204,13 +204,13 @@ async def get_collection_document_markdown(
         }
     },
 )
-async def get_collection_document_source(
-    collection_id: str,
+async def get_workspace_document_source(
+    workspace_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await source_archive_service.resolve_document_source_file(
-        collection_id, document_id, source_filename=None, user_id=user_id,
+        workspace_id, document_id, source_filename=None, user_id=user_id,
     )
 
     filename = str(payload["filename"])
@@ -228,7 +228,7 @@ async def get_collection_document_source(
 
 
 @document_router.get(
-    "/{collection_id}/documents/{document_id}/figures/{figure_id}/image",
+    "/{workspace_id}/documents/{document_id}/figures/{figure_id}/image",
     summary="Stream an extracted figure image for one parsed document",
     response_class=Response,
     responses={
@@ -243,14 +243,14 @@ async def get_collection_document_source(
         }
     },
 )
-async def get_collection_document_figure_image(
-    collection_id: str,
+async def get_workspace_document_figure_image(
+    workspace_id: str,
     document_id: str,
     figure_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     payload = await document_markdown_service.resolve_figure_image_file(
-        collection_id, document_id, figure_id, user_id=user_id,
+        workspace_id, document_id, figure_id, user_id=user_id,
     )
 
     filename = str(payload["filename"])

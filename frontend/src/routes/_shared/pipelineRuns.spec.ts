@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestJson } from './api';
 import {
-	formCollectionResearchQuestions,
-	listCollectionPipelineRuns,
-	prepareCollectionDocument
+	formWorkspaceResearchQuestions,
+	listWorkspacePipelineRuns,
+	prepareWorkspaceDocument
 } from './pipelineRuns';
 
 vi.mock('./api', () => ({ requestJson: vi.fn() }));
@@ -16,7 +16,7 @@ describe('document preparation API', () => {
 	it('starts preparation for one exact document and preserves run identity', async () => {
 		request.mockResolvedValue({
 			run_id: 'run_1',
-			collection_id: 'col_1',
+			workspace_id: 'col_1',
 			scope_type: 'document',
 			scope_id: 'doc_1',
 			pipeline_name: 'document_preparation',
@@ -31,9 +31,9 @@ describe('document preparation API', () => {
 			updated_at: '2026-08-27T00:00:00Z'
 		});
 
-		const result = await prepareCollectionDocument('col_1', 'doc_1');
+		const result = await prepareWorkspaceDocument('col_1', 'doc_1');
 
-		expect(request).toHaveBeenCalledWith('/collections/col_1/documents/doc_1/preparation', {
+		expect(request).toHaveBeenCalledWith('/workspaces/col_1/documents/doc_1/preparation', {
 			method: 'POST'
 		});
 		expect(result).toMatchObject({
@@ -44,11 +44,11 @@ describe('document preparation API', () => {
 		});
 	});
 
-	it('queues research-question formation as a collection run', async () => {
+	it('queues research-question formation as a workspace run', async () => {
 		request.mockResolvedValue({
 			run_id: 'run_discovery',
-			collection_id: 'col_1',
-			scope_type: 'collection',
+			workspace_id: 'col_1',
+			scope_type: 'workspace',
 			scope_id: 'col_1',
 			pipeline_name: 'objective_discovery',
 			mode: 'standard',
@@ -62,9 +62,9 @@ describe('document preparation API', () => {
 			updated_at: '2026-08-31T00:00:00Z'
 		});
 
-		const result = await formCollectionResearchQuestions('col_1', ['doc_1', 'doc_2']);
+		const result = await formWorkspaceResearchQuestions('col_1', ['doc_1', 'doc_2']);
 
-		expect(request).toHaveBeenCalledWith('/collections/col_1/objective-discovery', {
+		expect(request).toHaveBeenCalledWith('/workspaces/col_1/objective-discovery', {
 			method: 'POST',
 			body: JSON.stringify({ document_ids: ['doc_1', 'doc_2'] })
 		});
@@ -75,9 +75,9 @@ describe('document preparation API', () => {
 		});
 	});
 
-	it('preserves collection history as compact run summaries', async () => {
+	it('preserves workspace history as compact run summaries', async () => {
 		request.mockResolvedValue({
-			collection_id: 'col_1',
+			workspace_id: 'col_1',
 			count: 1,
 			items: [
 				{
@@ -99,9 +99,9 @@ describe('document preparation API', () => {
 			]
 		});
 
-		const result = await listCollectionPipelineRuns('col_1', { limit: 100 });
+		const result = await listWorkspacePipelineRuns('col_1', { limit: 100 });
 
-		expect(request).toHaveBeenCalledWith('/collections/col_1/pipeline-runs?limit=100&offset=0', {
+		expect(request).toHaveBeenCalledWith('/workspaces/col_1/pipeline-runs?limit=100&offset=0', {
 			method: 'GET'
 		});
 		expect(result.items[0]).toEqual({

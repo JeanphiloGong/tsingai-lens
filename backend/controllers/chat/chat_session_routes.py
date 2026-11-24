@@ -80,12 +80,12 @@ async def set_chat_permission(
 )
 async def list_chat_sessions(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    collection_id: str = Query(min_length=1, max_length=64),
+    workspace_id: str = Query(min_length=1, max_length=64),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
     sessions = await session_service.ChatService.list_sessions_for_user(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         user_id=user_id,
         limit=limit,
         offset=offset,
@@ -107,14 +107,14 @@ async def list_chat_sessions(
     "",
     response_model=ApiResponse[ChatSessionResponse],
     status_code=200,
-    summary="Create a collection-bound Research Agent Chat session",
+    summary="Create a workspace-bound Research Agent Chat session",
 )
 async def create_chat_session(
     payload: ChatSessionCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
     session = await session_service.ChatService.create_session(
-        collection_id=payload.collection_id,
+        workspace_id=payload.workspace_id,
         user_id=user_id,
     )
     return make_api_response(
@@ -421,7 +421,7 @@ def _map_source_contexts(
                     resource_id=item.resource_ref.resource_id,
                     href=item.resource_ref.href,
                 ),
-                collection_id=item.collection_id,
+                workspace_id=item.workspace_id,
                 document_id=item.document_id,
                 document_title=item.document_title,
                 source_kind=item.source_kind,

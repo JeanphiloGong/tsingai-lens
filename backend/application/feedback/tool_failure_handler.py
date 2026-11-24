@@ -252,7 +252,7 @@ async def analyze_tool_failure_job(
         signal_id=signal.signal_id,
         signal_type="tool_failure",
         session_id=session.session_id,
-        collection_id=session.collection_id,
+        workspace_id=session.workspace_id,
         tool_call_id=call.tool_call_id,
         assistant_message_id=assistant.message_id,
         result_message_id=result_message.message_id,

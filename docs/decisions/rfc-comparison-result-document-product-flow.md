@@ -40,7 +40,7 @@ This RFC should be read with:
 Implementation companions remain module-owned:
 
 - [`../backend/docs/specs/api.md`](../../backend/docs/specs/api.md)
-- [`../frontend/src/routes/collections/lens-v1-interface-spec.md`](../../frontend/src/routes/collections/lens-v1-interface-spec.md)
+- [`../frontend/src/routes/workspaces/lens-v1-interface-spec.md`](../../frontend/src/routes/workspaces/lens-v1-interface-spec.md)
 
 This RFC should not be used to silently treat raw
 `/api/v1/comparable-results` payloads as the final product-facing page model.
@@ -451,4 +451,4 @@ Frontend-owned docs and route plans should treat:
 - [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](rfc-paper-facts-primary-domain-model.md)
 - [RFC Comparable-Result Substrate and Materials Database Direction](rfc-comparable-result-substrate-and-materials-database-direction.md)
 - [Backend API Spec](../../backend/docs/specs/api.md)
-- [Frontend Lens V1 Interface Spec](../../frontend/src/routes/collections/lens-v1-interface-spec.md)
+- [Frontend Lens V1 Interface Spec](../../frontend/src/routes/workspaces/lens-v1-interface-spec.md)

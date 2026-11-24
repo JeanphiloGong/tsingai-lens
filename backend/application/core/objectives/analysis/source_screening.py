@@ -541,7 +541,7 @@ def _notify_progress(
 
 def screen_sources(
     *,
-    collection_id: str,
+    workspace_id: str,
     source_screener: ObjectiveSourceScreener,
     objectives: tuple[ResearchObjective, ...],
     paper_maps: tuple[PaperResearchMap, ...],
@@ -558,8 +558,8 @@ def screen_sources(
         if paper_map.document_id
     }
     logger.info(
-        "Research objective paper framing started collection_id=%s objective_count=%s document_count=%s",
-        collection_id,
+        "Research objective paper framing started workspace_id=%s objective_count=%s document_count=%s",
+        workspace_id,
         len(objectives),
         len(documents),
     )
@@ -583,8 +583,8 @@ def screen_sources(
             source_filename = _resolve_source_filename(document)
             tables = tables_by_document_id.get(document_id, [])
             logger.info(
-                "Research objective paper framing document started collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s table_count=%s",
-                collection_id,
+                "Research objective paper framing document started workspace_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s table_count=%s",
+                workspace_id,
                 objective.objective_id,
                 objective_position,
                 objective_count,
@@ -627,7 +627,7 @@ def screen_sources(
                 )
                 continue
             payload = _build_objective_paper_frame_payload(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective=objective,
                 paper_map=maps_by_document_id.get(document_id),
                 document=document,
@@ -690,8 +690,8 @@ def screen_sources(
                 fallback_reason = "model_call_failed"
                 fallback_errors = (f"{type(exc).__name__}: {str(exc).strip()}",)
                 logger.warning(
-                    "Research objective paper framing batch model failed; preserving batch sources collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
-                    collection_id,
+                    "Research objective paper framing batch model failed; preserving batch sources workspace_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
+                    workspace_id,
                     prepared.objective.objective_id,
                     prepared.document_id,
                     batch_position,
@@ -701,8 +701,8 @@ def screen_sources(
                 )
 
         logger.warning(
-            "Research objective paper framing batch used conservative fallback collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s source_unit_count=%s reason=%s prompt_tokens=%s",
-            collection_id,
+            "Research objective paper framing batch used conservative fallback workspace_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s source_unit_count=%s reason=%s prompt_tokens=%s",
+            workspace_id,
             prepared.objective.objective_id,
             prepared.document_id,
             batch_position,
@@ -765,8 +765,8 @@ def screen_sources(
             )
         if executor is not None:
             logger.info(
-                "Research objective paper framing batch concurrency collection_id=%s max_concurrency=%s batch_count=%s",
-                collection_id,
+                "Research objective paper framing batch concurrency workspace_id=%s max_concurrency=%s batch_count=%s",
+                workspace_id,
                 max_concurrency,
                 len(batch_jobs),
             )
@@ -785,8 +785,8 @@ def screen_sources(
                     ...,
                 ] = ()
                 logger.info(
-                    "Research objective paper framing skipped explicitly excluded document collection_id=%s objective_id=%s document_id=%s",
-                    collection_id,
+                    "Research objective paper framing skipped explicitly excluded document workspace_id=%s objective_id=%s document_id=%s",
+                    workspace_id,
                     prepared.objective.objective_id,
                     prepared.document_id,
                 )
@@ -809,8 +809,8 @@ def screen_sources(
             frames.append(frame)
             fallback_batch_count = sum(outcome[1] for outcome in batch_outcomes)
             logger.info(
-                "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s batch_count=%s fallback_batch_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
-                collection_id,
+                "Research objective paper framing document finished workspace_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s batch_count=%s fallback_batch_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
+                workspace_id,
                 prepared.objective.objective_id,
                 prepared.objective_position,
                 objective_count,
@@ -844,8 +844,8 @@ def screen_sources(
             executor.shutdown(wait=True)
 
     logger.info(
-        "Research objective paper framing finished collection_id=%s frame_count=%s",
-        collection_id,
+        "Research objective paper framing finished workspace_id=%s frame_count=%s",
+        workspace_id,
         len(frames),
     )
     return tuple(frames)
@@ -930,7 +930,7 @@ def _route_prompt_objective_record(
 
 def _build_objective_paper_frame_payload(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective: ResearchObjective,
     paper_map: PaperResearchMap | None,
     document: Any,
@@ -953,7 +953,7 @@ def _build_objective_paper_frame_payload(
             "objective paper framing requires unique backend source-unit ids"
         )
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective": _route_prompt_objective_record(objective),
         "paper_prior": _build_objective_paper_frame_prior(
             objective=objective,

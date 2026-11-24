@@ -27,9 +27,9 @@ class _SourceRepository:
     ) -> None:
         self.documents = documents
 
-    async def read_collection_documents(
+    async def read_workspace_documents(
         self,
-        collection_id: str,
+        workspace_id: str,
     ) -> tuple[SourceDocument, ...]:
         return self.documents
 
@@ -100,7 +100,7 @@ async def test_artifact_input_service_uses_explicit_source_repository():
             ),
         ),
     )
-    documents, text_units = await artifact_input_service.load_collection_inputs(
+    documents, text_units = await artifact_input_service.load_workspace_inputs(
         "col_source", repository
     )
     blocks = await artifact_input_service.load_blocks_artifact("col_source", repository)

@@ -42,7 +42,7 @@ from repositories.objective_repository import ObjectiveAnalysis
 
 def _objective(*, published_version: int | None = 1) -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="How does heat treatment affect tensile strength?",
         material_scope=("Alloy A",),
@@ -63,7 +63,7 @@ def _objective(*, published_version: int | None = 1) -> ResearchObjective:
 
 def _analysis() -> ObjectiveAnalysis:
     return ObjectiveAnalysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_inputs=tuple(
@@ -91,13 +91,13 @@ def _evidence(
     source_ref: str,
 ) -> ObjectiveEvidence:
     return ObjectiveEvidence(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         evidence_id=evidence_id
         or objective_scoped_id(
             "oev",
-            "collection-1",
+            "workspace-1",
             "objective-1",
             1,
             document_id or "",
@@ -170,7 +170,7 @@ def _contribution(
 ) -> PaperContribution:
     failed = status == "failed"
     return PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id=document_id or "",
@@ -201,13 +201,13 @@ def _needs_context_evidence(
     source_ref: str,
 ) -> ObjectiveEvidence:
     return ObjectiveEvidence(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         evidence_id=evidence_id
         or objective_scoped_id(
             "oev",
-            "collection-1",
+            "workspace-1",
             "objective-1",
             1,
             document_id or "",
@@ -254,7 +254,7 @@ def _finding(evidence: tuple[ObjectiveEvidence, ...]) -> Finding:
         },
     )
     return Finding(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -384,7 +384,7 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
 
 def test_evidence_map_is_complete_for_scientific_abstention() -> None:
     contribution = PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id="paper-1",
@@ -427,7 +427,7 @@ def test_evidence_map_keeps_unlinked_needs_context_evidence_with_source_lineage(
         source_ref="block-results-4",
     )
     contribution = PaperContribution(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         document_id="paper-1",

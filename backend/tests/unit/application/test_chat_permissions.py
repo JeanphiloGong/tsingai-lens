@@ -16,9 +16,9 @@ from domain.chat.permissions import AUTO_ACTIONS, change_permission, permits_aut
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from repositories.chat_repository import ChatRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.postgres import read_tool_calls, seed_collection
+from tests.support.postgres import read_tool_calls, seed_workspace
 from tests.unit.application.test_chat_session_service import (
-    _CollectionService,
+    _WorkspaceService,
     _Question,
     _WriteCapability,
 )
@@ -61,13 +61,13 @@ async def test_session_permission_controls_actual_write(
         discover=(write.spec.name,),
     )
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((write,))
     )
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     permission = await repository.set_permission(
         session.session_id,
         "user-1",
@@ -121,7 +121,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(
         input_model=_Question,
     )
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=_Model(
@@ -138,7 +138,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(
         capabilities=CapabilityRegistry((write,)),
     )
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     await repository.set_permission(
         session.session_id,
         "user-1",
@@ -232,13 +232,13 @@ async def test_each_automatic_write_rechecks_current_permission(
         ModelTurn(content="Both revisions are saved."),
     )
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((finding_write, plan_write))
     )
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     await repository.set_permission(
         session.session_id,
         "user-1",
@@ -293,14 +293,14 @@ async def test_permission_controller_enforces_owner_and_revision(
 
     repository = ChatRepository()
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
     service = make_scripted_chat_service(runner)
     monkeypatch.setattr(shared_chat_service, "ChatService", service, raising=False)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     assert (
         json.loads((await get_chat_permission(session.session_id, "user-1")).body)[
             "data"
@@ -320,7 +320,7 @@ async def test_permission_controller_enforces_owner_and_revision(
     with pytest.raises(ResourceNotFoundException) as forbidden:
         await get_chat_permission(session.session_id, "another-user")
     assert forbidden.value.code == 200201
-    fresh = await service.create_session(collection_id="col-1", user_id="user-1")
+    fresh = await service.create_session(workspace_id="col-1", user_id="user-1")
     assert (
         json.loads((await get_chat_permission(fresh.session_id, "user-1")).body)[
             "data"
@@ -363,24 +363,24 @@ async def test_permission_controller_enforces_owner_and_revision(
         ),
     ],
 )
-async def test_new_session_inherits_collection_default_permission(
+async def test_new_session_inherits_workspace_default_permission(
     default, expected, *, postgres_session_factory
 ) -> None:
-    class _CollectionDefaults(_CollectionService):
-        async def get_agent_default_permission_for_user(self, collection_id, user_id):
-            assert (collection_id, user_id) == ("col-1", "user-1")
+    class _WorkspaceDefaults(_WorkspaceService):
+        async def get_agent_default_permission_for_user(self, workspace_id, user_id):
+            assert (workspace_id, user_id) == ("col-1", "user-1")
             return default
 
     repository = ChatRepository()
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = _CollectionDefaults()
+    chat_session_service.workspace_service = _WorkspaceDefaults()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
     service = make_scripted_chat_service(runner)
 
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
 
     permission = await repository.read_permission(session.session_id, "user-1")
     if expected is None:
@@ -392,13 +392,13 @@ async def test_new_session_inherits_collection_default_permission(
         assert permission == expected
 
 
-async def test_collection_read_only_default_is_applied_before_runner_tool_selection(
+async def test_workspace_read_only_default_is_applied_before_runner_tool_selection(
     *, postgres_session_factory
 ) -> None:
     repository = ChatRepository()
 
-    class _CollectionDefaults(_CollectionService):
-        async def get_agent_default_permission_for_user(self, collection_id, user_id):
+    class _WorkspaceDefaults(_WorkspaceService):
+        async def get_agent_default_permission_for_user(self, workspace_id, user_id):
             return {
                 "mode": "read_only",
                 "actions": [],
@@ -407,13 +407,13 @@ async def test_collection_read_only_default_is_applied_before_runner_tool_select
             }
 
     chat_session_service.ChatRepo = repository
-    chat_session_service.collection_service = _CollectionDefaults()
+    chat_session_service.workspace_service = _WorkspaceDefaults()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
     service = make_scripted_chat_service(runner)
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
 
     assert (
         await service._effective_runner_permission_mode(
@@ -510,5 +510,5 @@ def test_automatic_permission_expiry_is_bounded() -> None:
 
 
 @pytest.fixture(autouse=True)
-async def research_collection(postgres_session_factory, anyio_backend):
-    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+async def research_workspace(postgres_session_factory, anyio_backend):
+    await seed_workspace(postgres_session_factory, "col-1", document_ids=("doc-1",))

@@ -11,35 +11,35 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 from utils.response import ApiResponse, make_api_response
 
-paper_experiment_router = APIRouter(prefix="/collections", tags=["paper-experiments"])
+paper_experiment_router = APIRouter(prefix="/workspaces", tags=["paper-experiments"])
 
 
 @paper_experiment_router.get(
-    "/{collection_id}/objectives/{objective_id}/experiment-analysis",
+    "/{workspace_id}/objectives/{objective_id}/experiment-analysis",
     summary="Read experiment-backed analysis records",
     response_model=ApiResponse[dict],
 )
 async def read_experiment_analysis(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int = Query(..., ge=1),
 ) -> Response:
     return make_api_response(
         data=await experiment_query_service.export_analysis_json(
-            collection_id, objective_id, analysis_version, user_id=user_id
+            workspace_id, objective_id, analysis_version, user_id=user_id
         )
     )
 
 
 @paper_experiment_router.get(
-    "/{collection_id}/objectives/{objective_id}/experiment-analysis/export",
+    "/{workspace_id}/objectives/{objective_id}/experiment-analysis/export",
     summary="Export fixed experiment-backed analysis data",
     response_model=ApiResponse[dict],
     responses={200: {"content": {"text/csv": {"schema": {"type": "string"}}}}},
 )
 async def export_experiment_analysis(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     analysis_version: int = Query(..., ge=1),
@@ -47,7 +47,7 @@ async def export_experiment_analysis(
 ):
     if format == "csv":
         body = await experiment_query_service.export_analysis_csv(
-            collection_id, objective_id, analysis_version, user_id=user_id
+            workspace_id, objective_id, analysis_version, user_id=user_id
         )
         return Response(
             content=body,
@@ -61,7 +61,7 @@ async def export_experiment_analysis(
         )
     return make_api_response(
         data=await experiment_query_service.export_analysis_json(
-            collection_id, objective_id, analysis_version, user_id=user_id
+            workspace_id, objective_id, analysis_version, user_id=user_id
         )
     )
 

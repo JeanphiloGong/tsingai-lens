@@ -14,7 +14,7 @@ export type DocumentProfile = {
 };
 
 export type DocumentProfilesResponse = {
-	collection_id: string;
+	workspace_id: string;
 	total: number;
 	count: number;
 	summary: {
@@ -38,7 +38,7 @@ export type DocumentContentBlock = {
 };
 
 export type DocumentContentResponse = {
-	collection_id: string;
+	workspace_id: string;
 	document_id: string;
 	title: string | null;
 	source_filename: string | null;
@@ -61,7 +61,7 @@ export type DocumentMarkdownSourceMapItem = {
 };
 
 export type DocumentMarkdownResponse = {
-	collection_id: string;
+	workspace_id: string;
 	document_id: string;
 	title: string | null;
 	source_filename: string | null;
@@ -128,7 +128,7 @@ export type DocumentSourceSelection = {
 };
 
 export type DocumentWorkbenchModel = {
-	collection_id: string;
+	workspace_id: string;
 	document_id: string;
 	title: string;
 	source_filename: string | null;
@@ -174,11 +174,11 @@ function sourceSpan(documentId: string, block: DocumentContentBlock): WorkbenchS
 }
 
 export function buildDocumentWorkbenchModel({
-	collectionId,
+	workspaceId,
 	documentId,
 	content
 }: {
-	collectionId: string;
+	workspaceId: string;
 	documentId: string;
 	content: DocumentContentResponse | null;
 }): DocumentWorkbenchModel {
@@ -208,12 +208,12 @@ export function buildDocumentWorkbenchModel({
 			};
 		});
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		document_id: content?.document_id || documentId,
 		title: content?.title || content?.source_filename || documentId,
 		source_filename: content?.source_filename || null,
 		sourceFileUrl: buildApiUrl(
-			`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(content?.document_id || documentId)}/source`
+			`/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(content?.document_id || documentId)}/source`
 		),
 		metadata: [],
 		pages,
@@ -236,7 +236,7 @@ export type DocumentProfileListOptions = {
 };
 
 export async function fetchDocumentProfiles(
-	collectionId: string,
+	workspaceId: string,
 	options: DocumentProfileListOptions = {}
 ): Promise<DocumentProfilesResponse> {
 	const search = new URLSearchParams();
@@ -250,49 +250,49 @@ export async function fetchDocumentProfiles(
 	}
 	const queryString = search.toString();
 	const data = (await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,
 		{ method: 'GET' }
 	)) as DocumentProfilesResponse;
-	if (data.collection_id !== collectionId) {
-		throw new Error('Document profiles response does not match collection_id.');
+	if (data.workspace_id !== workspaceId) {
+		throw new Error('Document profiles response does not match workspace_id.');
 	}
 	return data;
 }
 
 export async function fetchDocumentContent(
-	collectionId: string,
+	workspaceId: string,
 	documentId: string
 ): Promise<DocumentContentResponse> {
 	const data = (await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/content`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/content`,
 		{ method: 'GET' }
 	)) as DocumentContentResponse;
-	if (data.collection_id !== collectionId || data.document_id !== documentId) {
+	if (data.workspace_id !== workspaceId || data.document_id !== documentId) {
 		throw new Error('Document content response does not match the requested document.');
 	}
 	return data;
 }
 
 export async function fetchDocumentMarkdown(
-	collectionId: string,
+	workspaceId: string,
 	documentId: string
 ): Promise<DocumentMarkdownResponse> {
 	const data = (await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/markdown`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/markdown`,
 		{ method: 'GET' }
 	)) as DocumentMarkdownResponse;
-	if (data.collection_id !== collectionId || data.document_id !== documentId) {
+	if (data.workspace_id !== workspaceId || data.document_id !== documentId) {
 		throw new Error('Document Markdown response does not match the requested document.');
 	}
 	return data;
 }
 
 export async function fetchDocumentProfile(
-	collectionId: string,
+	workspaceId: string,
 	documentId: string
 ): Promise<DocumentProfile> {
 	const data = (await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/profile`,
+		`/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/profile`,
 		{ method: 'GET' }
 	)) as DocumentProfile;
 	if (data.document_id !== documentId) {

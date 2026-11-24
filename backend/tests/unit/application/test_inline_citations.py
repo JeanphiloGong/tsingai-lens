@@ -12,8 +12,8 @@ from application.chat.inline_citations import format_inline_citations, format_me
 
 
 def test_existing_links_survive_formatting_and_repeated_trajectory_projection():
-    first = "[Measured density](/collections/c/documents/p?source_ref=results)"
-    second = "[Tensile conditions](/collections/c/documents/q?source_ref=methods)"
+    first = "[Measured density](/workspaces/c/documents/p?source_ref=results)"
+    second = "[Tensile conditions](/workspaces/c/documents/q?source_ref=methods)"
     answer = f"| Finding | Source |\n|---|---|\n| Density | {first} |\n| Elongation | {second} |"
     formatted = format_inline_citations(answer)
     assert formatted == answer
@@ -36,7 +36,7 @@ def _read_result(
     call_id: str = "call-1",
     source_ref: str = "tbl_doc_abc_table_3",
     complete: bool = True,
-    href: str | None = "/collections/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3",
+    href: str | None = "/workspaces/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3",
 ) -> ChatToolResult:
     return ChatToolResult(
         tool_call_id=call_id,
@@ -73,7 +73,7 @@ def test_marker_becomes_a_readable_link_at_the_claim_location() -> None:
 
     assert rendered == (
         "The measured value increases. "
-        "[P006.pdf · Table 3 · p. 8](/collections/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3)"
+        "[P006.pdf · Table 3 · p. 8](/workspaces/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3)"
     )
     assert "tbl_doc_abc_table_3" not in rendered.split("](", 1)[0]
 
@@ -102,7 +102,7 @@ def test_truncated_source_is_not_rendered_as_supporting_link() -> None:
 
     assert "tbl_doc_abc_table_3" not in rendered
     assert "preview" in rendered
-    assert "](/collections/" not in rendered
+    assert "](/workspaces/" not in rendered
 
 
 def test_ambiguous_short_marker_requires_a_document_qualified_reference() -> None:
@@ -116,7 +116,7 @@ def test_ambiguous_short_marker_requires_a_document_qualified_reference() -> Non
             ChatResourceRef(
                 resource_type="source",
                 resource_id="doc-2:shared-table",
-                href="/collections/col-1/documents/doc-2?source_ref=shared-table",
+                href="/workspaces/col-1/documents/doc-2?source_ref=shared-table",
             ),
         ),
     )
@@ -158,7 +158,7 @@ def test_search_match_is_readable_but_never_a_supporting_link() -> None:
             ChatResourceRef(
                 resource_type="source",
                 resource_id="doc-1:blk_doc_abc_9",
-                href="/collections/col-1/documents/doc-1?source_ref=blk_doc_abc_9",
+                href="/workspaces/col-1/documents/doc-1?source_ref=blk_doc_abc_9",
             ),
         ),
     )
@@ -171,7 +171,7 @@ def test_search_match_is_readable_but_never_a_supporting_link() -> None:
 
     assert "blk_doc_abc_9" not in rendered
     assert "preview" in rendered
-    assert "](/collections/" not in rendered
+    assert "](/workspaces/" not in rendered
 
 
 def test_table_ref_is_bound_when_the_capability_uses_its_canonical_field_name() -> None:
@@ -193,7 +193,7 @@ def test_table_ref_is_bound_when_the_capability_uses_its_canonical_field_name() 
             ChatResourceRef(
                 resource_type="source",
                 resource_id="doc-1:tbl_doc_abc_table_3",
-                href="/collections/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3&page=8",
+                href="/workspaces/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3&page=8",
             ),
         ),
     )
@@ -205,7 +205,7 @@ def test_table_ref_is_bound_when_the_capability_uses_its_canonical_field_name() 
     )
 
     assert "P006.pdf · Table 3 · p. 8" in rendered
-    assert "](/collections/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3&page=8)" in rendered
+    assert "](/workspaces/col-1/documents/doc-1?source_ref=tbl_doc_abc_table_3&page=8)" in rendered
 
 
 def test_unknown_internal_source_id_is_not_exposed() -> None:

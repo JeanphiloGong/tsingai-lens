@@ -36,7 +36,7 @@ class FindingReviewRepository:
             ):
                 raise ValueError("feedback identity cannot be reassigned")
             row = existing or FindingFeedbackORM(feedback_id=feedback.feedback_id)
-            row.collection_id = feedback.collection_id
+            row.workspace_id = feedback.workspace_id
             row.objective_id = feedback.objective_id
             row.analysis_version = feedback.analysis_version
             row.finding_id = feedback.finding_id
@@ -57,14 +57,14 @@ class FindingReviewRepository:
 
     async def list_feedback(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str | None = None,
         analysis_version: int | None = None,
         finding_id: str | None = None,
     ) -> tuple[FindingFeedback, ...]:
         async with AsyncSessionLocal() as db:
             statement = select(FindingFeedbackORM).where(
-                FindingFeedbackORM.collection_id == collection_id
+                FindingFeedbackORM.workspace_id == workspace_id
             )
             if objective_id is not None:
                 statement = statement.where(
@@ -87,7 +87,7 @@ class FindingReviewRepository:
             return tuple(
                 FindingFeedback(
                     feedback_id=row.feedback_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     objective_id=row.objective_id,
                     analysis_version=row.analysis_version,
                     finding_id=row.finding_id,
@@ -109,7 +109,7 @@ class FindingReviewRepository:
             ):
                 raise ValueError("curation identity cannot be reassigned")
             row = existing or FindingCurationORM(curation_id=curation.curation_id)
-            row.collection_id = curation.collection_id
+            row.workspace_id = curation.workspace_id
             row.objective_id = curation.objective_id
             row.analysis_version = curation.analysis_version
             row.finding_id = curation.finding_id
@@ -141,7 +141,7 @@ class FindingReviewRepository:
                     for attribute in attributes
                 ]
             row.curated_finding = {
-                "collection_id": finding.collection_id,
+                "workspace_id": finding.workspace_id,
                 "objective_id": finding.objective_id,
                 "analysis_version": finding.analysis_version,
                 "finding_id": finding.finding_id,
@@ -222,14 +222,14 @@ class FindingReviewRepository:
 
     async def list_curations(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str | None = None,
         analysis_version: int | None = None,
         finding_id: str | None = None,
     ) -> tuple[FindingCuration, ...]:
         async with AsyncSessionLocal() as db:
             statement = select(FindingCurationORM).where(
-                FindingCurationORM.collection_id == collection_id
+                FindingCurationORM.workspace_id == workspace_id
             )
             if objective_id is not None:
                 statement = statement.where(
@@ -268,7 +268,7 @@ class FindingReviewRepository:
                         for item in context.get(scope, ())
                     )
                 finding = Finding(
-                    collection_id=stored["collection_id"],
+                    workspace_id=stored["workspace_id"],
                     objective_id=stored["objective_id"],
                     analysis_version=stored["analysis_version"],
                     finding_id=stored["finding_id"],
@@ -333,7 +333,7 @@ class FindingReviewRepository:
                 records.append(
                     FindingCuration(
                         curation_id=row.curation_id,
-                        collection_id=row.collection_id,
+                        workspace_id=row.workspace_id,
                         objective_id=row.objective_id,
                         analysis_version=row.analysis_version,
                         finding_id=row.finding_id,
@@ -349,7 +349,7 @@ class FindingReviewRepository:
 
 def _feedback_key(value) -> tuple[str, str, int, str]:
     return (
-        value.collection_id,
+        value.workspace_id,
         value.objective_id,
         value.analysis_version,
         value.finding_id,
@@ -358,7 +358,7 @@ def _feedback_key(value) -> tuple[str, str, int, str]:
 
 def _curation_key(value) -> tuple[str, str, int, str]:
     return (
-        value.collection_id,
+        value.workspace_id,
         value.objective_id,
         value.analysis_version,
         value.finding_id,
@@ -379,7 +379,7 @@ async def _require_finding(db: AsyncSession, value: object) -> None:
     row = await db.get(
         ObjectiveAnalysisORM,
         (
-            value.collection_id,
+            value.workspace_id,
             value.objective_id,
             value.analysis_version,
         ),
@@ -390,7 +390,7 @@ async def _require_finding(db: AsyncSession, value: object) -> None:
     )
     experiment_finding = await db.scalar(
         select(ExperimentFindingORM).where(
-            ExperimentFindingORM.collection_id == value.collection_id,
+            ExperimentFindingORM.workspace_id == value.workspace_id,
             ExperimentFindingORM.objective_id == value.objective_id,
             ExperimentFindingORM.analysis_version == value.analysis_version,
             ExperimentFindingORM.finding_id == value.finding_id,
@@ -399,7 +399,7 @@ async def _require_finding(db: AsyncSession, value: object) -> None:
     if row is None or (not authored_finding and experiment_finding is None):
         raise ValueError(
             "finding does not exist in the requested objective analysis: "
-            f"{value.collection_id}/{value.objective_id}/"
+            f"{value.workspace_id}/{value.objective_id}/"
             f"{value.analysis_version}/{value.finding_id}"
         )
 

@@ -55,7 +55,7 @@ def anyio_backend():
 
 def _objective(*, variables: tuple[str, ...] = ("preheat",)) -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="Does preheat change elongation?",
         material_scope=("316L",),
@@ -74,7 +74,7 @@ def _objective(*, variables: tuple[str, ...] = ("preheat",)) -> ResearchObjectiv
 
 def _analysis(version: int = 1) -> ObjectiveAnalysis:
     return ObjectiveAnalysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=int(version or 0),
         document_inputs=(
@@ -595,14 +595,14 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     experiment = _comparison_experiment("paper-a")
 
     first = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
         db=object(),
     )
     second = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
@@ -654,14 +654,14 @@ async def test_source_only_batch_validates_all_experiments_before_writing():
 async def test_authored_selection_revision_preserves_parent_limits_and_provenance():
     writer, _, _ = _writer()
     original = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_comparison_experiment("paper-a"),),
         db=object(),
     )
     revision = await writer.write_selection_finding_revision(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=replace(
             _analysis(2),
@@ -691,7 +691,7 @@ async def test_authored_selection_revision_preserves_parent_limits_and_provenanc
 async def test_abstention_revision_writes_no_placeholder_finding():
     writer, _, analyses = _writer()
     result = await writer.write_selection_finding_revision(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(2),
         revisions=(),
@@ -708,29 +708,29 @@ async def test_abstention_revision_writes_no_placeholder_finding():
 
 async def test_researcher_revises_limits_then_abstains_without_changing_source(
     monkeypatch,
-    collection_service,
+    workspace_service,
     *,
     postgres_session_factory,
-    collection_workspace,
+    workspace_files,
 ):
-    from tests.support.postgres import seed_collection
+    from tests.support.postgres import seed_workspace
 
-    collection = await collection_service.create_collection(
+    workspace = await workspace_service.create_workspace(
         "316L preheat and elongation",
         owner_user_id="researcher-1",
     )
-    collection_id = collection.collection.collection_id
-    await seed_collection(
-        postgres_session_factory, collection_id, document_ids=("paper-a", "paper-b")
+    workspace_id = workspace.workspace.workspace_id
+    await seed_workspace(
+        postgres_session_factory, workspace_id, document_ids=("paper-a", "paper-b")
     )
-    objective = replace(_objective(), collection_id=collection_id)
+    objective = replace(_objective(), workspace_id=workspace_id)
     repository = ObjectiveRepository()
     await repository.replace(
-        collection_id,
+        workspace_id,
         ObjectiveFactSet(research_objectives=(objective,)),
     )
     await repository.queue_analysis(
-        collection_id,
+        workspace_id,
         objective.objective_id,
         document_inputs=_analysis().document_inputs,
         pipeline_version="test",
@@ -738,11 +738,11 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
         prompt_versions={},
     )
     analysis = await claim_analysis_fixture(
-        repository, collection_id, objective.objective_id, 1
+        repository, workspace_id, objective.objective_id, 1
     )
     writer, _, graphs = _writer()
     source = await writer.write_experiment_analysis(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective=objective,
         analysis=analysis,
         experiment_outputs=(_comparison_experiment("paper-a"),),
@@ -750,7 +750,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
     )
     coverage = tuple(
         PaperContribution(
-            collection_id=collection_id or "",
+            workspace_id=workspace_id or "",
             objective_id=objective.objective_id or "",
             analysis_version=1,
             document_id=paper or "",
@@ -773,12 +773,12 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
     async with database.AsyncSessionLocal() as db, db.begin():
         await repository.publish_experiment_analysis(
             db,
-            collection_id,
+            workspace_id,
             objective.objective_id,
             1,
             contributions=coverage,
             job=analysis_job_fixture(
-                repository, collection_id, objective.objective_id, 1
+                repository, workspace_id, objective.objective_id, 1
             ),
         )
     query = SimpleNamespace(read_analysis_bundle=AsyncMock(return_value=source))
@@ -791,13 +791,13 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
         "application.core.objectives.finding_authoring_service.AsyncSessionLocal",
         database.AsyncSessionLocal,
     )
-    finding_authoring_service.collection_service = collection_service
+    finding_authoring_service.workspace_service = workspace_service
     finding_authoring_service.ObjectiveRepo = repository
     finding_authoring_service.experiment_query_service = query
     finding_authoring_service.experiment_analysis_writer = writer
     service = finding_authoring_service
     revised = await service.create_selection_version(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective.objective_id,
         source_analysis_version=1,
         selection_ids=tuple(item.selection_id for item in source.selections),
@@ -818,7 +818,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
         findings=graphs.graphs[-1].findings,
     )
     abstained = await service.create_selection_version(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective.objective_id,
         source_analysis_version=2,
         selection_ids=(),
@@ -831,10 +831,10 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
     assert abstained.finding is None
     assert graphs.graphs[-1].findings == ()
     assert await repository.list_contributions(
-        collection_id, objective.objective_id, 3
+        workspace_id, objective.objective_id, 3
     ) == tuple(replace(item, analysis_version=3) for item in coverage)
     assert (
-        await repository.read_analysis(collection_id, objective.objective_id, 1)
+        await repository.read_analysis(workspace_id, objective.objective_id, 1)
     ).status == "succeeded"
     assert source.findings[0].parent_finding_id is None
 
@@ -873,7 +873,7 @@ async def test_writer_keeps_selection_for_exact_partial_protocol() -> None:
     )
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
@@ -909,7 +909,7 @@ async def test_writer_passes_one_transaction_to_every_graph_repository():
     db = object()
 
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_comparison_experiment("paper-a"),),
@@ -941,7 +941,7 @@ async def test_writer_acquires_multi_draft_identities_in_deterministic_order():
     )
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=ordered_inputs,
@@ -960,7 +960,7 @@ async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
     writer, _, analyses = _writer()
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_comparison_experiment("paper-a"),),
@@ -982,7 +982,7 @@ async def test_writer_keeps_different_factor_sets_in_separate_selections():
     writer, _, _ = _writer()
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(variables=("preheat", "scan speed")),
         analysis=_analysis(),
         experiment_outputs=(_multi_factor_comparison_experiment("paper-a"),),
@@ -1007,7 +1007,7 @@ async def test_writer_keeps_valid_selection_when_another_comparison_is_partial()
     writer, _, _ = _writer()
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(variables=("preheat", "scan speed")),
         analysis=_analysis(),
         experiment_outputs=(_mixed_valid_invalid_comparison_experiment("paper-a"),),
@@ -1033,7 +1033,7 @@ async def test_writer_keeps_valid_selection_when_another_comparison_is_partial()
 async def test_writer_creates_conditional_group_for_cross_paper_finding():
     writer, _, analyses = _writer()
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(
@@ -1056,7 +1056,7 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
     experiment = _draft_output("paper-a", source_fingerprint="prepared-v1")
 
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
@@ -1064,7 +1064,7 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
     )
     revised_experiment = _draft_output("paper-a", source_fingerprint="prepared-v2")
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(revised_experiment,),
@@ -1084,14 +1084,14 @@ async def test_parent_identity_stays_stable_when_test_protocol_changes():
     writer, revisions, _ = _writer()
 
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_draft_output("paper-a"),),
         db=object(),
     )
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(
@@ -1114,7 +1114,7 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
     writer, revisions, _ = _writer()
 
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(
@@ -1152,7 +1152,7 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
     )
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(reread,),
@@ -1172,7 +1172,7 @@ async def test_parent_identity_is_reused_for_objective_variant_subset():
     writer, revisions, _ = _writer()
 
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_draft_output("paper-a"),),
@@ -1224,7 +1224,7 @@ async def test_parent_identity_is_reused_for_objective_variant_subset():
     )
 
     await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(subset,),
@@ -1242,7 +1242,7 @@ async def test_physical_split_identity_uses_source_backed_boundary_discriminator
     writer, revisions, _ = _writer()
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_physical_split_experiment("paper-a"),),
@@ -1271,7 +1271,7 @@ async def test_identical_physical_split_identity_requires_manual_reconciliation(
 
     with pytest.raises(ValueError, match="experiment identity collision"):
         await writer.write_experiment_analysis(
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             objective=_objective(),
             analysis=_analysis(),
             experiment_outputs=(
@@ -1284,7 +1284,7 @@ async def test_identical_physical_split_identity_requires_manual_reconciliation(
 async def test_writer_does_not_fabricate_finding_without_matching_experiment():
     writer, _, analyses = _writer()
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(),
@@ -1302,7 +1302,7 @@ async def test_partial_archive_without_variants_is_retained_without_selection_or
     writer, revisions, analyses = _writer()
 
     result = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(),
@@ -1324,7 +1324,7 @@ async def test_partial_archive_without_variants_is_retained_without_selection_or
     # The archive identity is deterministic, so a retry reuses the same
     # immutable revision instead of creating a duplicate partial record.
     second = await writer.write_experiment_analysis(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(),

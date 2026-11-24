@@ -13,13 +13,13 @@ from application.core.objectives import objective_input_service
 from application.core.objectives.objective_input_service import (
     ResearchObjectivesNotReadyError,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
     SOURCE_PARSER_VERSION,
 )
 from infra.source.build_source_artifacts import build_source_artifacts
-from tests.integration.test_app_layer_api import _create_collection, _upload
+from tests.integration.test_app_layer_api import _create_workspace, _upload
 
 pytest_plugins = ("tests.integration.test_app_layer_api",)
 
@@ -28,7 +28,7 @@ def test_upload_classification_retry_content_and_research_readiness(
     app_client,
     monkeypatch,
     *,
-    collection_workspace,
+    workspace_files,
 ):
     """Use the real text parser and HTTP routes, failing only the model boundary."""
     parse_calls = []
@@ -79,11 +79,11 @@ def test_upload_classification_retry_content_and_research_readiness(
         await ModelConnectionRepo.assign("document_profile", model.connection_id, 0, "manager")
 
     app_client.portal.call(assign_model)
-    collection_id = _create_collection(app_client, "LPBF classification recovery")
+    workspace_id = _create_workspace(app_client, "LPBF classification recovery")
     text = b"Laser power and Ti-6Al-4V porosity\n\nMethods\nLaser power was varied from 100 W to 150 W.\n\nResults\nPorosity decreased from 2.0% to 0.5%."
-    uploaded = _upload(app_client, collection_id, "laser-porosity.txt", text)
+    uploaded = _upload(app_client, workspace_id, "laser-porosity.txt", text)
     document_id = uploaded["document_id"]
-    document_path = f"/api/v1/collections/{collection_id}/documents/{document_id}"
+    document_path = f"/api/v1/workspaces/{workspace_id}/documents/{document_id}"
 
     async def finish_workers():
         job = await PipelineRunRepo.claim_next_document_preparation_job(
@@ -92,7 +92,7 @@ def test_upload_classification_retry_content_and_research_readiness(
         assert job is not None
         await preparation.execute_document_preparation_job(
             job,
-            workspace=collection_workspace,
+            workspace=workspace_files,
             object_store=store_module.Store,
             source_artifact_builder=parse_sources,
             profile_extractor=classifier,
@@ -112,20 +112,20 @@ def test_upload_classification_retry_content_and_research_readiness(
     assert content.status_code == 200
     assert "2.0%" in content.json()["data"]["content_text"]
     source_output_dir = (
-        collection_workspace.get_paths(collection_id).output_dir
+        workspace_files.get_paths(workspace_id).output_dir
         / "documents"
         / document_id
     )
     assert not source_output_dir.exists()
     assert not tuple(
-        collection_workspace.get_paths(collection_id).output_dir.glob("preparation/*")
+        workspace_files.get_paths(workspace_id).output_dir.glob("preparation/*")
     )
     assert not (source_output_dir / "cache").exists()
     input_service = objective_input_service
     with pytest.raises(ResearchObjectivesNotReadyError):
         app_client.portal.call(
             input_service.resolve_prepared_document_inputs,
-            collection_id,
+            workspace_id,
             (document_id,),
         )
 
@@ -142,12 +142,12 @@ def test_upload_classification_retry_content_and_research_readiness(
     assert current_profile["doc_type"] == "experimental"
     stored_profile = app_client.portal.call(
         document_profile_service.DocumentProfileRepo.read,
-        collection_id,
+        workspace_id,
         document_id,
     )
     stored_source = app_client.portal.call(
         document_profile_service.SourceArtifactRepo.read_document,
-        collection_id,
+        workspace_id,
         document_id,
     )
     assert (
@@ -155,7 +155,7 @@ def test_upload_classification_retry_content_and_research_readiness(
         == content.json()["data"]["content_text"]
     )
     inputs = app_client.portal.call(
-        input_service.resolve_prepared_document_inputs, collection_id, (document_id,)
+        input_service.resolve_prepared_document_inputs, workspace_id, (document_id,)
     )
     assert inputs[0].document_id == document_id
     assert inputs[0].preparation_fingerprint

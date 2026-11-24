@@ -51,10 +51,10 @@ async def test_exports_include_complete_fixed_results(load, experiment_backed, m
     monkeypatch.setattr(module, "ObjectiveRepository", Repository)
     monkeypatch.setattr(module, "build_database_engine", lambda _: SimpleNamespace(dispose=AsyncMock()))
     monkeypatch.setattr(module.AsyncSessionLocal, "configure", lambda **_: None)
-    monkeypatch.setattr(module, "SourceArtifactRepository", lambda: SimpleNamespace(read_collection_documents=AsyncMock(return_value=())))
-    monkeypatch.setattr(module, "DocumentProfileRepository", lambda: SimpleNamespace(list_collection=AsyncMock(return_value=())))
+    monkeypatch.setattr(module, "SourceArtifactRepository", lambda: SimpleNamespace(read_workspace_documents=AsyncMock(return_value=())))
+    monkeypatch.setattr(module, "DocumentProfileRepository", lambda: SimpleNamespace(list_workspace=AsyncMock(return_value=())))
     if hasattr(module, "PaperMapRepository"):
-        monkeypatch.setattr(module, "PaperMapRepository", lambda: SimpleNamespace(list_collection=AsyncMock(return_value=())))
+        monkeypatch.setattr(module, "PaperMapRepository", lambda: SimpleNamespace(list_workspace=AsyncMock(return_value=())))
     projection = AsyncMock(return_value=(findings, evidence, ()))
     monkeypatch.setattr(module.experiment_projection, "read_analysis_records", projection)
 

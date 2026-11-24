@@ -26,18 +26,18 @@ keeps every data row in Source order.
 blocks, tables, table rows, table cells, and figures. `text_unit_ids` is derived
 from the owned text units rather than stored as a second source of truth.
 
-`Collection` describes workspace identity, ownership and business status;
+`Workspace` describes workspace identity, ownership and business status;
 `Document` describes imported paper identity, content and preparation provenance.
-Storage filenames, object keys and record timestamps belong to `StoredCollection`
+Storage filenames, object keys and record timestamps belong to `StoredWorkspace`
 and `StoredDocument` beside the
-[Collection repository](../../repositories/collection_repository.py).
+[Workspace repository](../../repositories/workspace_repository.py).
 These records carry existing domain objects directly, without duplicating their
 fields or adding forwarding properties. The repository reads current membership.
 Neither domain model serializes database or HTTP records.
 
 Document preparation passes
 one `SourceDocument` aggregate to the Source repository, where it replaces that
-Document's current parsed structure. There is no collection-wide artifact
+Document's current parsed structure. There is no workspace-wide artifact
 aggregate or Source build identity in the domain.
 
 `SourceDocumentTree` is a per-document projection over one `SourceDocument`.

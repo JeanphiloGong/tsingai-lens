@@ -16,7 +16,7 @@ def anyio_backend() -> str:
 
 def _authored_objective() -> ResearchObjective:
     return ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id=build_research_objective_id(
             question="How does laser power affect tensile strength?",
             material_scope=("Ti-6Al-4V",),
@@ -69,6 +69,6 @@ async def test_authored_candidate_does_not_require_objective_discovery(*, postgr
 
 @pytest.fixture(autouse=True)
 async def research_records(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_collection
+    from tests.support.postgres import seed_workspace
 
-    await seed_collection(postgres_session_factory, "col-1", document_ids=("paper-1",))
+    await seed_workspace(postgres_session_factory, "col-1", document_ids=("paper-1",))

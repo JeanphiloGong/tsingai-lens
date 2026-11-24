@@ -220,7 +220,7 @@ async def _require_dataset_item(
     user_id: str,
 ) -> dict[str, Any]:
     dataset = await finding_dataset_service.export_dataset(
-        collection_id=identity["collection_id"],
+        workspace_id=identity["workspace_id"],
         objective_id=identity["objective_id"],
         user_id=user_id,
     )
@@ -252,10 +252,10 @@ def read_review_jsonl(path: Path) -> list[dict[str, Any]]:
 def _identity(row: dict[str, Any]) -> dict[str, Any]:
     if "claim_id" in row:
         raise ValueError("claim_id is not part of the Finding review contract")
-    for name in ("collection_id", "objective_id", "finding_id"):
+    for name in ("workspace_id", "objective_id", "finding_id"):
         if not isinstance(row.get(name), str) or not row[name].strip():
             raise ValueError(f"{name} is required and must be text")
-    collection_id = row["collection_id"].strip()
+    workspace_id = row["workspace_id"].strip()
     objective_id = row["objective_id"].strip()
     finding_id = row["finding_id"].strip()
     version = row.get("analysis_version")
@@ -265,12 +265,12 @@ def _identity(row: dict[str, Any]) -> dict[str, Any]:
         analysis_version = int(version)
     except (TypeError, ValueError):
         raise ValueError("analysis_version must be a positive integer") from None
-    if not collection_id or not objective_id or analysis_version < 1 or not finding_id:
+    if not workspace_id or not objective_id or analysis_version < 1 or not finding_id:
         raise ValueError(
-            "collection_id, objective_id, analysis_version, and finding_id are required"
+            "workspace_id, objective_id, analysis_version, and finding_id are required"
         )
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "analysis_version": analysis_version,
         "finding_id": finding_id,
@@ -313,7 +313,7 @@ def _summary(
 def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
     """Reject malformed external review JSON, then construct the Finding once."""
     required = {
-        "collection_id",
+        "workspace_id",
         "objective_id",
         "analysis_version",
         "finding_id",
@@ -345,7 +345,7 @@ def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
         or payload.keys() - required - optional
     ):
         raise ValueError(error)
-    for name in ("collection_id", "objective_id", "finding_id", "statement", "outcome"):
+    for name in ("workspace_id", "objective_id", "finding_id", "statement", "outcome"):
         if (
             not isinstance(payload[name], str)
             or not payload[name]
@@ -543,7 +543,7 @@ def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
             raise ValueError(f"{error}: invalid created_at")
         created_at = datetime.fromisoformat(created_at)
     return Finding(
-        collection_id=payload["collection_id"],
+        workspace_id=payload["workspace_id"],
         objective_id=payload["objective_id"],
         analysis_version=payload["analysis_version"],
         finding_id=payload["finding_id"],

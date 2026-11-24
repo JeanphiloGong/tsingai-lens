@@ -22,7 +22,7 @@ const ERROR_CODE_TRANSLATIONS = {
 	already_exists: 'onboarding.alreadyExists',
 	invalid_request: 'onboarding.invalidRequest',
 	identity_unavailable: 'onboarding.unavailable',
-	collection_not_found: 'error.collectionNotFound',
+	workspace_not_found: 'error.workspaceNotFound',
 	graph_not_ready: 'error.graphNotReady',
 	community_not_found: 'error.communityNotFound',
 	chat_session_busy: 'error.chatSessionBusy',

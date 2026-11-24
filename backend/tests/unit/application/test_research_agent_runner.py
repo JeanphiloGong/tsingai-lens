@@ -223,7 +223,7 @@ class _Capability:
             data=(
                 self.result_data
                 if self.result_data is not None
-                else {"arguments": values, "collection_id": context.collection_id}
+                else {"arguments": values, "workspace_id": context.workspace_id}
             ),
             resource_refs=self.resource_refs or (
                 (ChatResourceRef(resource_type="objective_analysis", resource_id="objective-1:1"),)
@@ -236,7 +236,7 @@ def _context() -> AgentContext:
     return AgentContext(
         session_id="chat-1",
         user_id="user-1",
-        collection_id="col-1",
+        workspace_id="col-1",
     )
 
 
@@ -437,7 +437,7 @@ def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> N
 
 
 async def test_greeting_completes_without_calling_a_tool() -> None:
-    capability = _Capability("get_collection_context", ToolRisk.READ)
+    capability = _Capability("get_workspace_context", ToolRisk.READ)
     model = _Model(ModelTurn(content="你好，我可以帮助你分析当前文献集合。"))
     runner = ResearchAgentRunner(
         model=model,
@@ -516,7 +516,7 @@ async def test_final_answer_binds_source_marker_to_a_readable_inline_link() -> N
                 resource_type="source",
                 resource_id=f"paper-1:{source_ref}",
                 href=(
-                    "/collections/col-1/documents/paper-1?view=parsed-paper&"
+                    "/workspaces/col-1/documents/paper-1?view=parsed-paper&"
                     f"source_ref={source_ref}&page=8"
                 ),
             ),
@@ -574,7 +574,7 @@ async def test_validated_tool_arguments_are_reused_for_execution() -> None:
 
 
 async def test_new_sources_may_continue_beyond_six_model_decisions() -> None:
-    read = _Capability("get_collection_context", ToolRisk.READ, _QuestionArguments)
+    read = _Capability("get_workspace_context", ToolRisk.READ, _QuestionArguments)
     model = _Model(
         *(ModelTurn(tool_calls=(ModelToolCall(
             name=read.spec.name, arguments={"question": f"paper-{index}"}
@@ -589,7 +589,7 @@ async def test_new_sources_may_continue_beyond_six_model_decisions() -> None:
 
 
 async def test_explicit_unbounded_limits_allow_long_investigation_with_reported_usage() -> None:
-    read = _Capability("get_collection_context", ToolRisk.READ, _QuestionArguments)
+    read = _Capability("get_workspace_context", ToolRisk.READ, _QuestionArguments)
     model = _Model(
         *(ModelTurn(tool_calls=(ModelToolCall(
             name=read.spec.name, arguments={"question": f"paper-{index}"},
@@ -600,7 +600,7 @@ async def test_explicit_unbounded_limits_allow_long_investigation_with_reported_
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,)),
                                      limits=AgentRunLimits(max_elapsed_seconds=None, max_tool_calls=None,
                                                            max_model_tokens=None, emergency_max_model_cycles=None)).run_turn(
-        context=_context(), previous_messages=(), user_message="Inspect the collection.",
+        context=_context(), previous_messages=(), user_message="Inspect the workspace.",
         progress_callback=traces.append,
     )
     assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
@@ -659,7 +659,7 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
     assert progress.observe(call, revised_source) is True
     assert progress.observe(call, revised_source) is False
 
-    browse_call = replace(call, name="browse_collection_papers")
+    browse_call = replace(call, name="browse_workspace_papers")
     browse_result = replace(
         result,
         data={"paper_total": 1, "papers": [{"document_id": "doc-1", "title": "Paper"}]},
@@ -709,14 +709,14 @@ async def test_changing_read_budgets_cannot_keep_duplicate_investigation_running
 
 @pytest.mark.parametrize("failed", [False, True])
 async def test_identical_observations_finalize_without_losing_results(failed: bool) -> None:
-    read = _Capability("get_collection_context", ToolRisk.READ,
+    read = _Capability("get_workspace_context", ToolRisk.READ,
                        fail_with=RuntimeError("unavailable") if failed else None)
     model = _Model(*(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),)) for _ in range(3)),
                    ModelTurn(content="Only the inspected scope can be discussed."))
     result = await ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry((read,)),
-    ).run_turn(context=_context(), previous_messages=(), user_message="Read collection papers.")
+    ).run_turn(context=_context(), previous_messages=(), user_message="Read workspace papers.")
     assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
     assert len(result.tool_results) == 4
     assert len(read.executed_arguments) == 3
@@ -726,12 +726,12 @@ async def test_identical_observations_finalize_without_losing_results(failed: bo
 
 
 async def test_usage_exhaustion_records_unexecuted_intent_then_finalizes() -> None:
-    read = _Capability("get_collection_context", ToolRisk.READ)
+    read = _Capability("get_workspace_context", ToolRisk.READ)
     result = await ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=(ModelToolCall(name=read.spec.name),), usage=ModelUsage(80, 20, 100)),
                      ModelTurn(content="The paper remains unread.")),
         capabilities=CapabilityRegistry((read,)), limits=AgentRunLimits(max_model_tokens=100),
-    ).run_turn(context=_context(), previous_messages=(), user_message="Read collection papers.")
+    ).run_turn(context=_context(), previous_messages=(), user_message="Read workspace papers.")
     assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
     assert read.executed_arguments == []
     assert result.tool_results[-1].error_code == "resource_budget"
@@ -758,7 +758,7 @@ async def test_provider_retries_are_visible_in_progress_trace() -> None:
 
 async def test_missing_stream_arguments_retry_nonstreaming_before_any_tool_executes():
     callbacks = []
-    tool = _Capability("get_collection_context", ToolRisk.READ)
+    tool = _Capability("get_workspace_context", ToolRisk.READ)
 
     class Model(_Model):
         async def respond(self, **kwargs):
@@ -768,10 +768,10 @@ async def test_missing_stream_arguments_retry_nonstreaming_before_any_tool_execu
     model = Model(
         ModelResponseError("missing", reason="stream_tool_arguments_missing"),
         ModelTurn(tool_calls=(ModelToolCall(tool.spec.name, {}),)),
-        ModelTurn(content="The collection was inspected."),
+        ModelTurn(content="The workspace was inspected."),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((tool,))).run_turn(
-        context=_context(), previous_messages=(), user_message="Inspect this collection.",
+        context=_context(), previous_messages=(), user_message="Inspect this workspace.",
         text_delta_callback=lambda _: None,
     )
     assert result.status is AgentRunStatus.COMPLETED
@@ -780,7 +780,7 @@ async def test_missing_stream_arguments_retry_nonstreaming_before_any_tool_execu
 
 
 async def test_retry_allowance_is_shared_across_successful_tool_cycles():
-    tool = _Capability("get_collection_context", ToolRisk.READ)
+    tool = _Capability("get_workspace_context", ToolRisk.READ)
     traces = []
     model = _Model(
         ModelResponseError("empty", reason="empty_response"),
@@ -790,7 +790,7 @@ async def test_retry_allowance_is_shared_across_successful_tool_cycles():
     )
     result = await ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((tool,)), limits=AgentRunLimits(max_model_retries=1),
-    ).run_turn(context=_context(), previous_messages=(), user_message="Inspect collection.", progress_callback=traces.append)
+    ).run_turn(context=_context(), previous_messages=(), user_message="Inspect workspace.", progress_callback=traces.append)
     assert result.status is AgentRunStatus.FAILED
     assert len(tool.executed_arguments) == 1
     assert len([trace for trace in traces if trace["phase"] == "model_retry"]) == 1
@@ -1257,7 +1257,7 @@ async def test_tool_response_deduplicates_and_bounds_one_model_batch() -> None:
     result = await ResearchAgentRunner(
         model=_Model(ModelTurn(tool_calls=requested), ModelTurn(content="The bounded batch was inspected.")),
         capabilities=CapabilityRegistry((read,)),
-    ).run_turn(context=_context(), previous_messages=(), user_message="Inspect the collection.")
+    ).run_turn(context=_context(), previous_messages=(), user_message="Inspect the workspace.")
 
     assert result.status is AgentRunStatus.COMPLETED
     assert len(read.executed_arguments) == 32
@@ -1497,7 +1497,7 @@ async def test_general_science_discussion_receives_no_capabilities() -> None:
         model=model,
         capabilities=CapabilityRegistry(
             (
-                _Capability("get_collection_context", ToolRisk.READ),
+                _Capability("get_workspace_context", ToolRisk.READ),
                 _Capability("search_sources", ToolRisk.READ, _QuestionArguments),
                 _Capability("create_objective_candidate", ToolRisk.WRITE),
             )
@@ -1517,13 +1517,13 @@ async def test_general_science_discussion_receives_no_capabilities() -> None:
 
 async def test_correction_request_that_says_do_not_publish_exposes_reads_but_no_writes() -> None:
     model = _Model(ModelTurn(content="我会先回到原始来源核对 HIP 条件。"),
-                   discover=("browse_collection_papers", "search_sources", "read_source"))
+                   discover=("browse_workspace_papers", "search_sources", "read_source"))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
             (
-                _Capability("get_collection_context", ToolRisk.READ),
-                _Capability("browse_collection_papers", ToolRisk.READ),
+                _Capability("get_workspace_context", ToolRisk.READ),
+                _Capability("browse_workspace_papers", ToolRisk.READ),
                 _Capability("search_sources", ToolRisk.READ, _QuestionArguments),
                 _Capability("read_source", ToolRisk.READ),
                 _Capability("query_published_findings", ToolRisk.READ),
@@ -1548,7 +1548,7 @@ async def test_correction_request_that_says_do_not_publish_exposes_reads_but_no_
     )
 
     exposed = set(model.tool_spec_names[0])
-    assert {"browse_collection_papers", "search_sources", "read_source"}.issubset(
+    assert {"browse_workspace_papers", "search_sources", "read_source"}.issubset(
         exposed
     )
     assert exposed.isdisjoint(
@@ -1562,15 +1562,15 @@ async def test_correction_request_that_says_do_not_publish_exposes_reads_but_no_
     )
 
 
-async def test_literature_screening_receives_only_collection_read_capabilities() -> None:
+async def test_literature_screening_receives_only_workspace_read_capabilities() -> None:
     model = _Model(ModelTurn(content="我会先根据论文概览形成临时阅读清单。"),
-                   discover=("get_collection_context", "browse_collection_papers"))
+                   discover=("get_workspace_context", "browse_workspace_papers"))
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
             (
-                _Capability("get_collection_context", ToolRisk.READ),
-                _Capability("browse_collection_papers", ToolRisk.READ),
+                _Capability("get_workspace_context", ToolRisk.READ),
+                _Capability("browse_workspace_papers", ToolRisk.READ),
                 _Capability("search_sources", ToolRisk.READ, _QuestionArguments),
                 _Capability("inspect_document_sources", ToolRisk.READ),
                 _Capability("read_source", ToolRisk.READ),
@@ -1590,15 +1590,15 @@ async def test_literature_screening_receives_only_collection_read_capabilities()
     assert result.status is AgentRunStatus.COMPLETED
     assert model.tool_spec_names == [
         (
-            "get_collection_context",
-            "browse_collection_papers",
+            "get_workspace_context",
+            "browse_workspace_papers",
         )
     ]
 
 
 async def test_literature_based_opinion_exposes_source_reading_capabilities() -> None:
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 2,
@@ -1636,7 +1636,7 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
     )
     model = _Model(
         ModelTurn(
-            tool_calls=(ModelToolCall(name="browse_collection_papers", arguments={}),)
+            tool_calls=(ModelToolCall(name="browse_workspace_papers", arguments={}),)
         ),
         ModelTurn(
             tool_calls=(ModelToolCall(
@@ -1651,14 +1651,14 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
             ),)
         ),
         ModelTurn(content="已读取结果原文；目前只能对第一篇论文形成有依据的初步判断。"),
-        discover=("browse_collection_papers", "search_sources", "read_source"),
+        discover=("browse_workspace_papers", "search_sources", "read_source"),
 
     )
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
             (
-                _Capability("get_collection_context", ToolRisk.READ),
+                _Capability("get_workspace_context", ToolRisk.READ),
                 browse,
                 search,
                 read,
@@ -1675,11 +1675,11 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
     assert result.status is AgentRunStatus.COMPLETED
     assert [call.name for call in result.tool_calls] == [
         "discover_research_tools",
-        "browse_collection_papers",
+        "browse_workspace_papers",
         "search_sources",
         "read_source",
     ]
-    assert all({"browse_collection_papers", "search_sources", "read_source"}.issubset(names)
+    assert all({"browse_workspace_papers", "search_sources", "read_source"}.issubset(names)
                for names in model.tool_spec_names)
 
 async def test_literature_based_opinion_completion_does_not_certify_source_support() -> None:
@@ -1688,10 +1688,10 @@ async def test_literature_based_opinion_completion_does_not_certify_source_suppo
         model=_Model(
             ModelTurn(content=unsupported_answer),
             ModelTurn(content=unsupported_answer),
-            discover=("browse_collection_papers",),
+            discover=("browse_workspace_papers",),
         ),
         capabilities=CapabilityRegistry(
-            (_Capability("browse_collection_papers", ToolRisk.READ),)
+            (_Capability("browse_workspace_papers", ToolRisk.READ),)
         ),
     )
 
@@ -1773,8 +1773,8 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
                     else ToolRisk.WRITE,
                 )
                 for name in (
-                    "get_collection_context",
-                    "browse_collection_papers",
+                    "get_workspace_context",
+                    "browse_workspace_papers",
                     "query_published_findings",
                     "inspect_published_finding",
                     "inspect_objective_analysis",
@@ -1801,7 +1801,7 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
 
 async def test_finding_review_does_not_expose_mutation_capabilities_without_save_request() -> None:
     model = _Model(ModelTurn(content="我会先核对结论、证据和适用边界。"),
-                   discover=("get_collection_context", "query_published_findings",
+                   discover=("get_workspace_context", "query_published_findings",
                              "inspect_published_finding", "inspect_objective_analysis",
                              "assess_objective_quality"))
     runner = ResearchAgentRunner(
@@ -1820,8 +1820,8 @@ async def test_finding_review_does_not_expose_mutation_capabilities_without_save
                     else ToolRisk.READ,
                 )
                 for name in (
-                    "get_collection_context",
-                    "browse_collection_papers",
+                    "get_workspace_context",
+                    "browse_workspace_papers",
                     "query_published_findings",
                     "inspect_published_finding",
                     "inspect_objective_analysis",
@@ -1843,7 +1843,7 @@ async def test_finding_review_does_not_expose_mutation_capabilities_without_save
     assert result.status is AgentRunStatus.COMPLETED
     assert model.tool_spec_names == [
         (
-            "get_collection_context",
+            "get_workspace_context",
             "query_published_findings",
             "inspect_published_finding",
             "inspect_objective_analysis",
@@ -1854,7 +1854,7 @@ async def test_finding_review_does_not_expose_mutation_capabilities_without_save
 
 async def test_objective_status_question_does_not_expose_derivation() -> None:
     model = _Model(ModelTurn(content="我会先查看现有研究目标和分析状态。"),
-                   discover=("get_collection_context", "inspect_research_process",
+                   discover=("get_workspace_context", "inspect_research_process",
                              "inspect_objective_analysis"))
     runner = ResearchAgentRunner(
         model=model,
@@ -1862,8 +1862,8 @@ async def test_objective_status_question_does_not_expose_derivation() -> None:
             tuple(
                 _Capability(name, ToolRisk.READ)
                 for name in (
-                    "get_collection_context",
-                    "browse_collection_papers",
+                    "get_workspace_context",
+                    "browse_workspace_papers",
                     "propose_objective_drafts",
                     "preview_research_scope",
                     "derive_objective",
@@ -1877,13 +1877,13 @@ async def test_objective_status_question_does_not_expose_derivation() -> None:
     result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="当前 collection 中已有研究目标和分析进度吗？请查看状态。",
+        user_message="当前 workspace 中已有研究目标和分析进度吗？请查看状态。",
     )
 
     assert result.status is AgentRunStatus.COMPLETED
     assert model.tool_spec_names == [
         (
-            "get_collection_context",
+            "get_workspace_context",
             "inspect_research_process",
             "inspect_objective_analysis",
         )
@@ -1891,8 +1891,8 @@ async def test_objective_status_question_does_not_expose_derivation() -> None:
 
 
 async def test_status_question_can_choose_each_status_read() -> None:
-    collection_context = _Capability(
-        "get_collection_context",
+    workspace_context = _Capability(
+        "get_workspace_context",
         ToolRisk.READ,
         result_data={
             "objectives": [
@@ -1912,7 +1912,7 @@ async def test_status_question_can_choose_each_status_read() -> None:
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
-                name="get_collection_context",
+                name="get_workspace_context",
                 arguments={},
             ),)
         ),
@@ -1929,39 +1929,39 @@ async def test_status_question_can_choose_each_status_read() -> None:
             ),)
         ),
         ModelTurn(content="现在可以完整说明研究目标和分析进度了。"),
-        discover=("get_collection_context", "inspect_research_process", "inspect_objective_analysis"),
+        discover=("get_workspace_context", "inspect_research_process", "inspect_objective_analysis"),
     )
     runner = ResearchAgentRunner(
         model=model,
-        capabilities=CapabilityRegistry((collection_context, process, analysis)),
+        capabilities=CapabilityRegistry((workspace_context, process, analysis)),
         limits=AgentRunLimits(max_tool_calls=6),
     )
 
     result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="当前 collection 中已有研究目标和分析进度吗？请查看状态。",
+        user_message="当前 workspace 中已有研究目标和分析进度吗？请查看状态。",
     )
 
     assert result.status is AgentRunStatus.COMPLETED
     assert [call.name for call in result.tool_calls] == [
         "discover_research_tools",
-        "get_collection_context",
+        "get_workspace_context",
         "inspect_research_process",
         "inspect_objective_analysis",
     ]
     assert process.executed_arguments == [{}]
     assert analysis.executed_arguments == [{"objective_id": "objective-1"}]
-    assert all({"get_collection_context", "inspect_research_process", "inspect_objective_analysis"}.issubset(names)
+    assert all({"get_workspace_context", "inspect_research_process", "inspect_objective_analysis"}.issubset(names)
                for names in model.tool_spec_names)
 
 
 async def test_filename_follow_up_keeps_paper_reads_without_exposing_writes() -> None:
-    browser = _Capability("browse_collection_papers", ToolRisk.READ)
+    browser = _Capability("browse_workspace_papers", ToolRisk.READ)
     search = _Capability("search_sources", ToolRisk.READ, _QuestionArguments)
     writer = _Capability("create_objective_candidate", ToolRisk.WRITE, _QuestionArguments)
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers", arguments={}),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="browse_workspace_papers", arguments={}),)),
         ModelTurn(content="我先列出了三篇优先阅读的论文。"),
         ModelTurn(content="已把文件名含 residual-stress 的论文加入临时阅读清单。"),
     )
@@ -1983,8 +1983,8 @@ async def test_filename_follow_up_keeps_paper_reads_without_exposing_writes() ->
 
     assert second.status is AgentRunStatus.COMPLETED
     assert model.tool_spec_names == [
-        ("browse_collection_papers",),
-        ("browse_collection_papers",),
+        ("browse_workspace_papers",),
+        ("browse_workspace_papers",),
         (),
     ]
     assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
@@ -1993,12 +1993,12 @@ async def test_filename_follow_up_keeps_paper_reads_without_exposing_writes() ->
 
 async def test_objective_write_is_hidden_until_the_user_requests_persistence() -> None:
     draft_model = _Model(ModelTurn(content="我可以先形成三个可审阅的问题草案。"),
-                         discover=("get_collection_context", "browse_collection_papers",
+                         discover=("get_workspace_context", "browse_workspace_papers",
                                    "preview_research_scope", "propose_objective_drafts"))
     capabilities = CapabilityRegistry(
         (
-            _Capability("get_collection_context", ToolRisk.READ),
-            _Capability("browse_collection_papers", ToolRisk.READ),
+            _Capability("get_workspace_context", ToolRisk.READ),
+            _Capability("browse_workspace_papers", ToolRisk.READ),
             _Capability("preview_research_scope", ToolRisk.READ),
             _Capability("propose_objective_drafts", ToolRisk.DRAFT, _QuestionArguments),
             _Capability("create_objective_candidate", ToolRisk.WRITE, _QuestionArguments),
@@ -2016,8 +2016,8 @@ async def test_objective_write_is_hidden_until_the_user_requests_persistence() -
 
     assert draft_model.tool_spec_names == [
         (
-            "get_collection_context",
-            "browse_collection_papers",
+            "get_workspace_context",
+            "browse_workspace_papers",
             "preview_research_scope",
             "propose_objective_drafts",
         )
@@ -2048,7 +2048,7 @@ async def test_candidate_creation_with_explicit_stop_hides_confirmation_and_anal
         model=model,
         capabilities=CapabilityRegistry(
             (
-                _Capability("get_collection_context", ToolRisk.READ),
+                _Capability("get_workspace_context", ToolRisk.READ),
                 _Capability("propose_objective_drafts", ToolRisk.DRAFT),
                 _Capability(
                     "create_objective_candidate",
@@ -2106,7 +2106,7 @@ async def test_discovered_write_requires_approval_before_execution() -> None:
 
 
 async def test_runner_forwards_model_text_deltas_before_returning_the_turn() -> None:
-    capability = _Capability("get_collection_context", ToolRisk.READ)
+    capability = _Capability("get_workspace_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(ModelTurn(content="逐段回复")),
         capabilities=CapabilityRegistry((capability,)),
@@ -2125,12 +2125,12 @@ async def test_runner_forwards_model_text_deltas_before_returning_the_turn() -> 
 
 
 async def test_read_capability_result_returns_to_the_model_before_final_answer() -> None:
-    capability = _Capability("get_collection_context", ToolRisk.READ)
+    capability = _Capability("get_workspace_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
@@ -2155,26 +2155,26 @@ async def test_read_capability_result_returns_to_the_model_before_final_answer()
         "assistant",
     ]
     assert result.tool_calls[1].status is ToolCallStatus.SUCCEEDED
-    assert result.tool_results[1].data["collection_id"] == "col-1"
+    assert result.tool_results[1].data["workspace_id"] == "col-1"
     assert capability.executed_arguments == [{}]
     assert capability.executed_call_ids == [result.tool_calls[1].tool_call_id]
     assert result.tool_results[1].tool_call_id == result.tool_calls[1].tool_call_id
 
 
 async def test_each_model_tool_decision_gets_a_unique_lens_call_identity() -> None:
-    capability = _Capability("get_collection_context", ToolRisk.READ)
+    capability = _Capability("get_workspace_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
             ModelTurn(content="第一轮读取完成。"),
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
@@ -2186,7 +2186,7 @@ async def test_each_model_tool_decision_gets_a_unique_lens_call_identity() -> No
     first = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="读取当前 collection",
+        user_message="读取当前 workspace",
     )
     second = await runner.run_turn(
         context=_context(),
@@ -2625,7 +2625,7 @@ async def test_unknown_tool_is_returned_to_the_model_as_a_failed_result() -> Non
             ModelTurn(content="这个工具不可用，我不会访问文件系统。"),
         ),
         capabilities=CapabilityRegistry(
-            (_Capability("get_collection_context", ToolRisk.READ),)
+            (_Capability("get_workspace_context", ToolRisk.READ),)
         ),
     )
 
@@ -2700,7 +2700,7 @@ async def test_finding_draft_repair_receives_actionable_selection_error(monkeypa
     assert result.status is AgentRunStatus.COMPLETED
     assert any(item.data.get("draft") == {**corrected, "comparison_group_ids": []} for item in result.tool_results)
     validate.assert_awaited_once_with(
-        collection_id="col-1", objective_id="obj-1", source_analysis_version=6,
+        workspace_id="col-1", objective_id="obj-1", source_analysis_version=6,
         selection_ids=("selection-1",), comparison_group_ids=(), user_id="user-1",
     )
 
@@ -2791,9 +2791,9 @@ async def test_requested_calls_deduplicates_success_only_in_memory_write() -> No
     ],
 )
 async def test_capability_business_rejection_reaches_the_next_model_turn(error) -> None:
-    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=error)
+    capability = _Capability("get_workspace_context", ToolRisk.READ, fail_with=error)
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="get_workspace_context", arguments={}),)),
         ModelTurn(content="当前依据已变化，需要重新检查后再决定。"),
     )
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((capability,)))
@@ -2815,7 +2815,7 @@ async def test_capability_business_rejection_reaches_the_next_model_turn(error) 
 
 async def test_capability_exception_is_sanitized_before_returning_to_model(caplog) -> None:
     capability = _Capability(
-        "get_collection_context",
+        "get_workspace_context",
         ToolRisk.READ,
         fail_with=RuntimeError("database password=do-not-expose"),
     )
@@ -2823,11 +2823,11 @@ async def test_capability_exception_is_sanitized_before_returning_to_model(caplo
         model=_Model(
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
-            ModelTurn(content="暂时无法读取 collection，请稍后重试。"),
+            ModelTurn(content="暂时无法读取 workspace，请稍后重试。"),
         ),
         capabilities=CapabilityRegistry((capability,)),
     )
@@ -2835,7 +2835,7 @@ async def test_capability_exception_is_sanitized_before_returning_to_model(caplo
     result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="读取 collection",
+        user_message="读取 workspace",
     )
 
     assert result.tool_results[-1].error_code == "capability_execution_failed"
@@ -2847,7 +2847,7 @@ async def test_capability_exception_is_sanitized_before_returning_to_model(caplo
 
 async def test_arbitrary_capability_value_error_does_not_expose_internal_text() -> None:
     capability = _Capability(
-        "get_collection_context",
+        "get_workspace_context",
         ToolRisk.DRAFT,
         fail_with=ValueError(
             "raw model output referenced unknown source labels: S001=methods-1"
@@ -2856,7 +2856,7 @@ async def test_arbitrary_capability_value_error_does_not_expose_internal_text() 
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(tool_calls=(ModelToolCall(
-                name="get_collection_context", arguments={},
+                name="get_workspace_context", arguments={},
             ),)),
             ModelTurn(content="我会改用读取结果中的 S001 标签。"),
         ),
@@ -2878,7 +2878,7 @@ async def test_arbitrary_capability_value_error_does_not_expose_internal_text() 
 
 async def test_paper_experiment_validation_failure_is_structured_for_model_repair() -> None:
     capability = _Capability(
-        "get_collection_context",
+        "get_workspace_context",
         ToolRisk.DRAFT,
         fail_with=PaperExperimentDraftValidationError(
             "experiments[0] comparison outcome does not match its measurements",
@@ -2888,7 +2888,7 @@ async def test_paper_experiment_validation_failure_is_structured_for_model_repai
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(tool_calls=(ModelToolCall(
-                name="get_collection_context", arguments={},
+                name="get_workspace_context", arguments={},
             ),)),
             ModelTurn(content="我会按因变量拆分比较并保留完整实验事实。"),
         ),
@@ -2953,24 +2953,24 @@ async def test_queued_capability_result_returns_to_model_as_a_successful_observa
 
 
 async def test_resource_budget_stops_repeated_tool_calls() -> None:
-    capability = _Capability("get_collection_context", ToolRisk.READ)
+    capability = _Capability("get_workspace_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
             ModelTurn(
                 content=(
-                    "我已读取两次 collection 概览，但仍未完成比较；目前只能给出"
+                    "我已读取两次 workspace 概览，但仍未完成比较；目前只能给出"
                     "有限判断，建议继续指定要检查的论文。"
                 )
             ),
@@ -3000,7 +3000,7 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
-                name="get_collection_context",
+                name="get_workspace_context",
                 arguments={},
             ),)
         ),
@@ -3009,7 +3009,7 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
-            (_Capability("get_collection_context", ToolRisk.READ),)
+            (_Capability("get_workspace_context", ToolRisk.READ),)
         ),
         limits=AgentRunLimits(max_tool_calls=2),
     )
@@ -3501,14 +3501,14 @@ async def test_resource_budget_final_answer_has_time_to_summarize_large_trajecto
         model=_Model(
             ModelTurn(
                 tool_calls=(ModelToolCall(
-                    name="get_collection_context",
+                    name="get_workspace_context",
                     arguments={},
                 ),)
             ),
             ModelTurn(content="已整理当前已读取的证据范围。"),
         ),
         capabilities=CapabilityRegistry(
-            (_Capability("get_collection_context", ToolRisk.READ),)
+            (_Capability("get_workspace_context", ToolRisk.READ),)
         ),
         limits=AgentRunLimits(max_tool_calls=2),
     )
@@ -3526,7 +3526,7 @@ async def test_resource_budget_final_answer_has_time_to_summarize_large_trajecto
 
 async def test_resource_budget_ledger_counts_complete_inspected_source_as_read() -> None:
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 4,
@@ -3560,7 +3560,7 @@ async def test_resource_budget_ledger_counts_complete_inspected_source_as_read()
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
-                name="browse_collection_papers",
+                name="browse_workspace_papers",
                 arguments={},
             ),)
         ),
@@ -3570,8 +3570,8 @@ async def test_resource_budget_ledger_counts_complete_inspected_source_as_read()
                 arguments={},
             ),)
         ),
-        ModelTurn(content="当前 collection 只有 4 篇；我精读了一个完整来源。"),
-        discover=("browse_collection_papers", "inspect_document_sources"),
+        ModelTurn(content="当前 workspace 只有 4 篇；我精读了一个完整来源。"),
+        discover=("browse_workspace_papers", "inspect_document_sources"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -3587,7 +3587,7 @@ async def test_resource_budget_ledger_counts_complete_inspected_source_as_read()
 
     assert result.status is AgentRunStatus.COMPLETED
     final_instruction = model.contexts[-1][-1].content
-    assert "Collection paper total: 4" in final_instruction
+    assert "Workspace paper total: 4" in final_instruction
     assert "Paper identities screened (1): paper-1" in final_instruction
     assert "Exact paper Sources read (1): paper-1:source-complete" in final_instruction
     assert "source-truncated" not in final_instruction
@@ -3616,7 +3616,7 @@ def test_reading_ledger_retains_failed_and_unread_document_scope() -> None:
             name=name, arguments=arguments, risk=ToolRisk.READ,
         )
         for index, (name, arguments) in enumerate((
-            ("browse_collection_papers", {}),
+            ("browse_workspace_papers", {}),
             ("read_source", {"document_id": "paper-1"}),
             ("read_source", {"document_id": "paper-2"}),
         ))
@@ -3685,7 +3685,7 @@ async def test_resource_budget_final_answer_keeps_latest_structured_draft() -> N
 
 async def test_complete_paper_browse_remains_available_during_source_reading() -> None:
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 4,
@@ -3700,7 +3700,7 @@ async def test_complete_paper_browse_remains_available_during_source_reading() -
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
-                name="browse_collection_papers",
+                name="browse_workspace_papers",
                 arguments={},
             ),)
         ),
@@ -3717,14 +3717,14 @@ async def test_complete_paper_browse_remains_available_during_source_reading() -
         user_message="深入阅读这些论文的实验条件和结果。",
     )
 
-    assert "browse_collection_papers" in model.tool_spec_names[0]
-    assert "browse_collection_papers" in model.tool_spec_names[1]
+    assert "browse_workspace_papers" in model.tool_spec_names[0]
+    assert "browse_workspace_papers" in model.tool_spec_names[1]
     assert "discover_research_tools" in model.all_tool_spec_names[-1]
 
 
 async def test_comparison_can_choose_source_search_after_paper_map() -> None:
     browse = _Capability(
-        "browse_collection_papers",
+        "browse_workspace_papers",
         ToolRisk.READ,
         result_data={
             "paper_total": 3,
@@ -3761,7 +3761,7 @@ async def test_comparison_can_choose_source_search_after_paper_map() -> None:
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
-                name="browse_collection_papers",
+                name="browse_workspace_papers",
                 arguments={},
             ),)
         ),
@@ -3778,7 +3778,7 @@ async def test_comparison_can_choose_source_search_after_paper_map() -> None:
             ),)
         ),
         ModelTurn(content="已基于精确来源检查论文间的实验条件。"),
-        discover=("browse_collection_papers", "search_sources", "read_source"),
+        discover=("browse_workspace_papers", "search_sources", "read_source"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -4142,7 +4142,7 @@ async def test_exact_finding_inspection_retains_tools_for_optional_plan_draft() 
 
 
 async def test_research_plan_can_choose_evidence_reads_before_draft() -> None:
-    context = _Capability("get_collection_context", ToolRisk.READ)
+    context = _Capability("get_workspace_context", ToolRisk.READ)
     quality = _Capability("assess_objective_quality", ToolRisk.READ)
     query = _Capability(
         "query_published_findings",
@@ -4165,7 +4165,7 @@ async def test_research_plan_can_choose_evidence_reads_before_draft() -> None:
     model = _Model(
         ModelTurn(
             tool_calls=(ModelToolCall(
-                name="get_collection_context",
+                name="get_workspace_context",
                 arguments={},
             ),)
         ),
@@ -4197,7 +4197,7 @@ async def test_research_plan_can_choose_evidence_reads_before_draft() -> None:
             ),)
         ),
         ModelTurn(content="方案草案已形成，但尚未保存或授权执行。"),
-        discover=("get_collection_context", "assess_objective_quality", "query_published_findings", "inspect_published_finding", "propose_research_plan"),
+        discover=("get_workspace_context", "assess_objective_quality", "query_published_findings", "inspect_published_finding", "propose_research_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -4215,7 +4215,7 @@ async def test_research_plan_can_choose_evidence_reads_before_draft() -> None:
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert all(set(names) == {"get_collection_context", "assess_objective_quality", "query_published_findings",
+    assert all(set(names) == {"get_workspace_context", "assess_objective_quality", "query_published_findings",
                               "inspect_published_finding", "propose_research_plan"}
                for names in model.tool_spec_names)
     assert propose.executed_arguments == [{}]
@@ -4503,8 +4503,8 @@ async def test_registered_write_reaches_approval_after_model_discovery() -> None
 @pytest.mark.anyio
 async def test_research_request_discovers_source_and_experiment_tools_from_catalog() -> None:
     names = (
-        "get_collection_context",
-        "browse_collection_papers",
+        "get_workspace_context",
+        "browse_workspace_papers",
         "inspect_document_sources",
         "read_source",
         "inspect_table",
@@ -4565,7 +4565,7 @@ async def test_review_save_requires_real_approval_instead_of_a_prose_confirmatio
     )
     deltas = []
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
-        capability, _Capability("get_collection_context", ToolRisk.READ),
+        capability, _Capability("get_workspace_context", ToolRisk.READ),
     ))).run_turn(context=_context(), previous_messages=(),
         user_message="请保存 Finding 的" + ("错误反馈。" if name == "record_finding_feedback" else "人工修订。"),
         text_delta_callback=deltas.append)
@@ -4645,12 +4645,12 @@ async def test_approved_write_does_not_request_the_same_write_again() -> None:
     assert completed.messages[-1].content == "实验记录已保存，未生成研究结论。"
 
 
-def test_attached_source_context_does_not_force_collection_browse() -> None:
+def test_attached_source_context_does_not_force_workspace_browse() -> None:
     runner = ResearchAgentRunner(
         model=_Model(ModelTurn(content="可以根据这段来源回答。")),
         capabilities=CapabilityRegistry(
             (
-                _Capability("browse_collection_papers", ToolRisk.READ),
+                _Capability("browse_workspace_papers", ToolRisk.READ),
                 _Capability("search_sources", ToolRisk.READ),
                 _Capability("read_source", ToolRisk.READ),
             )
@@ -4669,7 +4669,7 @@ def test_attached_source_context_does_not_force_collection_browse() -> None:
         for spec in capability_policy.select_tool_specs(runner.capabilities, [message], [])
     }
 
-    assert "browse_collection_papers" not in names
+    assert "browse_workspace_papers" not in names
     assert names == {"discover_research_tools"}
     assert "read_source" in runner.capabilities.discovery.tools
 
@@ -4772,7 +4772,7 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
 
 async def test_process_status_can_inspect_canonical_objective_analysis_state() -> None:
     context = _Capability(
-        "get_collection_context",
+        "get_workspace_context",
         ToolRisk.READ,
         result_data={
             "objectives": [
@@ -4792,7 +4792,7 @@ async def test_process_status_can_inspect_canonical_objective_analysis_state() -
     analysis = _Capability("inspect_objective_analysis", ToolRisk.READ)
     model = _Model(
         ModelTurn(
-            tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)
+            tool_calls=(ModelToolCall(name="get_workspace_context", arguments={}),)
         ),
         ModelTurn(
             tool_calls=(ModelToolCall(name="inspect_research_process", arguments={}),)
@@ -4801,7 +4801,7 @@ async def test_process_status_can_inspect_canonical_objective_analysis_state() -
             tool_calls=(ModelToolCall(name="inspect_objective_analysis", arguments={}),)
         ),
         ModelTurn(content="文献准备完成，已确认目标的分析状态见上。"),
-        discover=("get_collection_context", "inspect_research_process", "inspect_objective_analysis"),
+        discover=("get_workspace_context", "inspect_research_process", "inspect_objective_analysis"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -4811,11 +4811,11 @@ async def test_process_status_can_inspect_canonical_objective_analysis_state() -
     result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="当前 collection 的研究目标和分析进度是什么？请查看状态。",
+        user_message="当前 workspace 的研究目标和分析进度是什么？请查看状态。",
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert all({"get_collection_context", "inspect_research_process", "inspect_objective_analysis"}.issubset(names)
+    assert all({"get_workspace_context", "inspect_research_process", "inspect_objective_analysis"}.issubset(names)
                for names in model.tool_spec_names)
     assert analysis.executed_arguments == [{}]
     assert any(message.tool_result and "objective-confirmed" in json.dumps(message.tool_result.data)
@@ -4900,7 +4900,7 @@ async def test_invalid_model_response_is_retried_once_without_unavailable_error(
             ModelTurn(content="重试后得到有效回答。"),
         ),
         capabilities=CapabilityRegistry(
-            (_Capability("get_collection_context", ToolRisk.READ),)
+            (_Capability("get_workspace_context", ToolRisk.READ),)
         ),
     )
 
@@ -4921,7 +4921,7 @@ async def test_repeated_invalid_model_response_is_distinguished_from_unavailable
             *(ModelResponseError("empty response", reason="empty_response") for _ in range(6)),
         ),
         capabilities=CapabilityRegistry(
-            (_Capability("get_collection_context", ToolRisk.READ),)
+            (_Capability("get_workspace_context", ToolRisk.READ),)
         ),
     )
 
@@ -4945,7 +4945,7 @@ async def test_unexpected_model_failure_remains_model_unavailable(exception: Exc
     runner = ResearchAgentRunner(
         model=_Model(exception),
         capabilities=CapabilityRegistry(
-            (_Capability("get_collection_context", ToolRisk.READ),)
+            (_Capability("get_workspace_context", ToolRisk.READ),)
         ),
     )
 
@@ -5024,7 +5024,7 @@ async def test_original_inconel_request_survives_reading_compaction_and_provider
             assert next(message for message in context.messages if message.message_id == context.active_user_message_id).content == prompt
             if context.compacting:
                 result = next(message for message in context.messages if message.tool_result is not None)
-                return ModelTurn(content=json.dumps({"scope": "Supplied collection only; Inconel 718; density >= 99.9%.",
+                return ModelTurn(content=json.dumps({"scope": "Supplied workspace only; Inconel 718; density >= 99.9%.",
                     "checks": [{"statement": "Synthetic first paper: comparable elongation is unknown.",
                                 "conditions": "As-built; tensile orientation unknown.",
                                 "basis_message_ids": [result.message_id], "unresolved": "Need comparable tensile data."}],
@@ -5115,10 +5115,10 @@ async def test_incomplete_curation_is_rejected_before_approval_without_alias_rep
 
 @pytest.mark.parametrize("error", [PermissionError("private authority details"), PermissionDeniedException()])
 async def test_capability_permission_failure_keeps_a_distinct_error_contract(error):
-    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=error)
+    capability = _Capability("get_workspace_context", ToolRisk.READ, fail_with=error)
     runner = ResearchAgentRunner(
         model=_Model(
-            ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),
+            ModelTurn(tool_calls=(ModelToolCall(name="get_workspace_context", arguments={}),)),
             ModelTurn(content="当前权限不允许读取该集合。"),
         ),
         capabilities=CapabilityRegistry((capability,)),
@@ -5141,8 +5141,8 @@ async def test_analysis_prerequisites_return_actionable_rejections_without_sched
     )
 
     analysis = SimpleNamespace(start_analysis=AsyncMock())
-    objective_analysis.collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock()
+    objective_analysis.workspace_service = SimpleNamespace(
+        get_workspace_for_user=AsyncMock()
     )
     objective_analysis.ObjectiveRepo = SimpleNamespace(
         read_objective=AsyncMock(

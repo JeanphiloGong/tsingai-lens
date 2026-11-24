@@ -23,7 +23,7 @@ def anyio_backend() -> str:
 def _dataset() -> Dataset:
     return Dataset(
         dataset_id="fdset-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         name="SFT",
         task_type="sft",
         construction_spec={"language": "zh-CN"},
@@ -46,7 +46,7 @@ def _sample() -> DatasetSample:
 def _case(snapshot: dict) -> FeedbackCase:
     return FeedbackCase(
         case_id="case-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         session_id="session-1",
         anchor_message_id="answer-1",
         source_signal_ids=("signal-1",),

@@ -47,7 +47,7 @@ class _Service:
         self.session = ChatSession.create(
             session_id="chat-1",
             user_id="user-1",
-            collection_id="col-1",
+            workspace_id="col-1",
             created_at="2026-08-19T00:00:00+00:00",
         )
         self.messages = (
@@ -76,10 +76,10 @@ class _Service:
     async def create_session(
         self,
         *,
-        collection_id: str,
+        workspace_id: str,
         user_id: str,
     ) -> ChatSession:
-        assert collection_id == "col-1"
+        assert workspace_id == "col-1"
         assert user_id == "user-1"
         return self.session
 
@@ -95,12 +95,12 @@ class _Service:
     async def list_sessions_for_user(
         self,
         *,
-        collection_id: str,
+        workspace_id: str,
         user_id: str,
         limit: int = 50,
         offset: int = 0,
     ):
-        assert collection_id == "col-1"
+        assert workspace_id == "col-1"
         assert user_id == "user-1"
         return (
             ChatSessionSummary(
@@ -241,7 +241,7 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat(monkeypatch) ->
             (
                 asyncio.run(
                     sessions_controller.create_chat_session(
-                        payload=ChatSessionCreateRequest(collection_id="col-1"),
+                        payload=ChatSessionCreateRequest(workspace_id="col-1"),
                         user_id=request.state.current_user["user_id"],
                     )
                 )
@@ -288,21 +288,21 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat(monkeypatch) ->
     )
 
     assert created.session_id == "chat-1"
-    assert read.collection_id == "col-1"
+    assert read.workspace_id == "col-1"
     assert turn.status == "completed"
     assert turn.messages[-1].content.startswith("你好")
     assert [item.role for item in messages.items] == ["user", "assistant"]
     assert messages.pending_approval.tool_call_id == "call-1"
 
 
-def test_chat_sessions_api_lists_owned_collection_sessions(monkeypatch) -> None:
+def test_chat_sessions_api_lists_owned_workspace_sessions(monkeypatch) -> None:
     response = sessions_controller.ChatSessionListResponse.model_validate(
         json.loads(
             (
                 asyncio.run(
                     sessions_controller.list_chat_sessions(
                         user_id=_request(monkeypatch, _Service()).state.current_user["user_id"],
-                        collection_id="col-1",
+                        workspace_id="col-1",
                         limit=12,
                         offset=0,
                     )
@@ -352,7 +352,7 @@ def test_chat_history_title_is_a_bounded_first_question(
                 asyncio.run(
                     sessions_controller.list_chat_sessions(
                         user_id=_request(monkeypatch, service).state.current_user["user_id"],
-                        collection_id="col-1",
+                        workspace_id="col-1",
                         limit=12,
                         offset=0,
                     )
@@ -394,11 +394,11 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(monkeypatch, count:
             "resource_type": "source",
             "resource_id": "doc-1:results",
             "href": (
-                "/collections/col-1/documents/doc-1"
+                "/workspaces/col-1/documents/doc-1"
                 "?view=parsed-paper&source_ref=results&page=3"
             ),
         },
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "document_id": "doc-1",
         "document_title": "Paper A",
         "source_kind": "text_window",
@@ -449,7 +449,7 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(monkeypatch, count:
             "resource_type": "source",
             "resource_id": "doc-1:results",
             "href": (
-                "/collections/col-1/documents/doc-1"
+                "/workspaces/col-1/documents/doc-1"
                 "?view=parsed-paper&source_ref=results&page=3"
             ),
         }
@@ -560,7 +560,7 @@ class _AuthService:
 
 
 def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
-    monkeypatch, collection_service, *, postgres_session_factory
+    monkeypatch, workspace_service, *, postgres_session_factory
 ) -> None:
     service = _Service()
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
@@ -579,14 +579,14 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
 
     with TestClient(app) as client:
         monkeypatch.setattr(shared_chat_service, "ChatService", service)
-        response = client.post("/api/v1/chat-sessions", json={"collection_id": "col-1"})
+        response = client.post("/api/v1/chat-sessions", json={"workspace_id": "col-1"})
         assert response.status_code == 401
         assert response.json()["code"] == 200301
 
         client.cookies.set("lens_session", "browser-session")
         created = client.post(
             "/api/v1/chat-sessions",
-            json={"collection_id": "col-1"},
+            json={"workspace_id": "col-1"},
         )
         turn = client.post(
             "/api/v1/chat-sessions/chat-1/messages",
@@ -600,7 +600,7 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
 
 
 def test_chat_message_route_streams_text_then_the_persisted_turn(
-    monkeypatch, collection_service, *, postgres_session_factory
+    monkeypatch, workspace_service, *, postgres_session_factory
 ) -> None:
     service = _Service()
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
@@ -634,24 +634,24 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
 
 
 def test_title_route_validates_input_and_hides_unowned_sessions(
-    monkeypatch, collection_service, *, postgres_session_factory
+    monkeypatch, workspace_service, *, postgres_session_factory
 ) -> None:
     import asyncio
 
     from application.chat import ModelTurn
-    from tests.support.postgres import seed_collection
+    from tests.support.postgres import seed_workspace
     from tests.unit.application.test_chat_session_service import (
         _Model,
         _service,
     )
 
     asyncio.run(
-        seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+        seed_workspace(postgres_session_factory, "col-1", document_ids=("doc-1",))
     )
     repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="Answer")), repository)
     session = asyncio.run(
-        service.create_session(collection_id="col-1", user_id="user-1")
+        service.create_session(workspace_id="col-1", user_id="user-1")
     )
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     monkeypatch.setattr(

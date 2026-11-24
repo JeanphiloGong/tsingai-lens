@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from infra.persistence.file import object_store as object_store_module
 
-from repositories.collection_repository import StoredDocument
+from repositories.workspace_repository import StoredDocument
 
 import asyncio
 import json
@@ -29,52 +29,52 @@ class DocumentSourceUnavailableError(ResourceConflictException):
 
     def __init__(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
         *,
         code: str = "document_source_unavailable",
         message: str = "The original source file is not available for this document.",
     ) -> None:
-        self.collection_id = collection_id
+        self.workspace_id = workspace_id
         self.document_id = document_id
         super().__init__(
             message,
             data={
                 "code": code,
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "document_id": document_id,
             },
         )
 
 
-class CollectionSourceArchiveError(ResourceConflictException):
+class WorkspaceSourceArchiveError(ResourceConflictException):
     """Raised when selected original files cannot form a safe archive."""
 
     def __init__(
         self,
-        collection_id: str,
+        workspace_id: str,
         *,
         code: str,
         message: str,
         document_id: str | None = None,
     ) -> None:
-        self.collection_id = collection_id
+        self.workspace_id = workspace_id
         self.document_id = document_id
         super().__init__(
             message,
             data={
                 "code": code,
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "document_id": document_id,
             },
         )
 
 
-from application.source import collection_service
+from application.source import workspace_service
 
 
 async def build_source_archive(
-    collection_id: str,
+    workspace_id: str,
     document_ids: list[str],
     *,
     user_id: str,
@@ -92,20 +92,20 @@ async def build_source_archive(
     if len(set(normalized_document_ids)) != len(normalized_document_ids):
         raise ValueError("source archive document_ids must be unique")
 
-    collection = await collection_service.get_collection_for_user(
-        collection_id, user_id
+    workspace = await workspace_service.get_workspace_for_user(
+        workspace_id, user_id
     )
-    records = collection.documents
+    records = workspace.documents
     records_by_document_id = {record.document.document_id: record for record in records}
     selected_records: list[tuple[str, StoredDocument]] = []
     for document_id in normalized_document_ids:
         record = records_by_document_id.get(document_id)
         if record is None:
             raise ResourceNotFoundException(
-                "A requested source document does not exist in this collection.",
+                "A requested source document does not exist in this workspace.",
                 data={
-                    "code": "collection_source_document_not_found",
-                    "collection_id": collection_id,
+                    "code": "workspace_source_document_not_found",
+                    "workspace_id": workspace_id,
                     "document_id": document_id,
                 },
             )
@@ -119,66 +119,66 @@ async def build_source_archive(
         raise RequestInvalidException(
             f"Selected source files exceed the {_SOURCE_ARCHIVE_MAX_MIB} MiB archive limit.",
             data={
-                "code": "collection_source_archive_too_large",
-                "collection_id": collection_id,
+                "code": "workspace_source_archive_too_large",
+                "workspace_id": workspace_id,
             },
         )
 
     return await asyncio.to_thread(
         _write_source_archive,
-        collection_id,
+        workspace_id,
         selected_records,
         object_store=object_store,
     )
 
 
 async def resolve_document_source_file(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     *,
     user_id: str,
     source_filename: str | None = None,
 ) -> dict[str, Any]:
     object_store = object_store_module.Store
-    collection = await collection_service.get_collection_for_user(
-        collection_id, user_id
+    workspace = await workspace_service.get_workspace_for_user(
+        workspace_id, user_id
     )
     document_key = document_id
     if not document_key:
-        raise DocumentSourceUnavailableError(collection_id, document_key)
+        raise DocumentSourceUnavailableError(workspace_id, document_key)
 
     match_keys = _source_match_keys(document_key, source_filename)
     document_matches = [
         record
-        for record in collection.documents
+        for record in workspace.documents
         if _source_file_record_matches(record, match_keys)
     ]
     if len(document_matches) == 1:
         return _build_source_file_payload(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document_id=document_key,
             record=document_matches[0],
             object_store=object_store,
         )
     if len(document_matches) > 1:
         raise DocumentSourceUnavailableError(
-            collection_id,
+            workspace_id,
             document_key,
             code="document_source_ambiguous",
             message="More than one stored source file matches this document.",
         )
     raise ResourceNotFoundException(
-        "Document not found in this collection.",
+        "Document not found in this workspace.",
         data={
             "code": "document_not_found",
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "document_id": document_key,
         },
     )
 
 
 def _write_source_archive(
-    collection_id: str,
+    workspace_id: str,
     selected_records: list[tuple[str, StoredDocument]],
     *,
     object_store: ObjectStore,
@@ -200,14 +200,14 @@ def _write_source_archive(
             ):
                 try:
                     source = _build_source_file_payload(
-                        collection_id=collection_id,
+                        workspace_id=workspace_id,
                         document_id=document_id,
                         record=record,
                         object_store=object_store,
                     )
                 except DocumentSourceUnavailableError as exc:
-                    raise CollectionSourceArchiveError(
-                        collection_id,
+                    raise WorkspaceSourceArchiveError(
+                        workspace_id,
                         code=_source_archive_error_code(exc.data["code"]),
                         message=exc.message,
                         document_id=document_id,
@@ -237,7 +237,7 @@ def _write_source_archive(
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "collection_id": collection_id,
+                        "workspace_id": workspace_id,
                         "documents": manifest_files,
                     },
                     ensure_ascii=False,
@@ -251,7 +251,7 @@ def _write_source_archive(
 
     return {
         "file": archive_file,
-        "filename": _safe_archive_filename(f"collection-{collection_id}-sources.zip"),
+        "filename": _safe_archive_filename(f"workspace-{workspace_id}-sources.zip"),
     }
 
 
@@ -287,7 +287,7 @@ def _source_match_value(value: str | None) -> str:
 
 def _build_source_file_payload(
     *,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     record: StoredDocument,
     object_store: ObjectStore,
@@ -295,13 +295,13 @@ def _build_source_file_payload(
     storage_key = record.storage_key
     expected_sha256 = record.document.sha256
     if not storage_key or not expected_sha256:
-        raise DocumentSourceUnavailableError(collection_id, document_id)
+        raise DocumentSourceUnavailableError(workspace_id, document_id)
     stored_filename = record.stored_filename
     if not stored_filename or storage_key != _input_storage_key(
-        collection_id, stored_filename
+        workspace_id, stored_filename
     ):
         raise DocumentSourceUnavailableError(
-            collection_id,
+            workspace_id,
             document_id,
             code="document_source_path_invalid",
             message="The stored source file path is not safe to serve.",
@@ -309,17 +309,17 @@ def _build_source_file_payload(
     try:
         content = object_store.read(storage_key, expected_sha256)
     except FileNotFoundError as exc:
-        raise DocumentSourceUnavailableError(collection_id, document_id) from exc
+        raise DocumentSourceUnavailableError(workspace_id, document_id) from exc
     except ValueError as exc:
         if str(exc) == "invalid storage key":
             raise DocumentSourceUnavailableError(
-                collection_id,
+                workspace_id,
                 document_id,
                 code="document_source_path_invalid",
                 message="The stored source file path is not safe to serve.",
             ) from exc
         raise DocumentSourceUnavailableError(
-            collection_id,
+            workspace_id,
             document_id,
             code="document_source_integrity_failed",
             message="The stored source file failed its integrity check.",
@@ -335,8 +335,8 @@ def _build_source_file_payload(
     }
 
 
-def _input_storage_key(collection_id: str, stored_filename: str) -> str:
-    return f"{collection_id}/input/{stored_filename}"
+def _input_storage_key(workspace_id: str, stored_filename: str) -> str:
+    return f"{workspace_id}/input/{stored_filename}"
 
 
 def _safe_archive_filename(value: str) -> str:
@@ -350,13 +350,13 @@ def _safe_archive_filename(value: str) -> str:
 
 def _source_archive_error_code(document_source_code: str) -> str:
     return {
-        "document_source_path_invalid": "collection_source_path_invalid",
-        "document_source_integrity_failed": "collection_source_integrity_failed",
-    }.get(document_source_code, "collection_source_file_unavailable")
+        "document_source_path_invalid": "workspace_source_path_invalid",
+        "document_source_integrity_failed": "workspace_source_integrity_failed",
+    }.get(document_source_code, "workspace_source_file_unavailable")
 
 
 __all__ = [
-    "CollectionSourceArchiveError",
+    "WorkspaceSourceArchiveError",
     "DocumentSourceUnavailableError",
     "build_source_archive",
     "resolve_document_source_file",

@@ -210,7 +210,7 @@ def _studies_are_duplicates(
     if _relationship_sets_overlap(left.relationships, right.relationships):
         return True
     shared_factor_set = any(
-        _axis_collections_are_equivalent(
+        _axis_workspaces_are_equivalent(
             left_relationship.varied_factors,
             right_relationship.varied_factors,
         )
@@ -253,7 +253,7 @@ def _study_identity_matches(left: PaperResearchScope, right: PaperResearchScope)
         if (
             left_values
             and right_values
-            and not _axis_collections_do_not_conflict(
+            and not _axis_workspaces_do_not_conflict(
                 left_values,
                 right_values,
             )
@@ -280,13 +280,13 @@ def _relationships_are_duplicates(
     left: PaperResearchRelationship,
     right: PaperResearchRelationship,
 ) -> bool:
-    return _axis_collections_are_equivalent(
+    return _axis_workspaces_are_equivalent(
         left.varied_factors,
         right.varied_factors,
     ) and property_matching.axis_values_match(left.outcome, right.outcome)
 
 
-def _axis_collections_do_not_conflict(
+def _axis_workspaces_do_not_conflict(
     left: tuple[str, ...],
     right: tuple[str, ...],
 ) -> bool:
@@ -308,11 +308,11 @@ def _study_source_keys(study: PaperResearchScope) -> set[tuple[str, str]]:
     }
 
 
-def _axis_collections_are_equivalent(
+def _axis_workspaces_are_equivalent(
     left: tuple[str, ...],
     right: tuple[str, ...],
 ) -> bool:
-    return property_matching.axis_collections_are_equivalent(left, right)
+    return property_matching.axis_workspaces_are_equivalent(left, right)
 
 
 def _merge_studies(

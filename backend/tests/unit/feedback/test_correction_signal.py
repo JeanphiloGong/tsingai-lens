@@ -44,7 +44,7 @@ class _Chat:
         self.session = ChatSession.create(
             session_id="session-1",
             user_id="user-1",
-            collection_id="collection-1",
+            workspace_id="workspace-1",
             created_at="2026-09-25T00:00:00+00:00",
         )
         self.messages = messages
@@ -264,7 +264,7 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
     assert snapshot["inspected_sources"][0]["quote"] == "The exact passage."
     now = datetime.now(timezone.utc)
     dataset = Dataset(
-        "fdset-1", "collection-1", "Preference", "preference", {}, 1, "user-1"
+        "fdset-1", "workspace-1", "Preference", "preference", {}, 1, "user-1"
     )
     sample = DatasetSample.pending(
         sample_id="sample-1",
@@ -276,7 +276,7 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
     )
     case = FeedbackCase(
         "case-1",
-        "collection-1",
+        "workspace-1",
         "session-1",
         "answer-1",
         (),
@@ -396,7 +396,7 @@ async def test_handler_keeps_selected_context_requested_until_a_read_is_verified
             resource_type="source",
             resource_id="document-1:results",
         ),
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         document_id="document-1",
         document_title="Paper 1",
         source_kind="text_window",
@@ -523,7 +523,7 @@ async def test_chat_turn_trigger_requires_adjacent_final_answer_and_deduplicates
         async def enqueue_correction_signal_analysis(self, **kwargs):
             captured.append(kwargs)
 
-    chat_session_service.collection_service = SimpleNamespace()
+    chat_session_service.workspace_service = SimpleNamespace()
     chat_session_service.SourceArtifactRepo = SimpleNamespace()
     chat_session_service.ChatRepo = SimpleNamespace()
     chat_session_service.AnalysisJobRepo = _SignalJobs()
@@ -544,7 +544,7 @@ async def test_chat_turn_trigger_requires_adjacent_final_answer_and_deduplicates
     session = ChatSession.create(
         session_id="session-1",
         user_id="user-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         created_at="2026-09-25T00:00:00+00:00",
     )
     assert (

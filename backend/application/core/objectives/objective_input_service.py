@@ -18,7 +18,7 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
     PAPER_RESEARCH_MAP_PROMPT_VERSION,
     PaperResearchMapExtractor,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core import PaperResearchMap, PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
 from domain.source import (
@@ -69,15 +69,15 @@ def paper_map_input_fingerprint(preparation_fingerprint: str) -> str:
 
 
 class ResearchObjectivesNotReadyError(ResourceConflictException):
-    """Raised when a collection cannot serve prepared research inputs."""
+    """Raised when a workspace cannot serve prepared research inputs."""
 
-    def __init__(self, collection_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str) -> None:
+        self.workspace_id = workspace_id
         super().__init__(
-            f"research objectives not ready: {collection_id}",
+            f"research objectives not ready: {workspace_id}",
             data={
                 "code": "research_objectives_not_ready",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
             },
         )
 
@@ -86,7 +86,7 @@ from repositories.paper_map_repository import PaperMapRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 
 async def resolve_prepared_document_inputs(
-    collection_id: str,
+    workspace_id: str,
     document_ids: tuple[str, ...],
 ) -> tuple[PreparedDocumentInput, ...]:
     if not document_ids:
@@ -102,13 +102,13 @@ async def resolve_prepared_document_inputs(
 
     inputs: list[PreparedDocumentInput] = []
     for document_id in document_ids:
-        record = await collection_service.get_document(
-            collection_id,
+        record = await workspace_service.get_document(
+            workspace_id,
             document_id,
         )
         document = record.document
         if document.status != "ready" or not document.preparation_fingerprint:
-            raise ResearchObjectivesNotReadyError(collection_id)
+            raise ResearchObjectivesNotReadyError(workspace_id)
         inputs.append(
             PreparedDocumentInput(
                 document_id=document_id,
@@ -119,12 +119,12 @@ async def resolve_prepared_document_inputs(
 
 
 async def load_source_inputs(
-    collection_id: str,
+    workspace_id: str,
     *,
     document_inputs: tuple[PreparedDocumentInput, ...],
 ) -> ObjectiveSourceInputs:
     current_inputs = await resolve_prepared_document_inputs(
-        collection_id,
+        workspace_id,
         tuple(item.document_id for item in document_inputs),
     )
     if current_inputs != document_inputs:
@@ -135,32 +135,32 @@ async def load_source_inputs(
     try:
         profiles: tuple[DocumentProfile, ...] = (
             await document_profile_service.read_document_profiles(
-                collection_id,
+                workspace_id,
                 tuple(item.document_id for item in document_inputs),
             )
         )
     except DocumentProfilesNotReadyError as exc:
-        raise ResearchObjectivesNotReadyError(collection_id) from exc
+        raise ResearchObjectivesNotReadyError(workspace_id) from exc
     expected_ids = {item.document_id for item in document_inputs}
     if {profile.document_id for profile in profiles} != expected_ids:
-        raise ResearchObjectivesNotReadyError(collection_id)
+        raise ResearchObjectivesNotReadyError(workspace_id)
 
     try:
         documents = await _load_source_documents(
-            collection_id,
+            workspace_id,
             document_inputs=document_inputs,
         )
     except FileNotFoundError as exc:
-        raise ResearchObjectivesNotReadyError(collection_id) from exc
+        raise ResearchObjectivesNotReadyError(workspace_id) from exc
 
     document_ids = tuple(document.document_id for document in documents)
-    references = await SourceArtifactRepo.read_collection_references(
-        collection_id,
+    references = await SourceArtifactRepo.read_workspace_references(
+        workspace_id,
         document_ids,
     )
     document_trees_by_document_id = {
         document.document_id: build_source_document_tree(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document=document,
             blocks=document.blocks,
             tables=document.tables,
@@ -194,7 +194,7 @@ async def load_source_inputs(
 
 
 async def load_or_build_paper_maps(
-    collection_id: str,
+    workspace_id: str,
     *,
     document_inputs: tuple[PreparedDocumentInput, ...],
     source_inputs: ObjectiveSourceInputs,
@@ -202,8 +202,8 @@ async def load_or_build_paper_maps(
     progress_callback: Any | None = None,
 ) -> tuple[PaperResearchMap, ...]:
     document_ids = tuple(item.document_id for item in document_inputs)
-    existing_maps = await PaperMapRepo.list_collection(
-        collection_id,
+    existing_maps = await PaperMapRepo.list_workspace(
+        workspace_id,
         document_ids,
     )
     maps_by_document_id = {item.document_id: item for item in existing_maps}
@@ -248,7 +248,7 @@ async def load_or_build_paper_maps(
             paper_map_task = asyncio.create_task(
                 to_thread(
                     paper_research_map_service.build_document_paper_map,
-                    collection_id,
+                    workspace_id,
                     document=documents_by_id[document_id],
                     profile=source_inputs["profiles_by_document_id"][document_id],
                     document_tree=source_inputs["document_trees_by_document_id"][
@@ -290,17 +290,17 @@ async def load_or_build_paper_maps(
 
 
 async def _load_source_documents(
-    collection_id: str,
+    workspace_id: str,
     *,
     document_inputs: tuple[PreparedDocumentInput, ...],
 ) -> tuple[SourceDocument, ...]:
     document_ids = tuple(item.document_id for item in document_inputs)
     documents = await SourceArtifactRepo.read_documents(
-        collection_id,
+        workspace_id,
         document_ids,
     )
     if tuple(document.document_id for document in documents) != document_ids:
-        raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
+        raise FileNotFoundError(f"source artifacts not ready: {workspace_id}")
     return documents
 
 

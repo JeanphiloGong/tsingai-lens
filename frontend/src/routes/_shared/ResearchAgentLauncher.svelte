@@ -2,17 +2,17 @@
 	import { resolve } from '$app/paths';
 	import './ResearchAgentLauncher.css';
 	import { errorMessage } from './api';
-	import { collections, fetchCollections } from '$lib/workspace/collections';
+	import { workspaces, fetchWorkspaces } from '$lib/workspace/workspaces';
 	import { t } from './i18n';
 
-	export let collectionId = '';
+	export let workspaceId = '';
 
 	let dialog: HTMLDialogElement | null = null;
 	let loading = false;
 	let loadError = '';
 
-	$: currentAgentHref = collectionId
-		? resolve('/collections/[id]/assistant', { id: collectionId })
+	$: currentAgentHref = workspaceId
+		? resolve('/workspaces/[id]/assistant', { id: workspaceId })
 		: '';
 
 	function openWorkspacePicker() {
@@ -28,7 +28,7 @@
 		loading = true;
 		loadError = '';
 		try {
-			await fetchCollections();
+			await fetchWorkspaces();
 		} catch (error) {
 			loadError = errorMessage(error);
 		} finally {
@@ -41,7 +41,7 @@
 	}
 </script>
 
-{#if collectionId}
+{#if workspaceId}
 	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- The route helper resolves its pathname before adding query parameters. -->
 	<a class="agent-launcher" href={currentAgentHref} aria-label={$t('researchAgent.title')}>
 		<span class="agent-launcher__mark" aria-hidden="true">AI</span>
@@ -83,7 +83,7 @@
 			<p class="workspace-picker__description">{$t('researchAgent.launcher.description')}</p>
 
 			<div class="workspace-picker__body" aria-busy={loading}>
-				{#if loading && !$collections.length}
+				{#if loading && !$workspaces.length}
 					<p class="workspace-picker__state" role="status">
 						{$t('researchAgent.launcher.loading')}
 					</p>
@@ -94,30 +94,30 @@
 							{$t('researchAgent.launcher.retry')}
 						</button>
 					</div>
-				{:else if !$collections.length}
+				{:else if !$workspaces.length}
 					<div class="workspace-picker__state">
 						<p>{$t('researchAgent.launcher.empty')}</p>
 						<a href={resolve('/')} on:click={closeWorkspacePicker}>
-							{$t('researchAgent.launcher.manageCollections')}
+							{$t('researchAgent.launcher.manageWorkspaces')}
 						</a>
 					</div>
 				{:else}
 					<ul class="workspace-list">
-						{#each $collections as collection (collection.collection_id)}
+						{#each $workspaces as workspace (workspace.workspace_id)}
 							<li>
 								<a
-									href={resolve('/collections/[id]/assistant', { id: collection.collection_id })}
+									href={resolve('/workspaces/[id]/assistant', { id: workspace.workspace_id })}
 									on:click={closeWorkspacePicker}
 								>
 									<span class="workspace-list__name">
-										{collection.name || $t('collection.unknownName')}
+										{workspace.name || $t('workspace.unknownName')}
 									</span>
 									<span class="workspace-list__meta">
 										{$t('researchAgent.launcher.paperCount', {
-											count: collection.paper_count ?? 0
+											count: workspace.paper_count ?? 0
 										})}
 										<span aria-hidden="true">·</span>
-										{collection.status || $t('overview.statusUnknown')}
+										{workspace.status || $t('overview.statusUnknown')}
 									</span>
 									<span class="workspace-list__arrow" aria-hidden="true">→</span>
 								</a>

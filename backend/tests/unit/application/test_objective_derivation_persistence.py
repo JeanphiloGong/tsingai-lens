@@ -36,15 +36,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-class _CollectionService:
-    async def get_collection_for_user(self, collection_id: str, user_id: str) -> dict:
-        assert (collection_id, user_id) == ("col-1", "user-1")
-        return {"collection_id": collection_id}
+class _WorkspaceService:
+    async def get_workspace_for_user(self, workspace_id: str, user_id: str) -> dict:
+        assert (workspace_id, user_id) == ("col-1", "user-1")
+        return {"workspace_id": workspace_id}
 
     async def get_document(
-        self, collection_id: str, document_id: str
+        self, workspace_id: str, document_id: str
     ) -> SimpleNamespace:
-        assert collection_id == "col-1"
+        assert workspace_id == "col-1"
         return SimpleNamespace(document_id=document_id)
 
 
@@ -55,7 +55,7 @@ class _ObjectiveAuthoringService:
     async def create_chat_assisted_candidate(self, **kwargs) -> ResearchObjective:
         self.calls.append(kwargs)
         return ResearchObjective(
-            collection_id=kwargs.get("collection_id", None) or "",
+            workspace_id=kwargs.get("workspace_id", None) or "",
             objective_id="objective-derived",
             question=kwargs.get("question", None) or "",
             material_scope=normalize_objective_terms(kwargs.get("material_scope", ())),
@@ -91,7 +91,7 @@ class _ObjectiveAuthoringService:
 class _ParentObjectiveRepository:
     def __init__(self, published_version: int = 3) -> None:
         self.parent = ResearchObjective(
-            collection_id="col-1",
+            workspace_id="col-1",
             objective_id="objective-parent",
             question="How does preheating affect elongation?",
             material_scope=(),
@@ -136,15 +136,15 @@ class _ParentObjectiveRepository:
         )
         self.created: list[ResearchObjective] = []
 
-    async def read_analysis(self, collection_id, objective_id, analysis_version):
-        if (collection_id, objective_id, analysis_version) != (
+    async def read_analysis(self, workspace_id, objective_id, analysis_version):
+        if (workspace_id, objective_id, analysis_version) != (
             "col-1",
             "objective-parent",
             self.parent.published_analysis_version,
         ):
             return None
         return ObjectiveAnalysis(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
             document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-paper-1"),),
@@ -161,8 +161,8 @@ class _ParentObjectiveRepository:
             total_document_count=1,
         )
 
-    async def read_objective(self, collection_id: str, objective_id: str):
-        if (collection_id, objective_id) == ("col-1", "objective-parent"):
+    async def read_objective(self, workspace_id: str, objective_id: str):
+        if (workspace_id, objective_id) == ("col-1", "objective-parent"):
             return self.parent
         return None
 
@@ -178,13 +178,13 @@ class _ParentObjectiveRepository:
 
     async def read_finding(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         finding_id: str,
     ):
         if (
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
             finding_id,
@@ -194,7 +194,7 @@ class _ParentObjectiveRepository:
 
     async def list_evidence(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
         *,
@@ -204,7 +204,7 @@ class _ParentObjectiveRepository:
     ):
         records = (
             (self.evidence,)
-            if (collection_id, objective_id, analysis_version)
+            if (workspace_id, objective_id, analysis_version)
             == ("col-1", "objective-parent", 3)
             else ()
         )
@@ -212,11 +212,11 @@ class _ParentObjectiveRepository:
 
     async def list_contributions(
         self,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
     ):
-        if (collection_id, objective_id, analysis_version) == (
+        if (workspace_id, objective_id, analysis_version) == (
             "col-1",
             "objective-parent",
             3,
@@ -230,7 +230,7 @@ class _ParentExperimentProjection:
         self.finding = repository.finding
         source = repository.evidence
         self.evidence = ObjectiveEvidence(
-            collection_id="col-1", objective_id="objective-parent", analysis_version=3,
+            workspace_id="col-1", objective_id="objective-parent", analysis_version=3,
             evidence_id=source.evidence_id, document_id=source.document_id,
             source_kind=source.source_kind, source_ref=source.source_ref,
             source_excerpt="The paper reports elongation without binding it to an intermediate preheat level.",
@@ -247,9 +247,9 @@ class _ParentExperimentProjection:
         self.contribution = repository.contribution
 
     async def read_analysis_finding(
-        self, collection_id, objective_id, analysis_version, finding_id
+        self, workspace_id, objective_id, analysis_version, finding_id
     ):
-        assert (collection_id, objective_id, analysis_version, finding_id) == (
+        assert (workspace_id, objective_id, analysis_version, finding_id) == (
             "col-1",
             "objective-parent",
             3,
@@ -259,7 +259,7 @@ class _ParentExperimentProjection:
 
     async def list_analysis_evidence(
         self,
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
         *,
@@ -270,14 +270,14 @@ class _ParentExperimentProjection:
         assert finding_id is None
         records = (
             (self.evidence,)
-            if (collection_id, objective_id, analysis_version)
+            if (workspace_id, objective_id, analysis_version)
             == ("col-1", "objective-parent", 3)
             else ()
         )
         return records[offset : offset + limit], len(records)
 
-    async def list_analysis_contributions(self, collection_id, objective_id, analysis_version):
-        if (collection_id, objective_id, analysis_version) == (
+    async def list_analysis_contributions(self, workspace_id, objective_id, analysis_version):
+        if (workspace_id, objective_id, analysis_version) == (
             "col-1",
             "objective-parent",
             3,
@@ -290,7 +290,7 @@ def _context() -> CapabilityExecutionContext:
     return CapabilityExecutionContext(
         session_id="chat-1",
         user_id="user-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         tool_call_id="call-derived",
     )
 
@@ -378,7 +378,7 @@ async def test_derived_candidate_lineage_round_trips_through_postgres_repository
 ) -> None:
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="objective-derived",
         question="How does intermediate preheating affect fatigue life?",
         material_scope=("Ti-6Al-4V",),
@@ -417,7 +417,7 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(
 ) -> None:
     repository = ObjectiveRepository()
     first = ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="objective-derived",
         question="How does intermediate preheating affect fatigue life?",
         material_scope=("Ti-6Al-4V",),
@@ -459,7 +459,7 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(
 ) -> None:
     repository = ObjectiveRepository()
     first = ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="objective-derived",
         question="How does intermediate preheating affect fatigue life?",
         material_scope=("Ti-6Al-4V",),
@@ -495,7 +495,7 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(
 
 
 def _service(*, repository: ObjectiveRepository) -> ModuleType:
-    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.workspace_service = _WorkspaceService()
     objective_authoring_service.ObjectiveRepo = repository
     analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
     return objective_authoring_service
@@ -503,7 +503,7 @@ def _service(*, repository: ObjectiveRepository) -> ModuleType:
 
 def _published_parent() -> ResearchObjective:
     return ResearchObjective(
-        collection_id="col-1",
+        workspace_id="col-1",
         objective_id="objective-parent",
         question="How does preheating affect elongation?",
         material_scope=("Ti-6Al-4V",),
@@ -538,7 +538,7 @@ async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_pub
 
     with pytest.raises(ResourceConflictException, match="analysis version is no longer published"):
         await service.create_chat_assisted_candidate(
-            collection_id="col-1",
+            workspace_id="col-1",
             user_id="user-1",
             tool_call_id="call-derived",
             question="How does intermediate preheating affect fatigue life?",
@@ -561,7 +561,7 @@ async def test_service_persists_derived_candidate_against_published_parent() -> 
     service = _service(repository=repository)
 
     created = await service.create_chat_assisted_candidate(
-        collection_id="col-1",
+        workspace_id="col-1",
         user_id="user-1",
         tool_call_id="call-derived",
         question="How does intermediate preheating affect fatigue life?",
@@ -639,14 +639,14 @@ async def test_derived_objective_reads_parent_basis_from_experiment_projection()
     repository.read_finding = reject_legacy_read
     repository.list_evidence = reject_legacy_read
     repository.list_contributions = reject_legacy_read
-    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.workspace_service = _WorkspaceService()
     objective_authoring_service.ObjectiveRepo = repository
     analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
     objective_authoring_service.experiment_projection = projection
     service = objective_authoring_service
 
     created = await service.create_chat_assisted_candidate(
-        collection_id="col-1",
+        workspace_id="col-1",
         user_id="user-1",
         tool_call_id="call-experiment-derived",
         question="How does intermediate preheating affect fatigue life?",
@@ -768,7 +768,7 @@ async def test_service_rejects_noncanonical_derivation_basis_before_persistence(
 
     with pytest.raises(RequestInvalidException, match=expected_error):
         await service.create_chat_assisted_candidate(
-            collection_id="col-1",
+            workspace_id="col-1",
             user_id="user-1",
             tool_call_id="call-derived-invalid",
             question="How does intermediate preheating affect fatigue life?",
@@ -792,12 +792,12 @@ async def test_derived_candidate_requires_the_current_published_parent_version()
     None
 ):
     repository = _ParentObjectiveRepository(published_version=3)
-    objective_authoring_service.collection_service = _CollectionService()
+    objective_authoring_service.workspace_service = _WorkspaceService()
     objective_authoring_service.ObjectiveRepo = repository
     analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
     service = objective_authoring_service
     kwargs = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "user_id": "user-1",
         "tool_call_id": "call-derived",
         "question": "How does intermediate preheating affect fatigue life?",
@@ -826,7 +826,7 @@ async def test_derived_candidate_requires_the_current_published_parent_version()
 
 def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
     common = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "question": "How does intermediate preheating affect fatigue life?",
         "material_scope": ["Ti-6Al-4V"],
         "variables": ["build-plate preheating"],
@@ -838,7 +838,7 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         "derivation_basis": _lineage(),
     }
     first = ResearchObjective(
-        collection_id=common.get("collection_id", None) or "",
+        workspace_id=common.get("workspace_id", None) or "",
         objective_id=common.get("objective_id", None)
         or build_research_objective_id(
             question=common.get("question", None) or "",
@@ -881,7 +881,7 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         created_by_tool_call_id=common.get("created_by_tool_call_id", None),
     )
     second = ResearchObjective(
-        collection_id=common.get("collection_id", None) or "",
+        workspace_id=common.get("workspace_id", None) or "",
         objective_id=common.get("objective_id", None)
         or build_research_objective_id(
             question=common.get("question", None) or "",
@@ -929,6 +929,6 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
 
 @pytest.fixture(autouse=True)
 async def research_records(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_collection
+    from tests.support.postgres import seed_workspace
 
-    await seed_collection(postgres_session_factory, "col-1")
+    await seed_workspace(postgres_session_factory, "col-1")

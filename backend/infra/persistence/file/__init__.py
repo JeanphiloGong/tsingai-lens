@@ -1,5 +1,5 @@
 """File-backed workspace and object storage."""
 
-from infra.persistence.file.collection_workspace import FileCollectionWorkspace
+from infra.persistence.file.workspace_files import FileWorkspace
 
-__all__ = ["FileCollectionWorkspace"]
+__all__ = ["FileWorkspace"]

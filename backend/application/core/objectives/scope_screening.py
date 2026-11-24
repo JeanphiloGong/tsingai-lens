@@ -1,4 +1,4 @@
-"""Deterministic collection-wide paper screening for one Research Objective."""
+"""Deterministic workspace-wide paper screening for one Research Objective."""
 
 from __future__ import annotations
 
@@ -229,7 +229,7 @@ def _material_scope_conflicts(
             if item.material_scope
         )
     return bool(observed_scopes) and all(
-        _material_collections_conflict(requested_values, observed)
+        _material_workspaces_conflict(requested_values, observed)
         for observed in observed_scopes
     )
 
@@ -270,7 +270,7 @@ def _scope_partially_matches(
     observed_variables = tuple(variables)
     observed_outcomes = tuple(outcomes)
     observed_materials = tuple(materials)
-    if _material_collections_conflict(
+    if _material_workspaces_conflict(
         tuple(question.material_scope),
         observed_materials,
     ):
@@ -301,7 +301,7 @@ def _material_matches(requested: Iterable[str], observed: Iterable[str]) -> bool
     )
 
 
-def _material_collections_conflict(
+def _material_workspaces_conflict(
     requested: tuple[str, ...],
     observed: tuple[str, ...],
 ) -> bool:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from application.core.objectives import analysis_service as objective_analysis_service
 
 import json
@@ -64,12 +64,12 @@ class DeriveObjectiveCapability:
         context: CapabilityExecutionContext,
         arguments: DeriveObjectiveToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         state = await objective_analysis_service.get_analysis_state(
-            context.collection_id, arguments.objective_id, user_id=context.user_id
+            context.workspace_id, arguments.objective_id, user_id=context.user_id
         )
         published = state.get("published_analysis")
         version = (published.analysis_version if published is not None else None)
@@ -81,7 +81,7 @@ class DeriveObjectiveCapability:
                 else arguments.objective_id
             ),
             href=(
-                f"/collections/{context.collection_id}/objectives/"
+                f"/workspaces/{context.workspace_id}/objectives/"
                 f"{arguments.objective_id}"
             ),
         )
@@ -258,7 +258,7 @@ class DeriveObjectiveCapability:
                     resource_type="finding",
                     resource_id=f"{objective_id}:{analysis_version}:{reference_id}",
                     href=(
-                        f"/collections/{context.collection_id}/objectives/{objective_id}"
+                        f"/workspaces/{context.workspace_id}/objectives/{objective_id}"
                         f"?finding_id={reference_id}"
                     ),
                 ),
@@ -285,7 +285,7 @@ class DeriveObjectiveCapability:
                         f"{document_id}:{(gap.get('source_kind') or '')}:{source_ref}"
                     ),
                     href=(
-                        f"/collections/{context.collection_id}/documents/{document_id}?"
+                        f"/workspaces/{context.workspace_id}/documents/{document_id}?"
                         + urlencode({"view": "parsed-paper", "source_ref": source_ref})
                     ),
                 )
@@ -328,7 +328,7 @@ class DeriveObjectiveCapability:
             ChatResourceRef(
                 resource_type="document",
                 resource_id=reference_id,
-                href=f"/collections/{context.collection_id}/documents/{reference_id}",
+                href=f"/workspaces/{context.workspace_id}/documents/{reference_id}",
             ),
             None,
         )

@@ -11,14 +11,14 @@ DATASET_TASK_TYPES = frozenset({"sft", "preference", "evaluation"})
 
 @dataclass
 class Dataset:
-    """A maintained dataset scoped to one collection.
+    """A maintained dataset scoped to one workspace.
 
     Dataset identity and task type are intentionally separate from immutable
     exports.  Samples and revisions are added by later dataset-task stages.
     """
 
     dataset_id: str
-    collection_id: str
+    workspace_id: str
     name: str
     task_type: DatasetTaskType
     construction_spec: dict[str, Any]

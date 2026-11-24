@@ -11,7 +11,7 @@ from typing import (
 from application.core.objectives.objective_analysis_service import (
     ResearchObjectiveNotFoundError,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core.research_objective import ObjectiveEvidence
 from exceptions import ResourceConflictException
 
@@ -33,15 +33,15 @@ from application.evaluation.finding_snapshot_service import (
 async def export_dataset(
     *,
     user_id: str,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     label_status: str | None = None,
     dataset_use_status: str | None = None,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     if objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
     version = objective.published_analysis_version
     if version is None:
         raise ResourceConflictException(
@@ -50,10 +50,10 @@ async def export_dataset(
         )
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "items": await _dataset_items(
-            collection_id,
+            workspace_id,
             objective_id,
             version,
             label_status=label_status,
@@ -63,22 +63,22 @@ async def export_dataset(
     }
 
 
-async def export_collection_dataset(
+async def export_workspace_dataset(
     *,
     user_id: str,
-    collection_id: str,
+    workspace_id: str,
     label_status: str | None = None,
     dataset_use_status: str | None = None,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     items: list[dict[str, Any]] = []
-    for objective in await ObjectiveRepo.list_objectives(collection_id):
+    for objective in await ObjectiveRepo.list_objectives(workspace_id):
         version = objective.published_analysis_version
         if version is None:
             continue
         items.extend(
             await _dataset_items(
-                collection_id,
+                workspace_id,
                 objective.objective_id,
                 version,
                 label_status=label_status,
@@ -87,22 +87,22 @@ async def export_collection_dataset(
         )
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": None,
         "items": items,
         "warnings": [],
     }
 
 
-async def export_gold_draft(*, collection_id: str, user_id: str) -> dict[str, Any]:
-    dataset = await export_collection_dataset(
-        collection_id=collection_id,
+async def export_gold_draft(*, workspace_id: str, user_id: str) -> dict[str, Any]:
+    dataset = await export_workspace_dataset(
+        workspace_id=workspace_id,
         label_status="gold",
         user_id=user_id,
     )
     return {
-        "gold_id": _stable_id("gold", collection_id),
-        "collection_id": collection_id,
+        "gold_id": _stable_id("gold", workspace_id),
+        "workspace_id": workspace_id,
         "version": DATASET_SCHEMA_VERSION,
         "target_layer": "core",
         "metric_profile": "objective_findings_v2",
@@ -111,16 +111,16 @@ async def export_gold_draft(*, collection_id: str, user_id: str) -> dict[str, An
 
 
 async def _dataset_items(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
     label_status: str | None,
     dataset_use_status: str | None,
 ) -> list[dict[str, Any]]:
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     assert objective is not None
-    findings = await _all_findings(collection_id, objective_id, analysis_version)
+    findings = await _all_findings(workspace_id, objective_id, analysis_version)
     result: list[dict[str, Any]] = []
     for finding in findings:
         snapshot = await read_finding_snapshot(finding)
@@ -144,7 +144,7 @@ async def _dataset_items(
             {
                 "sample_id": _stable_id(
                     "sample",
-                    collection_id,
+                    workspace_id,
                     objective_id,
                     str(analysis_version),
                     finding.finding_id,
@@ -167,7 +167,7 @@ async def _dataset_items(
                 "training_messages": training_messages,
                 "metadata": {
                     "schema_version": TRAINING_SCHEMA_VERSION,
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                     "objective_id": objective_id,
                     "analysis_version": analysis_version,
                     "finding_id": finding.finding_id,
@@ -213,7 +213,7 @@ def _training_messages(
 
 def _training_evidence_text(index: int, evidence: ObjectiveEvidence) -> str:
     record = {
-        "collection_id": evidence.collection_id,
+        "workspace_id": evidence.workspace_id,
         "objective_id": evidence.objective_id,
         "analysis_version": evidence.analysis_version,
         "evidence_id": evidence.evidence_id,

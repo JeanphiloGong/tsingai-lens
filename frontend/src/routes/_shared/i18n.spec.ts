@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { translateKey } from './i18n';
 
 describe('research process terminology', () => {
-	it('describes collection preparation in researcher-facing Chinese', () => {
+	it('describes workspace preparation in researcher-facing Chinese', () => {
 		expect(translateKey('zh', 'researchAgent.capability.researchProcessStatus')).toBe(
 			'文献分析进度'
 		);

@@ -26,7 +26,7 @@ async def test_worker_reclaims_its_operation_and_heartbeat(
     analysis = kind == "objective_analysis"
     job = SimpleNamespace(
         run=SimpleNamespace(run_id="run"),
-        analysis=SimpleNamespace(key=("collection", "objective", 1)),
+        analysis=SimpleNamespace(key=("workspace", "objective", 1)),
     )
     repository = SimpleNamespace()
     setattr(repository, "claim_next_" + kind + "_job", AsyncMock(return_value=job))
@@ -91,7 +91,7 @@ async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
             finished.set()
 
     monkeypatch.setattr(
-        service.collection_service, "get_collection", AsyncMock(return_value=object())
+        service.workspace_service, "get_workspace", AsyncMock(return_value=object())
     )
     monkeypatch.setattr(
         service.SourceArtifactRepo,
@@ -102,11 +102,11 @@ async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
             )
         ),
     )
-    monkeypatch.setattr(service, "_build_collection_file_lookup", lambda _: {})
+    monkeypatch.setattr(service, "_build_workspace_file_lookup", lambda _: {})
     monkeypatch.setattr(service, "_profile_document", classify)
     operation = asyncio.create_task(
         service.build_document_profile(
-            "collection",
+            "workspace",
             "paper",
             source_fingerprint="source",
             profile_fingerprint="profile",

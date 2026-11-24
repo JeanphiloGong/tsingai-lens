@@ -3,7 +3,7 @@ import copy
 import pytest
 from repositories.chat_repository import ChatRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.postgres import read_tool_calls, seed_collection
+from tests.support.postgres import read_tool_calls, seed_workspace
 
 from scripts.evaluation.research_agent.run_scenarios import (
     SCIENTIFIC_SNAPSHOT_TABLES,
@@ -21,7 +21,7 @@ def fixture():
         "scenarios": [
             {
                 "id": f"S{i:02}",
-                "collection_id": f"collection-{i}",
+                "workspace_id": f"workspace-{i}",
                 "user_id": "u",
                 "scientific_rubric": ["Check original data"],
                 "turns": [{"message": "Inspect", "expected_statuses": ["completed"]}],
@@ -35,8 +35,8 @@ def test_complete_fixture_requires_independent_scope_and_approved_actions():
     record = fixture()
     validate_fixture(record)
     invalid = copy.deepcopy(record)
-    invalid["scenarios"][1]["collection_id"] = invalid["scenarios"][0]["collection_id"]
-    with pytest.raises(ValueError, match="isolated collection"):
+    invalid["scenarios"][1]["workspace_id"] = invalid["scenarios"][0]["workspace_id"]
+    with pytest.raises(ValueError, match="isolated workspace"):
         validate_fixture(invalid)
     invalid = copy.deepcopy(record)
     invalid["scenarios"][0]["turns"][0]["approve"] = ["create_finding_version"]
@@ -74,7 +74,7 @@ def test_scientific_snapshot_covers_the_experiment_and_plan_contract():
     assert SCIENTIFIC_SNAPSHOT_TABLES == (
         "documents",
         "document_preparations",
-        "collections",
+        "workspaces",
         "research_objectives",
         "objective_analyses",
         "paper_experiment",
@@ -136,7 +136,7 @@ async def test_replay_uses_service_permission_and_exact_approval(
     from domain.chat import ToolRisk
     from repositories.chat_repository import ChatRepository
     from tests.unit.application.test_chat_session_service import (
-        _CollectionService,
+        _WorkspaceService,
         _Question,
         _WriteCapability,
     )
@@ -163,7 +163,7 @@ async def test_replay_uses_service_permission_and_exact_approval(
         ModelTurn(content="No tools needed for the saved review."),
     )
     chat_session_service.ChatRepo = repo
-    chat_session_service.collection_service = _CollectionService()
+    chat_session_service.workspace_service = _WorkspaceService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((write,))
@@ -171,7 +171,7 @@ async def test_replay_uses_service_permission_and_exact_approval(
     service = make_scripted_chat_service(runner)
     case = {
         "id": "S21",
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "user_id": "user-1",
         "scientific_rubric": ["Check review"],
         "automatic_actions": [write.spec.name],
@@ -227,23 +227,23 @@ async def test_replay_uses_service_permission_and_exact_approval(
 async def test_replay_records_session_setup_failure_without_aborting_batch():
     from scripts.evaluation.research_agent.run_scenarios import replay_case
 
-    class MissingCollectionService:
+    class MissingWorkspaceService:
         async def create_session(self, **_):
-            raise FileNotFoundError("collection not found")
+            raise FileNotFoundError("workspace not found")
 
     case = {
         "id": "S01",
-        "collection_id": "missing",
+        "workspace_id": "missing",
         "user_id": "user-1",
         "scientific_rubric": ["Check original data"],
         "turns": [],
     }
-    result = await replay_case(MissingCollectionService(), case, "confirm")
+    result = await replay_case(MissingWorkspaceService(), case, "confirm")
     assert result["technical_result"] == "failed"
     assert result["session_id"] is None
     assert result["failures"] == ["exception_type:FileNotFoundError"]
 
 
 @pytest.fixture(autouse=True)
-async def research_collection(postgres_session_factory, anyio_backend):
-    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+async def research_workspace(postgres_session_factory, anyio_backend):
+    await seed_workspace(postgres_session_factory, "col-1", document_ids=("doc-1",))

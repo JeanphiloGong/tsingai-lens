@@ -7,7 +7,7 @@ published Finding review.
 ## Current Research Flow
 
 ```text
-Collection
+Workspace
   -> current Documents
 
 Document
@@ -28,7 +28,7 @@ confirmed Objective + selected ready Documents
   -> Finding
 ```
 
-A Collection groups papers. It does not own a generated snapshot. Each Document
+A Workspace groups papers. It does not own a generated snapshot. Each Document
 owns its current preparation status and current Source and Profile. A Paper Map
 is a lazy, document-scoped navigation artifact built by Objective discovery or
 analysis for the explicitly selected ready Documents. Adding or retrying one
@@ -48,7 +48,7 @@ reuse revisions from one or more papers.
 ## Ownership Map
 
 - `controllers/`: HTTP routes and response schemas.
-- `application/source/`: Collection lifecycle, upload, per-document preparation,
+- `application/source/`: Workspace lifecycle, upload, per-document preparation,
   run state, and Source reads.
 - `application/core/`: Document profiling, Paper Map creation, Objective
   discovery, PaperExperiment extraction, selection, and Finding synthesis.
@@ -71,10 +71,10 @@ reuse revisions from one or more papers.
 The main preparation and research commands are:
 
 ```text
-POST /api/v1/collections/{collection_id}/documents
-POST /api/v1/collections/{collection_id}/documents/{document_id}/preparation
-POST /api/v1/collections/{collection_id}/objective-discovery
-POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis
+POST /api/v1/workspaces/{workspace_id}/documents
+POST /api/v1/workspaces/{workspace_id}/documents/{document_id}/preparation
+POST /api/v1/workspaces/{workspace_id}/objective-discovery
+POST /api/v1/workspaces/{workspace_id}/objectives/{objective_id}/analysis
 ```
 
 Objective discovery and analysis both require an explicit non-empty

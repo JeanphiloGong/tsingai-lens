@@ -41,7 +41,7 @@ or a Finding.
 `paper_understanding/paper_map_outputs.py` owns the direct `*ModelOutput`
 contracts. `paper_map_results.py` owns normalized results with backend-bound
 Source identities. The model sees short labels, section paths, and scientific
-content; it cannot invent Collection, Document, or Source identities.
+content; it cannot invent Workspace, Document, or Source identities.
 
 Unresolved signals guide further reading. There is no separate signal-pairing
 model, distance-based candidate pairing, or compact single-Source fallback.
@@ -88,7 +88,7 @@ The prompt treats optional research interest as the requested exploration scope:
 it can clarify or split questions, but cannot replace an unsupported endpoint
 with another one, even with disclosure. Partial coverage of a multi-endpoint
 interest is explained in the supported proposal's reason. Without interest,
-collection-wide exploration remains available. Limitations describe inspected
+workspace-wide exploration remains available. Limitations describe inspected
 comparisons or open checks, not paper-wide verdicts inferred from missing
 context. Within-series controls and cross-series changes stay distinct.
 

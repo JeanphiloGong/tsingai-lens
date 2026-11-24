@@ -503,7 +503,7 @@ class _RunProgress:
             # request, not new Source content in the returned batch.
             for key in ("offset", "page", "limit", "next_offset", "batch_token_budget"):
                 data.pop(key, None)
-        normalized_paper_list = call.name == "browse_collection_papers" and (
+        normalized_paper_list = call.name == "browse_workspace_papers" and (
             data.get("papers") or data.get("paper_total")
         )
         if normalized_paper_list:
@@ -1059,8 +1059,8 @@ class ResearchAgentRunner:
                     successful = capability_policy.active_successful_results_by_name(messages)
                     # Browsing identities remain usable when the researcher continues
                     # a request; scientific prerequisites still use their original scope.
-                    successful["browse_collection_papers"] = capability_policy._successful_results_by_name(messages).get(
-                        "browse_collection_papers", []
+                    successful["browse_workspace_papers"] = capability_policy._successful_results_by_name(messages).get(
+                        "browse_workspace_papers", []
                     )
                     stage_content = capability_policy.stage_instruction(
                         tool_names,
@@ -2150,8 +2150,8 @@ class ResearchAgentRunner:
                 "do not mention internal budgets, tool schemas, or hidden reasoning. A paper "
                 "identity survey or a search match is not an exact Source read. Do not claim "
                 "that a paper was read unless the reading ledger below records an exact Source. "
-                "If the researcher requested more papers than the collection contains, state "
-                "the actual collection total and do not invent missing or unread papers."
+                "If the researcher requested more papers than the workspace contains, state "
+                "the actual workspace total and do not invent missing or unread papers."
             )
             if budget_exhausted
             else (
@@ -2639,7 +2639,7 @@ class ResearchAgentRunner:
                 "This turn could not be completed. Obtained results were preserved; the technical "
                 "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
             )
-        if not any(call.name in {"browse_collection_papers", "read_source", "inspect_table", "inspect_document_sources", "search_sources"} for call in calls):
+        if not any(call.name in {"browse_workspace_papers", "read_source", "inspect_table", "inspect_document_sources", "search_sources"} for call in calls):
             return lead
         ledger = ResearchAgentRunner._reading_ledger(calls, results, chinese=chinese)
         return f"{lead}\n\n{ledger}"
@@ -2655,7 +2655,7 @@ class ResearchAgentRunner:
         read_tool_names = {
             "read_source", "inspect_table", "inspect_document_sources", "search_sources",
         }
-        collection_paper_totals: set[int] = set()
+        workspace_paper_totals: set[int] = set()
         screened_documents: set[str] = set()
         requested_documents = {
             str(call.arguments["document_id"])
@@ -2698,10 +2698,10 @@ class ResearchAgentRunner:
                 continue
             if name in {"read_source", "inspect_table", "inspect_document_sources"}:
                 successful_reads.setdefault(name, []).append(result.data)
-            if name == "browse_collection_papers":
+            if name == "browse_workspace_papers":
                 paper_total = result.data.get("paper_total")
                 if isinstance(paper_total, int) and paper_total >= 0 and not result.data.get("query"):
-                    collection_paper_totals.add(paper_total)
+                    workspace_paper_totals.add(paper_total)
                 screened_documents.update(
                     str(item.get("document_id") or "").strip()
                     for item in result.data.get("papers") or ()
@@ -2715,7 +2715,7 @@ class ResearchAgentRunner:
             return ", ".join(sorted(value for value in values if value)[:30]) or ("无" if chinese else "none")
 
         paper_total = (
-            str(max(collection_paper_totals)) if collection_paper_totals else ("尚未核实" if chinese else "unknown")
+            str(max(workspace_paper_totals)) if workspace_paper_totals else ("尚未核实" if chinese else "unknown")
         )
         unread_documents = (screened_documents | requested_documents) - read_documents - failed_documents
         if chinese:
@@ -2731,7 +2731,7 @@ class ResearchAgentRunner:
                 f"尚未完成原文读取的论文 ({len(unread_documents)}): {display(unread_documents)}"
             )
         return (
-            f"Collection paper total: {paper_total}\n"
+            f"Workspace paper total: {paper_total}\n"
             f"Paper identities screened ({len(screened_documents)}): "
             f"{display(screened_documents)}\n"
             f"Exact paper Sources read ({len(exact_sources)}): "

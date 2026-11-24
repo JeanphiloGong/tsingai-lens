@@ -7,7 +7,7 @@ from domain.goal import ExperimentPlanRecord
 def _plan_payload(**overrides):
     payload = {
         "plan_id": "plan-v1",
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "title": "Validate laser-power effects",
         "content": "Compare an expert-approved laser-power matrix.",

@@ -42,7 +42,7 @@ async def test_another_web_instance_stops_model_wait_and_accepts_new_instruction
         model=Model(ModelTurn(tool_calls=(ModelToolCall("read_source", {}),))),
         capabilities=CapabilityRegistry((read,)),
     )
-    session = await fixture.service.create_session(collection_id="collection", user_id=fixture.owner)
+    session = await fixture.service.create_session(workspace_id="workspace", user_id=fixture.owner)
     active = asyncio.create_task(fixture.service.send_message(
         session.session_id, fixture.owner, message="Compare the reported tensile tests.",
     ))
@@ -123,7 +123,7 @@ async def test_stop_closes_unfinished_reads_before_accepting_another_question(br
             await asyncio.Event().wait()
 
     monkeypatch.setattr(session_service.ChatRepo, "save_trajectory", save_checkpoint)
-    session = await fixture.service.create_session(collection_id="collection", user_id=fixture.owner)
+    session = await fixture.service.create_session(workspace_id="workspace", user_id=fixture.owner)
     active = asyncio.create_task(fixture.service.send_message(session.session_id, fixture.owner, message="Read the test conditions."))
     try:
         await asyncio.wait_for(entered.wait(), 3)
@@ -162,7 +162,7 @@ async def test_stop_waits_for_approved_write_checkpoint_without_repeating_write(
         model=_Model(ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {"question": "Compare 293 K tests"}),))),
         capabilities=CapabilityRegistry((write,)),
     )
-    session = await fixture.service.create_session(collection_id="collection", user_id=fixture.owner)
+    session = await fixture.service.create_session(workspace_id="workspace", user_id=fixture.owner)
     first = await fixture.service.send_message(session.session_id, fixture.owner, message="Save the objective.")
     pending = first["pending_approval"]
     original_read = ChatRepository.read_response_snapshot

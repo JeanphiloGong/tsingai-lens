@@ -120,7 +120,7 @@ class _FailingCases(_Cases):
 
 def _fixture():
     session = ChatSession.create(
-        session_id="session-1", user_id="user-1", collection_id="collection-1",
+        session_id="session-1", user_id="user-1", workspace_id="workspace-1",
         created_at="2026-09-25T00:00:00+00:00",
     )
     request = ChatToolRequest(

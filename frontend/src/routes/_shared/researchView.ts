@@ -25,7 +25,7 @@ export type FindingFeedbackCreate = {
 };
 export type FindingFeedback = FindingFeedbackCreate & {
 	feedback_id: string;
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	finding_id: string;
 	created_at: string;
@@ -39,7 +39,7 @@ export type FindingCurationCreate = {
 };
 export type FindingCuration = FindingCurationCreate & {
 	curation_id: string;
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	finding_id: string;
 	updated_at: string;
@@ -79,7 +79,7 @@ export type FindingDatasetSample = {
 };
 export type FindingDataset = {
 	schema_version: string;
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string | null;
 	items: FindingDatasetSample[];
 	warnings: string[];
@@ -106,7 +106,7 @@ export type ObjectiveScopeDecision = {
 	is_seed: boolean;
 };
 export type ObjectiveScope = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	counts: Record<ObjectiveScopeClassification, number>;
 	recommended_document_ids: string[];
@@ -145,7 +145,7 @@ export type ObjectiveEvidenceStatus =
 	| 'non_comparable'
 	| 'extraction_failed';
 export type ObjectiveAnalysisState = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	document_inputs: PreparedDocumentInput[];
@@ -172,7 +172,7 @@ export type ObjectiveAnalysisState = {
 };
 export type ObjectiveAnalysisProgress = Pick<
 	ObjectiveAnalysisState,
-	| 'collection_id'
+	| 'workspace_id'
 	| 'objective_id'
 	| 'analysis_version'
 	| 'status'
@@ -212,7 +212,7 @@ export type PreparedDocumentInput = {
 	preparation_fingerprint: string;
 };
 export type ObjectiveSummary = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	question: string;
 	material_scope: string[];
@@ -260,7 +260,7 @@ export type ObjectiveFindingPaperContribution = {
 	condition_boundary_evidence_ids: string[];
 };
 export type ObjectiveFinding = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	finding_id: string;
@@ -287,7 +287,7 @@ export type ObjectiveFinding = {
 	created_at: string | null;
 };
 export type ObjectiveEvidence = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	evidence_id: string;
@@ -348,11 +348,11 @@ export type FindingAuthoringResult = {
 };
 
 export type ObjectiveList = {
-	collection_id: string;
+	workspace_id: string;
 	objectives: ObjectiveSummary[];
 };
 export type ObjectiveAnalysis = {
-	collection_id: string;
+	workspace_id: string;
 	objective: ObjectiveSummary;
 	active_analysis: ObjectiveAnalysisState | null;
 	published_analysis: ObjectiveAnalysisState | null;
@@ -364,7 +364,7 @@ export type FindingEvidenceReview = {
 	evidence_replacements: Record<string, string | null>;
 };
 export type ObjectiveFindingPage = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	items: ObjectiveFinding[];
@@ -374,14 +374,14 @@ export type ObjectiveFindingPage = {
 	total: number;
 };
 export type ObjectiveFindingDetail = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	finding: ObjectiveFinding;
 	evidence_review: FindingEvidenceReview;
 };
 export type ObjectiveEvidencePage = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	finding_id: string | null;
@@ -458,7 +458,7 @@ export type ObjectiveEvidenceMapCoverage = {
 	evidence_status_counts?: Partial<Record<ObjectiveEvidenceStatus, number>>;
 };
 export type ObjectiveEvidenceMap = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	projection_version: 'objective-evidence-map.v1';
@@ -475,36 +475,36 @@ export function formatShortIdentifier(value: string | null | undefined): string 
 	return `${text.slice(0, 10)}...${text.slice(-6)}`;
 }
 
-export async function fetchCollectionObjectives(collectionId: string): Promise<ObjectiveList> {
+export async function fetchWorkspaceObjectives(workspaceId: string): Promise<ObjectiveList> {
 	const data = (await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/objectives`
+		`/workspaces/${encodeURIComponent(workspaceId)}/objectives`
 	)) as ObjectiveList;
-	if (data.collection_id !== collectionId) {
-		throw new Error('Objective list response does not match collection_id.');
+	if (data.workspace_id !== workspaceId) {
+		throw new Error('Objective list response does not match workspace_id.');
 	}
 	return data;
 }
 
 export async function fetchObjectiveScope(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string
 ): Promise<ObjectiveScope> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/scope`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/scope`;
 	const data = (await requestJson(path)) as ObjectiveScope;
-	if (data.collection_id !== collectionId || data.objective_id !== objectiveId) {
+	if (data.workspace_id !== workspaceId || data.objective_id !== objectiveId) {
 		throw new Error('Objective scope response does not match the requested objective.');
 	}
 	return data;
 }
 
 export async function fetchObjectiveFindings(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number,
 	offset = 0,
 	limit = 50
 ): Promise<ObjectiveFindingPage> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/findings`;
 	const params = new URLSearchParams({
 		analysis_version: String(analysisVersion),
 		offset: String(offset),
@@ -512,7 +512,7 @@ export async function fetchObjectiveFindings(
 	});
 	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveFindingPage;
 	if (
-		data.collection_id !== collectionId ||
+		data.workspace_id !== workspaceId ||
 		data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion
 	) {
@@ -522,16 +522,16 @@ export async function fetchObjectiveFindings(
 }
 
 export async function fetchObjectiveFinding(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number,
 	findingId: string
 ): Promise<ObjectiveFindingDetail> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}`;
 	const params = new URLSearchParams({ analysis_version: String(analysisVersion) });
 	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveFindingDetail;
 	if (
-		data.collection_id !== collectionId ||
+		data.workspace_id !== workspaceId ||
 		data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion ||
 		data.finding?.finding_id !== findingId
@@ -542,21 +542,21 @@ export async function fetchObjectiveFinding(
 }
 
 export async function fetchObjectiveEvidence(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number,
 	findingId: string | null,
 	offset = 0,
 	limit = 100
 ): Promise<ObjectiveEvidencePage> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/evidence`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/evidence`;
 	const params = new URLSearchParams({ analysis_version: String(analysisVersion) });
 	if (findingId) params.set('finding_id', findingId);
 	params.set('offset', String(offset));
 	params.set('limit', String(limit));
 	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveEvidencePage;
 	if (
-		data.collection_id !== collectionId ||
+		data.workspace_id !== workspaceId ||
 		data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion ||
 		data.finding_id !== findingId
@@ -567,20 +567,20 @@ export async function fetchObjectiveEvidence(
 }
 
 export async function createFindingVersion(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	payload: FindingAuthoringCreate
 ): Promise<FindingAuthoringResult> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
-	return requestJson(`/collections/${encodedCollection}/objectives/${encodedObjective}/findings`, {
+	return requestJson(`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/findings`, {
 		method: 'POST',
 		body: JSON.stringify(payload)
 	}) as Promise<FindingAuthoringResult>;
 }
 
 export type ExperimentAnalysisProjection = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	analysis_version: number;
 	selections: Array<{
@@ -670,25 +670,25 @@ export type PaperExperimentRevision = {
 };
 
 export function experimentAnalysisExportUrl(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number,
 	format: 'json' | 'csv'
 ) {
-	return `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/experiment-analysis/export?${new URLSearchParams({ analysis_version: String(analysisVersion), format })}`;
+	return `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/experiment-analysis/export?${new URLSearchParams({ analysis_version: String(analysisVersion), format })}`;
 }
 
 export async function fetchExperimentAnalysis(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number
 ): Promise<ExperimentAnalysisProjection> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/experiment-analysis`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/experiment-analysis`;
 	const data = (await requestJson(
 		`${path}?analysis_version=${encodeURIComponent(String(analysisVersion))}`
 	)) as ExperimentAnalysisProjection;
 	if (
-		data.collection_id !== collectionId ||
+		data.workspace_id !== workspaceId ||
 		data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion
 	) {
@@ -698,7 +698,7 @@ export async function fetchExperimentAnalysis(
 }
 
 export type FindingEvidenceSummary = {
-	collection_id: string;
+	workspace_id: string;
 	objective_id: string;
 	finding_id: string;
 	analysis_version: number;
@@ -720,14 +720,14 @@ export type FindingEvidenceSummary = {
 };
 
 export async function generateFindingSummary(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	findingId: string,
 	analysisVersion: number,
 	language: 'en' | 'zh',
 	signal?: AbortSignal
 ): Promise<FindingEvidenceSummary> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}/summary`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}/summary`;
 	return requestJson(path, {
 		method: 'POST',
 		body: JSON.stringify({ analysis_version: analysisVersion, language }),
@@ -736,70 +736,70 @@ export async function generateFindingSummary(
 }
 
 export async function fetchObjectiveEvidenceMap(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string
 ): Promise<ObjectiveEvidenceMap> {
-	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/evidence-map`;
+	const path = `/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/evidence-map`;
 	return requestJson(path) as Promise<ObjectiveEvidenceMap>;
 }
 
 export async function runObjectiveAnalysis(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	documentIds: string[]
 ): Promise<ObjectiveAnalysis> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const data = (await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`,
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/analysis`,
 		{
 			method: 'POST',
 			body: JSON.stringify({ document_ids: documentIds })
 		}
 	)) as ObjectiveAnalysis;
-	if (data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId) {
+	if (data.workspace_id !== workspaceId || data.objective?.objective_id !== objectiveId) {
 		throw new Error('Objective analysis response does not match the requested objective.');
 	}
 	return data;
 }
 
 export async function fetchObjectiveAnalysis(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string
 ): Promise<ObjectiveAnalysis> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const data = (await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/analysis`
 	)) as ObjectiveAnalysis;
-	if (data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId) {
+	if (data.workspace_id !== workspaceId || data.objective?.objective_id !== objectiveId) {
 		throw new Error('Objective analysis response does not match the requested objective.');
 	}
 	return data;
 }
 
 export async function fetchObjectiveAnalysisStatus(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string
 ): Promise<ObjectiveAnalysisProgress> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	return (await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis/status`
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/analysis/status`
 	)) as ObjectiveAnalysisProgress;
 }
 
 export async function createFindingFeedback(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	findingId: string,
 	payload: FindingFeedbackCreate
 ): Promise<FindingFeedback> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const encodedFinding = encodeURIComponent(findingId);
 	return requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/findings/${encodedFinding}/feedback`,
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/findings/${encodedFinding}/feedback`,
 		{
 			method: 'POST',
 			body: JSON.stringify(payload)
@@ -808,25 +808,25 @@ export async function createFindingFeedback(
 }
 
 export async function fetchFindingFeedback(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number,
 	findingId: string
 ): Promise<FindingFeedback[]> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const encodedFinding = encodeURIComponent(findingId);
 	const data = (await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/findings/${encodedFinding}/feedback?analysis_version=${analysisVersion}`
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/findings/${encodedFinding}/feedback?analysis_version=${analysisVersion}`
 	)) as {
-		collection_id: string;
+		workspace_id: string;
 		objective_id: string;
 		analysis_version: number;
 		finding_id: string;
 		items: FindingFeedback[];
 	};
 	if (
-		data.collection_id !== collectionId ||
+		data.workspace_id !== workspaceId ||
 		data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion ||
 		data.finding_id !== findingId
@@ -837,16 +837,16 @@ export async function fetchFindingFeedback(
 }
 
 export async function createFindingCuration(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	findingId: string,
 	payload: FindingCurationCreate
 ): Promise<FindingCuration> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const encodedFinding = encodeURIComponent(findingId);
 	return requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/findings/${encodedFinding}/curation`,
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/findings/${encodedFinding}/curation`,
 		{
 			method: 'PUT',
 			body: JSON.stringify(payload)
@@ -855,25 +855,25 @@ export async function createFindingCuration(
 }
 
 export async function fetchFindingCurations(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	analysisVersion: number,
 	findingId: string
 ): Promise<FindingCuration[]> {
-	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedWorkspace = encodeURIComponent(workspaceId);
 	const encodedObjective = encodeURIComponent(objectiveId);
 	const encodedFinding = encodeURIComponent(findingId);
 	const data = (await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/findings/${encodedFinding}/curation?analysis_version=${analysisVersion}`
+		`/workspaces/${encodedWorkspace}/objectives/${encodedObjective}/findings/${encodedFinding}/curation?analysis_version=${analysisVersion}`
 	)) as {
-		collection_id: string;
+		workspace_id: string;
 		objective_id: string;
 		analysis_version: number;
 		finding_id: string;
 		items: FindingCuration[];
 	};
 	if (
-		data.collection_id !== collectionId ||
+		data.workspace_id !== workspaceId ||
 		data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion ||
 		data.finding_id !== findingId
@@ -891,38 +891,38 @@ function findingDatasetParams(filters: FindingDatasetFilters): URLSearchParams {
 }
 
 export function objectiveFindingDatasetUrl(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	format: 'json' | 'training_jsonl' | 'llamafactory_alpaca',
 	filters: FindingDatasetFilters = {}
 ): string {
 	const params = findingDatasetParams(filters);
 	params.set('format', format);
-	return `/api/v1/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset?${params.toString()}`;
+	return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset?${params.toString()}`;
 }
 
-export function collectionFindingDatasetUrl(
-	collectionId: string,
+export function workspaceFindingDatasetUrl(
+	workspaceId: string,
 	format: 'json' | 'training_jsonl',
 	filters: FindingDatasetFilters = {}
 ): string {
 	const params = findingDatasetParams(filters);
 	params.set('format', format);
-	return `/api/v1/collections/${encodeURIComponent(collectionId)}/finding-dataset?${params.toString()}`;
+	return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/finding-dataset?${params.toString()}`;
 }
 
-export function findingGoldDraftUrl(collectionId: string): string {
-	return `/api/v1/collections/${encodeURIComponent(collectionId)}/finding-gold-draft`;
+export function findingGoldDraftUrl(workspaceId: string): string {
+	return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/finding-gold-draft`;
 }
 
 export async function fetchObjectiveFindingDataset(
-	collectionId: string,
+	workspaceId: string,
 	objectiveId: string,
 	filters: FindingDatasetFilters = {}
 ): Promise<FindingDataset> {
 	const params = findingDatasetParams(filters);
 	const suffix = params.size ? `?${params.toString()}` : '';
 	return requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset${suffix}`
+		`/workspaces/${encodeURIComponent(workspaceId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset${suffix}`
 	) as Promise<FindingDataset>;
 }

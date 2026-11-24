@@ -19,13 +19,13 @@ class ComparisonGroupRepository:
     async def add_group(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         group: ComparisonGroup,
     ) -> ComparisonGroup:
         existing = await db.scalar(
             select(ComparisonGroupORM).where(
                 ComparisonGroupORM.group_id == group.group_id,
-                ComparisonGroupORM.collection_id == collection_id,
+                ComparisonGroupORM.workspace_id == workspace_id,
             )
         )
         if existing is not None:
@@ -33,10 +33,10 @@ class ComparisonGroupRepository:
             if restored == group:
                 return restored
             raise ValueError("comparison group identity already exists")
-        await _validate_group_context(db, collection_id, group)
+        await _validate_group_context(db, workspace_id, group)
         row = ComparisonGroupORM(
             group_id=group.group_id,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective_id=group.objective_id,
             analysis_version=group.analysis_version,
             outcome=group.outcome,
@@ -64,12 +64,12 @@ class ComparisonGroupRepository:
     async def read_group(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         group_id: str,
     ) -> ComparisonGroup | None:
         row = await db.scalar(
             select(ComparisonGroupORM).where(
-                ComparisonGroupORM.collection_id == collection_id,
+                ComparisonGroupORM.workspace_id == workspace_id,
                 ComparisonGroupORM.group_id == group_id,
             )
         )
@@ -78,7 +78,7 @@ class ComparisonGroupRepository:
     async def list_groups(
         self,
         db: AsyncSession,
-        collection_id: str,
+        workspace_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> tuple[ComparisonGroup, ...]:
@@ -86,7 +86,7 @@ class ComparisonGroupRepository:
             await db.scalars(
                 select(ComparisonGroupORM)
                 .where(
-                    ComparisonGroupORM.collection_id == collection_id,
+                    ComparisonGroupORM.workspace_id == workspace_id,
                     ComparisonGroupORM.objective_id == objective_id,
                     ComparisonGroupORM.analysis_version == analysis_version,
                 )
@@ -98,12 +98,12 @@ class ComparisonGroupRepository:
 
 async def _validate_group_context(
     db: AsyncSession,
-    collection_id: str,
+    workspace_id: str,
     group: ComparisonGroup,
 ) -> None:
     analysis = await db.scalar(
         select(ObjectiveAnalysisORM).where(
-            ObjectiveAnalysisORM.collection_id == collection_id,
+            ObjectiveAnalysisORM.workspace_id == workspace_id,
             ObjectiveAnalysisORM.objective_id == group.objective_id,
             ObjectiveAnalysisORM.analysis_version == group.analysis_version,
         )
@@ -113,7 +113,7 @@ async def _validate_group_context(
     selection_rows = tuple(
         await db.scalars(
             select(ObjectiveExperimentSelectionORM).where(
-                ObjectiveExperimentSelectionORM.collection_id == collection_id,
+                ObjectiveExperimentSelectionORM.workspace_id == workspace_id,
                 ObjectiveExperimentSelectionORM.selection_id.in_(
                     item.selection_id for item in group.members
                 ),

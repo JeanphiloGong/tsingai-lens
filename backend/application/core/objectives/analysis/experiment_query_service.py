@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
@@ -37,33 +37,33 @@ from repositories.paper_experiment_repository import PaperExperimentRepo
 
 
 async def read_analysis_bundle(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> ExperimentAnalysisBundle:
     if analysis_version < 1:
         raise ValueError("analysis_version must be positive")
     await _validate_analysis_snapshot(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
     async with AsyncSessionLocal() as db:
         selections = await ObjectiveExperimentSelectionRepo.list_selections(
             db,
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         )
         groups = await ComparisonGroupRepo.list_groups(
             db,
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         )
         findings = await ExperimentFindingRepo.list_findings(
             db,
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         )
@@ -92,21 +92,21 @@ async def read_analysis_bundle(
 
 
 async def _validate_analysis_snapshot(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> None:
     """Require a completed fixed analysis snapshot before reading its records."""
 
     analysis = await ObjectiveRepo.read_analysis(
-        collection_id, objective_id, analysis_version
+        workspace_id, objective_id, analysis_version
     )
     if analysis is None:
         raise ResourceNotFoundException(
             "Analysis snapshot not found.",
             data={
                 "code": "analysis_snapshot_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "analysis_version": analysis_version,
             },
@@ -122,20 +122,20 @@ async def _validate_analysis_snapshot(
 
 
 async def export_analysis_json(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     bundle = await read_analysis_bundle(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "analysis_version": analysis_version,
         "projection_version": "paper-experiment-analysis.v1",
@@ -180,7 +180,7 @@ async def export_analysis_json(
             ],
             "findings": [
                 {
-                    "collection_id": item.collection_id,
+                    "workspace_id": item.workspace_id,
                     "objective_id": item.objective_id,
                     "analysis_version": item.analysis_version,
                     "finding_id": item.finding_id,
@@ -666,15 +666,15 @@ async def export_analysis_json(
 
 
 async def export_analysis_csv(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
     user_id: str,
 ) -> str:
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     bundle = await read_analysis_bundle(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
@@ -735,7 +735,7 @@ async def export_analysis_csv(
             )
             rows.append(
                 {
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                     "objective_id": objective_id,
                     "analysis_version": str(analysis_version),
                     "selection_id": selection.selection_id,
@@ -1033,7 +1033,7 @@ async def export_analysis_csv(
 
     output = io.StringIO(newline="")
     fieldnames = (
-        "collection_id",
+        "workspace_id",
         "objective_id",
         "analysis_version",
         "selection_id",

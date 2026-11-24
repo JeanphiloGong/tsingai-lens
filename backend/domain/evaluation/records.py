@@ -53,7 +53,7 @@ FINDING_CURATION_STATUSES: Final[frozenset[str]] = frozenset(
 @dataclass(frozen=True)
 class EvaluationGoldSet:
     gold_id: str
-    collection_id: str
+    workspace_id: str
     version: str
     target_layer: str
     metric_profile: str
@@ -87,7 +87,7 @@ class EvaluationPredictionItem:
 @dataclass(frozen=True)
 class EvaluationPredictionSnapshot:
     snapshot_id: str
-    collection_id: str
+    workspace_id: str
     target_layer: str
     fact_source: str
     system_context: dict[str, Any]
@@ -127,7 +127,7 @@ class EvaluationFailure:
 @dataclass(frozen=True)
 class EvaluationRun:
     evaluation_run_id: str
-    collection_id: str
+    workspace_id: str
     gold_id: str
     prediction_snapshot_id: str
     target_layer: str
@@ -146,7 +146,7 @@ class FindingFeedbackDecisionError(ValueError):
 @dataclass(frozen=True)
 class FindingFeedback:
     feedback_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -157,7 +157,7 @@ class FindingFeedback:
     created_at: str
 
     def __post_init__(self) -> None:
-        if not self.collection_id or not self.objective_id or not self.finding_id:
+        if not self.workspace_id or not self.objective_id or not self.finding_id:
             raise ValueError("finding feedback requires objective and finding identity")
         if self.analysis_version < 1:
             raise ValueError("finding feedback requires a positive analysis_version")
@@ -170,7 +170,7 @@ class FindingFeedback:
 @dataclass(frozen=True)
 class FindingCuration:
     curation_id: str
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     finding_id: str
@@ -181,12 +181,12 @@ class FindingCuration:
     updated_at: str
 
     def __post_init__(self) -> None:
-        if not self.collection_id or not self.objective_id or not self.finding_id:
+        if not self.workspace_id or not self.objective_id or not self.finding_id:
             raise ValueError("finding curation requires objective and finding identity")
         if self.analysis_version < 1:
             raise ValueError("finding curation requires a positive analysis_version")
         if self.curated_finding.key != (
-            self.collection_id,
+            self.workspace_id,
             self.objective_id,
             self.analysis_version,
             self.finding_id,

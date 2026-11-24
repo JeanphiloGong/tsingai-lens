@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
             "Source text units. This benchmark does not change runtime retrieval."
         )
     )
-    parser.add_argument("--collection-id", required=True)
+    parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--fixture", required=True, type=Path)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--output", type=Path)
@@ -103,15 +103,15 @@ def evaluate_ranking(
 def validate_fixture(
     fixture: dict[str, Any],
     *,
-    collection_id: str,
+    workspace_id: str,
     available_ids: set[str],
     locators: dict[str, dict[str, Any]],
 ) -> None:
     if fixture.get("schema_version") != 1:
         raise ValueError("fixture schema_version must be 1")
     filters = fixture.get("filters")
-    if not isinstance(filters, dict) or filters.get("collection_id") != collection_id:
-        raise ValueError("fixture collection filter does not match requested collection")
+    if not isinstance(filters, dict) or filters.get("workspace_id") != workspace_id:
+        raise ValueError("fixture workspace filter does not match requested workspace")
     document_ids = filters.get("document_ids")
     if not isinstance(document_ids, list) or not document_ids:
         raise ValueError("fixture document filter must be a non-empty list")
@@ -265,15 +265,15 @@ async def main_async() -> int:
     AsyncSessionLocal.configure(bind=engine)
     try:
         repository = SourceArtifactRepository()
-        text_units = await repository.list_text_units(args.collection_id)
-        blocks = await repository.list_blocks(args.collection_id)
+        text_units = await repository.list_text_units(args.workspace_id)
+        blocks = await repository.list_blocks(args.workspace_id)
         connection = await ModelConnectionRepo.read_assigned_connection("embedding")
     except ProjectException as exc:
         raise SystemExit(exc.message) from None
     finally:
         await engine.dispose()
     if not text_units:
-        raise SystemExit(f"collection has no active Source text units: {args.collection_id}")
+        raise SystemExit(f"workspace has no active Source text units: {args.workspace_id}")
 
     locators = build_locators(text_units, blocks)
     filtered_document_ids = set(fixture.get("filters", {}).get("document_ids", []))
@@ -288,7 +288,7 @@ async def main_async() -> int:
     ]
     validate_fixture(
         fixture,
-        collection_id=args.collection_id,
+        workspace_id=args.workspace_id,
         available_ids={item["text_unit_id"] for item in corpus},
         locators=locators,
     )
@@ -312,7 +312,7 @@ async def main_async() -> int:
     }
     output = {
         "schema_version": 1,
-        "collection_id": args.collection_id,
+        "workspace_id": args.workspace_id,
         "fixture": fixture["name"],
         "filters": fixture["filters"],
         "corpus_text_unit_count": len(corpus),

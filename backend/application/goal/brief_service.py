@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from application.source import collection_service
+from application.source import workspace_service
 from exceptions import RequestInvalidException
 
 
@@ -19,7 +19,7 @@ def _build_objective(
     return str(context or "").strip()
 
 
-def _build_collection_name(
+def _build_workspace_name(
     material_system: str | None,
     target_property: str | None,
     intent: str,
@@ -74,32 +74,32 @@ def _build_coverage_assessment(
 
 
 def _build_entry_recommendation(
-    collection_id: str,
+    workspace_id: str,
     coverage_level: str,
 ) -> dict:
     recommended_mode = "comparison" if coverage_level == "direct" else "exploratory"
     if recommended_mode == "comparison":
         reason = "The goal is bounded enough to enter a comparison-oriented review once seed papers are attached."
     else:
-        reason = "The goal is still broad or weakly specified, so exploratory collection building should come first."
+        reason = "The goal is still broad or weakly specified, so exploratory workspace building should come first."
     return {
         "recommended_mode": recommended_mode,
         "reason": reason,
         "next_actions": [
-            "Upload papers or connect a source adapter into the seeded collection.",
+            "Upload papers or connect a source adapter into the seeded workspace.",
             "Prepare each paper to generate its Source, profile, and paper map.",
             "Select ready papers to discover candidate research objectives.",
         ],
         "links": [
-            f"/api/v1/collections/{collection_id}",
-            f"/api/v1/collections/{collection_id}/documents",
-            f"/api/v1/collections/{collection_id}/objectives",
+            f"/api/v1/workspaces/{workspace_id}",
+            f"/api/v1/workspaces/{workspace_id}/documents",
+            f"/api/v1/workspaces/{workspace_id}/objectives",
         ],
     }
 
 
 def _build_source_channels() -> list[str]:
-    # Goal Brief can only hand off into the currently supported collection
+    # Goal Brief can only hand off into the currently supported workspace
     # builder channels; it does not import papers itself.
     return ["upload"]
 
@@ -145,8 +145,8 @@ async def intake_goal(
         max_seed_documents,
     )
 
-    collection = await collection_service.create_collection(
-        name=_build_collection_name(
+    workspace = await workspace_service.create_workspace(
+        name=_build_workspace_name(
             normalized_material_system,
             normalized_target_property,
             intent,
@@ -154,21 +154,21 @@ async def intake_goal(
         description=objective,
         owner_user_id=owner_user_id,
     )
-    collection_id = collection.collection.collection_id
-    seed_collection = {
-        "collection_id": collection_id,
-        "name": collection.collection.name,
+    workspace_id = workspace.workspace.workspace_id
+    seed_workspace = {
+        "workspace_id": workspace_id,
+        "name": workspace.workspace.name,
         "created": True,
         "seeded_document_count": 0,
         "source_channels": _build_source_channels(),
     }
     entry_recommendation = _build_entry_recommendation(
-        collection_id,
+        workspace_id,
         coverage_assessment["level"],
     )
     return {
         "research_brief": research_brief,
         "coverage_assessment": coverage_assessment,
-        "seed_collection": seed_collection,
+        "seed_workspace": seed_workspace,
         "entry_recommendation": entry_recommendation,
     }

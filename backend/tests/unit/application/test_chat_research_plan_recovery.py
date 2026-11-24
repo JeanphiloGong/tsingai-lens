@@ -4,7 +4,7 @@ import pytest
 from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
 from application.chat.capabilities import ProposeResearchPlanCapability
 from tests.unit.application.test_chat_research_plan_capability import (
-    _CollectionService, _FindingFeedbackService, _Model, _plan_arguments,
+    _WorkspaceService, _FindingFeedbackService, _Model, _plan_arguments,
 )
 
 
@@ -18,7 +18,7 @@ def anyio_backend():
 @pytest.mark.parametrize("initial_schema_error", [False, True])
 @pytest.mark.parametrize("invented_finding", [False, True])
 async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missing_control, initial_schema_error, invented_finding):
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = _FindingFeedbackService()
     proposal = ProposeResearchPlanCapability()
     invalid = _plan_arguments()
@@ -37,7 +37,7 @@ async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missi
     )
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((proposal,)))
     result = await runner.run_turn(
-        context=AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1"),
+        context=AgentContext(session_id="chat-1", user_id="user-1", workspace_id="col-1"),
         previous_messages=(), user_message="Draft a research plan with at most four samples per group; do not save.",
     )
     assert result.status.value == "completed"
@@ -56,7 +56,7 @@ async def test_unresolved_plan_citations_do_not_expose_saving_or_claim_completio
     from domain.chat import ToolRisk
     from tests.unit.application.test_research_agent_runner import _Capability, _Model as Model
 
-    research_planning.collection_service = _CollectionService()
+    research_planning.workspace_service = _WorkspaceService()
     research_planning.finding_dataset_service = _FindingFeedbackService()
     proposal = ProposeResearchPlanCapability()
     invalid = _plan_arguments()
@@ -68,7 +68,7 @@ async def test_unresolved_plan_citations_do_not_expose_saving_or_claim_completio
         ModelTurn(content="No reviewable plan was produced because its references remain unresolved."),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((proposal, writer))).run_turn(
-        context=AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1"),
+        context=AgentContext(session_id="chat-1", user_id="user-1", workspace_id="col-1"),
         previous_messages=(), user_message="Draft and save a research plan.",
     )
     assert result.pending_approval is None

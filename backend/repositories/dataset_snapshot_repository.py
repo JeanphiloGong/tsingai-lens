@@ -27,7 +27,7 @@ class DatasetSnapshotRepository:
                 return DatasetSnapshot(
                     dataset_id=existing.dataset_id,
                     owner_id=existing.owner_id,
-                    collection_id=existing.collection_id,
+                    workspace_id=existing.workspace_id,
                     dataset_type=existing.dataset_type,
                     rows=tuple(existing.rows),
                     exclusions=tuple(existing.exclusions),
@@ -41,7 +41,7 @@ class DatasetSnapshotRepository:
             row = FeedbackDatasetSnapshotORM(
                 dataset_id=snapshot.dataset_id,
                 owner_id=snapshot.owner_id,
-                collection_id=snapshot.collection_id,
+                workspace_id=snapshot.workspace_id,
                 dataset_type=snapshot.dataset_type,
                 rows=list(snapshot.rows),
                 exclusions=list(snapshot.exclusions),
@@ -59,7 +59,7 @@ class DatasetSnapshotRepository:
             return DatasetSnapshot(
                 dataset_id=row.dataset_id,
                 owner_id=row.owner_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 dataset_type=row.dataset_type,
                 rows=tuple(row.rows),
                 exclusions=tuple(row.exclusions),
@@ -78,7 +78,7 @@ class DatasetSnapshotRepository:
                 DatasetSnapshot(
                     dataset_id=row.dataset_id,
                     owner_id=row.owner_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     dataset_type=row.dataset_type,
                     rows=tuple(row.rows),
                     exclusions=tuple(row.exclusions),
@@ -97,7 +97,7 @@ class DatasetSnapshotRepository:
         self,
         *,
         owner_id: str,
-        collection_id: str | None = None,
+        workspace_id: str | None = None,
         dataset_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -112,9 +112,9 @@ class DatasetSnapshotRepository:
             .offset(offset)
             .limit(limit)
         )
-        if collection_id is not None:
+        if workspace_id is not None:
             statement = statement.where(
-                FeedbackDatasetSnapshotORM.collection_id == collection_id
+                FeedbackDatasetSnapshotORM.workspace_id == workspace_id
             )
         if dataset_type is not None:
             statement = statement.where(
@@ -126,7 +126,7 @@ class DatasetSnapshotRepository:
                 DatasetSnapshot(
                     dataset_id=row.dataset_id,
                     owner_id=row.owner_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     dataset_type=row.dataset_type,
                     rows=tuple(row.rows),
                     exclusions=tuple(row.exclusions),

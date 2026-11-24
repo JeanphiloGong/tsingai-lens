@@ -13,7 +13,7 @@ DatasetTaskTypeLiteral = Literal["sft", "preference", "evaluation"]
 class TaskDatasetCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    collection_id: str = Field(min_length=1, max_length=64)
+    workspace_id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)
     task_type: DatasetTaskTypeLiteral
     construction_spec: dict[str, Any] = Field(default_factory=dict)
@@ -21,7 +21,7 @@ class TaskDatasetCreateRequest(BaseModel):
 
 class TaskDatasetResponse(BaseModel):
     dataset_id: str
-    collection_id: str
+    workspace_id: str
     name: str
     task_type: DatasetTaskTypeLiteral
     construction_spec: dict[str, Any]
@@ -43,24 +43,24 @@ class DatasetExportPreviewRequest(BaseModel):
     sample_ids: list[str] | None = Field(default=None, min_length=1, max_length=1000)
 
 
-class DatasetCollectionRequest(BaseModel):
+class DatasetWorkspaceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_case_ids: list[str] = Field(min_length=1, max_length=1000)
 
 
-class DatasetCollectionItemResponse(BaseModel):
+class DatasetWorkspaceItemResponse(BaseModel):
     sample_id: str
     source_case_id: str
     status: str
     job_id: str | None = None
 
 
-class DatasetCollectionResponse(BaseModel):
+class DatasetWorkspaceResponse(BaseModel):
     operation_id: str
     created_count: int
     existing_count: int
-    items: list[DatasetCollectionItemResponse]
+    items: list[DatasetWorkspaceItemResponse]
 
 
 class RevisionMessageRequest(BaseModel):
@@ -184,7 +184,7 @@ class DatasetSampleRevisionResponse(BaseModel):
 
 class DatasetSampleSourceCaseResponse(BaseModel):
     case_id: str
-    collection_id: str
+    workspace_id: str
     session_id: str
     anchor_message_id: str
     status: str
@@ -268,9 +268,9 @@ __all__ = [
     "TaskDatasetCreateRequest",
     "TaskDatasetListResponse",
     "TaskDatasetResponse",
-    "DatasetCollectionItemResponse",
-    "DatasetCollectionRequest",
-    "DatasetCollectionResponse",
+    "DatasetWorkspaceItemResponse",
+    "DatasetWorkspaceRequest",
+    "DatasetWorkspaceResponse",
     "DatasetSampleDetailResponse",
     "DatasetSampleListResponse",
     "DatasetSampleRevisionResponse",

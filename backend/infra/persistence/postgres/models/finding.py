@@ -33,9 +33,9 @@ class ExperimentFindingORM(Base):
     __tablename__ = "finding"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["collection_id", "objective_id", "analysis_version"],
+            ["workspace_id", "objective_id", "analysis_version"],
             [
-                "objective_analyses.collection_id",
+                "objective_analyses.workspace_id",
                 "objective_analyses.objective_id",
                 "objective_analyses.analysis_version",
             ],
@@ -59,7 +59,7 @@ class ExperimentFindingORM(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     finding_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
@@ -145,7 +145,7 @@ class FindingFeedbackORM(Base):
     )
 
     feedback_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     finding_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -166,7 +166,7 @@ class FindingCurationORM(Base):
     )
 
     curation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     objective_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     finding_id: Mapped[str] = mapped_column(String(128), nullable=False)

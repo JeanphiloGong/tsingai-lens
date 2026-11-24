@@ -10,8 +10,8 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from application.source import collection_service
-from repositories.collection_repository import StoredDocument
+from application.source import workspace_service
+from repositories.workspace_repository import StoredDocument
 from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
 from repositories.pipeline_run_repository import PipelineRunSummary
@@ -30,7 +30,7 @@ class InspectResearchProcessCapability:
     spec = ToolSpec(
         name="inspect_research_process",
         description=(
-            "Read the preparation state of each paper in the current collection. "
+            "Read the preparation state of each paper in the current workspace. "
             "Report which papers are stored, processing, ready, or failed and the "
             "observable stage of active work. This does not reveal private model "
             "reasoning and does not imply that Objective discovery or analysis ran."
@@ -44,13 +44,13 @@ class InspectResearchProcessCapability:
         context: CapabilityExecutionContext,
         _arguments: InspectResearchProcessToolRequest,
     ) -> ChatToolResult:
-        collection = await collection_service.get_collection_for_user(
-            context.collection_id,
+        workspace = await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         runs = await pipeline_run_service.list_runs(
             user_id=context.user_id,
-            collection_id=context.collection_id,
+            workspace_id=context.workspace_id,
             limit=200,
             offset=0,
         )
@@ -62,7 +62,7 @@ class InspectResearchProcessCapability:
             if document_id and document_id not in latest_by_document:
                 latest_by_document[document_id] = run
 
-        documents = collection.documents
+        documents = workspace.documents
         records = tuple(
             self._document_record(document, latest_by_document)
             for document in documents
@@ -93,7 +93,7 @@ class InspectResearchProcessCapability:
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
-                "collection_id": context.collection_id,
+                "workspace_id": context.workspace_id,
                 "process": {
                     "status": self._overall_status(counts, len(records)),
                     "document_count": len(records),
@@ -109,9 +109,9 @@ class InspectResearchProcessCapability:
             },
             resource_refs=(
                 ChatResourceRef(
-                    resource_type="collection",
-                    resource_id=context.collection_id,
-                    href=f"/collections/{context.collection_id}",
+                    resource_type="workspace",
+                    resource_id=context.workspace_id,
+                    href=f"/workspaces/{context.workspace_id}",
                 ),
             ),
             warnings=warnings,

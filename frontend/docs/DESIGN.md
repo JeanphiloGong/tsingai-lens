@@ -112,7 +112,7 @@ The current Collection is the research workspace boundary. Papers are files
 inside it; Objectives describe questions over an explicit ready-paper scope;
 Findings belong to a published Objective analysis. These are not nested
 collections. The route ownership and detailed behavior remain in the
-[collection route guide](../src/routes/collections/README.md).
+[collection route guide](../src/routes/workspaces/README.md).
 
 The shared shell places brand and collection context on the left, with the
 Research Agent and an avatar/name disclosure on the right. The disclosure shows

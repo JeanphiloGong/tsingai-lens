@@ -33,7 +33,7 @@ from application.source.document_preparation_service import (
 )
 
 from config import DATA_DIR
-from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.file import FileWorkspace
 from infra.persistence.file.object_store import FileObjectStore
 from infra.source.build_source_artifacts import build_source_artifacts
 
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 async def run_forever(
     *,
     worker_id: str,
-    workspace: FileCollectionWorkspace,
+    workspace: FileWorkspace,
     object_store: FileObjectStore,
     lease_duration: timedelta,
     heartbeat_interval: float,
@@ -106,7 +106,7 @@ async def run(
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
-        workspace = FileCollectionWorkspace(DATA_DIR / "collections")
+        workspace = FileWorkspace(DATA_DIR / "workspaces")
         object_store = FileObjectStore(workspace.root_dir)
         await run_forever(
             worker_id=f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}",

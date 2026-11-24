@@ -568,7 +568,7 @@ def test_model_cannot_supply_formal_identity() -> None:
         "source_ids",
         "arbitrary_record_id",
         "arbitrary_record_ids",
-        "collection_id",
+        "workspace_id",
         "objective_id",
         "experiment_version",
     ],
@@ -954,7 +954,7 @@ def _readiness_output(
 
 def _readiness_objective(*, outcome: str = "elongation") -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="Does preheating affect the reported outcome?",
         material_scope=("316L",),

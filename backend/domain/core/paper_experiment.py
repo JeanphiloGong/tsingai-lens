@@ -1,6 +1,6 @@
 """Reusable, source-grounded paper experiment records.
 
-This module deliberately has no Objective, Collection, SQLAlchemy, or HTTP
+This module deliberately has no Objective, Workspace, SQLAlchemy, or HTTP
 dependency.  A paper experiment is reusable research state; an analysis later
 selects the parts it needs.
 """

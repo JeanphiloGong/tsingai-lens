@@ -1,4 +1,4 @@
-"""Source tools use the real collection lookup to distinguish unavailable papers."""
+"""Source tools use the real workspace lookup to distinguish unavailable papers."""
 
 from application.chat.capabilities import document_sources
 from unittest.mock import AsyncMock
@@ -18,7 +18,7 @@ from application.chat.capabilities.document_sources import (
     SearchSourcesToolRequest,
 )
 from domain.source import Document
-from repositories.collection_repository import StoredDocument
+from repositories.workspace_repository import StoredDocument
 from repositories.source_artifact_repository import SourceArtifactRepository
 
 from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
@@ -35,41 +35,41 @@ pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")
     (InspectTableCapability, InspectTableToolRequest(document_id="paper", table_ref="table")),
     (SearchSourcesCapability, SearchSourcesToolRequest(document_ids=["paper"], query="HIP")),
 ])
-async def test_source_availability_uses_real_collection_lookup(
+async def test_source_availability_uses_real_workspace_lookup(
     state,
     capability,
     arguments,
-    collection_service,
+    workspace_service,
     monkeypatch,
     *,
-    collection_workspace,
+    workspace_files,
 ):
-    collection = await collection_service.create_collection(
+    workspace = await workspace_service.create_workspace(
         "LPBF source inspection", owner_user_id="local-user",
     )
-    collection_id = collection.collection.collection_id
+    workspace_id = workspace.workspace.workspace_id
     if state == "unprepared":
-        await collection_service.CollectionRepo.add_documents(
-            collection_id,
+        await workspace_service.WorkspaceRepo.add_documents(
+            workspace_id,
             (StoredDocument(
                 document=Document(
                     document_id="paper", original_filename="lpbf.pdf", sha256="a" * 64,
                     media_type="application/pdf", status="uploaded", size_bytes=100,
                 ),
                 stored_filename="lpbf.pdf", storage_key="lpbf.pdf",
-                created_at=collection.created_at,
+                created_at=workspace.created_at,
             ),),
-            updated_at=collection.updated_at,
+            updated_at=workspace.updated_at,
         )
     failure = OperationalError("SELECT document", None, RuntimeError("database unavailable"))
     if state == "database_failure":
         monkeypatch.setattr(
-            collection_service.CollectionRepo, "read_document", AsyncMock(side_effect=failure),
+            workspace_service.WorkspaceRepo, "read_document", AsyncMock(side_effect=failure),
         )
     context = CapabilityExecutionContext(
-        session_id="chat", user_id="local-user", collection_id=collection_id, tool_call_id="read",
+        session_id="chat", user_id="local-user", workspace_id=workspace_id, tool_call_id="read",
     )
-    document_sources.collection_service = collection_service
+    document_sources.workspace_service = workspace_service
     document_sources.SourceArtifactRepo = SourceArtifactRepository()
     handler = capability()
     if state == "database_failure":

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const collectionId = 'col_feedback';
+const workspaceId = 'col_feedback';
 const datasetId = 'fdset_feedback';
 const caseId = 'case_feedback_private';
 
@@ -41,12 +41,12 @@ async function mockTaskEntry(page: Page, withExport = false) {
 				})
 			});
 		}
-		if (path === '/api/v1/collections' && request.method() === 'GET') {
+		if (path === '/api/v1/workspaces' && request.method() === 'GET') {
 			return route.fulfill(
 				json({
 					items: [
 						{
-							collection_id: collectionId,
+							workspace_id: workspaceId,
 							name: 'Feedback fixture',
 							status: 'ready',
 							documents: []
@@ -55,10 +55,10 @@ async function mockTaskEntry(page: Page, withExport = false) {
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}` && request.method() === 'GET') {
+		if (path === `/api/v1/workspaces/${workspaceId}` && request.method() === 'GET') {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: 'Feedback fixture',
 					status: 'ready',
 					documents: []
@@ -69,7 +69,7 @@ async function mockTaskEntry(page: Page, withExport = false) {
 			const items = [
 				{
 					dataset_id: datasetId,
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '文献问答 SFT',
 					task_type: 'sft',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -80,7 +80,7 @@ async function mockTaskEntry(page: Page, withExport = false) {
 				},
 				{
 					dataset_id: 'fdset_feedback_preference',
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '回答偏好',
 					task_type: 'preference',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -91,7 +91,7 @@ async function mockTaskEntry(page: Page, withExport = false) {
 				},
 				{
 					dataset_id: 'fdset_feedback_evaluation',
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '评测',
 					task_type: 'evaluation',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -107,7 +107,7 @@ async function mockTaskEntry(page: Page, withExport = false) {
 			return route.fulfill(
 				json({
 					dataset_id: datasetId,
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					name: '预热条件问答纠错',
 					task_type: 'sft',
 					construction_spec: { mode: 'automatic_feedback_workbench' },
@@ -159,12 +159,12 @@ async function mockTaskEntry(page: Page, withExport = false) {
 	});
 }
 
-test('the collection entry uses task datasets and keeps internal IDs out of the reviewer view', async ({
+test('the workspace entry uses task datasets and keeps internal IDs out of the reviewer view', async ({
 	page
 }) => {
 	await mockTaskEntry(page);
 	await page.setViewportSize({ width: 1440, height: 1000 });
-	await page.goto(`/collections/${collectionId}/feedback`);
+	await page.goto(`/workspaces/${workspaceId}/feedback`);
 
 	await expect(page.getByRole('heading', { name: '反馈任务工作台' })).toBeVisible();
 	await expect(page.getByRole('button', { name: /回答偏好/ })).toBeVisible();
@@ -179,7 +179,7 @@ test('the collection entry uses task datasets and keeps internal IDs out of the 
 test('the global header keeps personal preferences reachable at tablet width', async ({ page }) => {
 	await mockTaskEntry(page);
 	await page.setViewportSize({ width: 1024, height: 800 });
-	await page.goto(`/collections/${collectionId}/feedback`);
+	await page.goto(`/workspaces/${workspaceId}/feedback`);
 
 	await page.getByRole('button', { name: /^个人菜单:/ }).click();
 	const language = page.getByRole('button', { name: /^语言 / });
@@ -197,7 +197,7 @@ test('the global header keeps personal preferences reachable at tablet width', a
 
 test('export history exposes the manifest download alongside training files', async ({ page }) => {
 	await mockTaskEntry(page, true);
-	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+	await page.goto(`/workspaces/${workspaceId}/feedback/datasets/${datasetId}`);
 	await page.locator('.export-panel > summary').click();
 	await expect(page.getByText('已发布版本')).toBeVisible();
 	await expect(page.getByText('Messages SFT', { exact: true })).toBeVisible();

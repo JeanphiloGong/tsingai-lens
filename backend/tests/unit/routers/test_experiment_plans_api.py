@@ -21,23 +21,23 @@ class _FindingFeedbackService:
         return "current", []
 
 
-class _CollectionService:
-    async def get_collection_for_user(self, _collection_id: str, _user_id: str):
-        return {"collection_id": _collection_id}
+class _WorkspaceService:
+    async def get_workspace_for_user(self, _workspace_id: str, _user_id: str):
+        return {"workspace_id": _workspace_id}
 
 
-class _DenyCollectionService:
-    async def get_collection_for_user(self, _collection_id: str, _user_id: str):
-        raise ResourceNotFoundException("collection not found")
+class _DenyWorkspaceService:
+    async def get_workspace_for_user(self, _workspace_id: str, _user_id: str):
+        raise ResourceNotFoundException("workspace not found")
 
 
 def _request(
     service: ModuleType,
     user_id: str = "expert-a",
-    collection_service: object | None = None,
+    workspace_service: object | None = None,
 ):
     experiment_plans_controller.experiment_plan_service = service
-    service.collection_service = collection_service or _CollectionService()
+    service.workspace_service = workspace_service or _WorkspaceService()
     return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
 
 
@@ -66,7 +66,7 @@ def test_stale_plan_update_returns_http_business_conflict_without_another_revisi
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     app.dependency_overrides[get_current_user_id] = lambda: "expert-a"
-    url = "/api/v1/collections/col_1/objectives/objective_1/experiment-plans"
+    url = "/api/v1/workspaces/col_1/objectives/objective_1/experiment-plans"
 
     with TestClient(app, raise_server_exceptions=False) as client:
         created = client.post(
@@ -111,7 +111,7 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan(
             (
                 asyncio.run(
                     experiment_plans_controller.create_experiment_plan(
-                        collection_id="col_1",
+                        workspace_id="col_1",
                         objective_id="objective_1",
                         payload=ExperimentPlanCreateRequest(
                             title="Preheating validation matrix",
@@ -153,7 +153,7 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan(
             (
                 asyncio.run(
                     experiment_plans_controller.list_experiment_plans(
-                        collection_id="col_1",
+                        workspace_id="col_1",
                         objective_id="objective_1",
                         user_id=request.state.current_user["user_id"],
                     )
@@ -166,7 +166,7 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan(
             (
                 asyncio.run(
                     experiment_plans_controller.update_experiment_plan(
-                        collection_id="col_1",
+                        workspace_id="col_1",
                         objective_id="objective_1",
                         plan_id=created.plan_id,
                         payload=ExperimentPlanUpdateRequest(
@@ -197,7 +197,7 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan(
             (
                 asyncio.run(
                     experiment_plans_controller.read_experiment_plan(
-                        collection_id="col_1",
+                        workspace_id="col_1",
                         objective_id="objective_1",
                         plan_id=created.plan_id,
                         user_id=request.state.current_user["user_id"],
@@ -219,7 +219,7 @@ def test_experiment_plan_routes_create_list_and_update_manual_plan(
             (
                 asyncio.run(
                     experiment_plans_controller.update_experiment_plan(
-                        collection_id="col_1",
+                        workspace_id="col_1",
                         objective_id="objective_1",
                         plan_id=updated.plan_id,
                         payload=ExperimentPlanUpdateRequest(title="Title-only edit"),
@@ -255,13 +255,13 @@ def test_experiment_plan_update_contract_allows_partial_patch() -> None:
     assert payload.structured_plan is None
 
 
-def test_experiment_plan_routes_hide_other_collection_from_non_owner(
+def test_experiment_plan_routes_hide_other_workspace_from_non_owner(
     *, postgres_session_factory
 ) -> None:
     experiment_plan_service.ExperimentPlanRepo = ExperimentPlanRepository()
     experiment_plan_service.finding_snapshot_service = _FindingFeedbackService()
     service = experiment_plan_service
-    request = _request(service, collection_service=_DenyCollectionService())
+    request = _request(service, workspace_service=_DenyWorkspaceService())
 
     with pytest.raises(ResourceNotFoundException) as exc_info:
         experiment_plans_controller.ExperimentPlanListResponse.model_validate(
@@ -269,7 +269,7 @@ def test_experiment_plan_routes_hide_other_collection_from_non_owner(
                 (
                     asyncio.run(
                         experiment_plans_controller.list_experiment_plans(
-                            collection_id="private-col",
+                            workspace_id="private-col",
                             objective_id="objective_1",
                             user_id=request.state.current_user["user_id"],
                         )

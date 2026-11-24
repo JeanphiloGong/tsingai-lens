@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from repositories.collection_repository import StoredCollection
+from repositories.workspace_repository import StoredWorkspace
 
 import asyncio
 
@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileExtractionError, DocumentProfileExtractor
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core.document_profile import (
     PROFILE_STATUS_COMPLETED,
     PROFILE_STATUS_EXTRACTION_FAILED,
     DocumentProfile,
-    summarize_document_profile_collection,
+    summarize_document_profile_workspace,
 )
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
@@ -64,35 +64,35 @@ _PROFILE_FRONT_MATTER_HEADINGS = (
 
 
 class DocumentProfilesNotReadyError(ResourceConflictException):
-    def __init__(self, collection_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str) -> None:
+        self.workspace_id = workspace_id
         super().__init__(
-            "The collection does not have document profiles yet. Finish preparation first.",
+            "The workspace does not have document profiles yet. Finish preparation first.",
             data={
                 "code": "document_profiles_not_ready",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
             },
         )
 
 
 class DocumentContentNotReadyError(ResourceConflictException):
-    def __init__(self, collection_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str) -> None:
+        self.workspace_id = workspace_id
         super().__init__(
-            "The collection does not have document content yet. Finish preparation first.",
-            data={"code": "document_content_not_ready", "collection_id": collection_id},
+            "The workspace does not have document content yet. Finish preparation first.",
+            data={"code": "document_content_not_ready", "workspace_id": workspace_id},
         )
 
 
 class DocumentNotFoundError(ResourceNotFoundException):
-    def __init__(self, collection_id: str, document_id: str) -> None:
-        self.collection_id = collection_id
+    def __init__(self, workspace_id: str, document_id: str) -> None:
+        self.workspace_id = workspace_id
         self.document_id = document_id
         super().__init__(
-            "Document not found in this collection.",
+            "Document not found in this workspace.",
             data={
                 "code": "document_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "document_id": document_id,
             },
         )
@@ -102,7 +102,7 @@ from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
 
 async def list_document_profiles(
-    collection_id: str,
+    workspace_id: str,
     offset: int = 0,
     limit: int = 51,
     query: str | None = None,
@@ -111,10 +111,10 @@ async def list_document_profiles(
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    profiles = await DocumentProfileRepo.list_collection(collection_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    profiles = await DocumentProfileRepo.list_workspace(workspace_id)
     if not profiles:
-        raise DocumentProfilesNotReadyError(collection_id)
+        raise DocumentProfilesNotReadyError(workspace_id)
     summary = summarize_document_profiles(profiles)
     normalized_query = (query or "").strip().casefold()
     normalized_doc_type = (doc_type or "").strip().casefold()
@@ -145,7 +145,7 @@ async def list_document_profiles(
         for profile in matched_profiles[offset : offset + limit]
     ]
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "total": len(matched_profiles),
         "count": len(items),
         "summary": summary,
@@ -153,19 +153,19 @@ async def list_document_profiles(
     }
 
 
-async def get_document_summary(collection_id: str) -> dict[str, Any]:
-    profiles = await read_document_profiles(collection_id)
+async def get_document_summary(workspace_id: str) -> dict[str, Any]:
+    profiles = await read_document_profiles(workspace_id)
     return summarize_document_profiles(profiles)
 
 
 async def get_document_profile(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    profile = await DocumentProfileRepo.read(collection_id, document_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    profile = await DocumentProfileRepo.read(workspace_id, document_id)
     if profile is not None:
         return {
             "document_id": profile.document_id,
@@ -179,31 +179,31 @@ async def get_document_profile(
             "profile_fingerprint": profile.profile_fingerprint,
             "generated_at": profile.generated_at,
         }
-    if not await DocumentProfileRepo.list_collection(collection_id):
-        raise DocumentProfilesNotReadyError(collection_id)
-    raise DocumentNotFoundError(collection_id, document_id)
+    if not await DocumentProfileRepo.list_workspace(workspace_id):
+        raise DocumentProfilesNotReadyError(workspace_id)
+    raise DocumentNotFoundError(workspace_id, document_id)
 
 
 async def get_document_content(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     *,
     user_id: str,
 ) -> dict[str, Any]:
-    collection = await collection_service.get_collection_for_user(
-        collection_id, user_id
+    workspace = await workspace_service.get_workspace_for_user(
+        workspace_id, user_id
     )
     document = await SourceArtifactRepo.read_document(
-        collection_id,
+        workspace_id,
         document_id,
     )
     if document is None:
-        if not await SourceArtifactRepo.has_documents(collection_id):
-            raise DocumentContentNotReadyError(collection_id)
-        raise DocumentNotFoundError(collection_id, document_id)
+        if not await SourceArtifactRepo.has_documents(workspace_id):
+            raise DocumentContentNotReadyError(workspace_id)
+        raise DocumentNotFoundError(workspace_id, document_id)
 
-    profile = await DocumentProfileRepo.read(collection_id, document_id)
-    file_lookup = _build_collection_file_lookup(collection)
+    profile = await DocumentProfileRepo.read(workspace_id, document_id)
+    file_lookup = _build_workspace_file_lookup(workspace)
 
     full_text = _document_text(document)
     block_payload = _build_document_content_blocks(
@@ -227,7 +227,7 @@ async def get_document_content(
         warnings.append("block_structure_missing")
 
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "document_id": document_id,
         "title": title,
         "source_filename": source_filename,
@@ -238,50 +238,50 @@ async def get_document_content(
 
 
 async def read_document_profiles(
-    collection_id: str,
+    workspace_id: str,
     document_ids: tuple[str, ...] | None = None,
 ) -> tuple[DocumentProfile, ...]:
-    await collection_service.get_collection(collection_id)
+    await workspace_service.get_workspace(workspace_id)
 
-    profiles = await DocumentProfileRepo.list_collection(
-        collection_id,
+    profiles = await DocumentProfileRepo.list_workspace(
+        workspace_id,
         document_ids,
     )
 
     if profiles:
         return profiles
-    raise DocumentProfilesNotReadyError(collection_id)
+    raise DocumentProfilesNotReadyError(workspace_id)
 
 
 async def build_document_profile(
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     *,
     source_fingerprint: str,
     profile_fingerprint: str,
     extractor: DocumentProfileExtractor,
 ) -> DocumentProfile:
-    collection = await collection_service.get_collection(collection_id)
+    workspace = await workspace_service.get_workspace(workspace_id)
     document = await SourceArtifactRepo.read_document(
-        collection_id,
+        workspace_id,
         document_id,
     )
     if document is None:
         exc = FileNotFoundError(
-            f"source artifacts not ready: {collection_id}/{document_id}"
+            f"source artifacts not ready: {workspace_id}/{document_id}"
         )
-        raise DocumentProfilesNotReadyError(collection_id) from exc
-    file_lookup = _build_collection_file_lookup(collection)
+        raise DocumentProfilesNotReadyError(workspace_id) from exc
+    file_lookup = _build_workspace_file_lookup(workspace)
     logger.info(
-        "Document profile build started collection_id=%s document_id=%s block_count=%s",
-        collection_id,
+        "Document profile build started workspace_id=%s document_id=%s block_count=%s",
+        workspace_id,
         document_id,
         len(document.blocks),
     )
     profile_task = asyncio.create_task(
         to_thread(
             _profile_document,
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document=document,
             file_lookup=file_lookup,
             extractor=extractor,
@@ -300,8 +300,8 @@ async def build_document_profile(
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
     logger.info(
-        "Document profile build finished collection_id=%s document_id=%s doc_type=%s warning_count=%s",
-        collection_id,
+        "Document profile build finished workspace_id=%s document_id=%s doc_type=%s warning_count=%s",
+        workspace_id,
         document_id,
         profile.doc_type,
         len(profile.profile_warnings),
@@ -318,7 +318,7 @@ def _document_text(document: SourceDocument) -> str:
 
 
 def _profile_document(
-    collection_id: str,
+    workspace_id: str,
     document: SourceDocument,
     file_lookup: dict[str, Any],
     extractor: DocumentProfileExtractor,
@@ -366,8 +366,8 @@ def _profile_document(
         }
         logger.warning(
             "Document profile classification unavailable; preserving document "
-            "as uncertain collection_id=%s document_id=%s trace=%s",
-            collection_id,
+            "as uncertain workspace_id=%s document_id=%s trace=%s",
+            workspace_id,
             document_id,
             json.dumps(
                 diagnostic,
@@ -496,7 +496,7 @@ def _ordered_profile_blocks(
 def summarize_document_profiles(
     profiles: tuple[DocumentProfile, ...],
 ) -> dict[str, Any]:
-    summary = summarize_document_profile_collection(profiles)
+    summary = summarize_document_profile_workspace(profiles)
     return {
         "total_documents": summary.total_documents,
         "by_doc_type": dict(summary.by_doc_type),
@@ -549,12 +549,12 @@ def _build_document_content_blocks(
     return []
 
 
-def _build_collection_file_lookup(
-    collection: StoredCollection,
+def _build_workspace_file_lookup(
+    workspace: StoredWorkspace,
 ) -> dict[str, Any]:
     stored_to_source: dict[str, str] = {}
     resolved_sources: list[str] = []
-    for record in collection.documents:
+    for record in workspace.documents:
         original = (record.document.original_filename or "").strip() or None
         stored = (record.stored_filename or "").strip() or None
         if original:

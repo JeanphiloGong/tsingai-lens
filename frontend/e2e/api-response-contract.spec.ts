@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.use({ baseURL: 'http://localhost:4173', locale: 'en-US' });
 
-const collectionId = 'col_response_contract';
+const workspaceId = 'col_response_contract';
 const createdAt = '2026-10-30T00:00:00Z';
 const user = { user_id: 'researcher', email: 'researcher@example.test' };
 const document = {
@@ -22,8 +22,8 @@ const document = {
 	profile_fingerprint: 'profile',
 	preparation_fingerprint: 'prepared'
 };
-const collection = {
-	collection_id: collectionId,
+const workspace = {
+	workspace_id: workspaceId,
 	name: 'LPBF response contract',
 	description: null,
 	status: 'ready',
@@ -35,7 +35,7 @@ const collection = {
 const session = {
 	session_id: 'chat_response_contract',
 	user_id: user.user_id,
-	collection_id: collectionId,
+	workspace_id: workspaceId,
 	created_at: createdAt,
 	updated_at: createdAt
 };
@@ -80,15 +80,15 @@ async function installApi(page: Page, authenticated = true) {
 			return reply({
 				items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }]
 			});
-		if (path === '/collections') return reply({ items: [collection] });
-		if (path === `/collections/${collectionId}`) return reply(collection);
-		if (path === `/collections/${collectionId}/documents`)
+		if (path === '/workspaces') return reply({ items: [workspace] });
+		if (path === `/workspaces/${workspaceId}`) return reply(workspace);
+		if (path === `/workspaces/${workspaceId}/documents`)
 			return reply({ items: [document], count: 1 });
-		if (path === `/collections/${collectionId}/pipeline-runs`)
-			return reply({ collection_id: collectionId, items: [], count: 0 });
-		if (path === `/collections/${collectionId}/objectives`)
-			return reply({ collection_id: collectionId, objectives: [], total: 0 });
-		if (path === `/collections/${collectionId}/source-archives`) {
+		if (path === `/workspaces/${workspaceId}/pipeline-runs`)
+			return reply({ workspace_id: workspaceId, items: [], count: 0 });
+		if (path === `/workspaces/${workspaceId}/objectives`)
+			return reply({ workspace_id: workspaceId, objectives: [], total: 0 });
+		if (path === `/workspaces/${workspaceId}/source-archives`) {
 			state.downloads += 1;
 			return reply(
 				{ code: 'source_archive_unavailable' },
@@ -126,7 +126,7 @@ async function installApi(page: Page, authenticated = true) {
 	return state;
 }
 
-test('login opens a collection and a rejected download creates no file', async ({ page }) => {
+test('login opens a workspace and a rejected download creates no file', async ({ page }) => {
 	const errors: string[] = [];
 	const downloads: string[] = [];
 	page.on('pageerror', (error) => errors.push(error.message));
@@ -140,8 +140,8 @@ test('login opens a collection and a rejected download creates no file', async (
 	await page.locator('#auth-password').fill('synthetic-test-password');
 	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 	await expect(page).toHaveURL('http://localhost:4173/');
-	await page.locator(`a[href="/collections/${collectionId}"]`).first().click();
-	await expect(page.getByRole('heading', { name: collection.name, exact: true })).toBeVisible();
+	await page.locator(`a[href="/workspaces/${workspaceId}"]`).first().click();
+	await expect(page.getByRole('heading', { name: workspace.name, exact: true })).toBeVisible();
 	await page.locator('details.export-panel > summary').click();
 	await page.getByRole('checkbox', { name: 'Select all papers', exact: true }).check();
 	await page.getByRole('button', { name: 'Download source ZIP', exact: true }).click();
@@ -152,14 +152,14 @@ test('login opens a collection and a rejected download creates no file', async (
 	expect(errors).toEqual([]);
 });
 
-test('an expired session returns the authenticated collection reader to login', async ({
+test('an expired session returns the authenticated workspace reader to login', async ({
 	page
 }) => {
 	const errors: string[] = [];
 	page.on('pageerror', (error) => errors.push(error.message));
 	const state = await installApi(page);
-	await page.goto(`/collections/${collectionId}`);
-	await expect(page.getByRole('heading', { name: collection.name, exact: true })).toBeVisible();
+	await page.goto(`/workspaces/${workspaceId}`);
+	await expect(page.getByRole('heading', { name: workspace.name, exact: true })).toBeVisible();
 	state.expired = true;
 	await page.reload();
 	await expect(page).toHaveURL('http://localhost:4173/login');
@@ -172,7 +172,7 @@ test('a JSON refusal of an SSE request shows the business error', async ({ page 
 	const errors: string[] = [];
 	page.on('pageerror', (error) => errors.push(error.message));
 	const state = await installApi(page);
-	await page.goto(`/collections/${collectionId}/assistant`);
+	await page.goto(`/workspaces/${workspaceId}/assistant`);
 	await page
 		.getByRole('textbox', { name: 'Message', exact: true })
 		.fill('Which test conditions should I compare?');

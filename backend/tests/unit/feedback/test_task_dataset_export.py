@@ -38,7 +38,7 @@ def anyio_backend() -> str:
 def _dataset() -> Dataset:
     return Dataset(
         dataset_id="fdset_export_test",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         name="文献问答 SFT",
         task_type="sft",
         construction_spec={"language": "zh-CN"},
@@ -762,7 +762,7 @@ def test_frozen_content_and_preview_fingerprints_keep_their_stored_contract():
             input_digest="a" * 64,
             provenance={
                 "paper_order": ["b", "a"],
-                "scope": {"collection": "collection-fixed"},
+                    "scope": {"collection": "collection-fixed"},
             },
         )
         preview = ExportPreview.build(

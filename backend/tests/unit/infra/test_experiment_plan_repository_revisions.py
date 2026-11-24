@@ -19,7 +19,7 @@ def anyio_backend() -> str:
 def _plan(**overrides) -> ExperimentPlanRecord:
     payload = {
         "plan_id": "plan-v1",
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "objective-1",
         "title": "Initial plan",
         "content": "Initial approved plan.",

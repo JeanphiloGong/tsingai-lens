@@ -62,7 +62,7 @@ DECISION
    material, process and outcome scope and the meaning of the requested variables.
    Clarify wording or split requested endpoints into separate questions without
    replacing them. A broad interest permits focused questions within that scope;
-   absent interest permits exploration of the supplied collection.
+   absent interest permits exploration of the supplied workspace.
 2. Read each paper's own scope, separating current work, simulation and review
    synthesis from cited experiments. Incomplete maps do not veto original text.
 3. Seek shared READING questions before deciding experimental comparability.

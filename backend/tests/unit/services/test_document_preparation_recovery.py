@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from application.source import (
-    collection_service,
+    workspace_service,
     document_preparation_service as preparation,
 )
 from application.core.document_profiles import service as profiles
@@ -17,7 +17,7 @@ from domain.source import SourceDocument
 from repositories.pipeline_run_repository import PipelineRunRepo
 from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -28,8 +28,8 @@ def anyio_backend():
 
 
 @pytest.fixture
-async def prepared_inputs(postgres_session_factory, monkeypatch, collection_workspace):
-    await seed_collection(
+async def prepared_inputs(postgres_session_factory, monkeypatch, workspace_files):
+    await seed_workspace(
         postgres_session_factory, "prepare-papers", document_ids=("paper-a",)
     )
     model = await ModelConnectionRepo.create("manager", "profile-a", {
@@ -55,7 +55,7 @@ async def prepared_inputs(postgres_session_factory, monkeypatch, collection_work
         lambda _: (_ for _ in ()).throw(ValueError("no reference boundary")),
     )
     return SimpleNamespace(
-        factory=postgres_session_factory, parse=parse, workspace=collection_workspace
+        factory=postgres_session_factory, parse=parse, workspace=workspace_files
     )
 
 
@@ -124,7 +124,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
     )
     assert result.status == "completed"
     assert (
-        await collection_service.get_document("prepare-papers", "paper-a")
+        await workspace_service.get_document("prepare-papers", "paper-a")
     ).document.status == "ready"
     assert ctx.parse.await_count == 1
     reused = await preparation.queue_document_preparation(
@@ -253,6 +253,6 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     )
     assert result.status == "completed"
     assert (
-        await collection_service.get_document("prepare-papers", "paper-a")
+        await workspace_service.get_document("prepare-papers", "paper-a")
     ).document.status == "ready"
     assert ctx.parse.await_count == (2 if stage == "source" else 1)

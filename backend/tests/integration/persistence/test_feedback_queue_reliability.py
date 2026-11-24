@@ -19,7 +19,7 @@ from domain.feedback.sample_revision import (
     SampleRevision,
     SftRevisionContent,
 )
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.execution import AnalysisJobORM
 from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackCaseORM
 from infra.persistence.postgres.models.feedback_dataset import (
@@ -51,7 +51,7 @@ def _now():
 
 def _service(chain, factory):
     dataset_service.FeedbackDatasetRepo = FeedbackDatasetRepository()
-    dataset_service.collection_service = chain.collection_service
+    dataset_service.workspace_service = chain.workspace_service
     dataset_service.FeedbackDatasetSampleRepo = FeedbackDatasetSampleRepository()
     dataset_service.FeedbackCaseRepo = chain.cases
     return dataset_service
@@ -73,7 +73,7 @@ async def _analyze(chain, answer=None):
     analysis_worker.FeedbackCaseRepo = chain.cases
     terminal = await FeedbackWorkerFixture(handler=FeedbackAnalyzerFixture()).run_once()
     assert terminal.status == "succeeded"
-    cases = await chain.cases.list_cases(collection_id=COLLECTION_ID)
+    cases = await chain.cases.list_cases(workspace_id=COLLECTION_ID)
     return next(case for case in cases if case.anchor_message_id == answer.message_id)
 
 
@@ -83,7 +83,7 @@ async def _second_case(chain):
     )
     await chain.chat.save_trajectory(
         chat_session=chain.session.update(
-            user_id=USER_ID, collection_id=COLLECTION_ID, updated_at=_now()
+            user_id=USER_ID, workspace_id=COLLECTION_ID, updated_at=_now()
         ),
         messages=(chain.question, chain.answer, answer),
         tool_calls=(),
@@ -119,7 +119,7 @@ def _content():
 
 async def _confirm_all_sft(chain, service):
     records = await service.list_dataset_records_for_user(
-        user_id=USER_ID, collection_id=COLLECTION_ID
+        user_id=USER_ID, workspace_id=COLLECTION_ID
     )
     dataset = next(
         record.dataset for record in records if record.dataset.task_type == "sft"
@@ -169,7 +169,7 @@ async def test_list_is_read_only_and_withdrawn_case_does_not_hide_normal_case(
     before = tuple(job.job_id for job in await chain.jobs.list_jobs())
     for _ in range(2):
         records = await service.list_dataset_records_for_user(
-            user_id=USER_ID, collection_id=COLLECTION_ID
+            user_id=USER_ID, workspace_id=COLLECTION_ID
         )
         assert len(records) == 3
         for record in records:
@@ -317,7 +317,7 @@ async def test_historical_backfill_crosses_a_full_batch(
     )
     await chain.chat.save_trajectory(
         chat_session=chain.session.update(
-            user_id=USER_ID, collection_id=COLLECTION_ID, updated_at=_now()
+            user_id=USER_ID, workspace_id=COLLECTION_ID, updated_at=_now()
         ),
         messages=(chain.question, chain.answer, *answers),
         tool_calls=(),
@@ -329,7 +329,7 @@ async def test_historical_backfill_crosses_a_full_batch(
             [
                 FeedbackCaseORM(
                     case_id=f"historical-case-{index:03d}",
-                    collection_id=COLLECTION_ID,
+                    workspace_id=COLLECTION_ID,
                     session_id=SESSION_ID,
                     anchor_message_id=answer.message_id,
                     source_signal_ids=[],
@@ -356,17 +356,17 @@ async def test_historical_backfill_crosses_a_full_batch(
         )
 
 
-async def test_empty_historical_collections_cross_a_full_batch(
+async def test_empty_historical_workspaces_cross_a_full_batch(
     feedback_chain, postgres_session_factory
 ):
     now = datetime.now(timezone.utc)
     async with postgres_session_factory.begin() as session:
         session.add_all(
             [
-                CollectionORM(
-                    collection_id=f"historical-collection-{index:03d}",
+                WorkspaceORM(
+                    workspace_id=f"historical-workspace-{index:03d}",
                     owner_user_id=USER_ID,
-                    name=f"Historical paper collection {index}",
+                    name=f"Historical paper workspace {index}",
                     status="idle",
                     created_at=now,
                     updated_at=now,
@@ -392,7 +392,7 @@ async def test_source_changed_between_read_and_collect_is_rejected(
     dataset = (
         await service.create_dataset_for_user(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
             name="Concurrent SFT",
             task_type="sft",
             construction_spec={},
@@ -435,7 +435,7 @@ async def test_new_analysis_preserves_human_revision_and_requires_reconfirmation
         dataset = (
             await service.create_dataset_for_user(
                 user_id=USER_ID,
-                collection_id=COLLECTION_ID,
+                workspace_id=COLLECTION_ID,
                 name="Explicit SFT",
                 task_type="sft",
                 construction_spec={},
@@ -460,7 +460,7 @@ async def test_new_analysis_preserves_human_revision_and_requires_reconfirmation
     assert after.confirmed_revision_id is None
     assert after.generation == before.generation + 1
     assert after.source_digest != before.source_digest
-    assert after.missing_reasons == ("source_changed_since_collection",)
+    assert after.missing_reasons == ("source_changed_since_workspace",)
     assert (
         await service.FeedbackDatasetSampleRepo.read_revision(
             before.current_revision_id
@@ -491,7 +491,7 @@ async def test_source_change_requeues_confirmed_worker_candidate(
         record.dataset
         for record in await service.list_dataset_records_for_user(
             user_id=USER_ID,
-            collection_id=COLLECTION_ID,
+            workspace_id=COLLECTION_ID,
         )
         if record.dataset.task_type == "sft"
     )
@@ -656,4 +656,4 @@ async def test_feedback_publication_rolls_back_results_case_queues_and_success(
     await chain.cases.upsert_case_from_analysis(result, job=replacement,
         context_snapshot=snapshot, source_signal_ids=signals, now=_now())
     assert (await chain.jobs.read_job(job.job_id)).status == "succeeded"
-    assert len(await chain.cases.list_cases(collection_id=COLLECTION_ID)) == 1
+    assert len(await chain.cases.list_cases(workspace_id=COLLECTION_ID)) == 1

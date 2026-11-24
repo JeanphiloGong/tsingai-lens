@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from infra.persistence import database
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 from tests.support.source_artifacts import build_source_documents
 
@@ -42,7 +42,7 @@ class _ObjectiveRepository:
             status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot"
         )
 
-    async def list_objectives(self, collection_id: str):
+    async def list_objectives(self, workspace_id: str):
         return (
             SimpleNamespace(
                 objective_id="obj-1",
@@ -53,7 +53,7 @@ class _ObjectiveRepository:
     async def list_evidence(self, *args, **kwargs):
         records = (
             ObjectiveEvidence(
-                collection_id="col-test",
+                workspace_id="col-test",
                 objective_id="obj-1",
                 analysis_version=1,
                 evidence_id="ev-1",
@@ -81,7 +81,7 @@ class _ObjectiveRepository:
     async def list_findings(self, *args, **kwargs):
         records = (
             Finding(
-                collection_id="col-test",
+                workspace_id="col-test",
                 objective_id="obj-1",
                 analysis_version=1,
                 finding_id="finding-1",
@@ -133,7 +133,7 @@ async def test_export_trace_writes_current_source_and_objective_views(tmp_path, 
             }
         ],
     )[0]
-    await seed_collection(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
+    await seed_workspace(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
     profile_repository = DocumentProfileRepository()
     await profile_repository.replace(
@@ -175,7 +175,7 @@ async def test_export_trace_writes_current_source_and_objective_views(tmp_path, 
 
     trace_dir = await trace.export_trace(
         backend_root=tmp_path,
-        collection_id="col-test",
+        workspace_id="col-test",
         trace_name="trace-test",
     )
 

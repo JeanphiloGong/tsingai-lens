@@ -21,7 +21,7 @@ async def test_new_http_request_inherits_notes_but_not_old_runtime_budget(
 ):
     fixture = branch_app
     session = await fixture.service.create_session(
-        collection_id="collection", user_id=fixture.owner
+        workspace_id="workspace", user_id=fixture.owner
     )
     prior = ChatMessage.user(
         message_id="prior-input",

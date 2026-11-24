@@ -66,7 +66,7 @@ def merge_expert_decision_board(
         key = _board_key(board_row)
         if not key[0] or not key[1] or key[2] < 1 or not key[3]:
             errors.append(
-                f"line {line_number}: collection_id, objective_id, "
+                f"line {line_number}: workspace_id, objective_id, "
                 "analysis_version, and finding_id are required"
             )
             continue
@@ -122,7 +122,7 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
         missing = [
             field
             for field in (
-                "collection_id",
+                "workspace_id",
                 "objective_id",
                 "analysis_version",
                 "finding_id",
@@ -146,7 +146,7 @@ def _index_template_rows(
         key = _row_key(row)
         if not key[0] or not key[1] or key[2] < 1 or not key[3]:
             raise ValueError(
-                f"template line {line_number}: collection_id, objective_id, "
+                f"template line {line_number}: workspace_id, objective_id, "
                 "analysis_version, and finding_id are required"
             )
         if key in indexed:
@@ -223,7 +223,7 @@ def _accept_allowed(
 
 def _board_key(row: dict[str, str]) -> tuple[str, str, int, str]:
     return (
-        _text(row.get("collection_id")),
+        _text(row.get("workspace_id")),
         _text(row.get("objective_id")),
         _int(row.get("analysis_version")),
         _text(row.get("finding_id")),
@@ -232,7 +232,7 @@ def _board_key(row: dict[str, str]) -> tuple[str, str, int, str]:
 
 def _row_key(row: dict[str, Any]) -> tuple[str, str, int, str]:
     return (
-        _text(row.get("collection_id")),
+        _text(row.get("workspace_id")),
         _text(row.get("objective_id")),
         _int(row.get("analysis_version")),
         _text(row.get("finding_id")),

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import type { ChatFeedbackInput, ChatMessageFeedback } from '../src/lib/conversation/api';
 
-const collectionId = 'col_123';
+const workspaceId = 'col_123';
 const documentId = 'doc_1';
 const objectiveId = 'obj_1';
 const sessionId = 'chat_1';
@@ -18,16 +18,16 @@ const routes = [
 	['/', 'Lens Workbench'],
 	['/docs', 'Using Lens'],
 	['/system', 'System'],
-	[`/collections/${collectionId}`, 'Research questions are ready to review'],
-	[`/collections/${collectionId}/documents`, 'Papers'],
-	[`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`, 'Paper A'],
-	[`/collections/${collectionId}/objectives`, 'Research objectives'],
+	[`/workspaces/${workspaceId}`, 'Research questions are ready to review'],
+	[`/workspaces/${workspaceId}/documents`, 'Papers'],
+	[`/workspaces/${workspaceId}/documents/${documentId}?view=parsed-paper`, 'Paper A'],
+	[`/workspaces/${workspaceId}/objectives`, 'Research objectives'],
 	[
-		`/collections/${collectionId}/objectives/${objectiveId}`,
+		`/workspaces/${workspaceId}/objectives/${objectiveId}`,
 		'How does heat treatment affect LPBF 316L tensile strength?'
 	],
-	[`/collections/${collectionId}/graph`, 'Objective evidence map'],
-	[`/collections/${collectionId}/assistant`, 'Research Agent']
+	[`/workspaces/${workspaceId}/graph`, 'Objective evidence map'],
+	[`/workspaces/${workspaceId}/assistant`, 'Research Agent']
 ] as const;
 
 test.describe('page interaction audit', () => {
@@ -82,7 +82,7 @@ test.describe('page interaction audit', () => {
 								tool_calls: [
 									{
 										tool_call_id: 'browse-papers',
-										name: 'browse_collection_papers',
+										name: 'browse_workspace_papers',
 										arguments: {},
 										position: 0
 									}
@@ -100,7 +100,7 @@ test.describe('page interaction audit', () => {
 									resource_refs: papers.map((paper) => ({
 										resource_type: 'document',
 										resource_id: paper.document_id,
-										href: `/collections/${collectionId}/documents/${paper.document_id}`
+										href: `/workspaces/${workspaceId}/documents/${paper.document_id}`
 									}))
 								}
 							}),
@@ -116,7 +116,7 @@ test.describe('page interaction audit', () => {
 					})
 				)
 			);
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			const activity = page.getByTestId('research-activity');
 			await expect(activity).toHaveAttribute('open', '');
 			await expect(activity).toContainText(
@@ -127,7 +127,7 @@ test.describe('page interaction audit', () => {
 			await expect(failures).toContainText('Original content read failed');
 			await expect(failures.getByRole('link', { name: 'View paper' })).toHaveAttribute(
 				'href',
-				`/collections/${collectionId}/documents/doc_read_failed`
+				`/workspaces/${workspaceId}/documents/doc_read_failed`
 			);
 			const pending = activity.locator('.paper-source-issues:not(.failed)');
 			await pending.locator('summary').click();
@@ -137,7 +137,7 @@ test.describe('page interaction audit', () => {
 			await resources.locator('summary').click();
 			await expect(resources.getByRole('link', { name: 'P002-preheating.pdf' })).toHaveAttribute(
 				'href',
-				`/collections/${collectionId}/documents/doc_1`
+				`/workspaces/${workspaceId}/documents/doc_1`
 			);
 			await resources.locator('summary').click();
 			await expect(activity).not.toContainText('doc_read_failed');
@@ -226,12 +226,12 @@ test.describe('page interaction audit', () => {
 				});
 			});
 			try {
-				await page.goto(`/collections/${collectionId}/assistant`);
+				await page.goto(`/workspaces/${workspaceId}/assistant`);
 				const answer = page.locator('[data-message-id="answer_1"]');
 				await expect(answer).toContainText(first.trim());
 				await expect(answer.getByTestId('research-progress')).toBeVisible();
 				await page.locator('.back-workspace').click();
-				await page.goto(`/collections/${collectionId}/assistant`);
+				await page.goto(`/workspaces/${workspaceId}/assistant`);
 				await expect(answer).toContainText(first.trim());
 				await page.reload();
 				await expect(answer).toHaveCount(1);
@@ -410,7 +410,7 @@ test.describe('page interaction audit', () => {
 				if (width < 820)
 					await page.getByRole('button', { name: 'Show history', exact: true }).click();
 			};
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(page.getByTestId('assistant-message')).toContainText(
 				'Earlier comparison completed'
 			);
@@ -431,7 +431,7 @@ test.describe('page interaction audit', () => {
 			const elapsed = await progress.locator('.progress-meta').innerText();
 			await expect(progress.locator('.progress-meta')).not.toHaveText(elapsed);
 			await page.locator('.back-workspace').click();
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(progress).toBeVisible();
 			toolResults = true;
 			await expect(progress).toContainText('1 / 2 research actions');
@@ -507,7 +507,7 @@ test.describe('page interaction audit', () => {
 					agentMessage(
 						`${id}-answer-${submissions.length}`,
 						'assistant',
-						`Answer for ${id}. [Read paper](/collections/${collectionId}/documents/${documentId}).`,
+						`Answer for ${id}. [Read paper](/workspaces/${workspaceId}/documents/${documentId}).`,
 						{ session_id: id }
 					)
 				];
@@ -522,7 +522,7 @@ test.describe('page interaction audit', () => {
 				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			};
 			const answers = page.getByTestId('assistant-message');
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await sendAgentMessage(page, 'Compare the heat treatments');
 			await expect(answers).toContainText('Answer for scope_1');
 			await answers.getByRole('link', { name: 'Read paper' }).click();
@@ -536,13 +536,13 @@ test.describe('page interaction audit', () => {
 			await expect(answers).toContainText('Answer for scope_2');
 			expect(created).toBe(2);
 
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(answers).toContainText('Answer for scope_1');
 			await page.getByRole('button', { name: 'New session', exact: true }).click();
 			await expect(answers).toHaveCount(0);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			expect(created).toBe(3);
-			await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+			await page.goto(`/workspaces/${workspaceId}/documents/${documentId}`);
 			await openReaderChat();
 			await expect(answers).toContainText('Answer for scope_2');
 			await page.reload();
@@ -566,7 +566,7 @@ test.describe('page interaction audit', () => {
 					)
 				);
 			});
-			await other.goto(`/collections/${collectionId}/assistant`);
+			await other.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(other.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			await other.getByRole('button', { name: 'New session', exact: true }).click();
 			await expect.poll(() => created).toBe(4);
@@ -585,7 +585,7 @@ test.describe('page interaction audit', () => {
 				.getByRole('button', { name: 'Compare the heat treatments' })
 				.click();
 			await expect(answers).toContainText('Answer for scope_1');
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			await expect(answers).toHaveCount(0);
 			if (width < 820) await page.getByRole('button', { name: 'Show history' }).click();
@@ -629,7 +629,7 @@ test.describe('page interaction audit', () => {
 			];
 			const reads: string[] = [];
 			let failSecondPaper = true;
-			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) =>
+			await page.route(`**/api/v1/workspaces/${workspaceId}/documents/profiles?*`, (route) =>
 				route.fulfill(
 					json({
 						...documentProfiles(),
@@ -643,7 +643,7 @@ test.describe('page interaction audit', () => {
 					})
 				)
 			);
-			await page.route(`**/api/v1/collections/${collectionId}/documents/*/*`, (route) => {
+			await page.route(`**/api/v1/workspaces/${workspaceId}/documents/*/*`, (route) => {
 				const parts = new URL(route.request().url()).pathname.split('/');
 				const paper = papers.find((item) => item.id === parts.at(-2));
 				if (!paper) return route.fallback();
@@ -724,7 +724,7 @@ test.describe('page interaction audit', () => {
 							agentMessage(
 								'compare-answer',
 								'assistant',
-								'The [methods in study A](/collections/col_123/documents/doc_1?source_ref=methods) and [methods in study B](/collections/col_123/documents/doc_2?source_ref=methods) use different heat treatments. The tensile test temperature matches, but the material states are not equivalent.'
+								'The [methods in study A](/workspaces/col_123/documents/doc_1?source_ref=methods) and [methods in study B](/workspaces/col_123/documents/doc_2?source_ref=methods) use different heat treatments. The tensile test temperature matches, but the material states are not equivalent.'
 							)
 						],
 						status: 'completed',
@@ -735,7 +735,7 @@ test.describe('page interaction audit', () => {
 					} as Parameters<typeof sseTurn>[0])
 				);
 			});
-			await page.goto(`/collections/${collectionId}/documents`);
+			await page.goto(`/workspaces/${workspaceId}/documents`);
 			await page.locator('.paper-row').filter({ hasText: papers[0].title }).click();
 			const paneA = page.locator('.reader-pane[data-document-id="doc_1"]');
 			const paneB = page.locator('.reader-pane[data-document-id="doc_2"]');
@@ -831,7 +831,7 @@ test.describe('page interaction audit', () => {
 			await expect(paneB).toBeVisible();
 			await tabs.getByRole('tab').focus();
 			await tabs.getByRole('tab').press('Delete');
-			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}/documents$`));
 			await expect(page.locator('.paper-row')).toHaveCount(2);
 			expect(reads.filter((read) => read === 'doc_1:content')).toHaveLength(1);
 			expect(reads.filter((read) => read === 'doc_2:content')).toHaveLength(2);
@@ -849,7 +849,7 @@ test.describe('page interaction audit', () => {
 			const state = await mockMessageBranches(page);
 			const errors: string[] = [];
 			page.on('pageerror', (error) => errors.push(error.message));
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			const composer = page.getByRole('textbox', { name: 'Message', exact: true });
 			await expect(page.getByTestId('user-message')).toContainText(state.question);
 			await composer.fill('Keep this follow-up draft');
@@ -910,7 +910,7 @@ test.describe('page interaction audit', () => {
 			const state = await mockMessageBranches(page, { checkpoint: true });
 			const errors: string[] = [];
 			page.on('pageerror', (error) => errors.push(error.message));
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			const open = page.getByRole('button', { name: 'Conversation branches', exact: true });
 			await open.click();
 			const dialog = page.getByRole('dialog', { name: 'Conversation branches' });
@@ -991,7 +991,7 @@ test.describe('page interaction audit', () => {
 		page
 	}) => {
 		const state = await mockMessageBranches(page, { failCreateOnce: true });
-		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.goto(`/workspaces/${workspaceId}/assistant`);
 		const composer = page.getByRole('textbox', { name: 'Message', exact: true });
 		await composer.fill('Keep this separate question');
 		let fail = true;
@@ -1025,7 +1025,7 @@ test.describe('page interaction audit', () => {
 		page
 	}) => {
 		const state = await mockMessageBranches(page, { unanswered: true, failCreateOnce: true });
-		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.goto(`/workspaces/${workspaceId}/assistant`);
 		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
 		await expect(page.getByRole('alert')).toBeVisible();
 		expect(state.sent).toHaveLength(0);
@@ -1037,7 +1037,7 @@ test.describe('page interaction audit', () => {
 
 	test('restores an unsent revision after reload with its Source context', async ({ page }) => {
 		const state = await mockMessageBranches(page, { failCreateOnce: true });
-		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.goto(`/workspaces/${workspaceId}/assistant`);
 		await page.getByRole('button', { name: 'Regenerate response', exact: true }).click();
 		await expect(page.getByRole('alert')).toBeVisible();
 		await page.reload();
@@ -1053,7 +1053,7 @@ test.describe('page interaction audit', () => {
 	for (const condition of ['running', 'approval'] as const) {
 		test(`disables saved message changes during ${condition}`, async ({ page }) => {
 			await mockMessageBranches(page, { condition });
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(page.getByRole('button', { name: 'Edit message', exact: true })).toBeDisabled();
 			await expect(
 				page.getByRole('button', { name: 'Regenerate response', exact: true })
@@ -1070,7 +1070,7 @@ test.describe('page interaction audit', () => {
 	test('opens the same conversation tree inside the document split workspace', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await mockMessageBranches(page, { checkpoint: true });
-		await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+		await page.goto(`/workspaces/${workspaceId}/documents/${documentId}`);
 		await page
 			.locator('.reader-header')
 			.getByRole('button', { name: /Ask research assistant/ })
@@ -1090,10 +1090,10 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [320, 768, 1024, 1440]) {
-		test(`browses and filters collection papers at ${width}px`, async ({ page }) => {
+		test(`browses and filters workspace papers at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });
 			const requests: URL[] = [];
-			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) => {
+			await page.route(`**/api/v1/workspaces/${workspaceId}/documents/profiles?*`, (route) => {
 				const url = new URL(route.request().url());
 				requests.push(url);
 				const offset = Number(url.searchParams.get('offset') ?? 0);
@@ -1116,7 +1116,7 @@ test.describe('page interaction audit', () => {
 					})
 				);
 			});
-			await page.goto(`/collections/${collectionId}/documents`);
+			await page.goto(`/workspaces/${workspaceId}/documents`);
 			await expect(page.locator('.paper-row')).toHaveCount(25);
 			await expect(page.locator('.paper-list-head')).toContainText('Paper');
 			await expect(page.locator('.paper-list-head')).toContainText('Parsing status');
@@ -1143,10 +1143,10 @@ test.describe('page interaction audit', () => {
 				await page.screenshot({ path: join(screenshotDir, `papers-browse-${width}.png`) });
 			await page.locator('.paper-row').first().focus();
 			await page.keyboard.press('Enter');
-			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents/doc_1$`));
+			await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}/documents/doc_1$`));
 			await expect(page.locator('.document-reader-root')).toBeVisible();
 			await page.locator('.library-link').click();
-			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}/documents$`));
 			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
 			await expect(page.locator('.site-header')).toBeVisible();
 			await page.locator('.agent-launcher').click();
@@ -1164,7 +1164,7 @@ test.describe('page interaction audit', () => {
 		});
 		let fail = true;
 		await page.route(
-			`**/api/v1/collections/${collectionId}/documents/profiles?*`,
+			`**/api/v1/workspaces/${workspaceId}/documents/profiles?*`,
 			async (route) => {
 				const url = new URL(route.request().url());
 				const query = url.searchParams.get('query');
@@ -1175,7 +1175,7 @@ test.describe('page interaction audit', () => {
 				return route.fulfill(json(result));
 			}
 		);
-		await page.goto(`/collections/${collectionId}/documents`);
+		await page.goto(`/workspaces/${workspaceId}/documents`);
 		await expect(page.locator('.paper-row')).toHaveCount(1);
 		await page.locator('#paper-search').fill('old');
 		await page.waitForRequest(
@@ -1208,7 +1208,7 @@ test.describe('page interaction audit', () => {
 			const errors: string[] = [];
 			page.on('pageerror', (error) => errors.push(error.message));
 			await page.route(
-				`**/api/v1/collections/${collectionId}/documents/${documentId}/markdown`,
+				`**/api/v1/workspaces/${workspaceId}/documents/${documentId}/markdown`,
 				(route) =>
 					route.fulfill(
 						json({
@@ -1239,7 +1239,7 @@ test.describe('page interaction audit', () => {
 					agentMessage(
 						'blocks_answer',
 						'assistant',
-						'The [Results section](/collections/col_123/documents/doc_1?source_ref=results) also specifies the EIS measurement method.'
+						'The [Results section](/workspaces/col_123/documents/doc_1?source_ref=results) also specifies the EIS measurement method.'
 					)
 				];
 				return route.fulfill(
@@ -1253,7 +1253,7 @@ test.describe('page interaction audit', () => {
 					})
 				);
 			});
-			await page.goto(`/collections/${collectionId}/documents/${documentId}`);
+			await page.goto(`/workspaces/${workspaceId}/documents/${documentId}`);
 			const blocks = page.locator('.source-selectable');
 			await expect(blocks).toHaveCount(2);
 			await expect(page.locator('.source-selection input[type="checkbox"]')).toHaveCount(0);
@@ -1344,7 +1344,7 @@ test.describe('page interaction audit', () => {
 	}
 
 	for (const width of [320, 768, 1024, 1440]) {
-		test(`uses a compact conversation title and named Collection at ${width}px`, async ({
+		test(`uses a compact conversation title and named Workspace at ${width}px`, async ({
 			page
 		}) => {
 			await page.setViewportSize({ width, height: 900 });
@@ -1375,27 +1375,27 @@ test.describe('page interaction audit', () => {
 			});
 			await page.route(
 				(url) =>
-					['/api/v1/collections', `/api/v1/collections/${collectionId}`].includes(url.pathname),
+					['/api/v1/workspaces', `/api/v1/workspaces/${workspaceId}`].includes(url.pathname),
 				(route) => {
-					const record = { ...collection(), name };
+					const record = { ...workspace(), name };
 					return route.fulfill(
 						json(
-							new URL(route.request().url()).pathname.endsWith(collectionId)
+							new URL(route.request().url()).pathname.endsWith(workspaceId)
 								? record
 								: { items: [record] }
 						)
 					);
 				}
 			);
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			await expect(page.locator('.conversation-header')).toHaveCount(0);
-			const context = page.locator('#assistant-collection-context');
+			const context = page.locator('#assistant-workspace-context');
 			const nameLink = context.getByRole('link', { name, exact: true });
 			await expect(nameLink).toBeVisible();
 			await expect(nameLink).toHaveAttribute('title', name);
-			await expect(nameLink).toHaveAttribute('href', `/collections/${collectionId}`);
-			await expect(context).not.toContainText(collectionId);
+			await expect(nameLink).toHaveAttribute('href', `/workspaces/${workspaceId}`);
+			await expect(context).not.toContainText(workspaceId);
 			await sendAgentMessage(page, question);
 			await expect(page.getByText(answer, { exact: true })).toBeVisible();
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
@@ -1410,12 +1410,12 @@ test.describe('page interaction audit', () => {
 			await page.mouse.move(0, 0);
 			if (screenshotDir)
 				await page.screenshot({
-					path: join(screenshotDir, `research-agent-named-collection-${width}.png`)
+					path: join(screenshotDir, `research-agent-named-workspace-${width}.png`)
 				});
-			await page.goto(`/collections/${collectionId}/assistant?objective_id=${objectiveId}`);
+			await page.goto(`/workspaces/${workspaceId}/assistant?objective_id=${objectiveId}`);
 			await expect(
 				page.getByRole('link', { name: 'Open selected objective', exact: true })
-			).toHaveAttribute('href', `/collections/${collectionId}/objectives/${objectiveId}`);
+			).toHaveAttribute('href', `/workspaces/${workspaceId}/objectives/${objectiveId}`);
 			expect(pageErrors).toEqual([]);
 		});
 	}
@@ -1455,7 +1455,7 @@ test.describe('page interaction audit', () => {
 					'> Different post-processing and test directions prevent attributing the strength difference to energy density alone.',
 					'',
 					'1. Match material state and test direction.',
-					'2. Verify the reported measurements against the [paper Source](/collections/col_123/documents/doc_1?view=parsed-paper).',
+					'2. Verify the reported measurements against the [paper Source](/workspaces/col_123/documents/doc_1?view=parsed-paper).',
 					'',
 					'```python',
 					'energy_density = power / (scan_speed * hatch_spacing * layer_thickness)',
@@ -1486,7 +1486,7 @@ test.describe('page interaction audit', () => {
 					};
 					return route.fulfill(sseTurn(turn));
 				});
-				await page.goto('/collections/col_123/assistant');
+				await page.goto('/workspaces/col_123/assistant');
 				await sendAgentMessage(page, prompt);
 				const reply = page.getByTestId('assistant-message').last();
 				await expect(reply.getByRole('cell', { name: '610', exact: true })).toBeVisible();
@@ -1594,20 +1594,20 @@ test.describe('page interaction audit', () => {
 			});
 			return route.fulfill({ response });
 		});
-		await page.route('**/api/v1/collections/col_123/documents*', async (route) => {
+		await page.route('**/api/v1/workspaces/col_123/documents*', async (route) => {
 			if (route.request().method() !== 'POST') return route.fallback();
 			uploads += 1;
 			if (uploads === 1) return route.abort('failed');
 			expect(new URL(route.request().url()).searchParams.get('reuse_existing')).toBe('true');
 			return route.fulfill(json(uploadedFile('uploaded')));
 		});
-		await page.route('**/api/v1/collections/col_123/documents/doc_1/preparation', (route) => {
+		await page.route('**/api/v1/workspaces/col_123/documents/doc_1/preparation', (route) => {
 			preparations += 1;
 			return route.fulfill(
 				json({ ...processingRun(), run_id: 'run_1', scope_id: documentId, status: 'queued' })
 			);
 		});
-		await page.goto('http://review.lens.test/collections/col_123/assistant');
+		await page.goto('http://review.lens.test/workspaces/col_123/assistant');
 		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 		expect(
 			await page.evaluate(() => ({ secure: isSecureContext, subtle: typeof crypto.subtle }))
@@ -1656,7 +1656,7 @@ test.describe('page interaction audit', () => {
 					return route.abort('failed');
 				}
 			);
-			await page.goto('/collections/col_123/assistant');
+			await page.goto('/workspaces/col_123/assistant');
 			await page.getByRole('button', { name: 'Approve and create', exact: true }).click();
 			await expect(page.getByTestId('research-recovery')).toBeVisible();
 			await page.reload();
@@ -1714,7 +1714,7 @@ test.describe('page interaction audit', () => {
 		await mockApis(other);
 		await other.route('**/user-api/v1/logout', (route) => route.fulfill(json({})));
 		try {
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			await sendAgentMessage(page, privateQuestion);
 			await expect(page.getByTestId('research-progress')).toBeVisible();
@@ -1798,7 +1798,7 @@ test.describe('page interaction audit', () => {
 					await route.fulfill(json(feedback));
 				}
 			);
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			const answer = page.getByTestId('assistant-message');
 			const helpful = answer.getByRole('button', { name: 'Helpful', exact: true });
 			const unhelpful = answer.getByRole('button', { name: 'Not helpful', exact: true });
@@ -1882,7 +1882,7 @@ test.describe('page interaction audit', () => {
 						contexts: [
 							{
 								resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
-								collection_id: 'col_123',
+								workspace_id: 'col_123',
 								document_id: 'doc_1',
 								document_title:
 									'Effect of post-build heat treatment on the microstructure and tensile properties of LPBF alloys',
@@ -1917,7 +1917,7 @@ test.describe('page interaction audit', () => {
 					})
 				);
 			});
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			const input = page.getByRole('textbox', { name: 'Message', exact: true });
 			await expect(input).toBeEnabled();
 			await page.getByLabel('Choose PDF papers').setInputFiles(
@@ -1979,7 +1979,7 @@ test.describe('page interaction audit', () => {
 		});
 	}
 
-	test('home collection row More menu stays fully visible', async ({ page }) => {
+	test('home workspace row More menu stays fully visible', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto('/');
 
@@ -2000,13 +2000,13 @@ test.describe('page interaction audit', () => {
 		}
 	});
 
-	test('home ready collection next step opens research objectives', async ({ page }) => {
+	test('home ready workspace next step opens research objectives', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.goto('/');
 
 		await expect(page.getByRole('link', { name: 'Enter objectives' })).toHaveAttribute(
 			'href',
-			`/collections/${collectionId}/objectives`
+			`/workspaces/${workspaceId}/objectives`
 		);
 		await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
 	});
@@ -2014,7 +2014,7 @@ test.describe('page interaction audit', () => {
 	test('evidence map distinguishes scientific relations from failed paper coverage', async ({
 		page
 	}) => {
-		await page.goto(`/collections/${collectionId}/graph`);
+		await page.goto(`/workspaces/${workspaceId}/graph`);
 
 		await expect(page.getByText('Supports')).toBeVisible();
 		await expect(page.getByText('Contradicts')).toBeVisible();
@@ -2027,7 +2027,7 @@ test.describe('page interaction audit', () => {
 		await expect(sourceLink).toHaveAttribute(
 			'href',
 			new RegExp(
-				`^/collections/${collectionId}/documents/${documentId}\\?view=parsed-paper&source_ref=table-7`
+				`^/workspaces/${workspaceId}/documents/${documentId}\\?view=parsed-paper&source_ref=table-7`
 			)
 		);
 		await sourceLink.click();
@@ -2053,7 +2053,7 @@ test.describe('page interaction audit', () => {
 					expect(route.request().postDataJSON()).toEqual({ analysis_version: 1, language: 'en' });
 					return route.fulfill(
 						json({
-							collection_id: collectionId,
+							workspace_id: workspaceId,
 							objective_id: objectiveId,
 							finding_id: 'finding-1',
 							analysis_version: 1,
@@ -2079,8 +2079,8 @@ test.describe('page interaction audit', () => {
 				});
 				const destination =
 					surface === 'graph'
-						? `/collections/${collectionId}/graph?objective_id=${objectiveId}&finding_id=finding-1`
-						: `/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`;
+						? `/workspaces/${workspaceId}/graph?objective_id=${objectiveId}&finding_id=finding-1`
+						: `/workspaces/${workspaceId}/objectives/${objectiveId}?finding_id=finding-1`;
 				await page.goto(destination);
 				const summary = page.locator('.finding-summary');
 				await expect(summary).toBeVisible();
@@ -2119,7 +2119,7 @@ test.describe('page interaction audit', () => {
 		}
 	}
 
-	test('global Research Agent entry asks for a collection workspace', async ({ page }) => {
+	test('global Research Agent entry asks for a workspace workspace', async ({ page }) => {
 		const consoleErrors: string[] = [];
 		page.on('console', (message) => {
 			if (message.type() === 'error' || message.type() === 'warning') {
@@ -2136,7 +2136,7 @@ test.describe('page interaction audit', () => {
 		await expect(picker).toBeVisible();
 		await expect(picker.getByRole('link', { name: /316L LPBF evidence set/ })).toHaveAttribute(
 			'href',
-			`/collections/${collectionId}/assistant`
+			`/workspaces/${workspaceId}/assistant`
 		);
 		expect(await visibleElementsFitViewport(page, '.workspace-picker')).toBe(true);
 		expect(consoleErrors).toEqual([]);
@@ -2236,10 +2236,10 @@ test.describe('page interaction audit', () => {
 		await page.route('**/api/v1/conversations', handleChatRoute);
 		await page.route('**/api/v1/conversations/**', handleChatRoute);
 		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.goto(`/workspaces/${workspaceId}/assistant`);
 
 		await sendAgentMessage(page, 'Hello');
-		await expect(page.getByText('Hello. I can help you work with this collection.')).toBeVisible();
+		await expect(page.getByText('Hello. I can help you work with this workspace.')).toBeVisible();
 		await expect(page.getByLabel('Research activity')).toHaveCount(0);
 
 		await sendAgentMessage(page, 'What published findings are available?');
@@ -2248,12 +2248,12 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByText('One paper used a different heat treatment.')).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Open finding' })).toHaveAttribute(
 			'href',
-			`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`
+			`/workspaces/${workspaceId}/objectives/${objectiveId}?finding_id=finding-1`
 		);
 
 		await sendAgentMessage(page, 'Suggest a focused objective');
 		await expect(page.getByText('How does energy input affect grain morphology?')).toBeVisible();
-		await expect(page.getByText('Proposal context: collection_supported')).toBeVisible();
+		await expect(page.getByText('Proposal context: workspace_supported')).toBeVisible();
 
 		await sendAgentMessage(page, 'Create that objective');
 		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
@@ -2276,7 +2276,7 @@ test.describe('page interaction audit', () => {
 		).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Open research objective' })).toHaveAttribute(
 			'href',
-			`/collections/${collectionId}/objectives/obj_agent_1`
+			`/workspaces/${workspaceId}/objectives/obj_agent_1`
 		);
 		expect(decisions).toEqual([
 			{ decision: 'rejected', arguments_digest: 'digest_exact_1' },
@@ -2299,12 +2299,12 @@ test.describe('page interaction audit', () => {
 		const objectiveRequests: string[] = [];
 		page.on('request', (request) => {
 			const url = new URL(request.url());
-			if (url.pathname === `/api/v1/collections/${collectionId}/objectives`) {
+			if (url.pathname === `/api/v1/workspaces/${workspaceId}/objectives`) {
 				objectiveRequests.push(url.pathname);
 			}
 		});
 
-		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
+		await page.goto(`/workspaces/${workspaceId}/objectives?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { name: 'Research objectives' })).toBeVisible();
 		await expect(
@@ -2313,10 +2313,10 @@ test.describe('page interaction audit', () => {
 			})
 		).toBeVisible();
 		await expect(page.getByRole('link', { name: 'View findings' })).toBeVisible();
-		expect(objectiveRequests).toEqual([`/api/v1/collections/${collectionId}/objectives`]);
+		expect(objectiveRequests).toEqual([`/api/v1/workspaces/${workspaceId}/objectives`]);
 	});
 
-	test('unprocessed collections still allow Research Agent conversation', async ({ page }) => {
+	test('unprocessed workspaces still allow Research Agent conversation', async ({ page }) => {
 		const consoleErrors: string[] = [];
 		page.on('console', (message) => {
 			if (message.type() === 'error' || message.type() === 'warning') {
@@ -2325,7 +2325,7 @@ test.describe('page interaction audit', () => {
 		});
 		page.on('pageerror', (error) => consoleErrors.push(error.message));
 
-		await page.goto(`/collections/${collectionId}/assistant?audit_state=uploaded`);
+		await page.goto(`/workspaces/${workspaceId}/assistant?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { level: 1, name: 'Research Agent' })).toBeVisible();
 		await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
@@ -2375,7 +2375,7 @@ test.describe('page interaction audit', () => {
 				)
 			)
 		);
-		await page.goto(`/collections/${collectionId}/assistant`);
+		await page.goto(`/workspaces/${workspaceId}/assistant`);
 
 		const composer = page.locator('.composer');
 		const input = page.getByRole('textbox', { name: 'Message', exact: true });
@@ -2385,9 +2385,9 @@ test.describe('page interaction audit', () => {
 		const historyToggle = page.getByRole('button', { name: 'Show history' });
 		await expect(historyToggle).toBeVisible();
 		await historyToggle.click();
-		await expect(page.getByText('Current collection')).toBeVisible();
+		await expect(page.getByText('Current workspace')).toBeVisible();
 		await expect(
-			page.getByLabel('Research Agent sessions').getByText(collection().name, { exact: true })
+			page.getByLabel('Research Agent sessions').getByText(workspace().name, { exact: true })
 		).toBeVisible();
 		await page.getByRole('button', { name: 'Hide history' }).click();
 		const mobileLayout = await page.evaluate(() => {
@@ -2490,7 +2490,7 @@ test.describe('page interaction audit', () => {
 								tool_calls: [
 									{
 										tool_call_id: 'inspect_1',
-										name: 'get_collection_context',
+										name: 'get_workspace_context',
 										arguments: {},
 										position: 0
 									}
@@ -2501,7 +2501,7 @@ test.describe('page interaction audit', () => {
 								tool_result: {
 									tool_call_id: 'inspect_1',
 									status: 'succeeded',
-									data: { collection: { paper_count: 30 } },
+									data: { workspace: { paper_count: 30 } },
 									resource_refs: [],
 									warnings: [],
 									error_code: null,
@@ -2520,7 +2520,7 @@ test.describe('page interaction audit', () => {
 				);
 			});
 			try {
-				await page.goto(`/collections/${collectionId}/assistant`);
+				await page.goto(`/workspaces/${workspaceId}/assistant`);
 				await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 				await expect(page.getByTestId('user-message')).toHaveCount(10);
 				await expect(
@@ -2591,7 +2591,7 @@ test.describe('page interaction audit', () => {
 		});
 
 		try {
-			await page.goto(`/collections/${collectionId}/assistant`);
+			await page.goto(`/workspaces/${workspaceId}/assistant`);
 			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
 			await expect(page.locator('.conversation-header')).toHaveCount(0);
 			await sendAgentMessage(page, 'Track this');
@@ -2639,7 +2639,7 @@ test.describe('page interaction audit', () => {
 
 	test('language preference updates document language and restores focus', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('.collections-table')).toContainText('316L LPBF evidence set');
+		await expect(page.locator('.workspaces-table')).toContainText('316L LPBF evidence set');
 		await page.getByRole('button', { name: /^Account menu:/ }).click();
 		await page.getByRole('button', { name: /^Language / }).click();
 		await page.getByRole('button', { name: '简体中文', exact: true }).click();
@@ -2656,16 +2656,16 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('button', { name: /^Language / })).toBeFocused();
 	});
 
-	test('create collection keeps the background inert and restores focus', async ({ page }) => {
+	test('create workspace keeps the background inert and restores focus', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.locator('.collections-table')).toContainText('316L LPBF evidence set');
-		const trigger = page.getByRole('button', { name: 'Create collection', exact: true });
+		await expect(page.locator('.workspaces-table')).toContainText('316L LPBF evidence set');
+		const trigger = page.getByRole('button', { name: 'Create workspace', exact: true });
 		await trigger.click();
-		const dialog = page.getByRole('dialog', { name: 'Create collection', exact: true });
+		const dialog = page.getByRole('dialog', { name: 'Create workspace', exact: true });
 		await expect(dialog).toBeVisible();
-		await expect(dialog.getByLabel('Collection name', { exact: true })).toBeFocused();
+		await expect(dialog.getByLabel('Workspace name', { exact: true })).toBeFocused();
 		await trigger.focus();
-		await expect(dialog.getByLabel('Collection name', { exact: true })).toBeFocused();
+		await expect(dialog.getByLabel('Workspace name', { exact: true })).toBeFocused();
 		await page.keyboard.press('Tab');
 		await expect(dialog.locator('textarea')).toBeFocused();
 		await page.keyboard.press('Tab');
@@ -2677,24 +2677,24 @@ test.describe('page interaction audit', () => {
 		await expect(trigger).toBeFocused();
 	});
 
-	test('narrow collection cards keep their actions reachable', async ({ page }) => {
+	test('narrow workspace cards keep their actions reachable', async ({ page }) => {
 		await page.setViewportSize({ width: 320, height: 844 });
 		await page.goto('/');
-		await expect(page.locator('.collection-list-card').first()).toBeVisible();
-		expect(await visibleElementsFitViewport(page, '.collection-list-card')).toBe(true);
-		expect(await visibleElementsFitViewport(page, '.collection-list-card__actions a')).toBe(true);
+		await expect(page.locator('.workspace-list-card').first()).toBeVisible();
+		expect(await visibleElementsFitViewport(page, '.workspace-list-card')).toBe(true);
+		expect(await visibleElementsFitViewport(page, '.workspace-list-card__actions a')).toBe(true);
 	});
 
-	test('collection navigation identifies the active route and exposes secondary destinations', async ({
+	test('workspace navigation identifies the active route and exposes secondary destinations', async ({
 		page
 	}) => {
-		await page.goto(`/collections/${collectionId}/objectives`);
+		await page.goto(`/workspaces/${workspaceId}/objectives`);
 		await expect(
 			page.getByRole('heading', {
 				name: 'How does heat treatment affect LPBF 316L tensile strength?'
 			})
 		).toBeVisible();
-		const nav = page.getByRole('navigation', { name: 'Collection navigation', exact: true });
+		const nav = page.getByRole('navigation', { name: 'Workspace navigation', exact: true });
 		await expect(nav.getByRole('link', { name: 'Objectives', exact: true })).toHaveAttribute(
 			'aria-current',
 			'page'
@@ -2708,12 +2708,12 @@ test.describe('page interaction audit', () => {
 		await expect(more).toBeFocused();
 		await more.click();
 		await graph.click();
-		await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/graph$`));
+		await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}/graph$`));
 	});
 
 	test('mobile document reader exposes Source modes without clipping', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto(`/collections/${collectionId}/documents/${documentId}?view=parsed-paper`);
+		await page.goto(`/workspaces/${workspaceId}/documents/${documentId}?view=parsed-paper`);
 
 		await expect(page.getByText('Paper A').first()).toBeVisible();
 		expect(await visibleElementsFitViewport(page, '.reader-header')).toBe(true);
@@ -2722,16 +2722,16 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('tab', { name: 'PDF Preview' })).toBeVisible();
 	});
 
-	test('collection navigation opens Finding review through research objectives', async ({
+	test('workspace navigation opens Finding review through research objectives', async ({
 		page
 	}) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto(`/collections/${collectionId}/documents`);
-		await expect(page.locator(`a[href="/collections/${collectionId}/comparisons"]`)).toHaveCount(0);
-		await page.locator(`a[href="/collections/${collectionId}/objectives"]`).first().click();
-		await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/objectives$`));
+		await page.goto(`/workspaces/${workspaceId}/documents`);
+		await expect(page.locator(`a[href="/workspaces/${workspaceId}/comparisons"]`)).toHaveCount(0);
+		await page.locator(`a[href="/workspaces/${workspaceId}/objectives"]`).first().click();
+		await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceId}/objectives$`));
 		await page
-			.locator(`a[href="/collections/${collectionId}/objectives/${objectiveId}"]`)
+			.locator(`a[href="/workspaces/${workspaceId}/objectives/${objectiveId}"]`)
 			.first()
 			.click();
 		await expect(
@@ -2741,7 +2741,7 @@ test.describe('page interaction audit', () => {
 
 	test('shows aggregate preparation progress for active paper runs', async ({ page }) => {
 		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.goto(`/collections/${collectionId}?audit_state=processing`);
+		await page.goto(`/workspaces/${workspaceId}?audit_state=processing`);
 
 		await expect(
 			page.getByRole('progressbar', { name: 'Paper preparation progress' })
@@ -2750,7 +2750,7 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByText('1 processing')).toBeVisible();
 		if (screenshotDir) {
 			await page.screenshot({
-				path: join(screenshotDir, 'collection-preparation-progress-desktop.png'),
+				path: join(screenshotDir, 'workspace-preparation-progress-desktop.png'),
 				fullPage: true
 			});
 		}
@@ -2761,7 +2761,7 @@ test.describe('page interaction audit', () => {
 		).toBeVisible();
 		if (screenshotDir) {
 			await page.screenshot({
-				path: join(screenshotDir, 'collection-preparation-progress-mobile.png'),
+				path: join(screenshotDir, 'workspace-preparation-progress-mobile.png'),
 				fullPage: true
 			});
 		}
@@ -2775,7 +2775,7 @@ test.describe('page interaction audit', () => {
 		page.on('pageerror', (error) => consoleErrors.push(error.message));
 
 		await page.setViewportSize({ width: 1440, height: 900 });
-		await page.goto(`/collections/${collectionId}/objectives?audit_state=objective-running`);
+		await page.goto(`/workspaces/${workspaceId}/objectives?audit_state=objective-running`);
 
 		await expect(
 			page.getByRole('progressbar', { name: 'Research objective analysis progress' })
@@ -2785,7 +2785,7 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('link', { name: '查看状态' })).toHaveCount(0);
 		await expect(
 			page.getByRole('link', { name: 'How does heat treatment affect LPBF 316L tensile strength?' })
-		).toHaveAttribute('href', `/collections/${collectionId}/objectives/${objectiveId}`);
+		).toHaveAttribute('href', `/workspaces/${workspaceId}/objectives/${objectiveId}`);
 		expect(await visibleElementsFitViewport(page, '.analysis-progress')).toBe(true);
 		if (screenshotDir) {
 			await page.screenshot({
@@ -2939,9 +2939,9 @@ async function mockMessageBranches(
 		resource_ref: {
 			resource_type: 'source',
 			resource_id: 'doc_1:methods',
-			href: `/collections/${collectionId}/documents/${documentId}?source_ref=methods`
+			href: `/workspaces/${workspaceId}/documents/${documentId}?source_ref=methods`
 		},
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		document_id: documentId,
 		document_title: 'LPBF tensile study',
 		source_kind: 'text_window',
@@ -2964,7 +2964,7 @@ async function mockMessageBranches(
 	const base = {
 		session_id: sessionId,
 		user_id: 'user_1',
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		created_at: now(),
 		updated_at: now()
 	};
@@ -3157,13 +3157,13 @@ async function mockApis(page: Page) {
 				json({ items: [{ connection_id: 'lab-a', display_name: 'Lab A', model: 'model-a' }] })
 			);
 		}
-		if (path === '/api/v1/collections') {
-			if (method === 'POST') return route.fulfill(json(collection(auditState)));
-			return route.fulfill(json({ items: [collection(auditState)] }));
+		if (path === '/api/v1/workspaces') {
+			if (method === 'POST') return route.fulfill(json(workspace(auditState)));
+			return route.fulfill(json({ items: [workspace(auditState)] }));
 		}
-		if (path === `/api/v1/collections/${collectionId}`)
-			return route.fulfill(json(collection(auditState)));
-		if (path === `/api/v1/collections/${collectionId}/documents`) {
+		if (path === `/api/v1/workspaces/${workspaceId}`)
+			return route.fulfill(json(workspace(auditState)));
+		if (path === `/api/v1/workspaces/${workspaceId}/documents`) {
 			return route.fulfill(
 				json(
 					auditState === 'processing'
@@ -3172,43 +3172,43 @@ async function mockApis(page: Page) {
 				)
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/pipeline-runs`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/pipeline-runs`) {
 			return route.fulfill(
 				json(
 					auditState === 'processing'
-						? { collection_id: collectionId, count: 1, items: [processingRun()] }
-						: { collection_id: collectionId, count: 0, items: [] }
+						? { workspace_id: workspaceId, count: 1, items: [processingRun()] }
+						: { workspace_id: workspaceId, count: 0, items: [] }
 				)
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/profiles`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/profiles`) {
 			return route.fulfill(json(documentProfiles()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/profile`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/profile`) {
 			return route.fulfill(json(documentProfile()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/content`) {
 			return route.fulfill(json(documentContent()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/markdown`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/markdown`) {
 			return route.fulfill(json(documentMarkdown()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/source`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/documents/${documentId}/source`) {
 			return route.fulfill({ status: 204, body: '' });
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives`) {
 			return route.fulfill(json(objectives(auditState)));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/analysis`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/analysis`) {
 			return route.fulfill(json(objectiveView(auditState)));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}`) {
 			return route.fulfill(json(objectiveView()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					items: [objectiveFinding()],
@@ -3219,11 +3219,11 @@ async function mockApis(page: Page) {
 			);
 		}
 		if (
-			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1`
+			path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings/finding-1`
 		) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					finding: objectiveFinding()
@@ -3232,16 +3232,16 @@ async function mockApis(page: Page) {
 		}
 		if (
 			path ===
-				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
+				`/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings/finding-1/feedback` ||
 			path ===
-				`/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1/curation`
+				`/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/findings/finding-1/curation`
 		) {
 			return route.fulfill(json({ items: [] }));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					finding_id: 'finding-1',
@@ -3253,11 +3253,11 @@ async function mockApis(page: Page) {
 			);
 		}
 		if (
-			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-analysis`
+			path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/experiment-analysis`
 		) {
 			return route.fulfill(
 				json({
-					collection_id: collectionId,
+					workspace_id: workspaceId,
 					objective_id: objectiveId,
 					analysis_version: 1,
 					selections: [],
@@ -3267,7 +3267,7 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence-map`) {
+		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/evidence-map`) {
 			return route.fulfill(json(objectiveEvidenceMap()));
 		}
 		if (/^\/api\/v1\/conversations\/[^/]+\/permissions$/.test(path)) {
@@ -3284,7 +3284,7 @@ async function mockApis(page: Page) {
 			}
 			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
 		}
-		if (/^\/api\/v1\/collections\/[^/]+\/agent-permissions$/.test(path)) {
+		if (/^\/api\/v1\/workspaces\/[^/]+\/agent-permissions$/.test(path)) {
 			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
 		}
 		if (path === '/api/v1/conversations') return route.fulfill(json(chatSession(), 201));
@@ -3366,7 +3366,7 @@ function agentTurn(prompt: string, sequence: number) {
 				agentMessage(
 					`msg_assistant_${sequence}`,
 					'assistant',
-					'Hello. I can help you work with this collection.'
+					'Hello. I can help you work with this workspace.'
 				)
 			],
 			pending_approval: null,
@@ -3402,7 +3402,7 @@ function agentTurn(prompt: string, sequence: number) {
 							{
 								resource_type: 'finding',
 								resource_id: 'finding-1',
-								href: `/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`
+								href: `/workspaces/${workspaceId}/objectives/${objectiveId}?finding_id=finding-1`
 							}
 						],
 						warnings: ['One paper used a different heat treatment.'],
@@ -3451,7 +3451,7 @@ function agentTurn(prompt: string, sequence: number) {
 									question: 'How does energy input affect grain morphology?',
 									variables: ['energy input'],
 									outcomes: ['grain morphology'],
-									support_status: 'collection_supported'
+									support_status: 'workspace_supported'
 								}
 							]
 						},
@@ -3533,7 +3533,7 @@ function approvedAgentTurn(callId: string) {
 						{
 							resource_type: 'research_objective',
 							resource_id: 'obj_agent_1',
-							href: `/collections/${collectionId}/objectives/obj_agent_1`
+							href: `/workspaces/${workspaceId}/objectives/obj_agent_1`
 						}
 					],
 					warnings: [],
@@ -3574,14 +3574,14 @@ function readAuditState(url: URL, referer?: string) {
 	}
 }
 
-function collection(auditState?: string | null) {
+function workspace(auditState?: string | null) {
 	const documents =
 		auditState === 'processing'
 			? [uploadedFile(auditState), processingDocument()]
 			: [uploadedFile(auditState)];
 	return {
-		collection_id: collectionId,
-		id: collectionId,
+		workspace_id: workspaceId,
+		id: workspaceId,
 		name: '316L LPBF evidence set',
 		description: 'Interaction audit fixture',
 		status:
@@ -3599,7 +3599,7 @@ function uploadedFile(auditState?: string | null) {
 		document_id: 'doc_1',
 		original_filename: 'paper-a.pdf',
 		stored_filename: 'paper-a.pdf',
-		storage_key: `${collectionId}/input/paper-a.pdf`,
+		storage_key: `${workspaceId}/input/paper-a.pdf`,
 		sha256: 'a'.repeat(64),
 		media_type: 'application/pdf',
 		status: ready ? 'ready' : 'stored',
@@ -3619,7 +3619,7 @@ function processingDocument() {
 		document_id: 'doc_2',
 		original_filename: 'paper-b.pdf',
 		stored_filename: 'paper-b.pdf',
-		storage_key: `${collectionId}/input/paper-b.pdf`,
+		storage_key: `${workspaceId}/input/paper-b.pdf`,
 		sha256: 'b'.repeat(64),
 		media_type: 'application/pdf',
 		status: 'processing',
@@ -3637,7 +3637,7 @@ function processingDocument() {
 function processingRun() {
 	return {
 		run_id: 'run_processing',
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		pipeline_name: 'document_preparation',
 		scope_type: 'document',
 		scope_id: 'doc_2',
@@ -3664,7 +3664,7 @@ function processingRun() {
 
 function documentProfiles() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		total: 1,
 		count: 1,
 		summary: {
@@ -3686,7 +3686,7 @@ function documentProfiles() {
 function documentProfile() {
 	return {
 		document_id: documentId,
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		title: 'Paper A',
 		source_filename: 'paper-a.txt',
 		doc_type: 'experimental',
@@ -3700,7 +3700,7 @@ function documentProfile() {
 
 function documentContent() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		document_id: documentId,
 		title: 'Paper A',
 		source_filename: 'paper-a.txt',
@@ -3734,7 +3734,7 @@ function documentContent() {
 
 function documentMarkdown() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		document_id: documentId,
 		title: 'Paper A',
 		source_filename: 'paper-a.pdf',
@@ -3760,10 +3760,10 @@ function documentMarkdown() {
 function objectives(auditState?: string | null) {
 	const isRunning = auditState === 'objective-running';
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objectives: [
 			{
-				collection_id: collectionId,
+				workspace_id: workspaceId,
 				objective_id: objectiveId,
 				question: 'How does heat treatment affect LPBF 316L tensile strength?',
 				material_scope: ['316L stainless steel'],
@@ -3790,7 +3790,7 @@ function objectiveView(auditState?: string | null) {
 	const objective = objectives(auditState).objectives[0];
 	const isRunning = auditState === 'objective-running';
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objective,
 		active_analysis: objectiveAnalysis(isRunning),
 		published_analysis: isRunning ? null : objectiveAnalysis(),
@@ -3809,7 +3809,7 @@ function objectiveView(auditState?: string | null) {
 
 function objectiveAnalysis(isRunning = false) {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objective_id: objectiveId,
 		analysis_version: 1,
 		document_inputs: [{ document_id: documentId, preparation_fingerprint: 'fingerprint-doc-1' }],
@@ -3832,7 +3832,7 @@ function objectiveAnalysis(isRunning = false) {
 
 function objectiveFinding() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objective_id: objectiveId,
 		analysis_version: 1,
 		finding_id: 'finding-1',
@@ -3877,7 +3877,7 @@ function objectiveFinding() {
 
 function objectiveEvidenceMap() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objective_id: objectiveId,
 		analysis_version: 1,
 		projection_version: 'objective-evidence-map.v1',
@@ -4057,7 +4057,7 @@ function objectiveEvidenceMap() {
 
 function objectiveEvidence() {
 	return {
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		objective_id: objectiveId,
 		analysis_version: 1,
 		evidence_id: 'evidence-1',
@@ -4109,7 +4109,7 @@ function chatSession() {
 	return {
 		session_id: sessionId,
 		user_id: 'user_1',
-		collection_id: collectionId,
+		workspace_id: workspaceId,
 		created_at: now(),
 		updated_at: now()
 	};

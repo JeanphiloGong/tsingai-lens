@@ -27,7 +27,7 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
     doc = SourceDocument('paper', 0, 'IN718', '', blocks=blocks)
     repo = SimpleNamespace(read_document=AsyncMock(return_value=doc))
     monkeypatch.setattr(document_sources, 'SourceArtifactRepo', repo)
-    monkeypatch.setattr(document_sources.collection_service, 'get_collection_for_user', AsyncMock())
+    monkeypatch.setattr(document_sources.workspace_service, 'get_workspace_for_user', AsyncMock())
     cap = InspectDocumentSourcesCapability()
     context = CapabilityExecutionContext('chat','user','col','read',max_result_tokens=2000)
     overview = await cap.execute(replace(context,max_result_tokens=12000), InspectDocumentSourcesToolRequest(document_id='paper'))
@@ -53,7 +53,7 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
 async def test_full_document_read_exposes_exact_pending_arguments(monkeypatch):
     doc=SourceDocument('paper',0,'IN718','',blocks=tuple(SourceBlock(f'b{i}','paper','paragraph','Measured condition '*20,i) for i in range(10)))
     monkeypatch.setattr(document_sources,'SourceArtifactRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
-    monkeypatch.setattr(document_sources.collection_service,'get_collection_for_user',AsyncMock())
+    monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
     r=await InspectDocumentSourcesCapability().execute(CapabilityExecutionContext('chat','user','col','read',max_result_tokens=2000),InspectDocumentSourcesToolRequest(document_id='paper'))
     ledger=_section_reading_progress({'inspect_document_sources':[r.data]})[0]
     assert ledger['pending_section_reads'][0]['arguments']==r.data['continuation']
@@ -81,7 +81,7 @@ async def test_exact_read_budget_includes_version_and_continuation_arguments(mon
     monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
         read_document=AsyncMock(return_value=document),
     ))
-    monkeypatch.setattr(document_sources.collection_service, "get_collection_for_user", AsyncMock())
+    monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
     arguments = {"document_id": "paper", "source_kind": "text_window", "source_ref": "results"}
     parts = []
     for _ in range(30):

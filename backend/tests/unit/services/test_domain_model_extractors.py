@@ -230,7 +230,7 @@ def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_linea
 
     paper_map = extractor.extract(
         {
-            "collection_id": "collection-1",
+            "workspace_id": "workspace-1",
             "document_id": "paper-1",
             "title": "Processing study",
             "window_id": "scope-1",
@@ -418,7 +418,7 @@ def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
 def test_paper_research_map_prompt_exposes_science_without_backend_lineage():
     _, user_prompt = build_paper_research_map_prompt(
         {
-            "collection_id": "col-internal-123",
+            "workspace_id": "col-internal-123",
             "document_id": "doc-internal-456",
             "title": "Scientific title",
             "window_id": "results-7.retry-left",
@@ -493,7 +493,7 @@ def test_paper_research_map_rebinds_model_source_labels_to_backend_lineage():
 
     paper_map = PaperResearchMapExtractor(_response_client(client)).extract(
         {
-            "collection_id": "col-internal-123",
+            "workspace_id": "col-internal-123",
             "document_id": "doc-internal-456",
             "window_id": "results-7",
             "window_role": "results",
@@ -712,7 +712,7 @@ def test_review_paper_research_map_extractor_keeps_only_review_author_synthesis(
 def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     _, user_prompt = build_research_axis_canonicalization_prompt(
         {
-            "collection_id": "collection-test",
+            "workspace_id": "workspace-test",
             "axis_pairs": [
                 {
                     "pair_id": "axis_pair_0001",
@@ -750,7 +750,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
         }
     )
 
-    assert "before collection objective grouping" in user_prompt
+    assert "before workspace objective grouping" in user_prompt
     assert "pair classification" in user_prompt
     assert "`decisions` array" in user_prompt
     assert "every input pair" in user_prompt
@@ -765,7 +765,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "equivalent=false" in user_prompt
     assert "tensile strength and ultimate tensile strength" in user_prompt
     assert "surface hardness and hardness" in user_prompt
-    assert "collection-test" not in user_prompt
+    assert "workspace-test" not in user_prompt
 
 
 def _assert_strict_object_schemas(schema, path: str = "$") -> None:
@@ -1334,13 +1334,13 @@ def test_structured_response_traces_are_isolated_between_concurrent_calls():
         traces = tuple(
             executor.map(
                 complete_and_consume_trace,
-                ("collection-one", "collection-two"),
+                ("workspace-one", "workspace-two"),
             )
         )
 
     assert {trace["task_type"] for trace in traces if trace is not None} == {
-        "collection-one",
-        "collection-two",
+        "workspace-one",
+        "workspace-two",
     }
 
 
@@ -2249,7 +2249,7 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
 
     canonicalization_plan = classifier.classify(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "axis_pairs": [
                 {
                     "pair_id": "axis_pair_0001",
@@ -2325,7 +2325,7 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
 
     plan = classifier.classify(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "axis_pairs": [
                 {
                     "pair_id": "axis_pair_0001",
@@ -2379,7 +2379,7 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "paper_prior": {"doc_role": "experimental"},
             "source_units": [
@@ -2468,7 +2468,7 @@ def test_objective_paper_frame_preserves_more_than_eight_explicit_outcomes():
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {
                 "question": "Which properties were measured under different laser powers?"
             },
@@ -2515,7 +2515,7 @@ def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_id
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "source_units": [
                 {
@@ -2559,7 +2559,7 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "source_units": [
                 {
@@ -2619,7 +2619,7 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "source_units": [
                 {
@@ -2680,7 +2680,7 @@ def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
     with pytest.raises((ValueError, ValidationError)):
         ObjectiveSourceScreener(extractor).screen_batch(
             {
-                "collection_id": "col-1",
+                "workspace_id": "col-1",
                 "objective": {
                     "question": "How does heat treatment affect corrosion?"
                 },
@@ -2785,7 +2785,7 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "source_units": [
                 {
@@ -2836,7 +2836,7 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "source_units": [
                 {
@@ -2908,7 +2908,7 @@ def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
 def test_objective_paper_frame_prompt_exposes_science_without_backend_lineage():
     _, user_prompt = build_objective_paper_frame_prompt(
         {
-            "collection_id": "collection-internal",
+            "workspace_id": "workspace-internal",
             "objective": {
                 "objective_id": "objective-internal",
                 "question": "How does heat treatment affect corrosion?",
@@ -2965,7 +2965,7 @@ def test_objective_paper_frame_prompt_exposes_science_without_backend_lineage():
     assert '"varied_factors": [' in user_prompt
     assert '"outcome": "corrosion resistance"' in user_prompt
     for internal_value in (
-        "collection-internal",
+        "workspace-internal",
         "objective-internal",
         "document-internal",
         "internal-name.pdf",
@@ -2995,7 +2995,7 @@ def test_objective_paper_frame_rebinds_source_labels_to_backend_lineage():
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
-            "collection_id": "collection-internal",
+            "workspace_id": "workspace-internal",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "source_units": [
                 {
@@ -3168,7 +3168,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
 
     extractions = ObjectiveSourceExtractor(extractor).extract_source(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "evidence_route": {
                 "source_kind": "table",
@@ -3243,7 +3243,7 @@ def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
     client = _FakeOpenAIClient('{"extractions":[]}')
     extractor = _response_client(client)
     payload = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective": {"question": "How does laser power affect density?"},
         "evidence_route": {
             "source_kind": "text_window",
@@ -3777,7 +3777,7 @@ def test_structured_objective_evidence_allows_unbound_variable_draft():
 def test_objective_evidence_prompt_preserves_multiple_atomic_extractions():
     system_prompt, prompt = build_objective_evidence_prompt(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does preheating affect 316L?"},
             "paper_frame": {"screening_note": "must not become evidence"},
             "evidence_route": {
@@ -3808,7 +3808,7 @@ def test_objective_evidence_prompt_preserves_multiple_atomic_extractions():
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
     assert "OUTPUT JSON:" in prompt
-    assert "collection_id" not in prompt
+    assert "workspace_id" not in prompt
     assert "paper_frame" not in prompt
     assert "document_state" not in prompt
     assert "must not become evidence" not in prompt
@@ -3865,7 +3865,7 @@ def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields
     with pytest.raises(ValidationError):
         ObjectiveSourceExtractor(extractor).extract_source(
             {
-                "collection_id": "col-1",
+                "workspace_id": "col-1",
                 "objective": {"question": "How does heat treatment affect strength?"},
                 "evidence_route": {
                     "source_kind": "text_window",
@@ -3977,7 +3977,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
 
     units = ObjectiveSourceExtractor(extractor).extract_source(
         {
-            "collection_id": "col-1",
+            "workspace_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
             "evidence_route": {"source_kind": "text_window", "source_ref": "b1"},
             "source": {"source_kind": "text_window", "source_ref": "b1", "text": "x"},

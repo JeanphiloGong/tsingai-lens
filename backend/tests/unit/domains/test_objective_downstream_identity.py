@@ -9,7 +9,7 @@ from domain.goal import ExperimentPlanRecord
 def test_experiment_plan_record_has_only_objective_identity() -> None:
     plan = ExperimentPlanRecord(
         plan_id="plan-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         title="Validation plan",
         content="Compare two processing conditions.",
@@ -29,7 +29,7 @@ def test_experiment_plan_record_has_only_objective_identity() -> None:
 def test_review_records_have_only_objective_identity() -> None:
     feedback = FindingFeedback(
         feedback_id="feedback-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -40,7 +40,7 @@ def test_review_records_have_only_objective_identity() -> None:
         created_at="2026-07-20T00:00:00+00:00",
     )
     finding = Finding(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -64,7 +64,7 @@ def test_review_records_have_only_objective_identity() -> None:
     )
     curation = FindingCuration(
         curation_id="curation-1",
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         analysis_version=1,
         finding_id="finding-1",
@@ -76,7 +76,7 @@ def test_review_records_have_only_objective_identity() -> None:
     )
 
     assert curation.curated_finding.key == (
-        feedback.collection_id, feedback.objective_id,
+        feedback.workspace_id, feedback.objective_id,
         feedback.analysis_version, feedback.finding_id,
     )
     for record in (feedback, curation):

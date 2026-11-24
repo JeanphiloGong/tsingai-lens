@@ -14,7 +14,7 @@ from infra.persistence.postgres.models.chat import (
     AgentTaskORM,
     ChatToolCallORM,
 )
-from infra.persistence.postgres.models.collection import CollectionORM
+from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import (
     ConversationORM,
     MessageFeedbackORM,
@@ -89,8 +89,8 @@ def _owned_conversation(user_id: str, *, include_deleted: bool = False):
         ConversationORM.user_id == user_id,
         select(1)
         .where(
-            CollectionORM.collection_id == ConversationORM.workspace_id,
-            CollectionORM.owner_user_id == user_id,
+            WorkspaceORM.workspace_id == ConversationORM.workspace_id,
+            WorkspaceORM.owner_user_id == user_id,
         )
         .correlate(ConversationORM)
         .exists(),
@@ -330,10 +330,10 @@ class ConversationRepository:
     ) -> ConversationRecord:
         async with AsyncSessionLocal() as db, db.begin():
             workspace = await db.scalar(
-                select(CollectionORM.collection_id)
+                select(WorkspaceORM.workspace_id)
                 .where(
-                    CollectionORM.collection_id == workspace_id,
-                    CollectionORM.owner_user_id == user_id,
+                    WorkspaceORM.workspace_id == workspace_id,
+                    WorkspaceORM.owner_user_id == user_id,
                 )
                 .with_for_update(read=True)
             )

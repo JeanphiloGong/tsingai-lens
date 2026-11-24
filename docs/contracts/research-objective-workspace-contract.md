@@ -9,7 +9,7 @@ parallel Objective result and intermediate traversal contracts.
 ## Product Boundary
 
 A user creates or confirms one research Objective. Lens analyzes selected
-collection papers and publishes evidence-calibrated Findings. The Objective
+workspace papers and publishes evidence-calibrated Findings. The Objective
 page presents a Finding list; selecting a Finding reveals its atomic result,
 mechanism explanation, scientific context, paper contributions, exact source
 Evidence, and review action.
@@ -32,7 +32,7 @@ ResearchObjective
 
 ### ResearchObjective
 
-Identity: `(collection_id, objective_id)`.
+Identity: `(workspace_id, objective_id)`.
 
 Owns:
 
@@ -54,10 +54,10 @@ version.
 It does not own execution progress, errors, complete document content, or
 embedded child arrays.
 
-Candidate discovery and analysis never infer all Collection papers. Their
+Candidate discovery and analysis never infer all Workspace papers. Their
 commands receive an explicit non-empty ready `document_ids` selection.
 After a candidate exists, deterministic Objective scope screening evaluates
-every current Collection Paper Map. Seed papers do not define the recommended
+every current Workspace Paper Map. Seed papers do not define the recommended
 analysis scope.
 
 ### PreparedDocumentInput
@@ -74,7 +74,7 @@ new Source.
 
 ### ObjectiveAnalysis
 
-Identity: `(collection_id, objective_id, analysis_version)`.
+Identity: `(workspace_id, objective_id, analysis_version)`.
 
 Owns one reproducible execution attempt:
 
@@ -252,7 +252,7 @@ Evidence.
 
 ## API Contract
 
-All routes are under `/api/v1/collections/{collection_id}`.
+All routes are under `/api/v1/workspaces/{workspace_id}`.
 
 ### Objective lifecycle
 
@@ -272,7 +272,7 @@ Every selected Document must be current and ready. Processing and failed papers
 do not block research over another explicitly selected ready subset.
 
 `GET .../scope` returns a complete, read-only classification of current
-Collection Paper Maps for one Objective:
+Workspace Paper Maps for one Objective:
 
 - `likely_relevant`: mapped material, variables, and outcome establish that the
   paper should enter deep inspection;
@@ -363,10 +363,10 @@ The Evidence POST command is the Source-to-Evidence decision boundary. It
 accepts one current published analysis version, one prepared Document and
 Source locator, a verbatim Source excerpt, an Evidence role, and the structured
 variables, comparison, reported result, attribution, and scientific context
-that the researcher confirms. The backend verifies collection ownership,
+that the researcher confirms. The backend verifies workspace ownership,
 analysis scope, exact Source identity, and normalized excerpt containment. It
 derives the Evidence identity, page, confidence, and authenticated creator;
-the request cannot move a Source from another collection or analysis version.
+the request cannot move a Source from another workspace or analysis version.
 
 Creating a correction with `supersedes_evidence_id` publishes a new immutable
 analysis snapshot. The prior Evidence and any Finding that cites it remain
@@ -418,7 +418,7 @@ or curation event controls review and training status.
 - `succeeded` with authored abstention: display the researcher's evidence
   decision even when the published Finding set is empty.
 
-The Collection page allows upload and independent prepare/retry while other
+The Workspace page allows upload and independent prepare/retry while other
 papers run. Objective discovery and analysis controls expose ready-paper
 selection; disabled processing or failed papers do not create a global lock.
 The Objective list labels seed papers as question sources. Starting a new
@@ -433,11 +433,11 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
 
 ## Invariants
 
-- Every child shares the same collection, Objective, and analysis version.
+- Every child shares the same workspace, Objective, and analysis version.
 - Every analysis has at least one unique PreparedDocumentInput, and each paper
   contribution belongs to that frozen selection.
 - Source, DocumentProfile, and PaperMap are current Document-owned records, not
-  collection-build snapshots.
+  workspace-build snapshots.
 - Findings reference only role-eligible Evidence from their own version and
   bind every PaperContribution in that version.
 - Every eligible direct result in an atomic result set is assigned exactly once

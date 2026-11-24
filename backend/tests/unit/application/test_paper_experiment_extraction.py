@@ -55,7 +55,7 @@ class FakeStructuredResponseClient:
 
 def _objective(*, outcome: str = "elongation") -> ResearchObjective:
     return ResearchObjective(
-        collection_id="collection-1",
+        workspace_id="workspace-1",
         objective_id="objective-1",
         question="Does preheating change elongation?",
         material_scope=("316L",),
@@ -507,13 +507,13 @@ def test_valid_multiple_experiments_keep_distinct_local_series() -> None:
     second["split_reason"] = "different population and intervention assignment"
     second["split_evidence"] = [{"source_label": "S001"}]
     second["source_labels"] = ["S001"]
-    for collection in (
+    for workspace in (
         second["experimental_variants"],
         second["test_conditions"],
         second["measurements"],
         second["comparisons"],
     ):
-        for item in collection:
+        for item in workspace:
             for key in tuple(item):
                 if key.endswith("_key") and isinstance(item[key], str):
                     item[key] += "-follow-up"

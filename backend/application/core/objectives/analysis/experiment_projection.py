@@ -39,7 +39,7 @@ from .experiment_query_service import ExperimentAnalysisBundle
 
 @dataclass(frozen=True)
 class _ProjectionState:
-    collection_id: str
+    workspace_id: str
     objective_id: str
     analysis_version: int
     bundle: ExperimentAnalysisBundle
@@ -54,14 +54,14 @@ from repositories.objective_repository import ObjectiveRepo
 
 
 async def list_analysis_findings(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[tuple[Finding, ...], int]:
-    state = await _state(collection_id, objective_id, analysis_version)
+    state = await _state(workspace_id, objective_id, analysis_version)
     records = tuple(
         _project_finding(finding, state) for finding in state.bundle.findings
     )
@@ -80,12 +80,12 @@ async def list_analysis_findings(
 
 
 async def read_analysis_finding(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     finding_id: str,
 ) -> Finding | None:
-    state = await _state(collection_id, objective_id, analysis_version)
+    state = await _state(workspace_id, objective_id, analysis_version)
     finding = next(
         (item for item in state.bundle.findings if item.finding_id == finding_id),
         None,
@@ -94,7 +94,7 @@ async def read_analysis_finding(
 
 
 async def list_analysis_evidence(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     *,
@@ -102,7 +102,7 @@ async def list_analysis_evidence(
     offset: int = 0,
     limit: int = 100,
 ) -> tuple[tuple[ObjectiveEvidence, ...], int]:
-    state = await _state(collection_id, objective_id, analysis_version)
+    state = await _state(workspace_id, objective_id, analysis_version)
     allowed: set[str] | None = None
     if finding_id is not None:
         finding = next(
@@ -127,11 +127,11 @@ async def list_analysis_evidence(
 
 
 async def list_analysis_contributions(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> tuple[PaperContribution, ...]:
-    state = await _state(collection_id, objective_id, analysis_version)
+    state = await _state(workspace_id, objective_id, analysis_version)
     return tuple(
         replace(value, uninspected_source_count=record["uninspected_source_count"])
         for value, record in _project_contributions(state, state.bundle.selections)
@@ -153,7 +153,7 @@ def _project_contributions(
     """
     contribution_by_document = {
         document_id: {
-            "collection_id": value.collection_id,
+            "workspace_id": value.workspace_id,
             "objective_id": value.objective_id,
             "analysis_version": value.analysis_version,
             "document_id": value.document_id,
@@ -205,7 +205,7 @@ def _project_contributions(
             contribution = contribution_by_document.setdefault(
                 revision.document_id,
                 _new_experiment_contribution(
-                    collection_id=state.collection_id,
+                    workspace_id=state.workspace_id,
                     objective_id=selection.objective_id,
                     analysis_version=selection.analysis_version,
                     document_id=revision.document_id,
@@ -274,7 +274,7 @@ def _project_contributions(
                 value = replace(original, **accounting)
             else:
                 value = PaperContribution(
-                    collection_id=state.collection_id,
+                    workspace_id=state.workspace_id,
                     objective_id=state.objective_id,
                     analysis_version=state.analysis_version,
                     document_id=document_id,
@@ -300,7 +300,7 @@ def _project_contributions(
 
 
 async def read_analysis_records(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> tuple[
@@ -310,7 +310,7 @@ async def read_analysis_records(
 ]:
     """Return typed findings, evidence and paper coverage for internal readers."""
 
-    state = await _state(collection_id, objective_id, analysis_version)
+    state = await _state(workspace_id, objective_id, analysis_version)
     findings = tuple(
         _project_finding(finding, state) for finding in state.bundle.findings
     )
@@ -332,7 +332,7 @@ async def build_evidence_map(
     version = objective.published_analysis_version
     if version is None or analysis.analysis_version != version:
         raise ValueError("analysis is not the Objective published analysis version")
-    state = await _state(objective.collection_id, objective.objective_id, version)
+    state = await _state(objective.workspace_id, objective.objective_id, version)
     findings = tuple(
         _project_finding(finding, state) for finding in state.bundle.findings
     )
@@ -540,7 +540,7 @@ async def build_evidence_map(
         item.get("analysis_status") == "failed" for item in contributions
     )
     return {
-        "collection_id": objective.collection_id,
+        "workspace_id": objective.workspace_id,
         "objective_id": objective.objective_id,
         "analysis_version": version,
         "projection_version": "objective-evidence-map.v1",
@@ -567,12 +567,12 @@ async def build_evidence_map(
 
 
 async def _state(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> _ProjectionState:
     bundle = await experiment_query_service.read_analysis_bundle(
-        collection_id,
+        workspace_id,
         objective_id,
         analysis_version,
     )
@@ -598,7 +598,7 @@ async def _state(
             if measurement is None:
                 raise ValueError(f"selection references missing measurement: {key}")
             value = _measurement_record(
-                collection_id,
+                workspace_id,
                 objective_id,
                 analysis_version,
                 selection,
@@ -612,7 +612,7 @@ async def _state(
             if comparison is None:
                 raise ValueError(f"selection references missing comparison: {key}")
             value = _comparison_record(
-                collection_id,
+                workspace_id,
                 objective_id,
                 analysis_version,
                 selection,
@@ -625,7 +625,7 @@ async def _state(
             dict.fromkeys(evidence_ids)
         )
     return _ProjectionState(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         bundle=bundle,
@@ -634,7 +634,7 @@ async def _state(
         evidence_by_id=evidence_by_id,
         evidence_ids_by_selection=evidence_ids_by_selection,
         contributions_by_document=await _load_contributions(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         ),
@@ -642,12 +642,12 @@ async def _state(
 
 
 async def _load_contributions(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> dict[str, PaperContribution]:
     records = await ObjectiveRepo.list_contributions(
-        collection_id, objective_id, analysis_version
+        workspace_id, objective_id, analysis_version
     )
     return {item.document_id: item for item in records}
 
@@ -698,7 +698,7 @@ def _project_finding(
 
 
 def _measurement_record(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     selection: Any,
@@ -725,7 +725,7 @@ def _measurement_record(
         else "needs_context"
     )
     evidence = ObjectiveEvidence(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         evidence_id=evidence_id,
@@ -768,7 +768,7 @@ def _measurement_record(
 
 
 def _comparison_record(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     selection: Any,
@@ -808,7 +808,7 @@ def _comparison_record(
         f"{target.result_text or target_value}"
     )
     evidence = ObjectiveEvidence(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
         evidence_id=evidence_id,
@@ -880,7 +880,7 @@ _CONTRIBUTION_LINK_FIELDS = (
 
 def _new_experiment_contribution(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     document_id: str,
@@ -888,7 +888,7 @@ def _new_experiment_contribution(
     outcome: str,
 ) -> dict[str, Any]:
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "objective_id": objective_id,
         "analysis_version": analysis_version,
         "document_id": document_id,

@@ -545,7 +545,7 @@ def natural_text_split(text: str, start: int, hard_end: int) -> int:
 
 def _build_window_payload(
     *,
-    collection_id: str,
+    workspace_id: str,
     document: Any,
     profile: Any,
     role: str,
@@ -571,7 +571,7 @@ def _build_window_payload(
         for item in items
     ]
     return {
-        "collection_id": collection_id,
+        "workspace_id": workspace_id,
         "document_id": document.document_id,
         "title": str(document.title or "")[:160],
         "window_id": f"{role}-{role_window_position}",

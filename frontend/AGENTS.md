@@ -15,7 +15,7 @@ approval gates, and verification rules.
   Lens v1 product boundary.
 - Primary authorities:
   `frontend/README.md`, `frontend/docs/frontend-plan.md`,
-  `frontend/src/routes/collections/README.md`, and
+  `frontend/src/routes/workspaces/README.md`, and
   `frontend/src/routes/_shared/README.md`.
 
 ## Core Principles
@@ -69,7 +69,7 @@ approval gates, and verification rules.
   keep route ownership, browser helpers, and frontend docs readable and
   discoverable.
 - Constraints:
-  `_shared/` owns reusable browser-side helpers; `collections/` owns workspace
+  `_shared/` owns reusable browser-side helpers; `workspaces/` owns workspace
   route behavior; formal frontend docs live in `frontend/docs/`.
 - Evidence:
   changes update the owning helper, route family, or doc path directly.
@@ -85,7 +85,7 @@ approval gates, and verification rules.
 - Browser requests must stay on same-origin `/api/*` and `/api/v1/*`.
 - `frontend/src/routes/_shared/` owns shared API clients, i18n, and route
   support logic.
-- `frontend/src/routes/collections/` owns collection workspace route behavior.
+- `frontend/src/routes/workspaces/` owns workspace route behavior.
 - `frontend/docs/frontend-plan.md` is the frontend same-origin contract guide.
 - Retired debug-style routes remain explanatory only and should not reintroduce
   alternate browser contracts.
@@ -137,7 +137,7 @@ approval gates, and verification rules.
 
 8. Keep route ownership clear.
    Why: this frontend relies on explicit route-family boundaries.
-   How: place collection workspace behavior under `collections/` and shared
+   How: place workspace behavior under `workspaces/` and shared
    support under `_shared/`.
    Check: ownership remains obvious from the file location.
 
@@ -222,7 +222,7 @@ approval gates, and verification rules.
 
 - `frontend/docs/frontend-plan.md` owns the frontend same-origin contract guide.
 - `frontend/src/routes/_shared/README.md` owns shared browser helper guidance.
-- `frontend/src/routes/collections/README.md` owns collection route-family
+- `frontend/src/routes/workspaces/README.md` owns workspace route-family
   guidance.
 - If a frontend change overlaps shared product docs, update the owning shared
   doc path instead of creating a second authority.

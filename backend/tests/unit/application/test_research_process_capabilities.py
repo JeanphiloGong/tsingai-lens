@@ -22,7 +22,7 @@ from repositories.pipeline_run_repository import (
     PipelineNodeStatus,
     PipelineRunStatus,
 )
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
 
@@ -35,7 +35,7 @@ def anyio_backend():
 async def test_start_reuses_active_preparation_with_complete_safe_run_observation(
     postgres_session_factory,
 ):
-    await seed_collection(
+    await seed_workspace(
         postgres_session_factory, "col_process", document_ids=("doc_a",)
     )
     run = await pipeline_run_service.create_run(
@@ -98,7 +98,7 @@ async def test_start_reuses_active_preparation_with_complete_safe_run_observatio
 async def test_inspect_reports_historical_failure_without_exposing_provider_details(
     postgres_session_factory,
 ):
-    await seed_collection(
+    await seed_workspace(
         postgres_session_factory, "col_process", document_ids=("doc_a",)
     )
     run = await pipeline_run_service.create_run(

@@ -32,7 +32,7 @@ from domain.source import (
     render_plain_table_text,
 )
 from infra.persistence.database import AsyncSessionLocal
-from infra.persistence.postgres.models.collection import (
+from infra.persistence.postgres.models.workspace import (
     DocumentORM,
     DocumentPreparationORM,
 )
@@ -46,7 +46,7 @@ class SourceArtifactRepository:
 
     async def replace_document(
         self,
-        collection_id: str,
+        workspace_id: str,
         document: SourceDocument,
         *,
         db: AsyncSession | None = None,
@@ -174,9 +174,9 @@ class SourceArtifactRepository:
         now = datetime.now(timezone.utc)
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
             owner = await db.get(DocumentORM, document.document_id)
-            if owner is None or owner.collection_id != collection_id:
+            if owner is None or owner.workspace_id != workspace_id:
                 raise FileNotFoundError(
-                    f"collection document not found: {collection_id}/{document.document_id}"
+                    f"workspace document not found: {workspace_id}/{document.document_id}"
                 )
             row = await db.get(DocumentPreparationORM, document.document_id)
             values = {
@@ -207,19 +207,19 @@ class SourceArtifactRepository:
 
     async def read_document(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
     ) -> SourceDocument | None:
-        documents = await self._read_documents(collection_id, (document_id,))
+        documents = await self._read_documents(workspace_id, (document_id,))
         return documents[0] if documents else None
 
-    async def read_collection_documents(
+    async def read_workspace_documents(
         self,
-        collection_id: str,
+        workspace_id: str,
     ) -> tuple[SourceDocument, ...]:
-        return await self._read_documents(collection_id)
+        return await self._read_documents(workspace_id)
 
-    async def has_documents(self, collection_id: str) -> bool:
+    async def has_documents(self, workspace_id: str) -> bool:
         async with AsyncSessionLocal() as db:
             document_id = await db.scalar(
                 select(DocumentPreparationORM.document_id)
@@ -228,7 +228,7 @@ class SourceArtifactRepository:
                     DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
                 .where(
-                    DocumentORM.collection_id == collection_id,
+                    DocumentORM.workspace_id == workspace_id,
                     DocumentPreparationORM.artifact_json["document"]["document_id"]
                     .as_string()
                     .is_not(None),
@@ -239,14 +239,14 @@ class SourceArtifactRepository:
 
     async def read_documents(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_ids: tuple[str, ...],
     ) -> tuple[SourceDocument, ...]:
         if not document_ids:
             return ()
         if len(document_ids) != len(set(document_ids)):
             raise ValueError("source document IDs must be unique")
-        documents = await self._read_documents(collection_id, document_ids)
+        documents = await self._read_documents(workspace_id, document_ids)
         by_id = {document.document_id: document for document in documents}
         missing = tuple(
             document_id for document_id in document_ids if document_id not in by_id
@@ -257,7 +257,7 @@ class SourceArtifactRepository:
 
     async def _read_documents(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_ids: tuple[str, ...] | None = None,
     ) -> tuple[SourceDocument, ...]:
         async with AsyncSessionLocal() as db:
@@ -268,7 +268,7 @@ class SourceArtifactRepository:
                     DocumentORM.document_id == DocumentPreparationORM.document_id,
                 )
                 .where(
-                    DocumentORM.collection_id == collection_id,
+                    DocumentORM.workspace_id == workspace_id,
                 )
                 .order_by(
                     DocumentORM.document_order, DocumentPreparationORM.document_id
@@ -413,17 +413,17 @@ class SourceArtifactRepository:
 
     async def read_document_tree(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str,
     ) -> SourceDocumentTree:
-        document = await self.read_document(collection_id, document_id)
+        document = await self.read_document(workspace_id, document_id)
         if document is None:
             raise FileNotFoundError(
-                f"source document not found: {collection_id}/{document_id}"
+                f"source document not found: {workspace_id}/{document_id}"
             )
         references = await self._read_references_for_document(document_id)
         return build_source_document_tree(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             document=document,
             blocks=document.blocks,
             tables=document.tables,
@@ -433,7 +433,7 @@ class SourceArtifactRepository:
 
     async def list_documents(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
@@ -441,17 +441,17 @@ class SourceArtifactRepository:
         selected = document_ids
         if document_id is not None:
             selected = (document_id,)
-        return list(await self._read_documents(collection_id, selected))
+        return list(await self._read_documents(workspace_id, selected))
 
     async def list_text_units(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTextUnit]:
         documents = await self.list_documents(
-            collection_id,
+            workspace_id,
             document_id,
             document_ids=document_ids,
         )
@@ -459,13 +459,13 @@ class SourceArtifactRepository:
 
     async def list_blocks(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceBlock]:
         documents = await self.list_documents(
-            collection_id,
+            workspace_id,
             document_id,
             document_ids=document_ids,
         )
@@ -473,13 +473,13 @@ class SourceArtifactRepository:
 
     async def list_tables(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTable]:
         documents = await self.list_documents(
-            collection_id,
+            workspace_id,
             document_id,
             document_ids=document_ids,
         )
@@ -487,12 +487,12 @@ class SourceArtifactRepository:
 
     async def list_table_rows(
         self,
-        collection_id: str,
+        workspace_id: str,
         table_id: str | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTableRow]:
-        documents = await self.list_documents(collection_id, document_ids=document_ids)
+        documents = await self.list_documents(workspace_id, document_ids=document_ids)
         return [
             item
             for document in documents
@@ -502,13 +502,13 @@ class SourceArtifactRepository:
 
     async def list_table_cells(
         self,
-        collection_id: str,
+        workspace_id: str,
         table_id: str | None = None,
         row_index: int | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceTableCell]:
-        documents = await self.list_documents(collection_id, document_ids=document_ids)
+        documents = await self.list_documents(workspace_id, document_ids=document_ids)
         return [
             item
             for document in documents
@@ -519,13 +519,13 @@ class SourceArtifactRepository:
 
     async def list_figures(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_id: str | None = None,
         *,
         document_ids: tuple[str, ...] | None = None,
     ) -> list[SourceFigure]:
         documents = await self.list_documents(
-            collection_id,
+            workspace_id,
             document_id,
             document_ids=document_ids,
         )
@@ -616,12 +616,12 @@ class SourceArtifactRepository:
             row.updated_at = datetime.now(timezone.utc)
 
 
-    async def read_collection_references(
+    async def read_workspace_references(
         self,
-        collection_id: str,
+        workspace_id: str,
         document_ids: tuple[str, ...] | None = None,
     ) -> SourceReferenceSet:
-        documents = await self.list_documents(collection_id, document_ids=document_ids)
+        documents = await self.list_documents(workspace_id, document_ids=document_ids)
         reference_sets = [
             await self._read_references_for_document(document.document_id)
             for document in documents

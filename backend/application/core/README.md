@@ -1,7 +1,7 @@
 # Core Application Layer
 
 This package owns scientific interpretation after one Document has parseable
-Source artifacts. It does not own Collection membership, file storage, document
+Source artifacts. It does not own Workspace membership, file storage, document
 preparation admission, or Agent conversation.
 
 ## Document-Level Scientific Triage
@@ -31,7 +31,7 @@ explicit ready document_ids
   -> candidate Objectives
 ```
 
-Discovery never chooses hidden Collection scope. The caller supplies the exact
+Discovery never chooses hidden Workspace scope. The caller supplies the exact
 ready Documents; discovery maps only those Documents and records their
 `(document_id, preparation_fingerprint)` inputs.
 

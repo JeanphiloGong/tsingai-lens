@@ -3,7 +3,7 @@
 ## Purpose
 
 This document defines the current maintained storage identities. The model is
-intentionally current-state-first: old collection build snapshots and their data
+intentionally current-state-first: old workspace build snapshots and their data
 are not migrated, read, or retained through compatibility paths.
 
 ## Storage Rule
@@ -27,14 +27,14 @@ account import and backup before cutover.
 ## Domain Ownership
 
 ```text
-Collection
+Workspace
   -> Documents
 
 Document
   -> current DocumentPreparation (Source + Profile + optional PaperMap)
 
 PipelineRun
-  -> technical execution history for a Collection or Document scope
+  -> technical execution history for a Workspace or Document scope
   -> nested node telemetry
 
 Objective discovery
@@ -49,24 +49,24 @@ ResearchObjective
      -> Findings
 ```
 
-### Collection and Document
+### Workspace and Document
 
-`Collection` is identified by `collection_id` and belongs to one user. It owns
+`Workspace` is identified by `workspace_id` and belongs to one user. It owns
 current Document membership. A Document is identified by `document_id`; its
-filename, storage key, SHA-256, media type, status, size, and collection order
+filename, storage key, SHA-256, media type, status, size, and workspace order
 live on the Document record. Parser provenance and the Source fingerprint live
 in the Source section of the current `DocumentPreparation` row. Profile
 version, Source/profile fingerprints, and profile generation time live in its
 Profile section. The domain-level preparation fingerprint is derived from the
 current profile fingerprint.
 
-There is no public CollectionDocument membership object and no DocumentVersion
-aggregate. A Document is the current paper in the Collection.
+There is no public WorkspaceDocument membership object and no DocumentVersion
+aggregate. A Document is the current paper in the Workspace.
 
-The Collection row also owns the current discovery selection through
+The Workspace row also owns the current discovery selection through
 `discovery_ready`, `discovery_document_inputs`, `discovery_objective_ids`,
 `discovery_study_dispositions`, and `discovery_updated_at`. This state is
-replaced as one collection-local result; it is not a separate discovery
+replaced as one workspace-local result; it is not a separate discovery
 aggregate or historical snapshot.
 
 ### Document preparation
@@ -106,7 +106,7 @@ versions and do not create a snapshot hierarchy.
 ### Pipeline Run
 
 `pipeline_runs` stores observable technical execution history in one row per
-invocation. Indexed columns carry `collection_id`, `pipeline_name`,
+invocation. Indexed columns carry `workspace_id`, `pipeline_name`,
 `scope_type`, `scope_id`, `input_fingerprint`, mode, status, and searchable
 timestamps. `record_json` carries the complete validated run snapshot,
 including current node, progress, nested node telemetry, warnings, errors,
@@ -117,12 +117,12 @@ A partial unique index permits at most one queued or running run for one
 `(pipeline_name, scope_type, scope_id)` tuple. A repeated Document preparation
 request receives the active run. A completed Document run can be reused only
 if its input fingerprint equals the current requested fingerprint. Objective
-discovery reuses an active Collection run but a later completed discovery does
+discovery reuses an active Workspace run but a later completed discovery does
 not suppress a new explicit discovery request.
 
 ### Objective discovery
 
-The current candidate-discovery result is stored on `collections` in the
+The current candidate-discovery result is stored on `workspaces` in the
 `discovery_*` fields. It includes ordered `document_inputs`, each containing:
 
 ```json
@@ -132,12 +132,12 @@ The current candidate-discovery result is stored on `collections` in the
 }
 ```
 
-Discovery replacement changes the current candidates for that Collection. It
-does not create a Collection snapshot or duplicate preparation aggregates.
+Discovery replacement changes the current candidates for that Workspace. It
+does not create a Workspace snapshot or duplicate preparation aggregates.
 
 ### Objective analysis
 
-Objective identity is `(collection_id, objective_id)`. Analysis identity is
+Objective identity is `(workspace_id, objective_id)`. Analysis identity is
 that pair plus positive `analysis_version`.
 
 Every analysis freezes its selected `document_inputs`. Before reading Source,
@@ -198,9 +198,9 @@ erDiagram
   Objective operation rebuilds the embedded Paper Map cache when its
   fingerprint is stale. Pipeline Run history remains observable.
 - Uploading another Document adds a peer and does not touch prepared peers.
-- Deleting a Collection cascades its Documents, prepared artifacts, Pipeline Runs,
+- Deleting a Workspace cascades its Documents, prepared artifacts, Pipeline Runs,
   Objectives, analyses, and downstream records.
-- The destructive current-model migrations drop old collection-build,
+- The destructive current-model migrations drop old workspace-build,
   active-build, artifact-version, workspace-projection, persisted paper-fact,
   and comparison tables before creating the current model. Migration
   `20260908_0043` backfills the consolidated Source aggregate from the retired

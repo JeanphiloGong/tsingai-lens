@@ -80,7 +80,7 @@ def _historical_plan() -> ExperimentPlanRecord:
     return ExperimentPlanRecord(
         **{
             "plan_id": "exp_historical",
-            "collection_id": "col_1",
+            "workspace_id": "col_1",
             "objective_id": "objective_1",
             "title": "Historical preheating plan",
             "content": (
@@ -96,7 +96,7 @@ def _historical_plan() -> ExperimentPlanRecord:
                 {
                     "kind": "evidence",
                     "label": "Source 1",
-                    "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
+                    "href": "/workspaces/col_1/documents/paper-a?evidence_id=ev_1",
                 },
             ),
             "metadata": {
@@ -118,7 +118,7 @@ async def test_manual_plan_creation_has_no_chat_provenance(
     service = _service(repository, postgres_session_factory=postgres_session_factory)
 
     draft = await service.create_plan(
-        collection_id="col_1",
+        workspace_id="col_1",
         objective_id="objective_1",
         title="Manual validation plan",
         content="Expert-authored plan.",
@@ -165,7 +165,7 @@ async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(
 ) -> None:
     service = _service(postgres_session_factory=postgres_session_factory)
     draft = await service.create_plan(
-        collection_id="col_1",
+        workspace_id="col_1",
         objective_id="objective_1",
         title="Initial",
         content="Initial plan.",
@@ -173,7 +173,7 @@ async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(
     )
 
     updated = await service.update_plan(
-        collection_id="col_1",
+        workspace_id="col_1",
         objective_id="objective_1",
         plan_id=draft.plan_id,
         title="Reviewed",
@@ -221,7 +221,7 @@ async def test_agent_plan_persists_current_finding_sources_after_approval(
     ]
 
     plan = await service.create_agent_plan(
-        collection_id="col_1",
+        workspace_id="col_1",
         objective_id="objective_1",
         title="Preheating validation plan",
         content=(
@@ -236,7 +236,7 @@ async def test_agent_plan_persists_current_finding_sources_after_approval(
                 "kind": "evidence",
                 "label": "Evidence 1",
                 "href": (
-                    "/collections/col_1/documents/paper-1"
+                    "/workspaces/col_1/documents/paper-1"
                     "?evidence_id=evidence-result"
                 ),
             }
@@ -249,7 +249,7 @@ async def test_agent_plan_persists_current_finding_sources_after_approval(
 
     assert feedback_service.validity_calls == [
         {
-            "collection_id": "col_1",
+            "workspace_id": "col_1",
             "objective_id": "objective_1",
             "source_findings": source_findings,
         }
@@ -278,7 +278,7 @@ async def test_agent_plan_is_not_saved_when_finding_sources_are_stale(
         ResourceConflictException, match="research plan sources are stale"
     ):
         await service.create_agent_plan(
-            collection_id="col_1",
+            workspace_id="col_1",
             objective_id="objective_1",
             title="Stale plan",
             content=(
@@ -318,7 +318,7 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
     repository = ExperimentPlanRepository()
     service = _service(repository, postgres_session_factory=postgres_session_factory)
     manual = await service.create_plan(
-        collection_id="col_1",
+        workspace_id="col_1",
         objective_id="objective_1",
         title="Manual starting point",
         content="Expert-authored starting point.",
@@ -336,7 +336,7 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
     ]
 
     revised = await service.update_plan(
-        collection_id="col_1",
+        workspace_id="col_1",
         objective_id="objective_1",
         plan_id=manual.plan_id,
         title="Agent-assisted revision",
@@ -354,7 +354,7 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
             {
                 "kind": "evidence",
                 "label": "Evidence 1",
-                "href": "/collections/col_1/documents/paper-1?evidence_id=evidence-result",
+                "href": "/workspaces/col_1/documents/paper-1?evidence_id=evidence-result",
             }
         ],
         source_findings=source_findings,
@@ -379,7 +379,7 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
 async def test_missing_plan_update_is_explicit(*, postgres_session_factory) -> None:
     with pytest.raises(ExperimentPlanNotFoundError):
         await _service(postgres_session_factory=postgres_session_factory).update_plan(
-            collection_id="col_1",
+            workspace_id="col_1",
             objective_id="objective_1",
             plan_id="missing",
             title="Missing",
@@ -422,7 +422,7 @@ async def test_stale_historical_plan_cannot_be_promoted(
             validity="stale",
             postgres_session_factory=postgres_session_factory,
         ).update_plan(
-            collection_id="col_1",
+            workspace_id="col_1",
             objective_id="objective_1",
             plan_id=historical.plan_id,
             title=historical.title,
@@ -435,16 +435,16 @@ async def test_stale_historical_plan_cannot_be_promoted(
 
 @pytest.fixture(autouse=True)
 async def research_records(postgres_session_factory, anyio_backend):
-    from tests.support.postgres import seed_collection, seed_objective
+    from tests.support.postgres import seed_workspace, seed_objective
 
-    await seed_collection(postgres_session_factory, "col_1", user_id="expert-a")
+    await seed_workspace(postgres_session_factory, "col_1", user_id="expert-a")
     await seed_objective(postgres_session_factory, "col_1", "objective_1")
     from domain.chat import ChatMessage, ChatSession
     from repositories.chat_repository import ChatRepository
 
     chat = ChatRepository()
     session = ChatSession.create(
-        collection_id="col_1",
+        workspace_id="col_1",
         user_id="user-1",
         session_id="chat_legacy",
         created_at="2026-07-13T00:00:00+00:00",

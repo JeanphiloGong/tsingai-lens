@@ -6,7 +6,7 @@ prepare Source documents, discover Objectives, or run Objective analyses.
 ## Services
 
 - `gold_service.py`
-  Registers versioned collection gold sets.
+  Registers versioned workspace gold sets.
 - `prediction_snapshot_service.py`
   Freezes Core and published Objective outputs into prediction snapshots.
 - `core_evaluation_service.py`
@@ -18,7 +18,7 @@ prepare Source documents, discover Objectives, or run Objective analyses.
   `finding.v2` / `evidence.v2` fingerprints, and checks only the Findings
   referenced by an experiment plan. This does not construct training messages.
 - `finding_dataset_service.py`
-  Exports Objective or collection datasets, training messages and gold drafts
+  Exports Objective or workspace datasets, training messages and gold drafts
   from those same snapshots.
 - `finding_review_import_service.py`
   Parses external corrected Finding JSON, validates human accept, reject,
@@ -29,7 +29,7 @@ prepare Source documents, discover Objectives, or run Objective analyses.
 Every Objective review record uses:
 
 ```text
-(collection_id, objective_id, analysis_version, finding_id)
+(workspace_id, objective_id, analysis_version, finding_id)
 ```
 
 The service rejects missing, stale, unpublished, and cross-version Findings.

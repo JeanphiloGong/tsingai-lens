@@ -97,7 +97,7 @@ class SourceReadAudit:
     ObjectiveEvidence.
     """
 
-    collection_id: str
+    workspace_id: str
     objective_id: str
     document_id: str
     source_kind: str
@@ -1251,7 +1251,7 @@ def _context_route_field_groups(
 
 def extract_and_validate_source_facts(
     *,
-    collection_id: str,
+    workspace_id: str,
     read_audits: list[SourceReadAudit],
     source_extractor: ObjectiveSourceExtractor,
     paper_facts_extractor: PaperFactsExtractor | None = None,
@@ -1268,7 +1268,7 @@ def extract_and_validate_source_facts(
     """Inspect Sources, then read missing same-paper context while facts advance."""
     units = list(
         _extract_source_round(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             read_audits=read_audits,
             source_extractor=source_extractor,
             paper_facts_extractor=paper_facts_extractor,
@@ -1334,7 +1334,7 @@ def extract_and_validate_source_facts(
             record_analysis_diagnostic(
                 {
                     "trace_type": "objective_context_expansion",
-                    "collection_id": collection_id,
+                    "workspace_id": workspace_id,
                     "route_count": len(adaptive_context_routes),
                     "context_round": context_round,
                     "document_keys": sorted(
@@ -1347,7 +1347,7 @@ def extract_and_validate_source_facts(
                 }
             )
             expanded_context_units = _extract_source_round(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 read_audits=read_audits,
                 source_extractor=source_extractor,
                 paper_facts_extractor=paper_facts_extractor,
@@ -1374,7 +1374,7 @@ def extract_and_validate_source_facts(
         )
         if context_state_after == context_state_before:
             _record_objective_context_scope_gap(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 context_round=context_round,
                 units=units,
                 objectives=objectives,
@@ -1388,7 +1388,7 @@ def extract_and_validate_source_facts(
             break
         if adaptive_source_count >= adaptive_source_budget:
             _record_objective_context_scope_gap(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 context_round=context_round,
                 units=units,
                 objectives=objectives,
@@ -1400,8 +1400,8 @@ def extract_and_validate_source_facts(
             break
 
     logger.info(
-        "Research objective evidence extraction finished collection_id=%s objective_extractions=%s",
-        collection_id,
+        "Research objective evidence extraction finished workspace_id=%s objective_extractions=%s",
+        workspace_id,
         len(units),
     )
     return tuple(units)
@@ -1409,7 +1409,7 @@ def extract_and_validate_source_facts(
 
 def _extract_source_round(
     *,
-    collection_id: str,
+    workspace_id: str,
     read_audits: list[SourceReadAudit],
     source_extractor: ObjectiveSourceExtractor,
     paper_facts_extractor: PaperFactsExtractor | None = None,
@@ -1441,8 +1441,8 @@ def _extract_source_round(
         document_trees_by_document_id=document_trees_by_document_id,
     )
     logger.info(
-        "Research objective evidence extraction started collection_id=%s route_count=%s extractable_route_count=%s",
-        collection_id,
+        "Research objective evidence extraction started workspace_id=%s route_count=%s extractable_route_count=%s",
+        workspace_id,
         len(objective_evidence_routes),
         len(extractable_routes),
     )
@@ -1477,8 +1477,8 @@ def _extract_source_round(
         objective = objective_by_id.get(route.objective_id)
         if objective is None:
             logger.info(
-                "Research objective evidence extraction route skipped collection_id=%s source_ref=%s reason=missing_objective route_position=%s route_count=%s",
-                collection_id,
+                "Research objective evidence extraction route skipped workspace_id=%s source_ref=%s reason=missing_objective route_position=%s route_count=%s",
+                workspace_id,
                 route.source_ref,
                 route_position,
                 len(extractable_routes),
@@ -1516,7 +1516,7 @@ def _extract_source_round(
             document_state_units.get((route.objective_id, route.document_id), [])
         )
         payload = {
-            "collection_id": collection_id,
+            "workspace_id": workspace_id,
             "objective": _route_prompt_objective_record(objective),
             "paper_frame": _route_prompt_paper_frame_record(frame) if frame else {},
             "evidence_route": _objective_evidence_prompt_route_record(route),
@@ -1533,7 +1533,7 @@ def _extract_source_round(
         ):
             resolved_paper_facts_extractor = build_default_paper_facts_extractor()
         source, table_repair_error = repair_table_source(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             route=route,
             source=source,
             paper_facts_extractor=resolved_paper_facts_extractor,
@@ -1590,7 +1590,7 @@ def _extract_source_round(
             )
         ):
             failed_read = _failed_source_read(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 route=route,
                 error=table_repair_error,
             )
@@ -1684,7 +1684,7 @@ def _extract_source_round(
                         )
                         llm_route_records_list.extend(
                             validate_source_fact(
-                                collection_id=collection_id,
+                                workspace_id=workspace_id,
                                 route=route,
                                 source=source,
                                 objective_context=objective_context,
@@ -1715,8 +1715,8 @@ def _extract_source_round(
                     if provider_unavailable:
                         llm_evidence_unavailable[document_key] = exc
                     logger.exception(
-                        "Research objective evidence extraction route failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
-                        collection_id,
+                        "Research objective evidence extraction route failed workspace_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
+                        workspace_id,
                         route.source_ref,
                         route.objective_id,
                         route.document_id,
@@ -1735,7 +1735,7 @@ def _extract_source_round(
                     )
             if extraction_error is not None:
                 failed_read = _failed_source_read(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     route=route,
                     error=extraction_error,
                 )
@@ -1760,7 +1760,7 @@ def _extract_source_round(
                 # context expansion can inspect it and the Evidence Map can
                 # show the unresolved read.
                 fallback_unit = _needs_context_source_observation(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     route=route,
                     selection_reason=_SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON,
                 )
@@ -1780,14 +1780,14 @@ def _extract_source_round(
                 # routes are handled above so their selection reason remains
                 # distinct from this lexical fallback.
                 fallback_unit = _needs_context_source_observation(
-                    collection_id=collection_id, route=route
+                    workspace_id=workspace_id, route=route
                 )
         route_units: list[SourceObservation] = []
         for record in route_records:
             if record.get("selection_status") == "failed":
                 read_audits.append(
                     SourceReadAudit(
-                        collection_id=collection_id,
+                        workspace_id=workspace_id,
                         objective_id=route.objective_id,
                         document_id=route.document_id,
                         source_kind=route.source_kind,
@@ -1797,7 +1797,7 @@ def _extract_source_round(
                     )
                 )
                 continue
-            record = {**record, "collection_id": collection_id}
+            record = {**record, "workspace_id": workspace_id}
             if "status" not in record:
                 record["status"] = (
                     "validated"
@@ -1829,7 +1829,7 @@ def _extract_source_round(
             context = record.get("scientific_context", {})
             route_units.append(SourceObservation(
                 observation_id=observation_id,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 objective_id=route.objective_id,
                 document_id=route.document_id,
                 source_kind=record.get("source_kind") or first_source_ref.get("source_kind", "text_window"),
@@ -1949,7 +1949,7 @@ def _extract_source_round(
             # Evidence; retain it only in the internal ledger.
             inspection_unit = (
                 _needs_context_source_observation(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     route=route,
                     selection_reason=(_SELECTED_RESULT_NEEDS_CONTEXT_SELECTION_REASON),
                 )
@@ -1959,7 +1959,7 @@ def _extract_source_round(
                     and not route_result_is_not_current_observation
                 )
                 else _inspected_source_read(
-                    collection_id=collection_id,
+                    workspace_id=workspace_id,
                     route=route,
                 )
             )
@@ -1971,7 +1971,7 @@ def _extract_source_round(
                 record_analysis_diagnostic(
                     {
                         "trace_type": "objective_source_inspection",
-                        "collection_id": collection_id,
+                        "workspace_id": workspace_id,
                         "objective_id": route.objective_id,
                         "document_id": route.document_id,
                         "source_kind": route.source_kind,
@@ -1990,8 +1990,8 @@ def _extract_source_round(
                         inspection_unit
                     )
         logger.info(
-            "Research objective evidence extraction route finished collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s extractions=%s completed_routes=%s remaining_routes=%s",
-            collection_id,
+            "Research objective evidence extraction route finished workspace_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s extractions=%s completed_routes=%s remaining_routes=%s",
+            workspace_id,
             route.source_ref,
             route.objective_id,
             route.document_id,
@@ -2095,13 +2095,13 @@ def _objective_header_matches_any_axis(
 
 def _failed_source_read(
     *,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     route: EvidenceCandidate,
     error: Exception,
 ) -> SourceReadAudit:
     reason = f"{error.__class__.__name__}: {str(error) or 'extraction failed'}"
     return SourceReadAudit(
-        collection_id=collection_id or "",
+        workspace_id=workspace_id or "",
         objective_id=route.objective_id,
         document_id=route.document_id,
         source_kind=route.source_kind,
@@ -2125,7 +2125,7 @@ _NEEDS_CONTEXT_SELECTION_REASONS = frozenset(
 )
 def _needs_context_source_observation(
     *,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     route: EvidenceCandidate,
     selection_reason: str = _NEEDS_CONTEXT_SELECTION_REASON,
 ) -> SourceObservation:
@@ -2140,7 +2140,7 @@ def _needs_context_source_observation(
     )
     return SourceObservation(
         observation_id=f"oev_context_{sha1(identity.encode('utf-8')).hexdigest()[:24]}",
-        collection_id=collection_id or "unknown",
+        workspace_id=workspace_id or "unknown",
         objective_id=route.objective_id,
         document_id=route.document_id,
         source_kind=route.source_kind,
@@ -2165,13 +2165,13 @@ _INSPECTION_ONLY_SELECTION_REASON = (
 
 def _inspected_source_read(
     *,
-    collection_id: str | None = None,
+    workspace_id: str | None = None,
     route: EvidenceCandidate,
 ) -> SourceReadAudit:
     """Keep an attempted read in the audit ledger without creating Evidence."""
 
     return SourceReadAudit(
-        collection_id=collection_id or "",
+        workspace_id=workspace_id or "",
         objective_id=route.objective_id,
         document_id=route.document_id,
         source_kind=route.source_kind,
@@ -3535,7 +3535,7 @@ def _objective_context_progress_state(
 
 def _record_objective_context_scope_gap(
     *,
-    collection_id: str,
+    workspace_id: str,
     context_round: int,
     units: list[SourceObservation],
     objectives: tuple[ResearchObjective, ...],
@@ -3590,7 +3590,7 @@ def _record_objective_context_scope_gap(
         record_analysis_diagnostic(
             {
                 "trace_type": "objective_context_scope_gap",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "context_round": context_round,
                 "reason": reason,
                 "pending": pending,

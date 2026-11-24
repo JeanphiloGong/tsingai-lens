@@ -71,7 +71,7 @@ completion writes use short transactions guarded by the claimed run lease.
 The analysis module imports `objective_input_service` and
 `document_profiles.service` directly. It does not reach through the scientific
 engine to discover those dependencies. Public reads and commands accept the
-actor's user ID and authorize the Collection before accessing scientific data.
+actor's user ID and authorize the Workspace before accessing scientific data.
 
 ## Changing This Package
 
@@ -154,7 +154,7 @@ POST objective-discovery {document_ids}
 
 `PreparedDocumentInput` contains `document_id` and the current
 `preparation_fingerprint`. Empty, duplicate, unknown, non-ready, or stale inputs
-are rejected. Discovery never falls back to all Collection papers.
+are rejected. Discovery never falls back to all Workspace papers.
 
 `objective_input_service` owns this input boundary for both Discovery and
 Analysis. It also loads the matching Source documents, Profiles, document trees,
@@ -206,7 +206,7 @@ set of papers that should enter deep Objective analysis.
 ```text
 GET objectives/{objective_id}/scope
   -> load the persisted Objective
-  -> screen every current Collection Paper Map exactly once
+  -> screen every current Workspace Paper Map exactly once
   -> return likely-relevant, needs-inspection, and confidently-out-of-scope papers
 ```
 
@@ -376,7 +376,7 @@ revision referenced by each Selection.
 
 - `paper_research_map_service.py`: one Document's lightweight Paper Map.
 - `objective_candidate_service.py`: candidate formation from selected maps.
-- `scope_screening.py`: collection-wide deterministic scope for one Objective.
+- `scope_screening.py`: workspace-wide deterministic scope for one Objective.
 - `objective_input_service.py`: selected prepared-paper inputs, Profiles, Source
   trees, and reusable Paper Maps.
 - `objective_discovery_service.py`: discovery run lifecycle and candidate

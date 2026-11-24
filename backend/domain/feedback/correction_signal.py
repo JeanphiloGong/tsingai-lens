@@ -96,7 +96,7 @@ class CorrectionSignalAnalysisResult:
     signal_id: str
     signal_type: str
     session_id: str
-    collection_id: str
+    workspace_id: str
     anchor_message_id: str
     trigger_message_id: str
     problem_type: FeedbackProblemType

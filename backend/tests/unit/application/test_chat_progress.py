@@ -9,7 +9,7 @@ from application.chat.agent_runner import (
 from application.chat import session_service as chat_session_service
 from repositories.chat_repository import ChatRepository
 from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
-from tests.support.postgres import seed_collection
+from tests.support.postgres import seed_workspace
 from tests.unit.application.test_chat_session_service import _Model, _service
 
 pytestmark = pytest.mark.usefixtures("scripted_chat_runner")
@@ -31,7 +31,7 @@ async def test_heartbeat_preserves_research_phase_and_completed_counts(
         "application.chat.session_service._SNAPSHOT_INTERVAL_SECONDS", 0.05
     )
     service = _service(_Model(), ChatRepository())
-    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(workspace_id="col-1", user_id="user-1")
     release = asyncio.Event()
 
     async def slow_turn(**kwargs):
@@ -77,5 +77,5 @@ async def test_heartbeat_preserves_research_phase_and_completed_counts(
 
 
 @pytest.fixture(autouse=True)
-async def research_collection(postgres_session_factory, anyio_backend):
-    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
+async def research_workspace(postgres_session_factory, anyio_backend):
+    await seed_workspace(postgres_session_factory, "col-1", document_ids=("doc-1",))

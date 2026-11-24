@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from infra.persistence.file import object_store as store_module
-from application.source import collection_service, source_import_service
+from application.source import workspace_service, source_import_service
 
 import json
 from hashlib import sha256
@@ -12,8 +12,8 @@ import pytest
 from exceptions import ProjectException
 from infra.persistence import database
 from pypdf import PdfWriter
-from repositories.collection_repository import StoredDocument
-from tests.support.postgres import seed_collection
+from repositories.workspace_repository import StoredDocument
+from tests.support.postgres import seed_workspace
 from tests.support.source_artifacts import build_source_documents
 
 try:
@@ -41,17 +41,17 @@ def anyio_backend() -> str:
 
 async def _store_document_profiles(
     document_profile_service: ModuleType,
-    collection_id: str,
+    workspace_id: str,
     profiles: list[dict],
 ) -> None:
     for row in profiles:
-        await seed_collection(
+        await seed_workspace(
             database.AsyncSessionLocal,
-            collection_id,
+            workspace_id,
             document_ids=(row["document_id"],),
         )
         await document_profile_service.DocumentProfileRepo.replace(
-            collection_id,
+            workspace_id,
             DocumentProfile(
                 document_id=row["document_id"],
                 title=row.get("title"),
@@ -67,27 +67,27 @@ async def _store_document_profiles(
         )
 
 
-async def _store_source_documents(repository, collection_id, documents) -> None:
+async def _store_source_documents(repository, workspace_id, documents) -> None:
     for document in documents:
-        await seed_collection(
+        await seed_workspace(
             database.AsyncSessionLocal,
-            collection_id,
+            workspace_id,
             document_ids=(document.document_id,),
         )
-        await repository.replace_document(collection_id, document)
+        await repository.replace_document(workspace_id, document)
 
 
 @pytest.fixture()
 def document_services(tmp_path, *, postgres_session_factory):
     source_repository = SourceArtifactRepository()
-    document_profile_service.collection_service = collection_service
+    document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceArtifactRepo = source_repository
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
-    document_markdown_service.collection_service = collection_service
+    document_markdown_service.workspace_service = workspace_service
     document_markdown_service.SourceArtifactRepo = source_repository
 
     return (
-        collection_service,
+        workspace_service,
         document_profile_service,
         document_markdown_service,
     )
@@ -101,7 +101,7 @@ def _document_request(
 ):
     monkeypatch.setattr(store_module, "Store", object_store, raising=False)
     (
-        collection_service,
+        workspace_service,
         document_profile_service,
         document_markdown_service,
     ) = document_services
@@ -117,22 +117,22 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Pending Collection")
+    record = await workspace_service.create_workspace(name="Pending Workspace")
 
     with pytest.raises(ProjectException) as exc_info:
         documents_controller.DocumentProfileListResponse.model_validate(
             json.loads(
                 (
-                    await documents_controller.list_collection_document_profiles(
-                        collection_id=record.collection.collection_id,
+                    await documents_controller.list_workspace_document_profiles(
+                        workspace_id=record.workspace.workspace_id,
                         user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                             "user_id"
                         ],
@@ -144,17 +144,17 @@ async def test_documents_route_returns_409_when_profiles_are_not_ready(
     exc = exc_info.value
     assert exc.code == 200204
     assert exc.data["code"] == "document_profiles_not_ready"
-    assert exc.data["collection_id"] == record.collection.collection_id
+    assert exc.data["workspace_id"] == record.workspace.workspace_id
 
 
-async def test_documents_route_returns_404_for_missing_collection(
+async def test_documents_route_returns_404_for_missing_workspace(
     monkeypatch,
     document_services,
     *,
     object_store,
 ):
     (
-        _collection_service,
+        _workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
@@ -163,8 +163,8 @@ async def test_documents_route_returns_404_for_missing_collection(
         documents_controller.DocumentProfileListResponse.model_validate(
             json.loads(
                 (
-                    await documents_controller.list_collection_document_profiles(
-                        collection_id="col_missing",
+                    await documents_controller.list_workspace_document_profiles(
+                        workspace_id="col_missing",
                         user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                             "user_id"
                         ],
@@ -175,26 +175,26 @@ async def test_documents_route_returns_404_for_missing_collection(
 
     exc = exc_info.value
     assert exc.code == 200201
-    assert "collection not found" in exc.message
+    assert "workspace not found" in exc.message
 
 
 async def test_documents_route_forwards_profile_search_filters_and_pagination(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Searchable Collection")
-    collection_id = record.collection.collection_id
+    record = await workspace_service.create_workspace(name="Searchable Workspace")
+    workspace_id = record.workspace.workspace_id
     await _store_document_profiles(
         document_profile_service,
-        collection_id,
+        workspace_id,
         [
             {
                 "document_id": "paper-1",
@@ -223,8 +223,8 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(
     payload = documents_controller.DocumentProfileListResponse.model_validate(
         json.loads(
             (
-                await documents_controller.list_collection_document_profiles(
-                    collection_id=collection_id,
+                await documents_controller.list_workspace_document_profiles(
+                    workspace_id=workspace_id,
                     user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
                     ],
@@ -247,21 +247,21 @@ async def test_document_profile_route_returns_single_profile(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Single Profile Collection",
+    record = await workspace_service.create_workspace(
+        name="Single Profile Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     await _store_document_profiles(
         document_profile_service,
-        collection_id,
+        workspace_id,
         [
             {
                 "document_id": "paper-1",
@@ -275,8 +275,8 @@ async def test_document_profile_route_returns_single_profile(
     payload = documents_controller.DocumentProfileItemResponse.model_validate(
         json.loads(
             (
-                await documents_controller.get_collection_document_profile(
-                    collection_id=collection_id,
+                await documents_controller.get_workspace_document_profile(
+                    workspace_id=workspace_id,
                     document_id="paper-1",
                     user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
@@ -294,21 +294,21 @@ async def test_document_profile_route_preserves_normalized_stored_values(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Invalid Profile Collection",
+    record = await workspace_service.create_workspace(
+        name="Invalid Profile Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     await _store_document_profiles(
         document_profile_service,
-        collection_id,
+        workspace_id,
         [
             {
                 "document_id": "paper-1",
@@ -322,8 +322,8 @@ async def test_document_profile_route_preserves_normalized_stored_values(
     payload = documents_controller.DocumentProfileItemResponse.model_validate(
         json.loads(
             (
-                await documents_controller.get_collection_document_profile(
-                    collection_id=collection_id,
+                await documents_controller.get_workspace_document_profile(
+                    workspace_id=workspace_id,
                     document_id="paper-1",
                     user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
@@ -340,21 +340,21 @@ async def test_document_content_route_uses_stable_block_locator(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Document Locator Collection",
+    record = await workspace_service.create_workspace(
+        name="Document Locator Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     await _store_source_documents(
         document_profile_service.SourceArtifactRepo,
-        collection_id,
+        workspace_id,
         build_source_documents(
             documents=[
                 {
@@ -381,7 +381,7 @@ async def test_document_content_route_uses_stable_block_locator(
     )
     await _store_document_profiles(
         document_profile_service,
-        collection_id,
+        workspace_id,
         [
             {
                 "document_id": "paper-1",
@@ -395,8 +395,8 @@ async def test_document_content_route_uses_stable_block_locator(
     payload = documents_controller.DocumentContentResponse.model_validate(
         json.loads(
             (
-                await documents_controller.get_collection_document_content(
-                    collection_id=collection_id,
+                await documents_controller.get_workspace_document_content(
+                    workspace_id=workspace_id,
                     document_id="paper-1",
                     user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
@@ -425,21 +425,21 @@ async def test_document_markdown_route_returns_markdown_projection(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Markdown Route Collection",
+    record = await workspace_service.create_workspace(
+        name="Markdown Route Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        collection_id,
+        workspace_id,
         build_source_documents(
             documents=[
                 {
@@ -479,8 +479,8 @@ async def test_document_markdown_route_returns_markdown_projection(
     payload = documents_controller.DocumentMarkdownResponse.model_validate(
         json.loads(
             (
-                await documents_controller.get_collection_document_markdown(
-                    collection_id=collection_id,
+                await documents_controller.get_workspace_document_markdown(
+                    workspace_id=workspace_id,
                     document_id="paper-1",
                     user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                         "user_id"
@@ -490,7 +490,7 @@ async def test_document_markdown_route_returns_markdown_projection(
         )["data"]
     )
 
-    assert payload.collection_id == collection_id
+    assert payload.workspace_id == workspace_id
     assert payload.document_id == "paper-1"
     assert payload.title == "Markdown Paper"
     assert payload.source_filename == "markdown-paper.pdf"
@@ -506,24 +506,24 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Markdown Pending Collection",
+    record = await workspace_service.create_workspace(
+        name="Markdown Pending Workspace",
     )
 
     with pytest.raises(ProjectException) as exc_info:
         documents_controller.DocumentMarkdownResponse.model_validate(
             json.loads(
                 (
-                    await documents_controller.get_collection_document_markdown(
-                        collection_id=record.collection.collection_id,
+                    await documents_controller.get_workspace_document_markdown(
+                        workspace_id=record.workspace.workspace_id,
                         document_id="paper-1",
                         user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user[
                             "user_id"
@@ -536,40 +536,40 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     exc = exc_info.value
     assert exc.code == 200204
     assert exc.data["code"] == "document_markdown_not_ready"
-    assert exc.data["collection_id"] == record.collection.collection_id
+    assert exc.data["workspace_id"] == record.workspace.workspace_id
 
 
 @pytest.mark.parametrize("filename, expected_disposition", [
     ("paper-1.pdf", "inline; filename*=UTF-8''paper-1.pdf"),
     ("论文.pdf", "inline; filename*=UTF-8''%E8%AE%BA%E6%96%87.pdf"),
 ])
-async def test_document_source_route_streams_current_collection_document(
+async def test_document_source_route_streams_current_workspace_document(
     monkeypatch,
     document_services,
     filename,
     expected_disposition,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Source File Collection")
-    collection_id = record.collection.collection_id
+    record = await workspace_service.create_workspace(name="Source File Workspace")
+    workspace_id = record.workspace.workspace_id
     writer = PdfWriter()
     writer.add_blank_page(width=72, height=72)
     pdf = BytesIO()
     writer.write(pdf)
     payload = pdf.getvalue()
     document = await source_import_service.add_document(
-        collection_id, filename, payload, "application/pdf", user_id="local-user",
+        workspace_id, filename, payload, "application/pdf", user_id="local-user",
     )
 
-    response = await documents_controller.get_collection_document_source(
-        collection_id=collection_id,
+    response = await documents_controller.get_workspace_document_source(
+        workspace_id=workspace_id,
         document_id=document.document.document_id,
         user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
     )
@@ -583,21 +583,21 @@ async def test_document_source_route_returns_404_when_document_is_missing(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Missing Source Collection",
+    record = await workspace_service.create_workspace(
+        name="Missing Source Workspace",
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_source(
-            collection_id=record.collection.collection_id,
+        await documents_controller.get_workspace_document_source(
+            workspace_id=record.workspace.workspace_id,
             document_id="paper-1",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
@@ -608,20 +608,20 @@ async def test_document_source_route_returns_404_when_document_is_missing(
     assert exc.data["document_id"] == "paper-1"
 
 
-async def test_document_source_route_rejects_path_outside_collection(
+async def test_document_source_route_rejects_path_outside_workspace(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Unsafe Source Collection")
-    collection_id = record.collection.collection_id
+    record = await workspace_service.create_workspace(name="Unsafe Source Workspace")
+    workspace_id = record.workspace.workspace_id
     unsafe_document = StoredDocument(
         document=Document(
             document_id="paper-1",
@@ -635,15 +635,15 @@ async def test_document_source_route_rejects_path_outside_collection(
         storage_key="../outside.pdf",
         created_at=record.created_at,
     )
-    await collection_service.CollectionRepo.add_documents(
-        collection_id,
+    await workspace_service.WorkspaceRepo.add_documents(
+        workspace_id,
         (unsafe_document,),
         updated_at=unsafe_document.created_at,
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_source(
-            collection_id=collection_id,
+        await documents_controller.get_workspace_document_source(
+            workspace_id=workspace_id,
             document_id="paper-1",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
@@ -654,22 +654,22 @@ async def test_document_source_route_rejects_path_outside_collection(
     assert "outside.pdf" not in exc.message
 
 
-async def test_document_source_route_rejects_another_collections_storage_key(
+async def test_document_source_route_rejects_another_workspaces_storage_key(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    first = await collection_service.create_collection(name="First source collection")
-    second = await collection_service.create_collection(name="Second source collection")
-    payload = b"%PDF-1.4\nsecond collection\n"
-    storage_key = f"{second.collection.collection_id}/input/paper-2.pdf"
+    first = await workspace_service.create_workspace(name="First source workspace")
+    second = await workspace_service.create_workspace(name="Second source workspace")
+    payload = b"%PDF-1.4\nsecond workspace\n"
+    storage_key = f"{second.workspace.workspace_id}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
     object_store.write(storage_key, payload, digest)
     foreign_document = StoredDocument(
@@ -685,15 +685,15 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         storage_key=storage_key,
         created_at=first.created_at,
     )
-    await collection_service.CollectionRepo.add_documents(
-        first.collection.collection_id,
+    await workspace_service.WorkspaceRepo.add_documents(
+        first.workspace.workspace_id,
         (foreign_document,),
         updated_at=foreign_document.created_at,
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_source(
-            collection_id=first.collection.collection_id,
+        await documents_controller.get_workspace_document_source(
+            workspace_id=first.workspace.workspace_id,
             document_id="paper-1",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
         )
@@ -706,20 +706,20 @@ async def test_document_figure_image_route_streams_extracted_asset(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(name="Figure Image Collection")
-    collection_id = record.collection.collection_id
+    record = await workspace_service.create_workspace(name="Figure Image Workspace")
+    workspace_id = record.workspace.workspace_id
     content = b"\x89PNG\r\n\x1a\nfixture\n"
     asset_sha256 = sha256(content).hexdigest()
-    storage_key = collection_service.write_figure_asset(
-        collection_id,
+    storage_key = workspace_service.write_figure_asset(
+        workspace_id,
         "build-figure",
         "image_assets/fig-1.png",
         content,
@@ -728,7 +728,7 @@ async def test_document_figure_image_route_streams_extracted_asset(
     )
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        collection_id,
+        workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -747,8 +747,8 @@ async def test_document_figure_image_route_streams_extracted_asset(
         ),
     )
 
-    response = await documents_controller.get_collection_document_figure_image(
-        collection_id=collection_id,
+    response = await documents_controller.get_workspace_document_figure_image(
+        workspace_id=workspace_id,
         document_id="paper-1",
         figure_id="fig-1",
         user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
@@ -763,21 +763,21 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Cross Document Figure Collection",
+    record = await workspace_service.create_workspace(
+        name="Cross Document Figure Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        collection_id,
+        workspace_id,
         build_source_documents(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
@@ -796,8 +796,8 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_figure_image(
-            collection_id=collection_id,
+        await documents_controller.get_workspace_document_figure_image(
+            workspace_id=workspace_id,
             document_id="paper-1",
             figure_id="fig-2",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
@@ -810,28 +810,28 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
     assert exc.data["figure_id"] == "fig-2"
 
 
-async def test_document_figure_image_route_rejects_path_outside_collection(
+async def test_document_figure_image_route_rejects_path_outside_workspace(
     monkeypatch,
     document_services,
     tmp_path,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Unsafe Figure Image Collection",
+    record = await workspace_service.create_workspace(
+        name="Unsafe Figure Image Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        collection_id,
+        workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -847,8 +847,8 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_figure_image(
-            collection_id=collection_id,
+        await documents_controller.get_workspace_document_figure_image(
+            workspace_id=workspace_id,
             document_id="paper-1",
             figure_id="fig-1",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
@@ -860,24 +860,24 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
     assert "outside.png" not in exc.message
 
 
-async def test_document_figure_image_route_rejects_another_collections_object_key(
+async def test_document_figure_image_route_rejects_another_workspaces_object_key(
     monkeypatch,
     document_services,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    first = await collection_service.create_collection(name="First Figure Collection")
-    second = await collection_service.create_collection(name="Second Figure Collection")
+    first = await workspace_service.create_workspace(name="First Figure Workspace")
+    second = await workspace_service.create_workspace(name="Second Figure Workspace")
     content = b"figure"
     digest = sha256(content).hexdigest()
-    foreign_key = collection_service.write_figure_asset(
-        second.collection.collection_id,
+    foreign_key = workspace_service.write_figure_asset(
+        second.workspace.workspace_id,
         "build-figure",
         "image_assets/figure.png",
         content,
@@ -886,7 +886,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
     )
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        first.collection.collection_id,
+        first.workspace.workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -904,8 +904,8 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_figure_image(
-            collection_id=first.collection.collection_id,
+        await documents_controller.get_workspace_document_figure_image(
+            workspace_id=first.workspace.workspace_id,
             document_id="paper-1",
             figure_id="fig-1",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],
@@ -921,22 +921,22 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
     document_services,
     failure,
     *,
-    collection_workspace,
+    workspace_files,
     object_store,
 ):
     (
-        collection_service,
+        workspace_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = await collection_service.create_collection(
-        name="Unavailable Figure Collection",
+    record = await workspace_service.create_workspace(
+        name="Unavailable Figure Workspace",
     )
-    collection_id = record.collection.collection_id
+    workspace_id = record.workspace.workspace_id
     content = b"figure"
     digest = sha256(content).hexdigest()
-    storage_key = collection_service.write_figure_asset(
-        collection_id,
+    storage_key = workspace_service.write_figure_asset(
+        workspace_id,
         "build-figure",
         "image_assets/figure.png",
         content,
@@ -946,10 +946,10 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
     if failure == "missing":
         object_store.delete(storage_key)
     else:
-        (collection_workspace.root_dir / storage_key).write_bytes(b"corrupt")
+        (workspace_files.root_dir / storage_key).write_bytes(b"corrupt")
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
-        collection_id,
+        workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -967,8 +967,8 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
     )
 
     with pytest.raises(ProjectException) as exc_info:
-        await documents_controller.get_collection_document_figure_image(
-            collection_id=collection_id,
+        await documents_controller.get_workspace_document_figure_image(
+            workspace_id=workspace_id,
             document_id="paper-1",
             figure_id="fig-1",
             user_id=_document_request(monkeypatch, document_services, object_store=object_store).state.current_user["user_id"],

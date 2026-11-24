@@ -40,7 +40,7 @@ def _run(
         ),
         mode="standard",
         run_id=run_id,
-        collection_id=COLLECTION_ID,
+        workspace_id=COLLECTION_ID,
         scope_type=scope_type,
         scope_id=scope_id,
         input_fingerprint=fingerprint,
@@ -84,21 +84,21 @@ async def test_document_run_reuses_active_and_matching_completed_work(
     assert (changed.run_id, created) == ("run-changed-request", True)
 
 
-async def test_collection_run_reuses_only_active_work(source_repository) -> None:
+async def test_workspace_run_reuses_only_active_work(source_repository) -> None:
     runs = PipelineRunRepository()
     first = _run(
         "run-discovery-first",
         "scope-a",
-        scope_type="collection",
+        scope_type="workspace",
         scope_id=COLLECTION_ID,
     )
-    assert await runs.get_or_create_collection_run(first) == (first, True)
+    assert await runs.get_or_create_workspace_run(first) == (first, True)
 
-    reused_active, created = await runs.get_or_create_collection_run(
+    reused_active, created = await runs.get_or_create_workspace_run(
         _run(
             "run-discovery-duplicate",
             "scope-b",
-            scope_type="collection",
+            scope_type="workspace",
             scope_id=COLLECTION_ID,
         )
     )
@@ -119,10 +119,10 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
     retry = _run(
         "run-discovery-retry",
         "scope-b",
-        scope_type="collection",
+        scope_type="workspace",
         scope_id=COLLECTION_ID,
     )
-    assert await runs.get_or_create_collection_run(retry) == (retry, True)
+    assert await runs.get_or_create_workspace_run(retry) == (retry, True)
 
 
 async def test_pipeline_run_round_trips_progress_nodes_and_context(
@@ -162,7 +162,7 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
     await update_pipeline_fixture(runs, running)
     async with database.AsyncSessionLocal() as db, db.begin():
         assert await runs.read_run(running.run_id, db=db) == running
-    (summary,) = await runs.list_runs(collection_id=COLLECTION_ID)
+    (summary,) = await runs.list_runs(workspace_id=COLLECTION_ID)
     assert summary.run_id == running.run_id
     assert summary.progress_percent == 45
     assert summary.warnings == ["low confidence title"]
@@ -181,10 +181,10 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
         pytest.fail("history must not reconstruct full pipeline diagnostics")
 
     monkeypatch.setattr(module, "PipelineRun", reject_full_hydration)
-    summary, = await runs.list_runs(collection_id=COLLECTION_ID)
+    summary, = await runs.list_runs(workspace_id=COLLECTION_ID)
 
     assert summary.run_id == "history-only"
-    assert summary.collection_id == COLLECTION_ID
+    assert summary.workspace_id == COLLECTION_ID
     assert summary.status == "queued"
 
 

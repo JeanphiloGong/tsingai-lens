@@ -28,7 +28,7 @@ def finding_call(request):
     context = CapabilityExecutionContext(
         session_id="chat-1",
         user_id="researcher-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         tool_call_id="finding-1",
     )
     arguments = dict(
@@ -54,7 +54,7 @@ def finding_call(request):
     [
         "stale_analysis",
         "missing_objective",
-        "missing_collection",
+        "missing_workspace",
         "unknown_selection",
         "unknown_group",
     ],
@@ -65,12 +65,12 @@ async def test_finding_business_rejection_returns_tool_result_without_writing(
     monkeypatch,
 ):
     capability, context, payload, expected_code = finding_call
-    authorize = AsyncMock(return_value={"collection_id": "col-1"})
-    if rejection == "missing_collection":
-        authorize.side_effect = ResourceNotFoundException("Collection is unavailable.")
+    authorize = AsyncMock(return_value={"workspace_id": "col-1"})
+    if rejection == "missing_workspace":
+        authorize.side_effect = ResourceNotFoundException("Workspace is unavailable.")
     monkeypatch.setattr(
-        finding_authoring_service.collection_service,
-        "get_collection_for_user",
+        finding_authoring_service.workspace_service,
+        "get_workspace_for_user",
         authorize,
     )
     objective = SimpleNamespace(
@@ -122,8 +122,8 @@ async def test_finding_unexpected_fault_propagates_to_runner(
 ):
     capability, context, payload, _expected_code = finding_call
     monkeypatch.setattr(
-        finding_authoring_service.collection_service,
-        "get_collection_for_user",
+        finding_authoring_service.workspace_service,
+        "get_workspace_for_user",
         AsyncMock(side_effect=error),
     )
 

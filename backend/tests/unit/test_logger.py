@@ -53,7 +53,7 @@ def test_log_formatter_prioritizes_request_context_and_short_component() -> None
 
 def test_log_formatter_renders_china_standard_time_with_offset(monkeypatch) -> None:
     monkeypatch.setattr(logging.Formatter, "converter", time.gmtime)
-    logger = setup_logger("application.source.collection_service")
+    logger = setup_logger("application.source.workspace_service")
     handler = next(
         handler
         for handler in logging.getLogger().handlers
@@ -63,9 +63,9 @@ def test_log_formatter_renders_china_standard_time_with_offset(monkeypatch) -> N
     record = logger.makeRecord(
         logger.name,
         logging.INFO,
-        "/app/application/source/collection_service.py",
+        "/app/application/source/workspace_service.py",
         1,
-        "collection event",
+        "workspace event",
         (),
         None,
     )

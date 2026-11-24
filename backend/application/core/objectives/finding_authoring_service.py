@@ -12,7 +12,7 @@ from application.core.objectives.analysis import (
 from application.core.objectives.objective_analysis_service import (
     ResearchObjectiveNotFoundError,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core.finding import Finding
 from exceptions import (
     RequestInvalidException,
@@ -37,7 +37,7 @@ from repositories.objective_repository import ObjectiveRepo
 
 async def create_selection_version(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     source_analysis_version: int,
     selection_ids: tuple[str, ...],
@@ -64,17 +64,17 @@ async def create_selection_version(
             raise RequestInvalidException(
                 "abstention requires an explanation and no experiment selections or parent"
             )
-    await collection_service.get_collection_for_user(collection_id, created_by_user_id)
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    await workspace_service.get_workspace_for_user(workspace_id, created_by_user_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     if objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
     if objective.active_analysis_version != source_analysis_version:
         raise ResourceConflictException(
             "Source analysis version is not the active published snapshot.",
             data={"code": "source_analysis_stale"},
         )
     source_analysis = await ObjectiveRepo.read_analysis(
-        collection_id, objective_id, source_analysis_version
+        workspace_id, objective_id, source_analysis_version
     )
     if source_analysis is None or source_analysis.status != "succeeded":
         raise ResourceConflictException(
@@ -82,7 +82,7 @@ async def create_selection_version(
             data={"code": "source_analysis_incomplete"},
         )
     source = await experiment_query_service.read_analysis_bundle(
-        collection_id, objective_id, source_analysis_version
+        workspace_id, objective_id, source_analysis_version
     )
     selected_ids = set(selection_ids)
     for group_id in comparison_group_ids:
@@ -113,11 +113,11 @@ async def create_selection_version(
                 "parent Finding is not in the source analysis snapshot"
             )
     coverage = await ObjectiveRepo.list_contributions(
-        collection_id, objective_id, source_analysis_version
+        workspace_id, objective_id, source_analysis_version
     )
     async with AsyncSessionLocal() as db, db.begin():
         _objective, queued = await ObjectiveRepo.queue_analysis(
-            collection_id,
+            workspace_id,
             objective_id,
             document_inputs=source_analysis.document_inputs,
             pipeline_version=source_analysis.pipeline_version,
@@ -136,7 +136,7 @@ async def create_selection_version(
         )
         claimed = job.analysis
         result = await experiment_analysis_writer.write_selection_finding_revision(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             objective=objective,
             analysis=claimed,
             revisions=source.revisions,
@@ -148,7 +148,7 @@ async def create_selection_version(
         )
         await ObjectiveRepo.publish_experiment_analysis(
             db,
-            collection_id,
+            workspace_id,
             objective_id,
             claimed.analysis_version,
             job=job,
@@ -166,14 +166,14 @@ async def create_selection_version(
         result.findings[0] if result.findings else None,
     )
     analysis = await ObjectiveRepo.read_analysis(
-        collection_id, objective_id, claimed.analysis_version
+        workspace_id, objective_id, claimed.analysis_version
     )
     if analysis is None:
         raise ServerException(
             "The Finding was published, but its analysis snapshot could not be reloaded.",
             data={
                 "code": "published_analysis_reload_failed",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "analysis_version": claimed.analysis_version,
             },
@@ -183,7 +183,7 @@ async def create_selection_version(
 
 async def validate_selection_references(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     source_analysis_version: int,
     selection_ids: tuple[str, ...],
@@ -191,17 +191,17 @@ async def validate_selection_references(
     user_id: str,
 ) -> None:
     """Validate transient draft references against the published graph."""
-    await collection_service.get_collection_for_user(collection_id, user_id)
-    objective = await ObjectiveRepo.read_objective(collection_id, objective_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
+    objective = await ObjectiveRepo.read_objective(workspace_id, objective_id)
     if objective is None:
-        raise ResearchObjectiveNotFoundError(collection_id, objective_id)
+        raise ResearchObjectiveNotFoundError(workspace_id, objective_id)
     if objective.active_analysis_version != source_analysis_version:
         raise ResourceConflictException(
             "Source analysis version is not the active published snapshot.",
             data={"code": "source_analysis_stale"},
         )
     source = await experiment_query_service.read_analysis_bundle(
-        collection_id, objective_id, source_analysis_version
+        workspace_id, objective_id, source_analysis_version
     )
     selected_ids = set(selection_ids)
     for group_id in comparison_group_ids:

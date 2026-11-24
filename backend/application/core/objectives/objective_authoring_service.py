@@ -9,7 +9,7 @@ from application.core.objectives.analysis.experiment_projection import experimen
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
-from application.source import collection_service
+from application.source import workspace_service
 from domain.core import ResearchObjective, is_question_shaped_objective
 from domain.core.research_objective import (
     ObjectiveEvidence,
@@ -22,7 +22,7 @@ from exceptions import RequestInvalidException, ResourceConflictException, Resou
 
 async def create_chat_assisted_candidate(
     *,
-    collection_id: str,
+    workspace_id: str,
     user_id: str,
     tool_call_id: str,
     question: str,
@@ -40,7 +40,7 @@ async def create_chat_assisted_candidate(
 ) -> ResearchObjective:
     """Persist one user-approved, explicitly untested research question."""
 
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     if len(outcomes) != 1:
         raise RequestInvalidException("chat-assisted objective requires exactly one outcome")
     if parent_objective_id is not None:
@@ -49,7 +49,7 @@ async def create_chat_assisted_candidate(
         if not derivation_basis:
             raise RequestInvalidException("derived Objective requires a derivation basis")
         parent = await ObjectiveRepo.read_objective(
-            collection_id,
+            workspace_id,
             parent_objective_id,
         )
         if parent is None:
@@ -63,7 +63,7 @@ async def create_chat_assisted_candidate(
                 data={"code": "objective_parent_analysis_stale", "objective_id": parent_objective_id},
             )
         derivation_basis = await _canonicalize_derived_objective_basis(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             parent_objective_id=parent_objective_id,
             parent_analysis_version=parent_analysis_version,
             derivation_basis=derivation_basis,
@@ -77,7 +77,7 @@ async def create_chat_assisted_candidate(
     comparator = requested_comparator
     parent_id = parent_objective_id
     objective = ResearchObjective(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         objective_id=build_research_objective_id(
             question=question,
             material_scope=material_terms,
@@ -113,7 +113,7 @@ async def create_chat_assisted_candidate(
     for document_id in dict.fromkeys(
         (*objective.seed_document_ids, *objective.excluded_document_ids)
     ):
-        await collection_service.get_document(collection_id, document_id)
+        await workspace_service.get_document(workspace_id, document_id)
     objective = replace(
         objective,
         confidence=0,
@@ -135,22 +135,22 @@ async def create_chat_assisted_candidate(
 
 async def confirm_objective(
     *,
-    collection_id: str,
+    workspace_id: str,
     user_id: str,
     objective_id: str,
 ) -> ResearchObjective:
     """Record the researcher's confirmation without starting analysis."""
 
-    await collection_service.get_collection_for_user(collection_id, user_id)
+    await workspace_service.get_workspace_for_user(workspace_id, user_id)
     return await ObjectiveRepo.confirm_objective(
-        collection_id,
+        workspace_id,
         objective_id,
     )
 
 
 async def _canonicalize_derived_objective_basis(
     *,
-    collection_id: str,
+    workspace_id: str,
     parent_objective_id: str,
     parent_analysis_version: int,
     derivation_basis: list[dict[str, Any]],
@@ -158,7 +158,7 @@ async def _canonicalize_derived_objective_basis(
     """Rebuild derived-Objective lineage from the published parent."""
 
     experiment_backed = await should_read_experiment_projection(
-        collection_id=collection_id, objective_id=parent_objective_id,
+        workspace_id=workspace_id, objective_id=parent_objective_id,
         analysis_version=parent_analysis_version,
     )
     canonical: list[dict[str, Any]] = []
@@ -176,14 +176,14 @@ async def _canonicalize_derived_objective_basis(
         if kind == "finding":
             if experiment_backed:
                 record = await experiment_projection.read_analysis_finding(
-                    collection_id,
+                    workspace_id,
                     parent_objective_id,
                     parent_analysis_version,
                     reference_id,
                 )
             else:
                 record = await ObjectiveRepo.read_finding(
-                    collection_id,
+                    workspace_id,
                     parent_objective_id,
                     parent_analysis_version,
                     reference_id,
@@ -195,7 +195,7 @@ async def _canonicalize_derived_objective_basis(
             }
         elif kind == "evidence_gap":
             record = await _published_evidence_by_id(
-                collection_id,
+                workspace_id,
                 parent_objective_id,
                 parent_analysis_version,
                 reference_id,
@@ -229,7 +229,7 @@ async def _canonicalize_derived_objective_basis(
             }
         elif kind == "paper_contribution":
             record = await _published_paper_contribution_by_id(
-                collection_id,
+                workspace_id,
                 parent_objective_id,
                 parent_analysis_version,
                 reference_id,
@@ -269,7 +269,7 @@ async def _canonicalize_derived_objective_basis(
 
 
 async def _published_evidence_by_id(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     evidence_id: str,
@@ -280,7 +280,7 @@ async def _published_evidence_by_id(
     while True:
         if experiment_backed:
             records, total = await experiment_projection.list_analysis_evidence(
-                collection_id,
+                workspace_id,
                 objective_id,
                 analysis_version,
                 offset=offset,
@@ -288,7 +288,7 @@ async def _published_evidence_by_id(
             )
         else:
             records, total = await ObjectiveRepo.list_evidence(
-                collection_id,
+                workspace_id,
                 objective_id,
                 analysis_version,
                 offset=offset,
@@ -303,7 +303,7 @@ async def _published_evidence_by_id(
 
 
 async def _published_paper_contribution_by_id(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
     document_id: str,
@@ -312,13 +312,13 @@ async def _published_paper_contribution_by_id(
 ) -> PaperContribution | None:
     if experiment_backed:
         records = await experiment_projection.list_analysis_contributions(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         )
     else:
         records = await ObjectiveRepo.list_contributions(
-            collection_id,
+            workspace_id,
             objective_id,
             analysis_version,
         )

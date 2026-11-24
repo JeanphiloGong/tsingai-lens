@@ -143,7 +143,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "repositories.document_profile_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "repositories.collection_repository.AsyncSessionLocal", factory
+            "repositories.workspace_repository.AsyncSessionLocal", factory
         )
         yield factory
     finally:
@@ -169,19 +169,19 @@ def identity_subjects(postgres_session_factory):
 
 
 @pytest.fixture
-def collection_workspace(tmp_path, monkeypatch):
-    from infra.persistence.file import collection_workspace as workspace_module
+def workspace_files(tmp_path, monkeypatch):
+    from infra.persistence.file import workspace_files as workspace_module
 
-    workspace = workspace_module.FileCollectionWorkspace(tmp_path / "collections")
+    workspace = workspace_module.FileWorkspace(tmp_path / "workspaces")
     monkeypatch.setattr(workspace_module, "Workspace", workspace, raising=False)
     return workspace
 
 
 @pytest.fixture
-def object_store(collection_workspace, monkeypatch):
+def object_store(workspace_files, monkeypatch):
     from infra.persistence.file import object_store as store_module
 
-    store = FileObjectStore(collection_workspace.root_dir)
+    store = FileObjectStore(workspace_files.root_dir)
     monkeypatch.setattr(store_module, "Store", store, raising=False)
     return store
 
@@ -189,12 +189,12 @@ def object_store(collection_workspace, monkeypatch):
 
 
 @pytest.fixture
-def collection_service(postgres_session_factory):
-    from application.source import collection_service
-    from repositories.collection_repository import CollectionRepository
+def workspace_service(postgres_session_factory):
+    from application.source import workspace_service
+    from repositories.workspace_repository import WorkspaceRepository
 
-    collection_service.CollectionRepo = CollectionRepository()
-    return collection_service
+    workspace_service.WorkspaceRepo = WorkspaceRepository()
+    return workspace_service
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +202,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
     import application.chat.session_service as _test_chat_session_service
     from application.chat.capabilities import (
-        collection_context,
+        workspace_context,
         research_scope,
         document_sources,
     )
@@ -230,7 +230,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.goal.brief_service as _test_goal_service
     import application.goal.experiment_plan_service as _test_experiment_plan_service
     import application.pipeline.pipeline_run_service as _test_pipeline_run_service
-    import application.source.collection_service as _test_collection_service
+    import application.source.workspace_service as _test_workspace_service
     import application.source.document_markdown_service as _test_document_markdown_service
     import application.source.document_preparation_service as _test_document_preparation_service
     import application.source.reference_extraction_service as _test_source_reference_extraction_service
@@ -247,7 +247,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     from controllers.feedback import dataset_snapshot_routes, feedback_dataset_routes
     from controllers.goal import experiment_plan_routes, goal_routes
     from controllers.source import (
-        collection_routes,
+        workspace_routes,
         pipeline_run_routes,
         reference_routes,
     )
@@ -303,7 +303,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             published_findings,
             [
-                "collection_service",
+                "workspace_service",
                 "ObjectiveRepo",
                 "objective_analysis_service",
                 "finding_feedback_service",
@@ -312,50 +312,50 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             research_planning,
             [
-                "collection_service",
+                "workspace_service",
                 "finding_dataset_service",
                 "experiment_plan_service",
             ],
         ),
         (finding_authoring, ["finding_authoring_service"]),
-        (finding_review, ["collection_service", "finding_feedback_service"]),
+        (finding_review, ["workspace_service", "finding_feedback_service"]),
         (
             paper_experiment_authoring,
             ["paper_experiment_authoring_service", "ChatRepo"],
         ),
         (objective_candidate, ["objective_authoring_service"]),
-        (objective_proposal, ["collection_service", "ObjectiveRepo", "PaperMapRepo"]),
+        (objective_proposal, ["workspace_service", "ObjectiveRepo", "PaperMapRepo"]),
         (
             objective_analysis,
             [
-                "collection_service",
+                "workspace_service",
                 "ObjectiveRepo",
                 "objective_authoring_service",
                 "objective_analysis_service",
             ],
         ),
-        (objective_derivation, ["collection_service", "objective_analysis_service"]),
-        (document_sources, ["collection_service", "SourceArtifactRepo"]),
+        (objective_derivation, ["workspace_service", "objective_analysis_service"]),
+        (document_sources, ["workspace_service", "SourceArtifactRepo"]),
         (
-            collection_context,
+            workspace_context,
             [
-                "collection_service",
+                "workspace_service",
                 "ObjectiveRepo",
                 "DocumentProfileRepo",
                 "PaperMapRepo",
                 "SourceArtifactRepo",
             ],
         ),
-        (research_scope, ["collection_service", "PaperMapRepo"]),
+        (research_scope, ["workspace_service", "PaperMapRepo"]),
         (_test_analysis_record_source, ["ObjectiveRepo"]),
         (
             _test_chat_session_service,
             [
                 "AnalysisJobRepo",
                 "ChatRepo",
-                "CollectionRepo",
+                "WorkspaceRepo",
                 "SourceArtifactRepo",
-                "collection_service",
+                "workspace_service",
             ],
         ),
         (
@@ -363,7 +363,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "DocumentProfileRepo",
                 "SourceArtifactRepo",
-                "collection_service",
+                "workspace_service",
             ],
         ),
         (
@@ -382,7 +382,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_experiment_query_service,
             [
-                "collection_service",
+                "workspace_service",
                 "ComparisonGroupRepo",
                 "ExperimentFindingRepo",
                 "ObjectiveExperimentSelectionRepo",
@@ -393,7 +393,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_objective_analysis_service,
             [
-                "collection_service",
+                "workspace_service",
                 "ObjectiveRepo",
                 "document_profile_service",
                 "experiment_analysis_service",
@@ -406,7 +406,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_finding_authoring_service,
             [
                 "ObjectiveRepo",
-                "collection_service",
+                "workspace_service",
                 "experiment_analysis_writer",
                 "experiment_query_service",
             ],
@@ -417,7 +417,7 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "ObjectiveRepo",
                 "PaperExperimentRepo",
                 "PaperMapRepo",
-                "collection_service",
+                "workspace_service",
                 "objective_input_service",
             ],
         ),
@@ -425,7 +425,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_objective_authoring_service,
             [
                 "ObjectiveRepo",
-                "collection_service",
+                "workspace_service",
                 "experiment_projection",
             ],
         ),
@@ -433,7 +433,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_objective_discovery_service,
             [
-                "collection_service",
+                "workspace_service",
                 "ObjectiveRepo",
                 "objective_candidate_service",
                 "objective_input_service",
@@ -445,17 +445,17 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "PaperMapRepo",
                 "SourceArtifactRepo",
-                "collection_service",
+                "workspace_service",
                 "document_profile_service",
                 "paper_research_map_service",
             ],
         ),
         (
             _test_paper_experiment_authoring_service,
-            ["SourceArtifactRepo", "collection_service", "experiment_analysis_writer"],
+            ["SourceArtifactRepo", "workspace_service", "experiment_analysis_writer"],
         ),
-        (_test_finding_feedback_service, ["collection_service", "FindingReviewRepo"]),
-        (_test_finding_dataset_service, ["collection_service", "ObjectiveRepo"]),
+        (_test_finding_feedback_service, ["workspace_service", "FindingReviewRepo"]),
+        (_test_finding_dataset_service, ["workspace_service", "ObjectiveRepo"]),
         (
             _test_finding_snapshot_service,
             ["ObjectiveRepo", "FindingReviewRepo", "experiment_projection"],
@@ -474,7 +474,7 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "FeedbackCaseRepo",
                 "FeedbackDatasetRepo",
                 "FeedbackDatasetSampleRepo",
-                "collection_service",
+                "workspace_service",
             ],
         ),
         (
@@ -483,30 +483,30 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "ChatRepo",
                 "DatasetSnapshotRepo",
                 "FeedbackCaseRepo",
-                "collection_service",
+                "workspace_service",
             ],
         ),
         (
             _test_feedback_case_service,
-            ["ChatRepo", "CollectionRepo", "FeedbackCaseRepo", "collection_service"],
+            ["ChatRepo", "WorkspaceRepo", "FeedbackCaseRepo", "workspace_service"],
         ),
-        (_test_goal_service, ["collection_service"]),
+        (_test_goal_service, ["workspace_service"]),
         (
             _test_experiment_plan_service,
-            ["ExperimentPlanRepo", "finding_snapshot_service", "collection_service"],
+            ["ExperimentPlanRepo", "finding_snapshot_service", "workspace_service"],
         ),
-        (_test_pipeline_run_service, ["PipelineRunRepo", "CollectionRepo"]),
+        (_test_pipeline_run_service, ["PipelineRunRepo", "WorkspaceRepo"]),
         (
-            _test_collection_service,
-            ["CollectionRepo"],
+            _test_workspace_service,
+            ["WorkspaceRepo"],
         ),
-        (_test_document_markdown_service, ["SourceArtifactRepo", "collection_service"]),
+        (_test_document_markdown_service, ["SourceArtifactRepo", "workspace_service"]),
         (
             _test_document_preparation_service,
             [
                 "DocumentProfileRepo",
                 "SourceArtifactRepo",
-                "collection_service",
+                "workspace_service",
                 "document_profile_service",
                 "pipeline_run_service",
             ],
@@ -514,9 +514,9 @@ def _isolate_application_module_dependencies(monkeypatch):
         (_test_source_reference_extraction_service, []),
         (
             _test_reference_workflow_service,
-            ["SourceArtifactRepo", "collection_service"],
+            ["SourceArtifactRepo", "workspace_service"],
         ),
-        (_test_source_import_service, ["CollectionRepo"]),
+        (_test_source_import_service, ["WorkspaceRepo"]),
         (chat_session_routes, ["chat_session_service"]),
         (
             document_routes,
@@ -549,13 +549,13 @@ def _isolate_application_module_dependencies(monkeypatch):
         (experiment_plan_routes, ["experiment_plan_service"]),
         (goal_routes, ["brief_service"]),
         (
-            collection_routes,
-            ["collection_service", "source_archive_service", "source_import_service"],
+            workspace_routes,
+            ["workspace_service", "source_archive_service", "source_import_service"],
         ),
         (
             pipeline_run_routes,
             [
-                "collection_service",
+                "workspace_service",
                 "pipeline_run_service",
             ],
         ),

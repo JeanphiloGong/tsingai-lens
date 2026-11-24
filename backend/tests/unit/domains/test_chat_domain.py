@@ -68,20 +68,20 @@ def test_approval_arguments_are_isolated_and_tampering_stops_execution() -> None
         approved.start("2026-10-29T00:01:00+00:00")
 
 
-def test_chat_session_preserves_immutable_owner_and_collection() -> None:
+def test_chat_session_preserves_immutable_owner_and_workspace() -> None:
     session = ChatSession.create(
         session_id="chat-1",
         user_id="user-1",
-        collection_id="col-1",
+        workspace_id="col-1",
         created_at="2026-08-19T00:00:00+00:00",
     )
 
     assert session.user_id == "user-1"
-    assert session.collection_id == "col-1"
+    assert session.workspace_id == "col-1"
     with pytest.raises(ValueError, match="session identity cannot be reassigned"):
         session.update(
             user_id="user-2",
-            collection_id="col-1",
+            workspace_id="col-1",
             updated_at="2026-08-19T00:01:00+00:00",
         )
 
@@ -163,7 +163,7 @@ def test_tool_call_rejects_invalid_state_transition() -> None:
         tool_call_id="call-1",
         session_id="chat-1",
         assistant_message_id="msg-2",
-        name="get_collection_context",
+        name="get_workspace_context",
         arguments={},
         risk=ToolRisk.READ,
     )
@@ -241,11 +241,11 @@ def test_user_message_preserves_traceable_source_context() -> None:
             resource_type="source",
             resource_id="doc-1:results",
             href=(
-                "/collections/col-1/documents/doc-1"
+                "/workspaces/col-1/documents/doc-1"
                 "?view=parsed-paper&source_ref=results&page=3"
             ),
         ),
-        collection_id="col-1",
+        workspace_id="col-1",
         document_id="doc-1",
         document_title="Paper A",
         source_kind="text_window",
@@ -271,7 +271,7 @@ def test_source_context_request_rejects_an_invalid_source_digest() -> None:
     with pytest.raises(ValueError, match="source_digest"):
         ChatSourceContextPayload(
             resource_ref={"resource_type": "source", "resource_id": "doc-1:results"},
-            collection_id="col-1",
+            workspace_id="col-1",
             document_id="doc-1",
             document_title="Paper A",
             source_kind="text_window",
@@ -289,7 +289,7 @@ def test_source_context_requires_a_matching_stable_source_reference() -> None:
                 resource_type="source",
                 resource_id="doc-1:another-source",
             ),
-            collection_id="col-1",
+            workspace_id="col-1",
             document_id="doc-1",
             document_title="Paper A",
             source_kind="text_window",

@@ -99,7 +99,7 @@ class PaperMapExtractionBudget:
 
 def extract_window_payloads(
     *,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     payloads: list[dict[str, Any]],
     paper_map_extractor: PaperResearchMapExtractor,
@@ -111,7 +111,7 @@ def extract_window_payloads(
     if len(payloads) <= 1 or _max_extraction_concurrency() == 1:
         return tuple(
             _extract_window_batch(
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 document_id=document_id,
                 payload=payload,
                 paper_map_extractor=paper_map_extractor,
@@ -127,7 +127,7 @@ def extract_window_payloads(
             executor.submit(
                 copy_context().run,
                 _extract_window_batch,
-                collection_id=collection_id,
+                workspace_id=workspace_id,
                 document_id=document_id,
                 payload=payload,
                 paper_map_extractor=paper_map_extractor,
@@ -224,7 +224,7 @@ def document_recovery_call_budget(
 
 def _extract_window_batch(
     *,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     payload: Mapping[str, Any],
     paper_map_extractor: PaperResearchMapExtractor,
@@ -251,9 +251,9 @@ def _extract_window_batch(
                 document_id=document_id, payload=payload, parsed=parsed,
             )
             logger.info(
-                "Paper map reading finished collection_id=%s document_id=%s "
+                "Paper map reading finished workspace_id=%s document_id=%s "
                 "window_id=%s reading_round=%s source_unit_ids=%s requests=%s",
-                collection_id, document_id, payload.get("window_id"),
+                workspace_id, document_id, payload.get("window_id"),
                 payload.get("reading_round", 1),
                 [unit.get("source_unit_id") for unit in payload.get("source_units") or ()],
                 request_count,
@@ -268,10 +268,10 @@ def _extract_window_batch(
             if attempt == 0 and failure_kind == "provider_unavailable":
                 continue
             logger.warning(
-                "Paper map reading incomplete collection_id=%s document_id=%s "
+                "Paper map reading incomplete workspace_id=%s document_id=%s "
                 "window_id=%s reading_round=%s source_unit_ids=%s "
                 "requests=%s failure_kind=%s",
-                collection_id, document_id, payload.get("window_id"),
+                workspace_id, document_id, payload.get("window_id"),
                 payload.get("reading_round", 1),
                 [unit.get("source_unit_id") for unit in payload.get("source_units") or ()],
                 request_count, failure_kind,
@@ -708,7 +708,7 @@ def _window_relationships_are_duplicates(
 ) -> bool:
     """Identify one paper-local axis repeated across overlapping windows."""
 
-    return property_matching.axis_collections_are_equivalent(
+    return property_matching.axis_workspaces_are_equivalent(
         left.varied_factors,
         right.varied_factors,
     ) and property_matching.axis_values_match(left.outcome, right.outcome)
@@ -862,7 +862,7 @@ def _claim_scope_for_document(
 
 def build_payloads(
     *,
-    collection_id: str,
+    workspace_id: str,
     document: Any,
     profile: Any,
     blocks: list[Any],
@@ -908,7 +908,7 @@ def build_payloads(
         return []
     roles = {item.role for item in selected_items}
     payload = paper_map_sources._build_window_payload(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         document=document,
         profile=profile,
         role=next(iter(roles)) if len(roles) == 1 else "overview",

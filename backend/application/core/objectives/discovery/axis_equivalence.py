@@ -49,7 +49,7 @@ def build_research_axis_canonicalization_prompt(
     user_prompt = (
         "TASK MODEL\n"
         "Classify the relationship between each candidate pair of neutral scientific "
-        "axes before collection objective grouping. This is pair classification, not "
+        "axes before workspace objective grouping. This is pair classification, not "
         "causal interpretation, direct-comparability judgment, objective wording, or "
         "evidence synthesis.\n\n"
         "INPUT SCHEMA\n"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from infra.persistence.file import collection_workspace as workspace_module
-from application.source import collection_service
+from infra.persistence.file import workspace_files as workspace_module
+from application.source import workspace_service
 
 import json
 from types import SimpleNamespace
@@ -31,9 +31,9 @@ def _request(
     goal_service,
     user_id: str='local-user',
     *,
-    collection_workspace,
+    workspace_files,
 ):
-    monkeypatch.setattr(workspace_module, "Workspace", collection_workspace, raising=False)
+    monkeypatch.setattr(workspace_module, "Workspace", workspace_files, raising=False)
     goals_controller.brief_service = goal_service
     return SimpleNamespace(
         state=SimpleNamespace(current_user={"user_id": user_id}),
@@ -42,18 +42,18 @@ def _request(
 
 @pytest.fixture()
 def goal_services(tmp_path, *, postgres_session_factory):
-    goal_service.collection_service = collection_service
+    goal_service.workspace_service = workspace_service
 
-    return collection_service, goal_service
+    return workspace_service, goal_service
 
 
 async def test_goals_route_returns_goal_contract(
     monkeypatch,
     goal_services,
     *,
-    collection_workspace,
+    workspace_files,
 ):
-    collection_service, goal_service = goal_services
+    workspace_service, goal_service = goal_services
 
     response = goals_controller.GoalIntakeResponse.model_validate(
         json.loads(
@@ -65,31 +65,31 @@ async def test_goals_route_returns_goal_contract(
                         intent="compare",
                         constraints={"substrate": "Al"},
                     ),
-                    user_id=_request(monkeypatch, goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
+                    user_id=_request(monkeypatch, goal_service, workspace_files=workspace_files).state.current_user["user_id"],
                 )
             ).body
         )["data"]
     )
 
-    collection = await collection_service.get_collection(
-        response.seed_collection.collection_id
+    workspace = await workspace_service.get_workspace(
+        response.seed_workspace.workspace_id
     )
 
     assert response.coverage_assessment.level == "direct"
     assert response.entry_recommendation.recommended_mode == "comparison"
-    assert response.seed_collection.source_channels == ["upload"]
-    assert response.seed_collection.seeded_document_count == 0
-    assert collection.collection.collection_id == response.seed_collection.collection_id
-    assert collection.documents == ()
+    assert response.seed_workspace.source_channels == ["upload"]
+    assert response.seed_workspace.seeded_document_count == 0
+    assert workspace.workspace.workspace_id == response.seed_workspace.workspace_id
+    assert workspace.documents == ()
 
 
 async def test_goals_route_returns_400_for_empty_goal_signal(
     monkeypatch,
     goal_services,
     *,
-    collection_workspace,
+    workspace_files,
 ):
-    _collection_service, goal_service = goal_services
+    _workspace_service, goal_service = goal_services
 
     with pytest.raises(RequestInvalidException) as exc_info:
         goals_controller.GoalIntakeResponse.model_validate(
@@ -103,7 +103,7 @@ async def test_goals_route_returns_400_for_empty_goal_signal(
                             constraints={},
                             context=None,
                         ),
-                        user_id=_request(monkeypatch, goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
+                        user_id=_request(monkeypatch, goal_service, workspace_files=workspace_files).state.current_user["user_id"],
                     )
                 ).body
             )["data"]

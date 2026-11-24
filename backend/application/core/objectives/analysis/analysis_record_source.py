@@ -17,7 +17,7 @@ def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
 
 async def should_read_experiment_projection(
     *,
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> bool:
@@ -28,14 +28,14 @@ async def should_read_experiment_projection(
     """
 
     analysis = await ObjectiveRepo.read_analysis(
-        collection_id, objective_id, analysis_version
+        workspace_id, objective_id, analysis_version
     )
     if analysis is None:
         raise ResourceNotFoundException(
             "Analysis snapshot not found.",
             data={
                 "code": "analysis_snapshot_not_found",
-                "collection_id": collection_id,
+                "workspace_id": workspace_id,
                 "objective_id": objective_id,
                 "analysis_version": analysis_version,
             },

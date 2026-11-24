@@ -8,15 +8,15 @@
 	import { authState } from './_shared/authState';
 
 	import {
-		createCollection,
-		collections,
-		deleteCollection,
-		fetchCollections,
-		getCollectionStatusGroup,
-		type Collection
-	} from '$lib/workspace/collections';
+		createWorkspace,
+		workspaces,
+		deleteWorkspace,
+		fetchWorkspaces,
+		getWorkspaceStatusGroup,
+		type Workspace
+	} from '$lib/workspace/workspaces';
 	import { language, t } from './_shared/i18n';
-	import { prepareCollectionDocument } from './_shared/pipelineRuns';
+	import { prepareWorkspaceDocument } from './_shared/pipelineRuns';
 
 	const statusFilters = ['all', 'complete', 'ready', 'processing', 'attention'] as const;
 	type StatusFilter = (typeof statusFilters)[number];
@@ -49,84 +49,84 @@
 	let createLoading = false;
 	let createError = '';
 	let notice = '';
-	let deletingCollectionId = '';
+	let deletingWorkspaceId = '';
 	let rowMessages: Record<string, { message: string; type: 'info' | 'error' }> = {};
 	let searchTerm = '';
 	let statusFilter: StatusFilter = 'all';
 	let openRowMenuId = '';
 	let rowMenuPanelStyle = '';
-	let collectionPollTimer: ReturnType<typeof setTimeout> | null = null;
+	let workspacePollTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
-	$: sortedCollections = [...$collections].sort(compareCollectionsByUpdated);
-	$: latestCollectionId = sortedCollections[0]?.collection_id ?? '';
-	$: visibleCollections = sortedCollections.filter((collection) => {
+	$: sortedWorkspaces = [...$workspaces].sort(compareWorkspacesByUpdated);
+	$: latestWorkspaceId = sortedWorkspaces[0]?.workspace_id ?? '';
+	$: visibleWorkspaces = sortedWorkspaces.filter((workspace) => {
 		const query = searchTerm.trim().toLowerCase();
 		const matchesQuery =
 			!query ||
-			collection.name?.toLowerCase().includes(query) ||
-			collection.description?.toLowerCase().includes(query);
+			workspace.name?.toLowerCase().includes(query) ||
+			workspace.description?.toLowerCase().includes(query);
 
-		return matchesQuery && matchesStatusFilter(collection, statusFilter);
+		return matchesQuery && matchesStatusFilter(workspace, statusFilter);
 	});
 	$: if (
 		$page.url?.pathname === '/' &&
-		$page.url.searchParams.get('create') === 'collection' &&
+		$page.url.searchParams.get('create') === 'workspace' &&
 		!isCreateOpen
 	) {
 		openCreate();
 	}
 
-	let hasLoadedCollections = false;
+	let hasLoadedWorkspaces = false;
 
-	$: if ($authState.status === 'authenticated' && !hasLoadedCollections) {
-		hasLoadedCollections = true;
-		void loadCollections();
+	$: if ($authState.status === 'authenticated' && !hasLoadedWorkspaces) {
+		hasLoadedWorkspaces = true;
+		void loadWorkspaces();
 	}
 
 	$: if ($authState.status === 'anonymous') {
-		clearCollectionPoll();
+		clearWorkspacePoll();
 		loading = false;
 	}
 
 	onMount(() => {
-		if ($authState.status === 'authenticated' && !hasLoadedCollections) {
-			hasLoadedCollections = true;
-			void loadCollections();
+		if ($authState.status === 'authenticated' && !hasLoadedWorkspaces) {
+			hasLoadedWorkspaces = true;
+			void loadWorkspaces();
 		}
 	});
 
 	onDestroy(() => {
-		clearCollectionPoll();
+		clearWorkspacePoll();
 	});
 
-	function clearCollectionPoll() {
-		if (collectionPollTimer) {
-			clearTimeout(collectionPollTimer);
-			collectionPollTimer = null;
+	function clearWorkspacePoll() {
+		if (workspacePollTimer) {
+			clearTimeout(workspacePollTimer);
+			workspacePollTimer = null;
 		}
 	}
 
-	function hasProcessingCollections(items: Collection[]) {
-		return items.some((collection) => getCollectionStatusGroup(collection) === 'processing');
+	function hasProcessingWorkspaces(items: Workspace[]) {
+		return items.some((workspace) => getWorkspaceStatusGroup(workspace) === 'processing');
 	}
 
-	function scheduleCollectionPoll() {
-		clearCollectionPoll();
-		collectionPollTimer = setTimeout(() => {
-			void loadCollections(false);
+	function scheduleWorkspacePoll() {
+		clearWorkspacePoll();
+		workspacePollTimer = setTimeout(() => {
+			void loadWorkspaces(false);
 		}, 2500);
 	}
 
-	async function loadCollections(showLoading = true) {
+	async function loadWorkspaces(showLoading = true) {
 		error = '';
 		if (showLoading) loading = true;
 		try {
-			const items = await fetchCollections();
-			if (hasProcessingCollections(items)) {
-				scheduleCollectionPoll();
+			const items = await fetchWorkspaces();
+			if (hasProcessingWorkspaces(items)) {
+				scheduleWorkspacePoll();
 			} else {
-				clearCollectionPoll();
+				clearWorkspacePoll();
 			}
 		} catch (err) {
 			error = errorMessage(err);
@@ -135,7 +135,7 @@
 		}
 	}
 
-	function compareCollectionsByUpdated(left: Collection, right: Collection) {
+	function compareWorkspacesByUpdated(left: Workspace, right: Workspace) {
 		const leftTime = left.updated_at ?? left.created_at ?? '';
 		const rightTime = right.updated_at ?? right.created_at ?? '';
 		return rightTime.localeCompare(leftTime);
@@ -167,7 +167,7 @@
 		description = '';
 		createError = '';
 
-		if ($page.url?.searchParams.get('create') === 'collection') {
+		if ($page.url?.searchParams.get('create') === 'workspace') {
 			void goto(resolve('/'), { replaceState: true, noScroll: true });
 		}
 	}
@@ -183,13 +183,13 @@
 
 		createLoading = true;
 		try {
-			const result = await createCollection({
+			const result = await createWorkspace({
 				name: name.trim(),
 				description: description.trim()
 			});
 			closeCreate();
-			await loadCollections();
-			await goto(resolve('/collections/[id]', { id: result.collection_id }));
+			await loadWorkspaces();
+			await goto(resolve('/workspaces/[id]', { id: result.workspace_id }));
 		} catch (err) {
 			createError = errorMessage(err);
 		} finally {
@@ -219,13 +219,13 @@
 		return $t('home.metricsPlaceholder');
 	}
 
-	function matchesStatusFilter(collection: Collection, filter: StatusFilter) {
+	function matchesStatusFilter(workspace: Workspace, filter: StatusFilter) {
 		if (filter === 'all') return true;
-		return getCollectionStatusGroup(collection) === filter;
+		return getWorkspaceStatusGroup(workspace) === filter;
 	}
 
-	function statusLabel(collection: Collection) {
-		const group = getCollectionStatusGroup(collection);
+	function statusLabel(workspace: Workspace) {
+		const group = getWorkspaceStatusGroup(workspace);
 		if (group === 'complete') return $t('home.statusDisplay.complete');
 		if (group === 'ready') return $t('home.statusDisplay.ready');
 		if (group === 'processing') return $t('home.statusDisplay.processing');
@@ -233,29 +233,29 @@
 		return $t('home.statusDisplay.pending');
 	}
 
-	function buildActionLabel(collection: Collection) {
-		const group = getCollectionStatusGroup(collection);
+	function buildActionLabel(workspace: Workspace) {
+		const group = getWorkspaceStatusGroup(workspace);
 		if (group === 'processing') return $t('home.actionProcessing');
 		if (group === 'ready') return $t('home.actionReady');
 		if (group === 'complete' || group === 'attention') return $t('home.actionRetryProcessing');
 		return $t('home.actionStartProcessing');
 	}
 
-	function isBuildActionDisabled(collection: Collection) {
-		const group = getCollectionStatusGroup(collection);
-		return group === 'processing' || group === 'ready' || !collection.paper_count;
+	function isBuildActionDisabled(workspace: Workspace) {
+		const group = getWorkspaceStatusGroup(workspace);
+		return group === 'processing' || group === 'ready' || !workspace.paper_count;
 	}
 
-	function buildActionTitle(collection: Collection) {
-		if (!collection.paper_count) return $t('home.indexNoFiles');
-		const group = getCollectionStatusGroup(collection);
+	function buildActionTitle(workspace: Workspace) {
+		if (!workspace.paper_count) return $t('home.indexNoFiles');
+		const group = getWorkspaceStatusGroup(workspace);
 		if (group === 'processing') return $t('home.actionProcessing');
 		if (group === 'ready') return $t('home.actionReadyTitle');
-		return buildActionLabel(collection);
+		return buildActionLabel(workspace);
 	}
 
-	function nextStep(collection: Collection) {
-		const group = getCollectionStatusGroup(collection);
+	function nextStep(workspace: Workspace) {
+		const group = getWorkspaceStatusGroup(workspace);
 		if (group === 'processing') {
 			return $t('home.nextProgress');
 		}
@@ -271,8 +271,8 @@
 		return $t('home.nextWorkspace');
 	}
 
-	function toggleRowMenu(collectionId: string, event: MouseEvent) {
-		if (openRowMenuId === collectionId) {
+	function toggleRowMenu(workspaceId: string, event: MouseEvent) {
+		if (openRowMenuId === workspaceId) {
 			openRowMenuId = '';
 			rowMenuPanelStyle = '';
 			return;
@@ -295,7 +295,7 @@
 			rowMenuPanelStyle = `--row-menu-top: ${Math.round(top)}px; --row-menu-left: ${Math.round(left)}px;`;
 		}
 
-		openRowMenuId = collectionId;
+		openRowMenuId = workspaceId;
 	}
 
 	function setRowMessage(id: string, message: string, type: 'info' | 'error' = 'info') {
@@ -307,28 +307,28 @@
 		}, 3000);
 	}
 
-	async function runBuild(collection: Collection) {
+	async function runBuild(workspace: Workspace) {
 		openRowMenuId = '';
-		const pendingDocuments = collection.documents.filter((document) => document.status !== 'ready');
-		if (!collection.documents.length) {
-			setRowMessage(collection.collection_id, $t('home.indexNoFiles'), 'error');
+		const pendingDocuments = workspace.documents.filter((document) => document.status !== 'ready');
+		if (!workspace.documents.length) {
+			setRowMessage(workspace.workspace_id, $t('home.indexNoFiles'), 'error');
 			return;
 		}
 		if (!pendingDocuments.length) {
-			setRowMessage(collection.collection_id, $t('home.indexStarted'));
+			setRowMessage(workspace.workspace_id, $t('home.indexStarted'));
 			return;
 		}
 
 		try {
-			setRowMessage(collection.collection_id, $t('home.indexing'));
+			setRowMessage(workspace.workspace_id, $t('home.indexing'));
 			const runs = await Promise.all(
 				pendingDocuments.map((document) =>
-					prepareCollectionDocument(collection.collection_id, document.document_id)
+					prepareWorkspaceDocument(workspace.workspace_id, document.document_id)
 				)
 			);
-			collections.update((items) =>
+			workspaces.update((items) =>
 				items.map((item) =>
-					item.collection_id === collection.collection_id
+					item.workspace_id === workspace.workspace_id
 						? {
 								...item,
 								status: 'running',
@@ -337,32 +337,32 @@
 						: item
 				)
 			);
-			scheduleCollectionPoll();
-			setRowMessage(collection.collection_id, $t('home.indexStarted'));
+			scheduleWorkspacePoll();
+			setRowMessage(workspace.workspace_id, $t('home.indexStarted'));
 		} catch (err) {
-			setRowMessage(collection.collection_id, errorMessage(err), 'error');
+			setRowMessage(workspace.workspace_id, errorMessage(err), 'error');
 		}
 	}
 
-	async function removeCollection(collection: Collection) {
+	async function removeWorkspace(workspace: Workspace) {
 		openRowMenuId = '';
-		if (deletingCollectionId) return;
+		if (deletingWorkspaceId) return;
 
-		const name = collection.name?.trim() || $t('collection.unknownName');
+		const name = workspace.name?.trim() || $t('workspace.unknownName');
 		if (!window.confirm($t('home.deleteConfirm', { name }))) {
 			return;
 		}
 
-		deletingCollectionId = collection.collection_id;
-		setRowMessage(collection.collection_id, $t('home.deleting'));
+		deletingWorkspaceId = workspace.workspace_id;
+		setRowMessage(workspace.workspace_id, $t('home.deleting'));
 
 		try {
-			await deleteCollection(collection.collection_id);
+			await deleteWorkspace(workspace.workspace_id);
 			setNotice($t('home.deleted', { name }));
 		} catch (err) {
-			setRowMessage(collection.collection_id, errorMessage(err), 'error');
+			setRowMessage(workspace.workspace_id, errorMessage(err), 'error');
 		} finally {
-			deletingCollectionId = '';
+			deletingWorkspaceId = '';
 		}
 	}
 </script>
@@ -379,10 +379,10 @@
 			<Plus size={16} aria-hidden="true" />
 			{$t('home.primaryAction')}
 		</button>
-		{#if latestCollectionId}
+		{#if latestWorkspaceId}
 			<a
 				class="home-button home-button--secondary"
-				href={resolve('/collections/[id]/documents', { id: latestCollectionId })}
+				href={resolve('/workspaces/[id]/documents', { id: latestWorkspaceId })}
 			>
 				<Upload size={16} aria-hidden="true" />
 				{$t('home.secondaryAction')}
@@ -396,28 +396,28 @@
 	</div>
 </section>
 
-<section class="recent-card" aria-labelledby="recent-collections-title">
+<section class="recent-card" aria-labelledby="recent-workspaces-title">
 	<div class="recent-card__header">
 		<div class="section-heading">
 			<span class="section-icon" aria-hidden="true"><Library size={20} /></span>
 			<div>
-				<h2 id="recent-collections-title">{$t('home.recentTitle')}</h2>
+				<h2 id="recent-workspaces-title">{$t('home.recentTitle')}</h2>
 				<p>{$t('home.recentSubtitle')}</p>
 			</div>
 		</div>
 		<div class="recent-controls">
-			<label class="sr-only" for="collection-search">{$t('home.searchLabel')}</label>
+			<label class="sr-only" for="workspace-search">{$t('home.searchLabel')}</label>
 			<div class="search-field">
 				<Search size={16} aria-hidden="true" />
 				<input
-					id="collection-search"
+					id="workspace-search"
 					bind:value={searchTerm}
 					type="search"
 					placeholder={$t('home.searchPlaceholder')}
 				/>
 			</div>
-			<label class="sr-only" for="collection-status-filter">{$t('home.filterLabel')}</label>
-			<select id="collection-status-filter" bind:value={statusFilter} class="filter-select">
+			<label class="sr-only" for="workspace-status-filter">{$t('home.filterLabel')}</label>
+			<select id="workspace-status-filter" bind:value={statusFilter} class="filter-select">
 				{#each statusFilters as filter (filter)}
 					<option value={filter}>{$t(`home.filter.${filter}`)}</option>
 				{/each}
@@ -437,20 +437,20 @@
 		<div class="home-status" role="status" aria-live="polite">{notice}</div>
 	{/if}
 
-	{#if !visibleCollections.length && !loading}
+	{#if !visibleWorkspaces.length && !loading}
 		<div class="empty-panel">
-			<h3>{$collections.length ? $t('home.noResultsTitle') : $t('home.emptyTitle')}</h3>
-			<p>{$collections.length ? $t('home.noResultsDesc') : $t('home.emptyDesc')}</p>
-			{#if !$collections.length}
+			<h3>{$workspaces.length ? $t('home.noResultsTitle') : $t('home.emptyTitle')}</h3>
+			<p>{$workspaces.length ? $t('home.noResultsDesc') : $t('home.emptyDesc')}</p>
+			{#if !$workspaces.length}
 				<button class="home-button home-button--primary" type="button" on:click={openCreate}>
 					<Plus size={16} aria-hidden="true" />
 					{$t('home.emptyCta')}
 				</button>
 			{/if}
 		</div>
-	{:else if visibleCollections.length}
-		<div class="collections-table-wrap">
-			<table class="collections-table">
+	{:else if visibleWorkspaces.length}
+		<div class="workspaces-table-wrap">
+			<table class="workspaces-table">
 				<thead>
 					<tr>
 						<th>{$t('home.tableName')}</th>
@@ -462,15 +462,15 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each visibleCollections as collection (collection.collection_id)}
-						{@const step = nextStep(collection)}
-						{@const statusGroup = getCollectionStatusGroup(collection)}
+					{#each visibleWorkspaces as workspace (workspace.workspace_id)}
+						{@const step = nextStep(workspace)}
+						{@const statusGroup = getWorkspaceStatusGroup(workspace)}
 						<tr>
 							<td>
-								<div class="collection-main">
-									<span>{collection.name || $t('collection.unknownName')}</span>
-									{#if collection.description}
-										<small>{collection.description}</small>
+								<div class="workspace-main">
+									<span>{workspace.name || $t('workspace.unknownName')}</span>
+									{#if workspace.description}
+										<small>{workspace.description}</small>
 									{/if}
 								</div>
 							</td>
@@ -482,19 +482,19 @@
 									class:attention={statusGroup === 'attention'}
 									class:neutral={statusGroup === 'neutral'}
 								>
-									{statusLabel(collection)}
+									{statusLabel(workspace)}
 								</span>
 							</td>
-							<td>{formatCount(collection.paper_count)}</td>
-							<td>{formatDate(collection.updated_at || collection.created_at)}</td>
+							<td>{formatCount(workspace.paper_count)}</td>
+							<td>{formatDate(workspace.updated_at || workspace.created_at)}</td>
 							<td>
 								<a
 									class="next-link"
 									href={resolve(
 										statusGroup === 'complete'
-											? '/collections/[id]/objectives'
-											: '/collections/[id]',
-										{ id: collection.collection_id }
+											? '/workspaces/[id]/objectives'
+											: '/workspaces/[id]',
+										{ id: workspace.workspace_id }
 									)}
 								>
 									{step}
@@ -505,7 +505,7 @@
 								<div class="row-actions">
 									<a
 										class="enter-link"
-										href={resolve('/collections/[id]', { id: collection.collection_id })}
+										href={resolve('/workspaces/[id]', { id: workspace.workspace_id })}
 										>{$t('home.actionEnter')}</a
 									>
 									<div class="row-menu">
@@ -513,30 +513,30 @@
 											class="icon-button"
 											type="button"
 											aria-label={$t('home.moreActions', {
-												name: collection.name || $t('collection.unknownName')
+												name: workspace.name || $t('workspace.unknownName')
 											})}
-											aria-expanded={openRowMenuId === collection.collection_id}
-											on:click={(event) => toggleRowMenu(collection.collection_id, event)}
+											aria-expanded={openRowMenuId === workspace.workspace_id}
+											on:click={(event) => toggleRowMenu(workspace.workspace_id, event)}
 										>
 											<Ellipsis size={16} aria-hidden="true" />
 										</button>
-										{#if openRowMenuId === collection.collection_id}
+										{#if openRowMenuId === workspace.workspace_id}
 											<div class="row-menu__panel" style={rowMenuPanelStyle}>
 												<button
 													type="button"
-													disabled={isBuildActionDisabled(collection)}
-													title={buildActionTitle(collection)}
-													on:click={() => runBuild(collection)}
+													disabled={isBuildActionDisabled(workspace)}
+													title={buildActionTitle(workspace)}
+													on:click={() => runBuild(workspace)}
 												>
-													{buildActionLabel(collection)}
+													{buildActionLabel(workspace)}
 												</button>
 												<button
 													type="button"
 													class="danger-menu-item"
-													disabled={deletingCollectionId === collection.collection_id}
-													on:click={() => removeCollection(collection)}
+													disabled={deletingWorkspaceId === workspace.workspace_id}
+													on:click={() => removeWorkspace(workspace)}
 												>
-													{deletingCollectionId === collection.collection_id
+													{deletingWorkspaceId === workspace.workspace_id
 														? $t('home.deleting')
 														: $t('home.actionDelete')}
 												</button>
@@ -544,13 +544,13 @@
 										{/if}
 									</div>
 								</div>
-								{#if rowMessages[collection.collection_id]}
+								{#if rowMessages[workspace.workspace_id]}
 									<div
-										class={`row-message ${rowMessages[collection.collection_id].type === 'error' ? 'row-message--error' : ''}`}
+										class={`row-message ${rowMessages[workspace.workspace_id].type === 'error' ? 'row-message--error' : ''}`}
 										role="status"
 										aria-live="polite"
 									>
-										{rowMessages[collection.collection_id].message}
+										{rowMessages[workspace.workspace_id].message}
 									</div>
 								{/if}
 							</td>
@@ -560,16 +560,16 @@
 			</table>
 		</div>
 
-		<div class="collection-list">
-			{#each visibleCollections as collection (collection.collection_id)}
-				{@const step = nextStep(collection)}
-				{@const statusGroup = getCollectionStatusGroup(collection)}
-				<article class="collection-list-card">
-					<div class="collection-list-card__header">
-						<div class="collection-main">
-							<span>{collection.name || $t('collection.unknownName')}</span>
-							{#if collection.description}
-								<small>{collection.description}</small>
+		<div class="workspace-list">
+			{#each visibleWorkspaces as workspace (workspace.workspace_id)}
+				{@const step = nextStep(workspace)}
+				{@const statusGroup = getWorkspaceStatusGroup(workspace)}
+				<article class="workspace-list-card">
+					<div class="workspace-list-card__header">
+						<div class="workspace-main">
+							<span>{workspace.name || $t('workspace.unknownName')}</span>
+							{#if workspace.description}
+								<small>{workspace.description}</small>
 							{/if}
 						</div>
 						<span
@@ -579,23 +579,23 @@
 							class:attention={statusGroup === 'attention'}
 							class:neutral={statusGroup === 'neutral'}
 						>
-							{statusLabel(collection)}
+							{statusLabel(workspace)}
 						</span>
 					</div>
-					<div class="collection-list-card__meta">
-						<span>{$t('home.tableDocs')}: {formatCount(collection.paper_count)}</span>
+					<div class="workspace-list-card__meta">
+						<span>{$t('home.tableDocs')}: {formatCount(workspace.paper_count)}</span>
 						<span
 							>{$t('home.tableUpdated')}: {formatDate(
-								collection.updated_at || collection.created_at
+								workspace.updated_at || workspace.created_at
 							)}</span
 						>
 					</div>
-					<div class="collection-list-card__actions">
+					<div class="workspace-list-card__actions">
 						<a
 							class="next-link"
 							href={resolve(
-								statusGroup === 'complete' ? '/collections/[id]/objectives' : '/collections/[id]',
-								{ id: collection.collection_id }
+								statusGroup === 'complete' ? '/workspaces/[id]/objectives' : '/workspaces/[id]',
+								{ id: workspace.workspace_id }
 							)}
 						>
 							{step}
@@ -603,17 +603,17 @@
 						</a>
 						<a
 							class="enter-link"
-							href={resolve('/collections/[id]', { id: collection.collection_id })}
+							href={resolve('/workspaces/[id]', { id: workspace.workspace_id })}
 							>{$t('home.actionEnter')}</a
 						>
 					</div>
-					{#if rowMessages[collection.collection_id]}
+					{#if rowMessages[workspace.workspace_id]}
 						<div
-							class={`row-message ${rowMessages[collection.collection_id].type === 'error' ? 'row-message--error' : ''}`}
+							class={`row-message ${rowMessages[workspace.workspace_id].type === 'error' ? 'row-message--error' : ''}`}
 							role="status"
 							aria-live="polite"
 						>
-							{rowMessages[collection.collection_id].message}
+							{rowMessages[workspace.workspace_id].message}
 						</div>
 					{/if}
 				</article>
@@ -644,7 +644,7 @@
 {#if isCreateOpen}
 	<dialog
 		class="modal create-dialog"
-		aria-labelledby="create-collection-title"
+		aria-labelledby="create-workspace-title"
 		bind:this={createDialog}
 		use:showCreateDialog
 		on:cancel|preventDefault={closeCreate}
@@ -652,13 +652,13 @@
 		on:click|self={closeCreate}
 	>
 		<div class="modal-header">
-			<h3 id="create-collection-title">{$t('create.title')}</h3>
+			<h3 id="create-workspace-title">{$t('create.title')}</h3>
 		</div>
 		<form class="modal-form" on:submit={submitCreate}>
 			<div class="field">
-				<label for="collection-name">{$t('create.nameLabel')}</label>
+				<label for="workspace-name">{$t('create.nameLabel')}</label>
 				<input
-					id="collection-name"
+					id="workspace-name"
 					class="input"
 					bind:value={name}
 					placeholder={$t('create.namePlaceholder')}
@@ -666,9 +666,9 @@
 				/>
 			</div>
 			<div class="field">
-				<label for="collection-desc">{$t('create.descLabel')}</label>
+				<label for="workspace-desc">{$t('create.descLabel')}</label>
 				<textarea
-					id="collection-desc"
+					id="workspace-desc"
 					class="textarea"
 					bind:value={description}
 					placeholder={$t('create.descPlaceholder')}
@@ -962,19 +962,19 @@
 		line-height: 22px;
 	}
 
-	.collections-table-wrap {
+	.workspaces-table-wrap {
 		overflow-x: auto;
 	}
 
-	.collections-table {
+	.workspaces-table {
 		width: 100%;
 		min-width: 820px;
 		border-collapse: collapse;
 		color: var(--text-primary);
 	}
 
-	.collections-table th,
-	.collections-table td {
+	.workspaces-table th,
+	.workspaces-table td {
 		height: 56px;
 		padding: 0 16px;
 		border-bottom: 1px solid #eef2f7;
@@ -986,7 +986,7 @@
 		white-space: nowrap;
 	}
 
-	.collections-table th {
+	.workspaces-table th {
 		height: 44px;
 		color: var(--text-secondary);
 		font-size: 12px;
@@ -994,31 +994,31 @@
 		line-height: 18px;
 	}
 
-	.collections-table tbody tr {
+	.workspaces-table tbody tr {
 		transition: background 0.18s ease;
 	}
 
-	.collections-table tbody tr:hover {
+	.workspaces-table tbody tr:hover {
 		background: #f8fafc;
 	}
 
-	.collections-table tbody tr:last-child td {
+	.workspaces-table tbody tr:last-child td {
 		border-bottom: 0;
 	}
 
-	.collection-main {
+	.workspace-main {
 		display: flex;
 		min-width: 0;
 		flex-direction: column;
 		gap: 2px;
 	}
 
-	.collection-main span {
+	.workspace-main span {
 		color: var(--text-primary);
 		font-weight: 600;
 	}
 
-	.collection-main small {
+	.workspace-main small {
 		max-width: 280px;
 		overflow: hidden;
 		color: var(--text-tertiary);
@@ -1175,7 +1175,7 @@
 		color: var(--danger-text);
 	}
 
-	.collection-list {
+	.workspace-list {
 		display: none;
 	}
 
@@ -1267,7 +1267,7 @@
 
 	:global(:root[data-theme='dark']) .recent-card,
 	:global(:root[data-theme='dark']) .future-card,
-	:global(:root[data-theme='dark']) .collection-list-card {
+	:global(:root[data-theme='dark']) .workspace-list-card {
 		border-color: var(--border-default);
 		background: var(--surface-card);
 	}
@@ -1282,14 +1282,14 @@
 		color: var(--text-primary);
 	}
 
-	:global(:root[data-theme='dark']) .collections-table tbody tr:hover,
+	:global(:root[data-theme='dark']) .workspaces-table tbody tr:hover,
 	:global(:root[data-theme='dark']) .row-menu__panel button:hover,
 	:global(:root[data-theme='dark']) .icon-button:hover {
 		background: rgba(90, 150, 255, 0.14);
 	}
 
-	:global(:root[data-theme='dark']) .collections-table th,
-	:global(:root[data-theme='dark']) .collections-table td {
+	:global(:root[data-theme='dark']) .workspaces-table th,
+	:global(:root[data-theme='dark']) .workspaces-table td {
 		border-bottom-color: var(--border-default);
 	}
 
@@ -1354,16 +1354,16 @@
 			padding: 20px;
 		}
 
-		.collections-table-wrap {
+		.workspaces-table-wrap {
 			display: none;
 		}
 
-		.collection-list {
+		.workspace-list {
 			display: grid;
 			gap: 12px;
 		}
 
-		.collection-list-card {
+		.workspace-list-card {
 			display: grid;
 			min-width: 0;
 			gap: 12px;
@@ -1373,8 +1373,8 @@
 			background: #fff;
 		}
 
-		.collection-list-card__header,
-		.collection-list-card__actions {
+		.workspace-list-card__header,
+		.workspace-list-card__actions {
 			display: flex;
 			align-items: flex-start;
 			justify-content: space-between;
@@ -1383,13 +1383,13 @@
 			gap: 12px;
 		}
 
-		.collection-list-card .collection-main {
+		.workspace-list-card .workspace-main {
 			flex: 1 1 160px;
 			max-width: 100%;
 			overflow-wrap: anywhere;
 		}
 
-		.collection-list-card__meta {
+		.workspace-list-card__meta {
 			display: grid;
 			gap: 4px;
 			color: var(--text-tertiary);

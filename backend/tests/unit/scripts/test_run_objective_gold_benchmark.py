@@ -112,7 +112,7 @@ def test_objective_benchmark_generates_canonical_prediction_report(
     def fake_export_prediction_bundle(
         *,
         backend_root,
-        collection_id,
+        workspace_id,
         source_output_dir,
         output_path,
     ):
@@ -149,7 +149,7 @@ def test_objective_benchmark_generates_canonical_prediction_report(
     )
     summary = benchmark.run_objective_gold_benchmark(
         backend_root=tmp_path,
-        collection_id="col_test",
+        workspace_id="col_test",
         gold_input_dir=tmp_path / "gold",
         benchmark_output_dir=tmp_path,
     )

@@ -6,7 +6,7 @@ Lens supports paper-first and question-first research while preserving one
 evidence-backed Core. The layers are:
 
 1. Goal Brief
-2. Collection and Document Source
+2. Workspace and Document Source
 3. Research Intelligence Core
 4. Goal Consumer and expert decision
 5. Derived views and follow-up work
@@ -16,12 +16,12 @@ evidence-backed Core. The layers are:
 ### Goal Brief
 
 Captures what the researcher wants to decide, the material/process/outcome
-scope, constraints, and uncertainty. It may create an empty Collection or draft
+scope, constraints, and uncertainty. It may create an empty Workspace or draft
 an Objective. It cannot claim Evidence or a Finding.
 
-### Collection and Document Source
+### Workspace and Document Source
 
-A Collection assembles papers. Each Document keeps its current file metadata and
+A Workspace assembles papers. Each Document keeps its current file metadata and
 readiness. Its preparation Pipeline Run produces a separate format-neutral Source
 tree, coarse Profile, and lightweight Paper Map. Adding one paper does not
 rebuild existing papers.

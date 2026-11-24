@@ -3,29 +3,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { language } from './i18n';
 
-const { collectionStore, fetchCollectionsMock, setCollections } = vi.hoisted(() => {
+const { workspaceStore, fetchWorkspacesMock, setWorkspaces } = vi.hoisted(() => {
 	const subscribers = new Set<(value: unknown[]) => void>();
 	let items: unknown[] = [];
 
 	return {
-		collectionStore: {
+		workspaceStore: {
 			subscribe(run: (value: unknown[]) => void) {
 				run(items);
 				subscribers.add(run);
 				return () => subscribers.delete(run);
 			}
 		},
-		fetchCollectionsMock: vi.fn(),
-		setCollections(nextItems: unknown[]) {
+		fetchWorkspacesMock: vi.fn(),
+		setWorkspaces(nextItems: unknown[]) {
 			items = nextItems;
 			for (const run of subscribers) run(items);
 		}
 	};
 });
 
-vi.mock('$lib/workspace/collections', () => ({
-	collections: collectionStore,
-	fetchCollections: fetchCollectionsMock
+vi.mock('$lib/workspace/workspaces', () => ({
+	workspaces: workspaceStore,
+	fetchWorkspaces: fetchWorkspacesMock
 }));
 
 const Launcher = (await import('./ResearchAgentLauncher.svelte')).default;
@@ -33,30 +33,30 @@ const Launcher = (await import('./ResearchAgentLauncher.svelte')).default;
 describe('ResearchAgentLauncher', () => {
 	beforeEach(() => {
 		language.set('en');
-		setCollections([]);
-		fetchCollectionsMock.mockReset();
-		fetchCollectionsMock.mockImplementation(async () => {
+		setWorkspaces([]);
+		fetchWorkspacesMock.mockReset();
+		fetchWorkspacesMock.mockImplementation(async () => {
 			const items = [
 				{
 					id: 'col_123',
-					collection_id: 'col_123',
+					workspace_id: 'col_123',
 					name: 'LPBF alloy papers',
 					status: 'uploaded',
 					paper_count: 10
 				}
 			];
-			setCollections(items);
+			setWorkspaces(items);
 			return items;
 		});
 	});
 
-	it('links directly to the current Collection Research Agent', async () => {
-		render(Launcher, { collectionId: 'col_123' });
+	it('links directly to the current Workspace Research Agent', async () => {
+		render(Launcher, { workspaceId: 'col_123' });
 
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Research Agent' }))
-			.toHaveAttribute('href', '/collections/col_123/assistant');
-		expect(fetchCollectionsMock).not.toHaveBeenCalled();
+			.toHaveAttribute('href', '/workspaces/col_123/assistant');
+		expect(fetchWorkspacesMock).not.toHaveBeenCalled();
 	});
 
 	it('asks for a research workspace before opening a global conversation', async () => {
@@ -69,7 +69,7 @@ describe('ResearchAgentLauncher', () => {
 			.toBeVisible();
 		await expect
 			.element(browserPage.getByRole('link', { name: /LPBF alloy papers/ }))
-			.toHaveAttribute('href', '/collections/col_123/assistant');
-		expect(fetchCollectionsMock).toHaveBeenCalledOnce();
+			.toHaveAttribute('href', '/workspaces/col_123/assistant');
+		expect(fetchWorkspacesMock).toHaveBeenCalledOnce();
 	});
 });

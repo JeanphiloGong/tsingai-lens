@@ -51,7 +51,7 @@ bounded table repair, model extraction, and route-scoped technical failures.
 source_validation.validate_source_fact checks each observation against the exact
 Source before it enters the same-paper working state.
 
-Extraction and validation alternate per Source; they are not a collection-wide
+Extraction and validation alternate per Source; they are not a workspace-wide
 "extract everything, then validate later" pass. Methods, captions, tables,
 figures, and Results may complete one another only inside the same document and
 only when a Source supplies an explicit identity or relationship. A paper map,
@@ -100,7 +100,7 @@ direction_candidate, or attribution_scope_candidate; they are hints for
 service checks, not accepted status.
 
 The model must not generate formal experiment/result IDs, database IDs,
-collection or Objective ownership, revision numbers, formal SourceReference
+workspace or Objective ownership, revision numbers, formal SourceReference
 objects, binding/relation status, or final direction/basis/causal decisions.
 `parse_paper_experiment_response` rejects those fields at the model-response
 boundary, and the service attaches request context and the Source catalog.

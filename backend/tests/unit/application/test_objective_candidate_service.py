@@ -156,35 +156,35 @@ def test_material_context_conflicts_are_strict_but_unknown_labels_remain_reviewa
     service = objective_candidate_service
 
     assert (
-        service._context_collection_compatibility(
+        service._context_workspace_compatibility(
             ("nickel foam",),
             ("nickel alloy",),
         ).value
         == "possible"
     )
     assert (
-        service._context_collection_compatibility(
+        service._context_workspace_compatibility(
             ("titanium alloy",),
             ("Ti-6Al-4V",),
         ).value
         == "possible"
     )
     assert (
-        service._context_collection_compatibility(
+        service._context_workspace_compatibility(
             ("titanium alloy",),
             ("stainless steel",),
         ).value
         == "possible"
     )
     assert (
-        service._context_collection_compatibility(
+        service._context_workspace_compatibility(
             ("316L stainless steel",),
             ("17-4PH stainless steel",),
         ).value
         == "incompatible"
     )
     assert (
-        service._context_collection_compatibility(
+        service._context_workspace_compatibility(
             ("316L stainless steel", "17-4PH stainless steel"),
             ("316L stainless steel",),
         ).value
@@ -249,7 +249,7 @@ def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -281,7 +281,7 @@ def test_missing_material_does_not_inherit_an_ambiguous_multi_material_scope():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -311,7 +311,7 @@ def test_missing_confidence_does_not_erase_supported_objective_confidence():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -338,7 +338,7 @@ def test_all_missing_confidence_remains_zero_with_an_explicit_reason():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -366,7 +366,7 @@ def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -397,7 +397,7 @@ def test_microstructure_theme_group_is_rejected_until_an_observation_is_specific
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -426,7 +426,7 @@ def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -496,7 +496,7 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=RejectingAxisExtractor(),
@@ -525,7 +525,7 @@ def test_tial6v4_notation_keeps_different_intervention_sets_separate():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-ti64-notation",
+        "workspace-ti64-notation",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -702,7 +702,7 @@ def test_distinct_thermal_processing_interventions_create_distinct_objectives():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-ti64-thermal-processing",
+        "workspace-ti64-thermal-processing",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=DistinctAxisClassifier(),
@@ -762,7 +762,7 @@ def test_shared_topic_preserves_different_joint_interventions():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-ti64-cooling",
+        "workspace-ti64-cooling",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=CoolingTopicClassifier(),
@@ -818,7 +818,7 @@ def test_hip_relations_keep_each_intervention_as_a_candidate():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-ti64-hip-topic",
+        "workspace-ti64-hip-topic",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=HipTopicClassifier(),
@@ -867,7 +867,7 @@ def test_laser_exposure_theme_does_not_rewrite_precise_axes():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-316l-topic-only",
+        "workspace-316l-topic-only",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=LaserExposureTopicClassifier(),
@@ -929,7 +929,7 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-316l-joint-factor",
+        "workspace-316l-joint-factor",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=LaserFactorClassifier(),
@@ -1033,7 +1033,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
     )
 
     objective_candidate_service.discover_candidate_facts(
-        "collection-accounting",
+        "workspace-accounting",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1101,7 +1101,7 @@ def test_shared_parent_theme_keeps_each_papers_complete_intervention():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-local-topic-bridges",
+        "workspace-local-topic-bridges",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=LocalTopicClassifier(),
@@ -1180,7 +1180,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-orientation",
+        "workspace-orientation",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=ContextAwareClassifier(),
@@ -1238,7 +1238,7 @@ def test_topic_only_pairs_are_classified_once_without_affecting_objectives():
         ),
     )
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-confirm-topic",
+        "workspace-confirm-topic",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=classifier,
@@ -1310,7 +1310,7 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-focused-outcome",
+        "workspace-focused-outcome",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=RelatedOutcomeClassifier(),
@@ -1360,7 +1360,7 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
     classifier = MartensiteAliasClassifier()
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-outcome-alias",
+        "workspace-outcome-alias",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=classifier,
@@ -1414,7 +1414,7 @@ def test_property_aliases_are_not_repeated_in_the_objective_outcomes():
         ),
     )
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-ductility-alias",
+        "workspace-ductility-alias",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=RejectModelAliases(),
@@ -1447,7 +1447,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1469,7 +1469,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 
-def test_multi_paper_collection_does_not_promote_single_paper_relationships():
+def test_multi_paper_workspace_does_not_promote_single_paper_relationships():
     skims = (
         _paper_map(
             document_id="paper-steel",
@@ -1484,7 +1484,7 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1513,7 +1513,7 @@ def test_candidate_build_derives_objective_identity_and_lineage_from_relationshi
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1549,7 +1549,7 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1582,7 +1582,7 @@ def test_compatible_relationship_group_builds_one_cross_paper_objective():
         for index in range(3)
     )
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1613,7 +1613,7 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
     extractor = _GroupingExtractor()
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=extractor,
@@ -1636,7 +1636,7 @@ def test_uncertain_claim_scope_cannot_seed_a_precise_candidate():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -1689,7 +1689,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=IncompleteAxisPlanExtractor(),
@@ -1750,7 +1750,7 @@ def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
     extractor = SemanticAxisExtractor()
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=extractor,
@@ -1802,7 +1802,7 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
     extractor = MaterialAxisExtractor()
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=extractor,
@@ -1841,7 +1841,7 @@ def test_objective_constraints_omit_the_relationship_axes():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -2085,7 +2085,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
     extractor = RecordingExtractor()
 
     objective_candidate_service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=extractor,
@@ -2161,7 +2161,7 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
     ]
 
     facts = service.discover_candidate_facts(
-        "collection-test",
+        "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
         axis_equivalence_classifier=FuzzyAliasExtractor(),
@@ -2219,7 +2219,7 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
     inventory = objective_candidate_service._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
-            collection_id="collection-test",
+            workspace_id="workspace-test",
             objective_id="objective-fewer-relationships",
             question="How does factor b affect outcome b?",
             material_scope=(),
@@ -2235,7 +2235,7 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
             source_relationship_ids=("relationship-b-1", "relationship-b-2"),
         ),
         ResearchObjective(
-            collection_id="collection-test",
+            workspace_id="workspace-test",
             objective_id="objective-more-relationships",
             question="How does factor a affect outcome a?",
             material_scope=(),
@@ -2291,7 +2291,7 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
     inventory = objective_candidate_service._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
-            collection_id="collection-test",
+            workspace_id="workspace-test",
             objective_id="objective-block",
             question="How does laser power affect relative density?",
             material_scope=(),
@@ -2307,7 +2307,7 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
             source_relationship_ids=("relationship-block-a", "relationship-block-b"),
         ),
         ResearchObjective(
-            collection_id="collection-test",
+            workspace_id="workspace-test",
             objective_id="objective-table",
             question="How does laser power affect relative density?",
             material_scope=(),
@@ -2375,7 +2375,7 @@ def test_ranking_prefers_structured_results_from_independent_papers():
     inventory = objective_candidate_service._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
-            collection_id="collection-test",
+            workspace_id="workspace-test",
             objective_id="objective-concentrated",
             question="How does laser power affect relative density?",
             material_scope=(),
@@ -2396,7 +2396,7 @@ def test_ranking_prefers_structured_results_from_independent_papers():
             ),
         ),
         ResearchObjective(
-            collection_id="collection-test",
+            workspace_id="workspace-test",
             objective_id="objective-distributed",
             question="How does laser power affect relative density?",
             material_scope=(),
@@ -2448,7 +2448,7 @@ def test_repeated_paper_relationships_share_one_candidate_lineage():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-repeated",
+        "workspace-repeated",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -2470,7 +2470,7 @@ def test_relationship_with_same_variable_and_outcome_is_not_a_candidate():
     )
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-self-relation",
+        "workspace-self-relation",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
         axis_equivalence_classifier=_GroupingExtractor(),
@@ -2527,7 +2527,7 @@ def test_candidate_review_set_is_bounded_without_losing_relationship_accounting(
     maps = tuple(paper_maps)
 
     facts = objective_candidate_service.discover_candidate_facts(
-        "collection-bounded-review",
+        "workspace-bounded-review",
         paper_maps=maps,
         document_inputs=_document_inputs(maps),
         axis_equivalence_classifier=DistinctAxisExtractor(),

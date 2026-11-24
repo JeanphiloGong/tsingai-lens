@@ -38,7 +38,7 @@ def api(monkeypatch):
     app.add_exception_handler(Exception, general_exception_handler)
     service = SimpleNamespace(
         summarize_finding=AsyncMock(),
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
+        workspace_service=SimpleNamespace(get_workspace_for_user=AsyncMock()),
     )
     service.summarize_objective_finding = service.summarize_finding
     monkeypatch.setattr(
@@ -50,13 +50,13 @@ def api(monkeypatch):
         yield client, service
 
 
-URL = "/api/v1/collections/col-1/objectives/obj-1/findings/f-1/summary"
+URL = "/api/v1/workspaces/col-1/objectives/obj-1/findings/f-1/summary"
 
 
 def test_summary_returns_versioned_citations_without_publishing(api):
     client, service = api
     service.summarize_finding.return_value = {
-        "collection_id": "col-1",
+        "workspace_id": "col-1",
         "objective_id": "obj-1",
         "finding_id": "f-1",
         "analysis_version": 2,
@@ -148,7 +148,7 @@ def test_optional_summary_errors_are_explicit_and_safe(api, error, status, code)
 @pytest.mark.parametrize(
     "access,code", [("anonymous", 200301), ("other-owner", 200201)]
 )
-def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
+def test_summary_uses_workspace_owner_authorization(access, code, monkeypatch):
     from infra.identity.client import SessionNotFoundError
     from application.core.objectives import analysis_service
 
@@ -163,12 +163,12 @@ def test_summary_uses_collection_owner_authorization(access, code, monkeypatch):
         resolve_session.side_effect = SessionNotFoundError()
     monkeypatch.setattr("infra.identity.client.Client.resolve_session", resolve_session)
     authorize = AsyncMock(
-        side_effect=ResourceNotFoundException("Collection not found.")
+        side_effect=ResourceNotFoundException("Workspace not found.")
     )
     monkeypatch.setattr(
         analysis_service,
-        "collection_service",
-        SimpleNamespace(get_collection_for_user=authorize),
+        "workspace_service",
+        SimpleNamespace(get_workspace_for_user=authorize),
     )
     repository = SimpleNamespace(read_objective=AsyncMock())
     monkeypatch.setattr(analysis_service, "ObjectiveRepo", repository)

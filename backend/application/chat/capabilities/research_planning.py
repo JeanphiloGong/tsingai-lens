@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.source import collection_service
+from application.source import workspace_service
 from application.evaluation import finding_dataset_service
 from application.goal import experiment_plan_service
 
@@ -45,7 +45,7 @@ class ProposeResearchPlanToolRequest(ResearchPlanStructure):
         max_length=32,
         description=(
             "Use only Evidence returned by inspecting one of the selected finding_ids. "
-            "Evidence from the collection overview may belong to other Findings and "
+            "Evidence from the workspace overview may belong to other Findings and "
             "cannot be attached to this plan without inspecting and selecting its parent."
         ),
     )
@@ -134,20 +134,20 @@ class InspectResearchPlansCapability:
         context: CapabilityExecutionContext,
         arguments: InspectResearchPlansToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         if arguments.plan_id is None:
             plans = await experiment_plan_service.list_plans(
-                context.collection_id,
+                context.workspace_id,
                 arguments.objective_id,
                 user_id=context.user_id,
             )
             records = [
                 {
                     "plan_id": item.plan_id,
-                    "collection_id": item.collection_id,
+                    "workspace_id": item.workspace_id,
                     "objective_id": item.objective_id,
                     "title": item.title,
                     "content": item.content,
@@ -175,13 +175,13 @@ class InspectResearchPlansCapability:
                     "history_scope": "current_revisions",
                 },
                 resource_refs=tuple(
-                    _plan_ref(context.collection_id, arguments.objective_id, item)
+                    _plan_ref(context.workspace_id, arguments.objective_id, item)
                     for item in records
                 ),
             )
         try:
             plan = await experiment_plan_service.read_plan(
-                context.collection_id,
+                context.workspace_id,
                 arguments.objective_id,
                 arguments.plan_id,
                 user_id=context.user_id,
@@ -199,7 +199,7 @@ class InspectResearchPlansCapability:
             )
         record = {
             "plan_id": plan.plan_id,
-            "collection_id": plan.collection_id,
+            "workspace_id": plan.workspace_id,
             "objective_id": plan.objective_id,
             "title": plan.title,
             "content": plan.content,
@@ -224,7 +224,7 @@ class InspectResearchPlansCapability:
                 "history_scope": "named_revision",
             },
             resource_refs=(
-                _plan_ref(context.collection_id, arguments.objective_id, record),
+                _plan_ref(context.workspace_id, arguments.objective_id, record),
             ),
         )
 
@@ -257,13 +257,13 @@ class ProposeResearchPlanCapability:
         context: CapabilityExecutionContext,
         arguments: ProposeResearchPlanToolRequest,
     ) -> ChatToolResult:
-        await collection_service.get_collection_for_user(
-            context.collection_id,
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
             context.user_id,
         )
         try:
             dataset = await finding_dataset_service.export_dataset(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 user_id=context.user_id,
             )
@@ -390,7 +390,7 @@ class ProposeResearchPlanCapability:
                 "kind": "evidence",
                 "label": evidence_labels[evidence_id],
                 "href": _evidence_href(
-                    context.collection_id,
+                    context.workspace_id,
                     evidence[evidence_id],
                 ),
             }
@@ -409,7 +409,7 @@ class ProposeResearchPlanCapability:
                     f"{arguments.objective_id}:{source_analysis_version}:{finding_id}"
                 ),
                 href=(
-                    f"/collections/{context.collection_id}/objectives/"
+                    f"/workspaces/{context.workspace_id}/objectives/"
                     f"{arguments.objective_id}?finding_id={finding_id}"
                 ),
             )
@@ -421,7 +421,7 @@ class ProposeResearchPlanCapability:
                 ChatResourceRef(
                     resource_type="evidence",
                     resource_id=f"{arguments.objective_id}:{evidence_id}",
-                    href=_evidence_href(context.collection_id, item),
+                    href=_evidence_href(context.workspace_id, item),
                 )
             )
             document_id = item["document_id"]
@@ -434,7 +434,7 @@ class ProposeResearchPlanCapability:
                             f"{document_id}:{item['source_kind']}:" f"{source_ref}"
                         ),
                         href=(
-                            f"/collections/{context.collection_id}/documents/"
+                            f"/workspaces/{context.workspace_id}/documents/"
                             f"{document_id}?"
                             + urlencode(
                                 {"view": "parsed-paper", "source_ref": source_ref}
@@ -505,7 +505,7 @@ class CreateResearchPlanCapability:
 
         try:
             plan = await experiment_plan_service.create_agent_plan(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 title=arguments.title,
                 content=current.data["content"],
@@ -560,7 +560,7 @@ class ReviseResearchPlanCapability:
             return error
         try:
             plan = await experiment_plan_service.update_plan(
-                collection_id=context.collection_id,
+                workspace_id=context.workspace_id,
                 objective_id=arguments.objective_id,
                 plan_id=arguments.parent_plan_id,
                 title=arguments.title,
@@ -691,7 +691,7 @@ def _saved_plan_result(
 ) -> ChatToolResult:
     record = {
         "plan_id": plan.plan_id,
-        "collection_id": plan.collection_id,
+        "workspace_id": plan.workspace_id,
         "objective_id": plan.objective_id,
         "title": plan.title,
         "content": plan.content,
@@ -707,7 +707,7 @@ def _saved_plan_result(
         "structured_plan": plan.structured_plan,
         "updated_by": plan.updated_by,
     }
-    refs = [_plan_ref(context.collection_id, objective_id, record)]
+    refs = [_plan_ref(context.workspace_id, objective_id, record)]
     refs.extend(
         ref
         for ref in current.resource_refs
@@ -825,15 +825,15 @@ def _cell(value: str) -> str:
     return " ".join(value.replace("|", "\\|").split())
 
 
-def _evidence_href(collection_id: str, evidence: Mapping[str, Any]) -> str:
+def _evidence_href(workspace_id: str, evidence: Mapping[str, Any]) -> str:
     return (
-        f"/collections/{collection_id}/documents/{evidence['document_id']}"
+        f"/workspaces/{workspace_id}/documents/{evidence['document_id']}"
         f"?evidence_id={evidence['evidence_id']}"
     )
 
 
 def _plan_ref(
-    collection_id: str,
+    workspace_id: str,
     objective_id: str,
     plan: Mapping[str, Any],
 ) -> ChatResourceRef:
@@ -842,7 +842,7 @@ def _plan_ref(
         resource_type="research_plan",
         resource_id=plan_id,
         href=(
-            f"/collections/{collection_id}/objectives/{objective_id}"
+            f"/workspaces/{workspace_id}/objectives/{objective_id}"
             f"?plan_id={plan_id}"
         ),
     )

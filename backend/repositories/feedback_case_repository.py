@@ -56,7 +56,7 @@ class FeedbackCaseRepository:
                 job_id=row.job_id,
                 feedback_id=row.feedback_id,
                 session_id=row.session_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 anchor_message_id=row.anchor_message_id,
                 problem_type=row.problem_type,
                 confidence=float(row.confidence),
@@ -125,7 +125,7 @@ class FeedbackCaseRepository:
             if row is None:
                 row = FeedbackCaseORM(
                     case_id=f"case_{uuid4().hex[:32]}",
-                    collection_id=result.collection_id,
+                    workspace_id=result.workspace_id,
                     session_id=result.session_id,
                     anchor_message_id=result.anchor_message_id,
                     source_signal_ids=list(signals),
@@ -138,8 +138,8 @@ class FeedbackCaseRepository:
                 )
                 db.add(row)
             else:
-                if row.collection_id != result.collection_id:
-                    raise ValueError("feedback case identity cannot change collection")
+                if row.workspace_id != result.workspace_id:
+                    raise ValueError("feedback case identity cannot change workspace")
                 row.source_signal_ids = list(
                     _ordered_unique(tuple(row.source_signal_ids or ()) + signals)
                 )
@@ -167,7 +167,7 @@ class FeedbackCaseRepository:
             job_row.heartbeat_at = None
             return FeedbackCase(
                 case_id=row.case_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 session_id=row.session_id,
                 anchor_message_id=row.anchor_message_id,
                 source_signal_ids=tuple(row.source_signal_ids or ()),
@@ -195,7 +195,7 @@ class FeedbackCaseRepository:
                 signal_id=row.signal_id,
                 signal_type=row.signal_type,
                 session_id=row.session_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 anchor_message_id=row.anchor_message_id,
                 trigger_message_id=row.trigger_message_id,
                 problem_type=row.problem_type,
@@ -265,7 +265,7 @@ class FeedbackCaseRepository:
             if row is None:
                 row = FeedbackCaseORM(
                     case_id=f"case_{uuid4().hex[:32]}",
-                    collection_id=result.collection_id,
+                    workspace_id=result.workspace_id,
                     session_id=result.session_id,
                     anchor_message_id=result.anchor_message_id,
                     source_signal_ids=list(signals),
@@ -279,8 +279,8 @@ class FeedbackCaseRepository:
                 )
                 db.add(row)
             else:
-                if row.collection_id != result.collection_id:
-                    raise ValueError("feedback case identity cannot change collection")
+                if row.workspace_id != result.workspace_id:
+                    raise ValueError("feedback case identity cannot change workspace")
                 row.source_signal_ids = list(
                     _ordered_unique(tuple(row.source_signal_ids or ()) + signals)
                 )
@@ -309,7 +309,7 @@ class FeedbackCaseRepository:
             job_row.heartbeat_at = None
             return FeedbackCase(
                 case_id=row.case_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 session_id=row.session_id,
                 anchor_message_id=row.anchor_message_id,
                 source_signal_ids=tuple(row.source_signal_ids or ()),
@@ -337,7 +337,7 @@ class FeedbackCaseRepository:
                 signal_id=row.signal_id,
                 signal_type=row.signal_type,
                 session_id=row.session_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 tool_call_id=row.tool_call_id,
                 assistant_message_id=row.assistant_message_id,
                 result_message_id=row.result_message_id,
@@ -415,7 +415,7 @@ class FeedbackCaseRepository:
             if row is None:
                 row = FeedbackCaseORM(
                     case_id=f"case_{uuid4().hex[:32]}",
-                    collection_id=result.collection_id,
+                    workspace_id=result.workspace_id,
                     session_id=result.session_id,
                     anchor_message_id=anchor_message_id,
                     source_signal_ids=list(signals),
@@ -430,8 +430,8 @@ class FeedbackCaseRepository:
                 )
                 db.add(row)
             else:
-                if row.collection_id != result.collection_id:
-                    raise ValueError("feedback case identity cannot change collection")
+                if row.workspace_id != result.workspace_id:
+                    raise ValueError("feedback case identity cannot change workspace")
                 row.source_signal_ids = list(
                     _ordered_unique(tuple(row.source_signal_ids or ()) + signals)
                 )
@@ -460,7 +460,7 @@ class FeedbackCaseRepository:
             job_row.heartbeat_at = None
             return FeedbackCase(
                 case_id=row.case_id,
-                collection_id=row.collection_id,
+                workspace_id=row.workspace_id,
                 session_id=row.session_id,
                 anchor_message_id=row.anchor_message_id,
                 source_signal_ids=tuple(row.source_signal_ids or ()),
@@ -482,7 +482,7 @@ class FeedbackCaseRepository:
             return (
                 FeedbackCase(
                     case_id=row.case_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     session_id=row.session_id,
                     anchor_message_id=row.anchor_message_id,
                     source_signal_ids=tuple(row.source_signal_ids or ()),
@@ -521,7 +521,7 @@ class FeedbackCaseRepository:
                     job_id=row.job_id,
                     feedback_id=row.feedback_id,
                     session_id=row.session_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     anchor_message_id=row.anchor_message_id,
                     problem_type=row.problem_type,
                     confidence=float(row.confidence),
@@ -575,7 +575,7 @@ class FeedbackCaseRepository:
                     signal_id=row.signal_id,
                     signal_type=row.signal_type,
                     session_id=row.session_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     anchor_message_id=row.anchor_message_id,
                     trigger_message_id=row.trigger_message_id,
                     problem_type=row.problem_type,
@@ -630,7 +630,7 @@ class FeedbackCaseRepository:
                     signal_id=row.signal_id,
                     signal_type=row.signal_type,
                     session_id=row.session_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     tool_call_id=row.tool_call_id,
                     assistant_message_id=row.assistant_message_id,
                     result_message_id=row.result_message_id,
@@ -672,8 +672,8 @@ class FeedbackCaseRepository:
     async def list_cases(
         self,
         *,
-        collection_id: str | None = None,
-        collection_ids: tuple[str, ...] | None = None,
+        workspace_id: str | None = None,
+        workspace_ids: tuple[str, ...] | None = None,
         status: str | None = None,
         problem_type: str | None = None,
         limit: int | None = 50,
@@ -682,13 +682,13 @@ class FeedbackCaseRepository:
         if limit is not None and limit < 0 or offset < 0:
             raise ValueError("limit and offset must be non-negative")
         statement = select(FeedbackCaseORM)
-        if collection_id is not None:
-            statement = statement.where(FeedbackCaseORM.collection_id == collection_id)
-        elif collection_ids is not None:
-            if not collection_ids:
+        if workspace_id is not None:
+            statement = statement.where(FeedbackCaseORM.workspace_id == workspace_id)
+        elif workspace_ids is not None:
+            if not workspace_ids:
                 return ()
             statement = statement.where(
-                FeedbackCaseORM.collection_id.in_(collection_ids)
+                FeedbackCaseORM.workspace_id.in_(workspace_ids)
             )
         if status is not None:
             statement = statement.where(FeedbackCaseORM.status == status)
@@ -778,7 +778,7 @@ class FeedbackCaseRepository:
             return tuple(
                 FeedbackCase(
                     case_id=row.case_id,
-                    collection_id=row.collection_id,
+                    workspace_id=row.workspace_id,
                     session_id=row.session_id,
                     anchor_message_id=row.anchor_message_id,
                     source_signal_ids=tuple(row.source_signal_ids or ()),
@@ -1057,14 +1057,14 @@ async def _save_result_row(
             by_job.job_id,
             by_job.feedback_id,
             by_job.session_id,
-            by_job.collection_id,
+            by_job.workspace_id,
             by_job.anchor_message_id,
         )
         requested_identity = (
             result.job_id,
             result.feedback_id,
             result.session_id,
-            result.collection_id,
+            result.workspace_id,
             result.anchor_message_id,
         )
         if existing_identity != requested_identity:
@@ -1076,14 +1076,14 @@ async def _save_result_row(
             existing.job_id,
             existing.feedback_id,
             existing.session_id,
-            existing.collection_id,
+            existing.workspace_id,
             existing.anchor_message_id,
         )
         requested_identity = (
             result.job_id,
             result.feedback_id,
             result.session_id,
-            result.collection_id,
+            result.workspace_id,
             result.anchor_message_id,
         )
         if identity != requested_identity:
@@ -1095,7 +1095,7 @@ async def _save_result_row(
     row.job_id = result.job_id
     row.feedback_id = result.feedback_id
     row.session_id = result.session_id
-    row.collection_id = result.collection_id
+    row.workspace_id = result.workspace_id
     row.anchor_message_id = result.anchor_message_id
     row.problem_type = result.problem_type
     row.confidence = result.confidence
@@ -1126,7 +1126,7 @@ async def _save_correction_result_row(
             by_job.signal_id,
             by_job.signal_type,
             by_job.session_id,
-            by_job.collection_id,
+            by_job.workspace_id,
             by_job.anchor_message_id,
             by_job.trigger_message_id,
         )
@@ -1135,7 +1135,7 @@ async def _save_correction_result_row(
             result.signal_id,
             result.signal_type,
             result.session_id,
-            result.collection_id,
+            result.workspace_id,
             result.anchor_message_id,
             result.trigger_message_id,
         )
@@ -1149,7 +1149,7 @@ async def _save_correction_result_row(
             existing.signal_id,
             existing.signal_type,
             existing.session_id,
-            existing.collection_id,
+            existing.workspace_id,
             existing.anchor_message_id,
             existing.trigger_message_id,
         )
@@ -1158,7 +1158,7 @@ async def _save_correction_result_row(
             result.signal_id,
             result.signal_type,
             result.session_id,
-            result.collection_id,
+            result.workspace_id,
             result.anchor_message_id,
             result.trigger_message_id,
         )
@@ -1172,7 +1172,7 @@ async def _save_correction_result_row(
     row.signal_id = result.signal_id
     row.signal_type = result.signal_type
     row.session_id = result.session_id
-    row.collection_id = result.collection_id
+    row.workspace_id = result.workspace_id
     row.anchor_message_id = result.anchor_message_id
     row.trigger_message_id = result.trigger_message_id
     row.problem_type = result.problem_type
@@ -1203,7 +1203,7 @@ async def _save_tool_failure_result_row(
             by_job.job_id,
             by_job.signal_id,
             by_job.session_id,
-            by_job.collection_id,
+            by_job.workspace_id,
             by_job.tool_call_id,
             by_job.assistant_message_id,
             by_job.result_message_id,
@@ -1212,7 +1212,7 @@ async def _save_tool_failure_result_row(
             result.job_id,
             result.signal_id,
             result.session_id,
-            result.collection_id,
+            result.workspace_id,
             result.tool_call_id,
             result.assistant_message_id,
             result.result_message_id,
@@ -1226,7 +1226,7 @@ async def _save_tool_failure_result_row(
             existing.job_id,
             existing.signal_id,
             existing.session_id,
-            existing.collection_id,
+            existing.workspace_id,
             existing.tool_call_id,
             existing.assistant_message_id,
             existing.result_message_id,
@@ -1235,7 +1235,7 @@ async def _save_tool_failure_result_row(
             result.job_id,
             result.signal_id,
             result.session_id,
-            result.collection_id,
+            result.workspace_id,
             result.tool_call_id,
             result.assistant_message_id,
             result.result_message_id,
@@ -1252,7 +1252,7 @@ async def _save_tool_failure_result_row(
     row.signal_id = result.signal_id
     row.signal_type = result.signal_type
     row.session_id = result.session_id
-    row.collection_id = result.collection_id
+    row.workspace_id = result.workspace_id
     row.tool_call_id = result.tool_call_id
     row.assistant_message_id = result.assistant_message_id
     row.result_message_id = result.result_message_id

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from exceptions import ResourceNotFoundException
 from infra.persistence.database import AsyncSessionLocal
-from repositories.collection_repository import CollectionRepo
+from repositories.workspace_repository import WorkspaceRepo
 from infra.execution_stats import ExecutionStats
 from repositories.pipeline_run_repository import (
     ExecutionTimestamps,
@@ -52,7 +52,7 @@ from repositories.pipeline_run_repository import PipelineRunRepo
 
 
 async def create_run(
-    collection_id: str,
+    workspace_id: str,
     pipeline_name: str,
     *,
     scope_type: str,
@@ -62,7 +62,7 @@ async def create_run(
     context: Mapping[str, Any] | None = None,
 ) -> PipelineRun:
     run = _new_run(
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         pipeline_name=pipeline_name,
         scope_type=scope_type,
         scope_id=scope_id,
@@ -76,7 +76,7 @@ async def create_run(
 
 async def get_or_create_document_run(
     *,
-    collection_id: str,
+    workspace_id: str,
     document_id: str,
     pipeline_name: str,
     input_fingerprint: str,
@@ -88,7 +88,7 @@ async def get_or_create_document_run(
         raise ValueError("document run requires document and input fingerprint")
     run, created = await PipelineRunRepo.get_or_create_document_run(
         _new_run(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             pipeline_name=pipeline_name,
             scope_type="document",
             scope_id=document_id,
@@ -101,22 +101,22 @@ async def get_or_create_document_run(
     return run, created
 
 
-async def get_or_create_collection_run(
+async def get_or_create_workspace_run(
     *,
-    collection_id: str,
+    workspace_id: str,
     pipeline_name: str,
     input_fingerprint: str,
     mode: str = "standard",
     context: Mapping[str, Any] | None = None,
 ) -> tuple[PipelineRun, bool]:
     if not input_fingerprint:
-        raise ValueError("collection run requires an input fingerprint")
-    run, created = await PipelineRunRepo.get_or_create_collection_run(
+        raise ValueError("workspace run requires an input fingerprint")
+    run, created = await PipelineRunRepo.get_or_create_workspace_run(
         _new_run(
-            collection_id=collection_id,
+            workspace_id=workspace_id,
             pipeline_name=pipeline_name,
-            scope_type="collection",
-            scope_id=collection_id,
+            scope_type="workspace",
+            scope_id=workspace_id,
             mode=mode,
             input_fingerprint=input_fingerprint,
             context=context,
@@ -133,7 +133,7 @@ async def get_run(run_id: str, *, user_id: str) -> PipelineRun:
             "Pipeline run not found.",
             data={"code": "pipeline_run_not_found", "run_id": run_id},
         )
-    if not await CollectionRepo.collection_belongs_to_user(run.collection_id, user_id):
+    if not await WorkspaceRepo.workspace_belongs_to_user(run.workspace_id, user_id):
         raise ResourceNotFoundException(
             "Pipeline run not found.",
             data={"code": "pipeline_run_not_found", "run_id": run_id},
@@ -142,20 +142,20 @@ async def get_run(run_id: str, *, user_id: str) -> PipelineRun:
 
 
 async def list_runs(
-    collection_id: str,
+    workspace_id: str,
     status: str | None = None,
     limit: int | None = None,
     offset: int = 0,
     *,
     user_id: str,
 ) -> list[PipelineRunSummary]:
-    if not await CollectionRepo.collection_belongs_to_user(collection_id, user_id):
+    if not await WorkspaceRepo.workspace_belongs_to_user(workspace_id, user_id):
         raise ResourceNotFoundException(
-            "Collection not found.",
-            data={"code": "collection_not_found", "collection_id": collection_id},
+            "Workspace not found.",
+            data={"code": "workspace_not_found", "workspace_id": workspace_id},
         )
     return await PipelineRunRepo.list_runs(
-        collection_id=collection_id, status=status, limit=limit, offset=offset,
+        workspace_id=workspace_id, status=status, limit=limit, offset=offset,
     )
 
 
@@ -262,7 +262,7 @@ async def finish_run(
 
 def _new_run(
     *,
-    collection_id: str,
+    workspace_id: str,
     pipeline_name: str,
     scope_type: str,
     scope_id: str,
@@ -272,13 +272,13 @@ def _new_run(
 ) -> PipelineRun:
     now = _now_iso()
     dependencies = _PIPELINE_NODES.get(pipeline_name, {})
-    if not all((pipeline_name, mode, collection_id, scope_type, scope_id)):
+    if not all((pipeline_name, mode, workspace_id, scope_type, scope_id)):
         raise ValueError("pipeline run identity is required")
     return PipelineRun(
         pipeline_name=pipeline_name,
         mode=mode,
         run_id=f"run_{uuid4().hex[:12]}",
-        collection_id=collection_id,
+        workspace_id=workspace_id,
         scope_type=scope_type,
         scope_id=scope_id,
         status=PipelineRunStatus.QUEUED,
@@ -423,7 +423,7 @@ def _semantic_node(run: PipelineRun, phase: str | None) -> str | None:
 __all__ = [
     "create_run",
     "get_or_create_document_run",
-    "get_or_create_collection_run",
+    "get_or_create_workspace_run",
     "get_run",
     "list_runs",
     "update_run",

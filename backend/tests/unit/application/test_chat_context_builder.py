@@ -36,7 +36,7 @@ async def test_three_compactions_retain_earlier_conditions_and_new_observations(
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
 
-    active = _user("active", "Compare Inconel 718 elongation using only the collection; density >= 99.9%.")
+    active = _user("active", "Compare Inconel 718 elongation using only the workspace; density >= 99.9%.")
     notes = {"scope": active.content, "checks": [{
         "statement": "Paper A reports an as-built measurement; Source methods-A.",
         "conditions": "Liquid-floating process; orientation unknown.",
@@ -489,7 +489,7 @@ def _tool_pair(
         message_id=f"msg-{call_id}",
         session_id="chat-1",
         content="",
-        tool_calls=(ChatToolRequest(tool_call_id=call_id, name="get_collection_context", arguments={}, position=0),),
+        tool_calls=(ChatToolRequest(tool_call_id=call_id, name="get_workspace_context", arguments={}, position=0),),
 
 
         created_at="2026-08-19T00:00:00+00:00",
@@ -497,7 +497,7 @@ def _tool_pair(
     tool_result = ChatToolResult(
         tool_call_id=call_id,
         status=ToolResultStatus.SUCCEEDED,
-        data=payload or {"collection_id": "col-1"},
+        data=payload or {"workspace_id": "col-1"},
     )
     result = ChatMessage(
         message_id=f"msg-result-{call_id}",
@@ -624,7 +624,7 @@ def test_rollover_keeps_lineage_without_source_text_or_errors() -> None:
     resource_ref = ChatResourceRef(
         resource_type="source",
         resource_id="paper-1:methods-3",
-        href="/collections/col-1/documents/paper-1?source_ref=methods-3",
+        href="/workspaces/col-1/documents/paper-1?source_ref=methods-3",
     )
     assert result.tool_result is not None
     result = replace(
@@ -669,7 +669,7 @@ def test_rollover_preserves_selected_source_and_pending_approval_lineage() -> No
     active = replace(_user("active", "Check this measured result."), source_contexts=(
         ChatSourceContext(
             resource_ref=ChatResourceRef("source", "paper-1:results-2"),
-            collection_id="col-1", document_id="paper-1", document_title="Paper 1",
+            workspace_id="col-1", document_id="paper-1", document_title="Paper 1",
             source_kind="text_window", source_ref="results-2", page=2, quote="The measured elongation was 8%.",
         ),
     ))
@@ -798,10 +798,10 @@ def test_working_notes_with_no_room_fail_without_returning_an_oversized_summary(
     from application.chat.model import ResearchWorkingNotesModelOutput
 
     runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
-    notes = ResearchWorkingNotesModelOutput(scope="Only collection evidence.", checks=[], next_actions=[])
+    notes = ResearchWorkingNotesModelOutput(scope="Only workspace evidence.", checks=[], next_actions=[])
     with pytest.raises(ModelResponseError, match="cannot fit"):
         runner._bounded_working_notes(notes, max_tokens=1)
-    assert notes.scope == "Only collection evidence."
+    assert notes.scope == "Only workspace evidence."
 
 
 @pytest.mark.anyio
@@ -822,7 +822,7 @@ async def test_context_recovery_shrinks_real_requests_and_keeps_full_trajectory(
                 raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
             return ModelTurn(content="Comparable density and elongation evidence remain insufficient.")
 
-    active = _user("active", "Rank Inconel 718 using collection evidence only; density >= 99.9%.")
+    active = _user("active", "Rank Inconel 718 using workspace evidence only; density >= 99.9%.")
     pairs = [_tool_pair(call_id=f"paper-{i}", payload={
         "document_id": f"paper-{i}", "source_ref": "results",
         "content": "As-built orientation is unreported; density does not establish elongation. " * 900,

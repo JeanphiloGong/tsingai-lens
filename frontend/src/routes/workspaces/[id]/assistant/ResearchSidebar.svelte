@@ -1,0 +1,560 @@
+<script lang="ts">
+	import { resolve } from '$app/paths';
+	import { t } from '../../../_shared/i18n';
+	import {
+		LoaderCircle,
+		Clock3,
+		CircleAlert,
+		Trash2,
+		Pencil,
+		Pin,
+		PinOff,
+		ChevronDown
+	} from '@lucide/svelte';
+	import type { ChatSessionActivity } from '$lib/research/conversationPresentation';
+
+	type SessionSummary = {
+		session_id: string;
+		title: string;
+		updated_at: string;
+		is_pinned: boolean;
+	};
+
+	export let workspaceId = '';
+	export let workspaceName = '';
+	export let history: SessionSummary[] = [];
+	export let sessionActivities: Record<string, ChatSessionActivity> = {};
+	export let activeSessionId = '';
+	export let disabled = false;
+	export let pinningSessionId = '';
+	export let historyHasMore = false;
+	export let historyPageLoading = false;
+	export let historyPageError = false;
+	export let onNewSession: () => void = () => {};
+	export let onSwitchSession: (sessionId: string) => void = () => {};
+	export let onDeleteSession: (sessionId: string) => void = () => {};
+	export let onRenameSession: (sessionId: string) => void = () => {};
+	export let onTogglePin: (sessionId: string) => void = () => {};
+	export let onLoadMoreHistory: () => void = () => {};
+	export let formatHistoryTime: (value: string) => string = () => '';
+	let mobileHistoryOpen = false;
+
+	function loadMoreOnScroll(event: Event) {
+		const list = event.currentTarget as HTMLElement;
+		if (!historyPageError && list.scrollHeight - list.scrollTop - list.clientHeight < 80)
+			onLoadMoreHistory();
+	}
+</script>
+
+<aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
+	<div class="sidebar-top">
+		<a class="back-workspace" href={resolve('/workspaces/[id]', { id: workspaceId })}>
+			<span aria-hidden="true">←</span>
+			{$t('researchAgent.backToWorkspace')}
+		</a>
+		<div class="brand">
+			<img class="brand-mark brand-mark--image" src="/lens-mark-a2.svg" alt="" />
+			<h1>{$t('researchAgent.title')}</h1>
+		</div>
+	</div>
+
+	<div class="sidebar-actions">
+		<button class="new-session" type="button" {disabled} on:click={onNewSession}>
+			<span class="new-session-icon" aria-hidden="true">+</span>
+			<span>{$t('researchAgent.newSession')}</span>
+		</button>
+		<button
+			class="mobile-history-toggle"
+			type="button"
+			aria-expanded={mobileHistoryOpen}
+			aria-controls="assistant-history"
+			on:click={() => (mobileHistoryOpen = !mobileHistoryOpen)}
+		>
+			<span aria-hidden="true">☰</span>
+			<span
+				>{$t(mobileHistoryOpen ? 'researchAgent.hideHistory' : 'researchAgent.showHistory')}</span
+			>
+		</button>
+	</div>
+
+	<section
+		id="assistant-history"
+		class="history"
+		class:mobile-open={mobileHistoryOpen}
+		aria-label={$t('researchAgent.historyTitle')}
+	>
+		<h2>{$t('researchAgent.historyTitle')}</h2>
+		<div class="history-list" on:scroll={loadMoreOnScroll}>
+			{#each history as item (item.session_id)}
+				{@const activity = sessionActivities[item.session_id]}
+				<div class="history-item" class:active={item.session_id === activeSessionId}>
+					<button
+						class="history-select"
+						title={item.title}
+						type="button"
+						{disabled}
+						on:click={() => {
+							mobileHistoryOpen = false;
+							onSwitchSession(item.session_id);
+						}}
+					>
+						<span class="history-title">{item.title}</span>
+						{#if activity && activity !== 'idle'}
+							<span class="session-state" data-state={activity}>
+								{#if activity === 'running'}<LoaderCircle
+										size={12}
+									/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
+										size={12}
+									/>{/if}
+								<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
+							</span>
+						{:else}
+							<time>{formatHistoryTime(item.updated_at)}</time>
+						{/if}
+					</button>
+					<button
+						class="pin-session"
+						type="button"
+						{disabled}
+						aria-label={$t('researchAgent.renameSession')}
+						title={$t('researchAgent.renameSession')}
+						on:click={() => onRenameSession(item.session_id)}
+						><Pencil size={14} aria-hidden="true" /></button
+					>
+					<button
+						class="pin-session"
+						class:pinned={item.is_pinned}
+						type="button"
+						{disabled}
+						aria-label={$t(
+							item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession'
+						)}
+						title={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+						aria-pressed={item.is_pinned}
+						aria-busy={pinningSessionId === item.session_id}
+						on:click|stopPropagation={() => onTogglePin(item.session_id)}
+					>
+						{#if pinningSessionId === item.session_id}<LoaderCircle size={14} />
+						{:else if item.is_pinned}<PinOff size={14} aria-hidden="true" />
+						{:else}<Pin size={14} aria-hidden="true" />{/if}
+					</button>
+					<button
+						class="delete-session"
+						type="button"
+						{disabled}
+						aria-label={$t('researchAgent.deleteSession')}
+						title={$t('researchAgent.deleteSession')}
+						on:click|stopPropagation={() => onDeleteSession(item.session_id)}
+						><Trash2 size={14} aria-hidden="true" /></button
+					>
+				</div>
+			{:else}
+				<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>
+			{/each}
+			{#if historyHasMore}
+				<button
+					class="load-more"
+					type="button"
+					disabled={disabled || historyPageLoading}
+					aria-label={$t('researchAgent.loadMoreSessions')}
+					on:click={onLoadMoreHistory}
+				>
+					{#if historyPageLoading}<LoaderCircle size={14} />{:else}<ChevronDown size={14} />{/if}
+					{$t('researchAgent.loadMoreSessions')}
+				</button>
+			{/if}
+		</div>
+	</section>
+
+	<div id="assistant-workspace-context" class="workspace-context">
+		<span>
+			<small>{$t('researchAgent.currentWorkspace')}</small>
+			<a
+				class="workspace-name"
+				href={resolve('/workspaces/[id]', { id: workspaceId })}
+				title={workspaceName || $t('workspace.unknownName')}
+				>{workspaceName || $t('workspace.unknownName')}</a
+			>
+		</span>
+	</div>
+</aside>
+
+<style>
+	.sidebar {
+		display: flex;
+		min-height: 0;
+		flex-direction: column;
+		padding: 12px;
+		border-right: 1px solid var(--border-default);
+		background: var(--bg-subtle);
+	}
+
+	.sidebar-top {
+		display: grid;
+		gap: 8px;
+	}
+
+	.back-workspace {
+		display: inline-flex;
+		align-items: center;
+		align-self: flex-start;
+		gap: 7px;
+		min-height: 32px;
+		padding: 0 8px;
+		border-radius: 8px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		text-decoration: none;
+		transition:
+			background-color 140ms ease,
+			color 140ms ease;
+	}
+
+	.back-workspace span {
+		font-size: 18px;
+		line-height: 1;
+	}
+
+	.back-workspace:hover {
+		background: var(--surface-card);
+		color: var(--brand-primary);
+	}
+
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 8px 12px;
+		border-bottom: 1px solid var(--border-default);
+	}
+
+	.brand-mark {
+		display: grid;
+		place-items: center;
+		width: 32px;
+		height: 32px;
+		border: 1px solid var(--brand-border);
+		border-radius: 9px;
+		background: var(--surface-card);
+		color: var(--brand-primary);
+		font-weight: 800;
+	}
+
+	.brand-mark--image {
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		object-fit: contain;
+	}
+
+	.brand h1 {
+		margin: 0;
+		font-size: 15px;
+		line-height: 20px;
+	}
+
+	.new-session {
+		display: inline-flex;
+		align-items: center;
+		justify-content: flex-start;
+		gap: 9px;
+		min-height: 40px;
+		margin-top: 12px;
+		padding: 0 10px;
+		border: 1px solid transparent;
+		border-radius: 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font-weight: 700;
+		cursor: pointer;
+		transition:
+			background-color 140ms ease,
+			border-color 140ms ease,
+			transform 140ms ease;
+	}
+
+	.sidebar-actions {
+		display: grid;
+		gap: 8px;
+	}
+
+	.mobile-history-toggle {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		gap: 7px;
+		min-height: 40px;
+		padding: 0 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 10px;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.mobile-history-toggle:hover,
+	.mobile-history-toggle[aria-expanded='true'] {
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+	}
+
+	.new-session-icon {
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 7px;
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+		font-size: 18px;
+		font-weight: 400;
+		line-height: 1;
+	}
+
+	.new-session:hover:not(:disabled) {
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
+		color: var(--brand-primary);
+		transform: translateY(-1px);
+	}
+
+	button:disabled {
+		cursor: not-allowed;
+		opacity: 0.55;
+	}
+
+	.history {
+		display: flex;
+		min-height: 0;
+		flex: 1;
+		flex-direction: column;
+		margin-top: 22px;
+	}
+
+	.history h2 {
+		margin: 0 8px 8px;
+		color: var(--text-secondary);
+		font-size: 10px;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.history-list {
+		display: grid;
+		align-content: start;
+		grid-auto-rows: max-content;
+		gap: 4px;
+		overflow-y: auto;
+	}
+
+	.history-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 28px 28px;
+		align-items: center;
+		gap: 8px;
+		min-height: 50px;
+		padding: 7px 9px;
+		border: 1px solid transparent;
+		border-radius: 9px;
+		background: transparent;
+		color: var(--text-primary);
+		text-align: left;
+		cursor: pointer;
+		transition:
+			background-color 140ms ease,
+			border-color 140ms ease;
+	}
+
+	.history-select {
+		display: grid;
+		width: 100%;
+		min-width: 0;
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: 18px 16px;
+		align-items: center;
+		gap: 2px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.delete-session,
+	.pin-session {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: var(--text-tertiary);
+		cursor: pointer;
+	}
+
+	.pin-session.pinned,
+	.pin-session:hover:not(:disabled),
+	.pin-session:focus-visible {
+		background: var(--surface-card);
+		color: var(--brand-primary);
+	}
+
+	.load-more {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		min-height: 32px;
+		border: 0;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
+		cursor: pointer;
+	}
+
+	.delete-session:hover:not(:disabled),
+	.delete-session:focus-visible {
+		background: var(--surface-card);
+		color: var(--danger, #b42318);
+	}
+
+	.history-item:hover,
+	.history-item.active {
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
+	}
+
+	.history-title {
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.history-item time,
+	.empty-history {
+		color: var(--text-tertiary);
+		font-size: 11px;
+		line-height: 16px;
+	}
+
+	.workspace-context {
+		display: grid;
+		gap: 10px;
+		padding: 16px 8px 2px;
+		border-top: 1px solid var(--border-default);
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.workspace-context span {
+		display: grid;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.workspace-context small {
+		color: var(--text-secondary);
+		font-weight: 500;
+	}
+
+	.workspace-name {
+		overflow: hidden;
+		color: var(--text-primary);
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		text-decoration: none;
+	}
+
+	.workspace-name:hover {
+		color: var(--brand-primary);
+		text-decoration: underline;
+	}
+
+	@media (max-width: 820px) {
+		.sidebar {
+			display: grid;
+			max-height: 50dvh;
+			overflow-y: auto;
+			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-rows: auto auto;
+			align-items: center;
+			gap: 12px;
+			padding: 12px 16px;
+			border-right: 0;
+			border-bottom: 1px solid var(--border-default);
+		}
+
+		.sidebar-top {
+			grid-column: 1;
+			grid-row: 1 / span 2;
+		}
+
+		.back-workspace {
+			grid-column: 1;
+			grid-row: 1;
+		}
+
+		.brand {
+			grid-column: 1;
+			grid-row: 2;
+			padding-bottom: 0;
+			border-bottom: 0;
+		}
+
+		.sidebar-actions {
+			grid-column: 2;
+			grid-row: 1 / span 2;
+			margin: 0;
+		}
+
+		.new-session,
+		.mobile-history-toggle {
+			display: inline-flex;
+			padding: 0 12px;
+		}
+
+		.new-session {
+			margin-top: 0;
+		}
+
+		.history {
+			display: none;
+		}
+
+		.history.mobile-open,
+		.workspace-context {
+			grid-column: 1 / -1;
+		}
+
+		.history.mobile-open {
+			display: flex;
+			max-height: min(26dvh, 180px);
+			grid-row: 4;
+			margin-top: 4px;
+			padding-top: 12px;
+			border-top: 1px solid var(--border-default);
+		}
+
+		.workspace-context {
+			display: grid;
+			grid-row: 3;
+			padding: 0 8px;
+			border-top: 0;
+		}
+
+		.workspace-context span {
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: center;
+			gap: 8px;
+		}
+	}
+</style>

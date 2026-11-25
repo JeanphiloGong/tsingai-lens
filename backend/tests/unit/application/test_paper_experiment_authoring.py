@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from application.chat.capabilities import paper_experiment_authoring
+from agent.capabilities import paper_experiment_authoring
 
 import json
 from contextlib import asynccontextmanager
@@ -11,8 +11,8 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.paper_experiment_authoring import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.paper_experiment_authoring import (
     CreatePaperExperimentRevisionCapability,
     PaperExperimentDraftToolRequest,
     PaperExperimentRevisionToolRequest,
@@ -83,7 +83,7 @@ def _draft() -> dict:
 
 
 def test_agent_request_schema_describes_structured_test_parameters() -> None:
-    schema = ProposePaperExperimentDraftCapability.spec.model_schema()
+    schema = ProposePaperExperimentDraftCapability().spec.model_schema()
     serialized = str(schema)
     assert "Structured test parameters" in serialized
     assert "strain_rate" in serialized
@@ -153,7 +153,7 @@ def test_agent_request_allows_omitted_protocol_completeness() -> None:
 
 
 def test_agent_request_schema_describes_the_complete_scientific_graph() -> None:
-    tool_schema = ProposePaperExperimentDraftCapability.spec.model_schema()
+    tool_schema = ProposePaperExperimentDraftCapability().spec.model_schema()
     schema = tool_schema["function"]["parameters"]
     description = tool_schema["function"]["description"]
     assert "label and scope_description" in description
@@ -587,12 +587,19 @@ class _AuthoringStub:
         return SimpleNamespace(revisions=(revision,), selections=(), findings=())
 
 
-class _ChatRepository:
+class _TaskRepository:
     def __init__(self, messages=()):
         self.messages = tuple(messages)
 
-    async def read_messages(self, session_id):
-        return self.messages
+    async def read_successful_results(self, *, task_id, user_id, names):
+        return tuple(
+            (
+                "propose_paper_experiment_draft" if message.tool_result.data.get("draft_id") else "read_source",
+                asdict(message.tool_result),
+            )
+            for message in self.messages
+            if message.tool_result is not None
+        )
 
 
 def _prepared_for_capability(draft):
@@ -667,11 +674,12 @@ async def test_experiment_draft_requires_current_complete_read_for_every_cited_s
     draft = _draft()
     authoring = _AuthoringStub(_prepared_for_capability(draft))
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
-    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages(content, complete))
+    paper_experiment_authoring.task_repository = _TaskRepository(_read_messages(content, complete))
     capability = ProposePaperExperimentDraftCapability()
     result = await capability.execute(
-        CapabilityExecutionContext(
-            session_id="session-1",
+        ToolExecutionContext(
+            operation_id="operation",
+            task_id="session-1",
             user_id="user-1",
             workspace_id="workspace-1",
             tool_call_id="draft-1",
@@ -704,10 +712,11 @@ async def test_experiment_draft_does_not_treat_one_read_as_coverage_for_another_
     prepared.source_digests["text_window", "results-1"] = sha256(b"Results").hexdigest()
     draft["experiments"][0]["measurements"][0]["source_labels"] = ["S002"]
     paper_experiment_authoring.paper_experiment_authoring_service = _AuthoringStub(prepared)
-    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages())
+    paper_experiment_authoring.task_repository = _TaskRepository(_read_messages())
     result = await ProposePaperExperimentDraftCapability().execute(
-        CapabilityExecutionContext(
-            session_id="session-1",
+        ToolExecutionContext(
+            operation_id="operation",
+            task_id="session-1",
             user_id="user-1",
             workspace_id="workspace-1",
             tool_call_id="draft-1",
@@ -730,14 +739,15 @@ async def test_experiment_draft_does_not_treat_one_read_as_coverage_for_another_
 async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
     draft = _draft()
     authoring = _AuthoringStub(_prepared_for_capability(draft))
-    context = CapabilityExecutionContext(
-        session_id="session-1",
+    context = ToolExecutionContext(
+        operation_id="operation",
+        task_id="session-1",
         user_id="user-1",
         workspace_id="workspace-1",
         tool_call_id="call-propose",
     )
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
-    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages())
+    paper_experiment_authoring.task_repository = _TaskRepository(_read_messages())
     proposed = await ProposePaperExperimentDraftCapability().execute(
         context,
         PaperExperimentDraftToolRequest(document_id="paper-1", **draft),
@@ -758,12 +768,13 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
         tool_call_id=proposed.tool_call_id,
         tool_result=proposed,
     )
-    repository = _ChatRepository((message,))
+    repository = _TaskRepository((message,))
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
-    paper_experiment_authoring.ChatRepo = repository
+    paper_experiment_authoring.task_repository = repository
     created = await CreatePaperExperimentRevisionCapability().execute(
         context.__class__(
-            session_id="session-1",
+            operation_id="operation-create",
+            task_id="session-1",
             user_id="user-1",
             workspace_id="workspace-1",
             tool_call_id="call-create",
@@ -784,14 +795,15 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
 async def test_agent_save_rejects_stale_or_unapproved_draft(change):
     prepared = _prepared_for_capability(_draft())
     authoring = _AuthoringStub(prepared)
-    context = CapabilityExecutionContext(
-        session_id="session-1",
+    context = ToolExecutionContext(
+        operation_id="operation",
+        task_id="session-1",
         user_id="user-1",
         workspace_id="workspace-1",
         tool_call_id="call-1",
     )
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
-    paper_experiment_authoring.ChatRepo = _ChatRepository(_read_messages())
+    paper_experiment_authoring.task_repository = _TaskRepository(_read_messages())
     proposed = await ProposePaperExperimentDraftCapability().execute(
         context, PaperExperimentDraftToolRequest(document_id="paper-1", **_draft())
     )
@@ -822,7 +834,7 @@ async def test_agent_save_rejects_stale_or_unapproved_draft(change):
     )
     with pytest.raises(ValueError, match="digest|expired"):
         paper_experiment_authoring.paper_experiment_authoring_service = authoring
-        paper_experiment_authoring.ChatRepo = _ChatRepository((message,))
+        paper_experiment_authoring.task_repository = _TaskRepository((message,))
         await CreatePaperExperimentRevisionCapability().execute(context, arguments)
     assert authoring.write_calls == []
 
@@ -830,10 +842,11 @@ async def test_agent_save_rejects_stale_or_unapproved_draft(change):
 async def test_agent_experiment_revision_rejects_unknown_or_changed_draft():
     authoring = _AuthoringStub(_prepared_for_capability(_draft()))
     paper_experiment_authoring.paper_experiment_authoring_service = authoring
-    paper_experiment_authoring.ChatRepo = _ChatRepository()
+    paper_experiment_authoring.task_repository = _TaskRepository()
     capability = CreatePaperExperimentRevisionCapability()
-    context = CapabilityExecutionContext(
-        session_id="session-1",
+    context = ToolExecutionContext(
+        operation_id="operation",
+        task_id="session-1",
         user_id="user-1",
         workspace_id="workspace-1",
         tool_call_id="call-create",

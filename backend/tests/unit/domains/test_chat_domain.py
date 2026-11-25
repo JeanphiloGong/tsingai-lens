@@ -8,12 +8,11 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from controllers.chat.schemas import ChatSourceContextPayload
+from conversation.controllers.schemas import SourceContextRequest
 
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
-    ChatSession,
     ChatSourceContext,
     ChatToolCall,
     ChatToolRequest,
@@ -66,24 +65,6 @@ def test_approval_arguments_are_isolated_and_tampering_stops_execution() -> None
     approved.arguments["measurements"].append("tampered")
     with pytest.raises(ValueError, match="digest"):
         approved.start("2026-10-29T00:01:00+00:00")
-
-
-def test_chat_session_preserves_immutable_owner_and_workspace() -> None:
-    session = ChatSession.create(
-        session_id="chat-1",
-        user_id="user-1",
-        workspace_id="col-1",
-        created_at="2026-08-19T00:00:00+00:00",
-    )
-
-    assert session.user_id == "user-1"
-    assert session.workspace_id == "col-1"
-    with pytest.raises(ValueError, match="session identity cannot be reassigned"):
-        session.update(
-            user_id="user-2",
-            workspace_id="col-1",
-            updated_at="2026-08-19T00:01:00+00:00",
-        )
 
 
 def test_tool_call_digest_is_stable_and_write_waits_for_approval() -> None:
@@ -269,7 +250,7 @@ def test_user_message_preserves_traceable_source_context() -> None:
 
 def test_source_context_request_rejects_an_invalid_source_digest() -> None:
     with pytest.raises(ValueError, match="source_digest"):
-        ChatSourceContextPayload(
+        SourceContextRequest(
             resource_ref={"resource_type": "source", "resource_id": "doc-1:results"},
             workspace_id="col-1",
             document_id="doc-1",

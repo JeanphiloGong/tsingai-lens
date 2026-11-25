@@ -5,12 +5,12 @@ from dataclasses import replace
 
 import pytest
 
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.research_process import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.research_process import (
     InspectResearchProcessCapability,
     InspectResearchProcessToolRequest,
 )
-from application.chat.capabilities.research_process_start import (
+from agent.capabilities.research_process_start import (
     StartResearchProcessCapability,
     StartResearchProcessToolRequest,
 )
@@ -70,7 +70,7 @@ async def test_start_reuses_active_preparation_with_complete_safe_run_observatio
     )
     await update_pipeline_fixture(pipeline_run_service.PipelineRunRepo, run)
     result = await StartResearchProcessCapability().execute(
-        CapabilityExecutionContext("session-1", "user-1", "col_process", "call-start"),
+        ToolExecutionContext(task_id="session-1", user_id="user-1", workspace_id="col_process", tool_call_id="call-start", operation_id="operation"),
         StartResearchProcessToolRequest(document_ids=["doc_a"]),
     )
 
@@ -120,9 +120,7 @@ async def test_inspect_reports_historical_failure_without_exposing_provider_deta
             db=db,
         )
     result = await InspectResearchProcessCapability().execute(
-        CapabilityExecutionContext(
-            "session-1", "user-1", "col_process", "call-inspect"
-        ),
+        ToolExecutionContext(task_id="session-1", user_id="user-1", workspace_id="col_process", tool_call_id="call-inspect", operation_id="operation"),
         InspectResearchProcessToolRequest(),
     )
 

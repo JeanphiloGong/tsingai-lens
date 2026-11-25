@@ -8,7 +8,7 @@ import json
 
 from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolRequest, ChatToolResult, ToolRisk
 
-from application.chat.inline_citations import format_inline_citations, format_message_citations
+from agent.application.inline_citations import format_inline_citations, format_message_citations
 
 
 def test_existing_links_survive_formatting_and_repeated_trajectory_projection():

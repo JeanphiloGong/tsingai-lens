@@ -63,10 +63,6 @@ class DocumentContentAlreadyExists(ValueError):
     """The workspace already contains the uploaded content digest."""
 
 
-class PermissionRevisionConflict(ValueError):
-    """The permission revision changed before the locked write."""
-
-
 class WorkspaceRepository:
     async def add_workspace(self, record: StoredWorkspace) -> None:
         async with AsyncSessionLocal() as db, db.begin():
@@ -232,32 +228,6 @@ class WorkspaceRepository:
             row.description = record.workspace.description
             row.status = record.workspace.status
             row.updated_at = _datetime(record.updated_at)
-            return True
-
-    async def read_agent_default_permission(
-        self, workspace_id: str
-    ) -> dict[str, Any] | None:
-        async with AsyncSessionLocal() as db:
-            row = await db.get(WorkspaceORM, workspace_id)
-            if row is None:
-                return None
-            return dict(row.agent_default_permission or {}) or None
-
-    async def set_agent_default_permission(
-        self,
-        workspace_id: str,
-        permission: dict[str, Any],
-        *,
-        expected_revision: int,
-    ) -> bool:
-        async with AsyncSessionLocal() as db, db.begin():
-            row = await db.get(WorkspaceORM, workspace_id, with_for_update=True)
-            if row is None:
-                return False
-            current_revision = (row.agent_default_permission or {}).get("revision", 0)
-            if current_revision != expected_revision:
-                raise PermissionRevisionConflict("permission_revision_conflict")
-            row.agent_default_permission = dict(permission)
             return True
 
     async def add_documents(

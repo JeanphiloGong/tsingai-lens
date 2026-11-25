@@ -62,11 +62,6 @@ vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
 			)
 		);
 	}
-	if (requestPath(input).endsWith('/permissions')) {
-		return Promise.resolve(
-			jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 })
-		);
-	}
 	return fetchMock(input, init);
 });
 
@@ -859,12 +854,12 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	it('executes slash commands locally instead of sending them as research text', async () => {
 		installApi();
 		const composer = await renderReady();
-		await composer.fill('/per');
+		await composer.fill('/sta');
 		await expect.element(browserPage.getByTestId('slash-command-menu')).toBeVisible();
 		await userEvent.keyboard('{Enter}');
-		await expect.element(composer).toHaveValue('/permissions');
+		await expect.element(composer).toHaveValue('/status');
 		await userEvent.keyboard('{Enter}');
-		await expect.element(browserPage.getByRole('combobox', { name: /^Mode\b/ })).toBeVisible();
+		await expect.element(composer).toHaveValue('');
 		await composer.fill('/missing');
 		await userEvent.keyboard('{Enter}');
 		await expect

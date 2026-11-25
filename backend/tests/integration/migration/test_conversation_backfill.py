@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import literal_column, select, text
 
 from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import (
@@ -13,7 +13,10 @@ from infra.persistence.postgres.models.conversation import (
 from scripts.backfill_conversations import backfill_conversation
 
 
-pytestmark = pytest.mark.anyio
+pytestmark = [
+    pytest.mark.anyio,
+    pytest.mark.parametrize("postgres_sync_engine", ["b71000000006"], indirect=True),
+]
 
 
 async def test_backfill_is_idempotent_and_preserves_feedback(
@@ -31,6 +34,7 @@ async def test_backfill_is_idempotent_and_preserves_feedback(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="migration-v2-conversation",
@@ -41,37 +45,16 @@ async def test_backfill_is_idempotent_and_preserves_feedback(
             )
         )
         await db.flush()
-        db.add_all(
-            [
-                MessageORM(
-                    message_id="migration-v2-question",
-                    conversation_id="migration-v2-conversation",
-                    position=0,
-                    role="user",
-                    content="Compare the papers.",
-                    source_contexts=[{"document_id": "paper-a"}],
-                    created_at=now,
-                ),
-                MessageORM(
-                    message_id="migration-v2-answer-1",
-                    conversation_id="migration-v2-conversation",
-                    position=1,
-                    role="assistant",
-                    content="First answer.",
-                    source_contexts=[],
-                    created_at=now,
-                ),
-                MessageORM(
-                    message_id="migration-v2-answer-2",
-                    conversation_id="migration-v2-conversation",
-                    position=2,
-                    role="assistant",
-                    content="Second answer.",
-                    source_contexts=[],
-                    created_at=now,
-                ),
-            ]
-        )
+        await db.execute(text("""
+            INSERT INTO chat_messages
+                (message_id, conversation_id, position, role, content, source_contexts, created_at)
+            VALUES (:message_id, :conversation_id, :position, :role, :content,
+                    CAST(:source_contexts AS jsonb), :created_at)
+        """), [
+            {'message_id': "migration-v2-question", 'conversation_id': "migration-v2-conversation", 'position': 0, 'role': "user", 'content': "Compare the papers.", 'source_contexts': '[{"document_id": "paper-a"}]', 'created_at': now},
+            {'message_id': "migration-v2-answer-1", 'conversation_id': "migration-v2-conversation", 'position': 1, 'role': "assistant", 'content': "First answer.", 'source_contexts': '[]', 'created_at': now},
+            {'message_id': "migration-v2-answer-2", 'conversation_id': "migration-v2-conversation", 'position': 2, 'role': "assistant", 'content': "Second answer.", 'source_contexts': '[]', 'created_at': now},
+        ])
         await db.flush()
         db.add(
             MessageFeedbackORM(
@@ -98,7 +81,7 @@ async def test_backfill_is_idempotent_and_preserves_feedback(
             await db.scalars(
                 select(MessageORM)
                 .where(MessageORM.conversation_id == "migration-v2-conversation")
-                .order_by(MessageORM.position)
+                .order_by(literal_column("chat_messages.position"))
             )
         ).all()
         conversation = await db.get(ConversationORM, "migration-v2-conversation")
@@ -127,6 +110,7 @@ async def test_backfill_reports_non_contiguous_history(postgres_session_factory)
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="migration-v2-gap-conversation",
@@ -137,26 +121,15 @@ async def test_backfill_reports_non_contiguous_history(postgres_session_factory)
             )
         )
         await db.flush()
-        db.add_all(
-            [
-                MessageORM(
-                    message_id="migration-v2-gap-question",
-                    conversation_id="migration-v2-gap-conversation",
-                    position=0,
-                    role="user",
-                    content="Question",
-                    created_at=now,
-                ),
-                MessageORM(
-                    message_id="migration-v2-gap-answer",
-                    conversation_id="migration-v2-gap-conversation",
-                    position=2,
-                    role="assistant",
-                    content="Answer",
-                    created_at=now,
-                ),
-            ]
-        )
+        await db.execute(text("""
+            INSERT INTO chat_messages
+                (message_id, conversation_id, position, role, content, source_contexts, created_at)
+            VALUES (:message_id, :conversation_id, :position, :role, :content,
+                    CAST(:source_contexts AS jsonb), :created_at)
+        """), [
+            {'message_id': "migration-v2-gap-question", 'conversation_id': "migration-v2-gap-conversation", 'position': 0, 'role': "user", 'content': "Question", 'created_at': now, 'source_contexts': '[]'},
+            {'message_id': "migration-v2-gap-answer", 'conversation_id': "migration-v2-gap-conversation", 'position': 2, 'role': "assistant", 'content': "Answer", 'created_at': now, 'source_contexts': '[]'},
+        ])
 
     async with postgres_session_factory() as db:
         report = await backfill_conversation(db, "migration-v2-gap-conversation")

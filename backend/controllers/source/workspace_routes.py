@@ -4,7 +4,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import asdict
 from tempfile import SpooledTemporaryFile
-from typing import Annotated, BinaryIO, Literal
+from typing import Annotated, BinaryIO
 from urllib.parse import quote
 
 from application.source import (
@@ -13,7 +13,6 @@ from application.source import (
     source_import_service,
 )
 from controllers.dependencies.auth import get_current_user_id
-from domain.chat.permissions import AUTO_ACTIONS
 from exceptions import RequestInvalidException
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -35,30 +34,6 @@ class WorkspaceCreateRequest(BaseModel):
     @classmethod
     def empty_description_is_none(cls, value: str | None) -> str | None:
         return value or None
-
-
-class WorkspaceAgentPermissionRequest(BaseModel):
-    """Default Research Agent authority for new sessions in one workspace."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Literal["read_only", "confirm", "auto"]
-    actions: list[str] = Field(default_factory=list, max_length=len(AUTO_ACTIONS))
-    all_actions: bool = False
-    expires_at: str | None = Field(
-        default=None,
-        description=(
-            "Optional automatic-grant expiry; null keeps the grant active until revoked."
-        ),
-    )
-    expected_revision: int = Field(ge=0)
-
-
-class WorkspaceAgentPermissionResponse(BaseModel):
-    mode: Literal["read_only", "confirm", "auto"]
-    actions: list[str]
-    expires_at: str | None
-    revision: int
 
 
 class WorkspaceDocumentResponse(BaseModel):
@@ -266,39 +241,6 @@ async def get_workspace(
         user_id,
     )
     return make_api_response(data=workspace_response(record))
-
-
-@workspace_router.get(
-    "/{workspace_id}/agent-permissions",
-    response_model=ApiResponse[WorkspaceAgentPermissionResponse],
-    summary="Read the default Research Agent permission for a workspace",
-)
-async def get_workspace_agent_permission(
-    workspace_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
-) -> Response:
-    permission = await workspace_service.get_agent_default_permission_for_user(
-        workspace_id,
-        user_id,
-    )
-    return make_api_response(data=WorkspaceAgentPermissionResponse(**permission))
-
-
-@workspace_router.put(
-    "/{workspace_id}/agent-permissions",
-    response_model=ApiResponse[WorkspaceAgentPermissionResponse],
-    summary="Set the default Research Agent permission for a workspace",
-)
-async def set_workspace_agent_permission(
-    workspace_id: str,
-    payload: WorkspaceAgentPermissionRequest,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-) -> Response:
-    permission = await workspace_service.set_agent_default_permission_for_user(
-        workspace_id,
-        user_id,
-        **payload.model_dump(),
-    )
-    return make_api_response(data=WorkspaceAgentPermissionResponse(**permission))
 
 
 @workspace_router.delete(

@@ -70,7 +70,6 @@ async def test_conversation_commands_tree_and_fork(
             answer = MessageORM(
                 message_id="v4-answer",
                 conversation_id=conversation_id,
-                position=1,
                 role="assistant",
                 content="The reported conditions differ.",
                 parent_message_id=question.message_id,
@@ -158,6 +157,13 @@ async def test_conversation_commands_tree_and_fork(
         assert fork_messages.status_code == 200
         assert fork_messages.json()["data"]["items"][-1]["message_id"] != "v4-answer"
         assert fork_messages.json()["data"]["items"][-1]["my_feedback"] is None
+        copy = fork_messages.json()["data"]["items"][-1]
+        assert copy["can_rate"] is False
+        denied = await client.put(
+            f"{BASE}/{fork_id}/messages/{copy['message_id']}/feedback",
+            json={"rating": "helpful"},
+        )
+        assert denied.status_code == 422
 
         tree = await client.get(f"{BASE}/{conversation_id}/tree")
         assert tree.status_code == 200

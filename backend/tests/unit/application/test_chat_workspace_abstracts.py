@@ -1,5 +1,5 @@
-from application.chat.capabilities import document_sources
-from application.chat.capabilities import workspace_context
+from agent.capabilities import document_sources
+from agent.capabilities import workspace_context
 from infra.persistence import database
 from copy import deepcopy
 from tests.support.source_artifacts import build_source_documents
@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from application.chat.capabilities.workspace_context import (
+from agent.capabilities.workspace_context import (
     BrowseWorkspacePapersCapability,
     BrowseWorkspacePapersToolRequest,
 )
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.document_sources import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
 )
@@ -113,7 +113,7 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(text)))
     capability = BrowseWorkspacePapersCapability()
     result = asyncio.run(capability.execute(
-        CapabilityExecutionContext(session_id="session-1", user_id="user-1", workspace_id="workspace-1", tool_call_id="call-1"),
+        ToolExecutionContext(operation_id="operation", task_id="session-1", user_id="user-1", workspace_id="workspace-1", tool_call_id="call-1"),
         BrowseWorkspacePapersToolRequest(),
     ))
     paper = result.data["papers"][0]
@@ -152,7 +152,7 @@ def test_optional_screening_information_does_not_require_researcher_intervention
         )))
     capability = BrowseWorkspacePapersCapability()
     result = asyncio.run(capability.execute(
-        CapabilityExecutionContext(session_id="s", user_id="u", workspace_id="c", tool_call_id="t"),
+        ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t"),
         BrowseWorkspacePapersToolRequest(),
     ))
     assert result.status == "succeeded"
@@ -182,7 +182,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
     capability = BrowseWorkspacePapersCapability()
-    context = CapabilityExecutionContext(session_id="s", user_id="u", workspace_id="c", tool_call_id="t")
+    context = ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t")
     result = asyncio.run(capability.execute(context, BrowseWorkspacePapersToolRequest(limit=6)))
     assert [paper["source_status"] for paper in result.data["papers"]] == [
         "available", "preparing", "not_prepared", "preparation_failed", "unavailable", "read_failed"
@@ -221,7 +221,7 @@ def test_normal_pagination_is_not_a_warning():
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
     capability = BrowseWorkspacePapersCapability()
     result = asyncio.run(capability.execute(
-        CapabilityExecutionContext(session_id="s", user_id="u", workspace_id="c", tool_call_id="t"),
+        ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t"),
         BrowseWorkspacePapersToolRequest(limit=8),
     ))
     assert result.warnings == ()
@@ -267,8 +267,9 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     document_sources.workspace_service = workspace_service
     document_sources.SourceArtifactRepo = sources
     inspect = InspectDocumentSourcesCapability()
-    context = CapabilityExecutionContext(
-        session_id="s", user_id="u", workspace_id="c", tool_call_id="browse"
+    context = ToolExecutionContext(
+        operation_id="operation",
+        task_id="s", user_id="u", workspace_id="c", tool_call_id="browse"
     )
 
     async def scenario():

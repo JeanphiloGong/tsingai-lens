@@ -155,17 +155,8 @@ The visual rules are documented in [DESIGN.md](../../../docs/DESIGN.md).
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete workspace artifacts.
   The composer also provides a Codex-style local slash-command menu.
-  `/permissions` opens the current session's authority controls, `/settings`
-  opens workspace defaults, and `/status`, `/new`, `/history`, `/tree`, and
-  `/help` operate on the client conversation surface. These commands are
-  resolved before message submission and are never sent to the Agent as
-  research text.
-- `workspaces/[id]/settings/+page.svelte`
-  Workspace-level Agent permission defaults for newly created sessions. The
-  owner can choose read-only, per-write confirmation, or a persistent/temporary
-  automatic grant and can authorize the complete current write-action set. Existing
-  sessions keep their own permission record and must be changed from the
-  conversation control.
+  `/status`, `/new`, `/history`, `/tree`, and `/help` act on the current
+  conversation. The composer handles these commands locally.
 - `workspaces/[id]/feedback/+page.svelte`
   Fixed task workbenches for the current Workspace: SFT, preference, and
   evaluation. Analysis workers continuously turn new feedback cases into

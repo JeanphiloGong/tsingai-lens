@@ -17,7 +17,6 @@ from application.source.source_archive_service import (
     WorkspaceSourceArchiveError,
     DocumentSourceUnavailableError,
 )
-from domain.chat.permissions import AUTO_ACTIONS
 from domain.source import Document
 from exceptions import (
     RequestInvalidException,
@@ -210,42 +209,6 @@ async def test_workspace_update_preserves_documents(
     assert updated.workspace.name == "After"
     assert updated.workspace.status == "running"
     assert updated.documents == (document,)
-
-
-async def test_workspace_agent_default_permission_is_owner_scoped(
-    tmp_path,
-    *,
-    postgres_session_factory,
-    workspace_files,
-) -> None:
-    service = workspace_service
-
-    workspace = await service.create_workspace(
-        "Permission defaults",
-        owner_user_id="user-1",
-    )
-    expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-
-    saved = await service.set_agent_default_permission_for_user(
-        workspace.workspace.workspace_id,
-        "user-1",
-        mode="auto",
-        actions=[],
-        all_actions=True,
-        expires_at=expiry,
-        expected_revision=0,
-    )
-
-    assert saved["actions"] == sorted(AUTO_ACTIONS)
-    assert (
-        await service.get_agent_default_permission_for_user(
-            workspace.workspace.workspace_id, "user-1"
-        )
-    ) == saved
-    with pytest.raises(ResourceNotFoundException):
-        await service.get_agent_default_permission_for_user(
-            workspace.workspace.workspace_id, "other-user"
-        )
 
 
 async def test_missing_workspace_is_not_inferred_from_workspace(

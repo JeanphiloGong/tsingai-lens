@@ -1,13 +1,13 @@
 """Source tools use the real workspace lookup to distinguish unavailable papers."""
 
-from application.chat.capabilities import document_sources
+from agent.capabilities import document_sources
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from application.chat import CapabilityExecutionContext
-from application.chat.capabilities.document_sources import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
     InspectTableCapability,
@@ -21,9 +21,8 @@ from domain.source import Document
 from repositories.workspace_repository import StoredDocument
 from repositories.source_artifact_repository import SourceArtifactRepository
 
-from tests.support.chat_model_connections import scripted_chat_runner  # noqa: F401
 
-pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("scripted_chat_runner")]
+pytestmark = pytest.mark.anyio
 
 
 @pytest.mark.parametrize("state", ["missing", "unprepared", "database_failure"])
@@ -66,8 +65,9 @@ async def test_source_availability_uses_real_workspace_lookup(
         monkeypatch.setattr(
             workspace_service.WorkspaceRepo, "read_document", AsyncMock(side_effect=failure),
         )
-    context = CapabilityExecutionContext(
-        session_id="chat", user_id="local-user", workspace_id=workspace_id, tool_call_id="read",
+    context = ToolExecutionContext(
+        operation_id="operation",
+        task_id="chat", user_id="local-user", workspace_id=workspace_id, tool_call_id="read",
     )
     document_sources.workspace_service = workspace_service
     document_sources.SourceArtifactRepo = SourceArtifactRepository()

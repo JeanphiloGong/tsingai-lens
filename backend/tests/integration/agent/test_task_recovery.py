@@ -9,7 +9,7 @@ from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpe
 from agent.application.task_execution import TaskExecution
 from agent.domain.models import Operation
 from agent.repositories.task_repository import TaskRepository
-from application.chat.model import ModelTurn
+from agent.application.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
 from infra.persistence.postgres.models.workspace import WorkspaceORM
@@ -70,7 +70,6 @@ async def test_recovery_reuses_committed_operation(
             MessageORM(
                 message_id="agent-v3-question",
                 conversation_id="agent-v3-conversation",
-                position=0,
                 role="user",
                 content="Inspect Source.",
                 created_at=now,

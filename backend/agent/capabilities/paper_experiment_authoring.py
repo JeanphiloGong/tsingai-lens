@@ -1,0 +1,1226 @@
+"""Agent capabilities for proposing and approving PaperExperiment revisions."""
+
+from __future__ import annotations
+
+from application.core.objectives import paper_experiment_authoring_service
+from agent.repositories.task_repository import TaskRepository
+
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from collections.abc import Mapping
+from typing import Any, Literal
+
+from agent.capabilities.registry import ToolExecutionContext, ToolSpec
+from application.core.objectives.paper_experiment_authoring_service import (
+    PaperExperimentAuthoringError,
+)
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class _ScientificAttributeToolField(BaseModel):
+    """A source-reported named value used in variants or test conditions."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = Field(
+        min_length=1,
+        description="Source-reported parameter name, such as temperature or strain_rate.",
+    )
+    value: str | int | float | bool = Field(
+        description="The reported value; do not invent a value when the source is silent."
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Reported unit, such as C, K, or 1/s; null when not reported.",
+    )
+    context_scope: str | None = Field(
+        default=None,
+        description="Optional scope: experimental, simulation, background, or unknown.",
+    )
+    applies_to_outcomes: list[str] = Field(
+        default_factory=list,
+        description="Optional outcome labels this parameter applies to.",
+    )
+
+
+class _ScientificVariableToolField(BaseModel):
+    """A source-reported factor that differs between comparison sides."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(
+        min_length=1,
+        description="Changed factor name, such as preheating or dose.",
+    )
+    baseline_value: str | int | float | bool | None = Field(
+        default=None,
+        description="Source-reported value for the baseline variant, if stated.",
+    )
+    target_value: str | int | float | bool | None = Field(
+        default=None,
+        description="Source-reported value for the target variant, if stated.",
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Unit shared by the reported baseline and target values, if any.",
+    )
+
+
+class _PaperExperimentVariantToolField(BaseModel):
+    """One response-local experimental variant; extra scientific fields are allowed."""
+
+    model_config = ConfigDict(extra="allow")
+
+    variant_key: str = Field(
+        min_length=1,
+        description="Required response-local key used by measurements and comparisons.",
+    )
+    variant_label: str = Field(
+        min_length=1,
+        description="Required paper-reported label for this object or group.",
+    )
+    subject_attributes: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Material, specimen, or population attributes reported for this variant.",
+    )
+    intervention_attributes: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Treatment or process attributes that distinguish this variant.",
+    )
+    state: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Other source-reported state attributes for this variant.",
+    )
+    population_scope: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional paper-reported population or specimen scope. Keep paper-native "
+            "identifiers inside reported_identifiers; do not put Lens IDs here."
+        ),
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the variant identity or attributes.",
+    )
+    binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels that explicitly bind this variant to its experiment scope; "
+            "leave empty only when that relationship is not stated."
+        ),
+    )
+    identity_specificity: Literal[
+        "exact", "partial", "category", "broad", "unknown"
+    ] = Field(
+        default="unknown",
+        description=(
+            "Source-grounded identity detail: exact only when the paper distinguishes "
+            "this object/group from its peers; otherwise partial or unknown."
+        ),
+    )
+    missing_dimensions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Missing distinctions that prevent uniquely identifying this object/group "
+            "within the experiment. Any entry makes its identity partial. Put other "
+            "unreported context (such as powder oxygen or scan strategy when the source "
+            "already identifies the cohort and treatment group) in notes instead."
+        ),
+    )
+    identity_evidence: list[str] = Field(
+        default_factory=list,
+        description="Short source-grounded notes explaining the identity classification.",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Other source-grounded limitations for this variant.",
+    )
+
+
+class _PaperExperimentTestConditionToolField(BaseModel):
+    """A test or characterization and the parameters reported for it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    test_key: str = Field(
+        min_length=1,
+        description="Required response-local key used by measurements.",
+    )
+    test_type: str = Field(
+        min_length=1,
+        description="Test or characterization category, such as tensile or microscopy.",
+    )
+    method: str | None = Field(
+        default=None, description="Reported method or instrument description."
+    )
+    standard: str | None = Field(
+        default=None, description="Reported standard, such as ASTM E8."
+    )
+    parameters: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description=(
+            "Structured test parameters reported by the source, such as temperature, "
+            "strain_rate, frequency, duration, or n. Use this field rather than "
+            "test_attributes."
+        ),
+    )
+    outcome_scope: list[str] = Field(
+        default_factory=list,
+        description="Outcome labels measured or characterized by this test.",
+    )
+    population_scope: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional paper-reported scope of objects to which this protocol applies.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the test identity, method, or parameters.",
+    )
+    binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels that explicitly connect this test protocol to the reported "
+            "experiment scope; leave empty when that relationship is not stated."
+        ),
+    )
+    protocol_specificity: Literal[
+        "exact", "partial", "category", "broad", "unknown"
+    ] = Field(
+        description=(
+            "Source-grounded protocol identity: exact only for a concrete method or "
+            "standard, not a category such as 'mechanical test'."
+        ),
+    )
+    protocol_completeness: Literal["complete", "partial", "unknown"] = Field(
+        default="unknown",
+        description=(
+            "Source coverage for the listed outcomes: complete when the reported "
+            "protocol details are sufficient for interpretation, partial when details "
+            "are missing, or unknown when coverage cannot be determined. This is "
+            "diagnostic metadata; do not invent missing parameters."
+        ),
+    )
+    missing_parameters: list[str] = Field(
+        default_factory=list,
+        description="Protocol parameters needed for interpretation but absent from the source.",
+    )
+    protocol_evidence: list[str] = Field(
+        default_factory=list,
+        description="Short source-grounded notes supporting protocol specificity/completeness.",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Other source-grounded limitations for this test condition.",
+    )
+
+
+class _PaperExperimentMeasurementToolField(BaseModel):
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
+
+    measurement_key: str = Field(
+        min_length=1,
+        description="Required response-local key used by comparisons and interpretations.",
+    )
+    variant_key: str | None = Field(
+        default=None, description="Response-local variant key, when known."
+    )
+    test_key: str | None = Field(
+        default=None, description="Response-local test key, when known."
+    )
+    outcome: str = Field(
+        min_length=1, description="Measured or observed outcome label."
+    )
+    value: str | int | float | bool | None = Field(
+        default=None,
+        description="Reported scalar value; supply value or result_text. Omit or use null for a qualitative result.",
+    )
+    unit: str | None = Field(default=None, description="Reported measurement unit.")
+    result_text: str | None = Field(
+        default=None,
+        description="Verbatim qualitative result; supply result_text or value. Omit or use null when value is populated.",
+    )
+    statistics: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Reported statistics such as error, range, or n. Keep the source's "
+            "statistical meaning; do not turn n into a separate measurement."
+        ),
+    )
+    measurement_scope: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Reported scope such as specimen/group, replicate, time, or location. "
+            "Keep paper-native identifiers inside reported_identifiers."
+        ),
+    )
+    result_kind: Literal[
+        "measured", "observed", "simulated", "predicted", "unknown"
+    ] = Field(
+        default="measured",
+        description="Nature of the reported result; use observed for qualitative observations.",
+    )
+    reported_sample_label: str | None = Field(
+        default=None,
+        description="Verbatim sample/row wording when variant_key is unresolved.",
+    )
+    reported_test_label: str | None = Field(
+        default=None,
+        description="Verbatim test/method wording when test_key is unresolved.",
+    )
+    candidate_variant_keys: list[str] = Field(
+        default_factory=list,
+        description="Possible local variant keys when exact result ownership is unresolved.",
+    )
+    candidate_test_keys: list[str] = Field(
+        default_factory=list,
+        description="Possible local test keys when exact protocol ownership is unresolved.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the reported value or result text.",
+    )
+    variant_binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels proving this result belongs to variant_key. Required for "
+            "exact binding; leave empty when the source only gives a broad scope."
+        ),
+    )
+    test_binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels proving this result was obtained under test_key. Required "
+            "for exact binding; leave empty when the source does not connect them."
+        ),
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Other source-grounded limitations for this measurement.",
+    )
+
+
+class _PaperExperimentComparisonToolField(BaseModel):
+    """One typed same-paper comparison between two local variants."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    comparison_key: str = Field(
+        min_length=1,
+        description="Required response-local comparison key.",
+    )
+    baseline_variant_key: str = Field(
+        min_length=1,
+        description="Local key of the baseline/control variant.",
+    )
+    target_variant_key: str = Field(
+        min_length=1,
+        description="Local key of the target/treated variant.",
+    )
+    outcome: str = Field(
+        min_length=1,
+        description="One outcome shared by both comparison sides.",
+    )
+    baseline_measurement_keys: list[str] = Field(
+        min_length=1,
+        description="Local measurement keys reported for the baseline side.",
+    )
+    target_measurement_keys: list[str] = Field(
+        min_length=1,
+        description="Local measurement keys reported for the target side.",
+    )
+    changed_variables: list[_ScientificVariableToolField] = Field(
+        default_factory=list,
+        description=(
+            "Factors that differ between the two sides. Include every jointly changed "
+            "factor; do not claim isolated causation from one difference alone."
+        ),
+    )
+    matched_conditions: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Conditions the source explicitly holds equal on both sides.",
+    )
+    reported_statement: str | None = Field(
+        default=None,
+        description="Optional verbatim author statement about this comparison.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the comparison or author statement.",
+    )
+    binding_source_labels: list[str] = Field(
+        min_length=1,
+        description=(
+            "Sxxx labels proving that the referenced measurements form this comparison; "
+            "do not use a model-local key as evidence."
+        ),
+    )
+
+
+class _PaperExperimentReportedInterpretationToolField(BaseModel):
+    """A paper author's interpretation, kept separate from a Lens Finding."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    interpretation_key: str | None = Field(
+        default=None,
+        description="Optional response-local key for referring to this interpretation.",
+    )
+    statement: str = Field(
+        min_length=1,
+        description="The author's source-grounded statement, not a Lens-generated Finding.",
+    )
+    kind: Literal["result_summary", "mechanism_hypothesis", "limitation"] = Field(
+        description=(
+            "Interpretation type: result_summary, mechanism_hypothesis, or limitation. "
+            "This field is required even when the statement is short."
+        ),
+    )
+    measurement_keys: list[str] = Field(
+        default_factory=list,
+        description="Local measurements discussed by the author's statement.",
+    )
+    comparison_keys: list[str] = Field(
+        default_factory=list,
+        description="Local comparisons discussed by the author's statement.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels containing the author's statement.",
+    )
+
+
+class _PaperExperimentDraftExperimentField(BaseModel):
+    """One paper experiment with response-local relationships."""
+
+    model_config = ConfigDict(extra="allow")
+
+    label: str = Field(
+        min_length=1,
+        description="Required human-readable name for this experiment series.",
+    )
+    scope_description: str = Field(
+        min_length=1,
+        description=(
+            "Required boundary description: which variants, tests, outcomes, and "
+            "paper scope this experiment covers."
+        ),
+    )
+    series_key: str | None = Field(
+        default=None, description="Response-local experiment series key."
+    )
+    scope_kind: Literal[
+        "parent",
+        "matrix",
+        "selected_stratum",
+        "follow_up",
+        "physical_split",
+        "split",
+        "independent",
+        "unknown",
+    ] = Field(
+        default="unknown",
+        description=(
+            "Boundary category for this response-local experiment. Use parent for the "
+            "main paper series; use unknown when the source does not establish a boundary."
+        ),
+    )
+    parent_series_key: str | None = Field(
+        default=None,
+        description="Prior response-local parent key for selected_stratum or follow_up scopes.",
+    )
+    scope_selector: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional source-grounded selector for a selected/follow-up scope, such as "
+            "selected_levels, fixed_attributes, or test_scope_labels."
+        ),
+    )
+    split_evidence: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Source-label records supporting an independent physical split.",
+    )
+    design_type: Literal[
+        "parallel", "factorial", "dose_response", "observational", "unknown"
+    ] = Field(
+        default="unknown",
+        description="Paper-supported design shape; use unknown when the design is not stated.",
+    )
+    experimental_variants: list[_PaperExperimentVariantToolField] = Field(
+        default_factory=list,
+        description="Variants or groups reconstructed from the paper.",
+    )
+    variants: list[_PaperExperimentVariantToolField] = Field(
+        default_factory=list,
+        description="Alias accepted by the contract for experimental_variants.",
+    )
+    test_conditions: list[_PaperExperimentTestConditionToolField] = Field(
+        default_factory=list,
+        description="Tests or characterizations and their structured parameters.",
+    )
+    measurements: list[_PaperExperimentMeasurementToolField] = Field(
+        default_factory=list,
+        description="Source-reported measurements or qualitative observations.",
+    )
+    comparisons: list[_PaperExperimentComparisonToolField] = Field(
+        default_factory=list,
+        description=(
+            "Typed within-paper comparisons. Every comparison must name both local "
+            "variants, both sides' measurement keys, and source-backed relation labels."
+        ),
+    )
+    reported_interpretations: list[_PaperExperimentReportedInterpretationToolField] = (
+        Field(
+            default_factory=list,
+            description=(
+                "Typed paper-author interpretations. Always provide statement, kind, and "
+                "source labels; these are not Lens Findings."
+            ),
+        )
+    )
+    source_labels: list[str] = Field(
+        default_factory=list, description="Sxxx labels supporting this experiment."
+    )
+    unresolved_issues: list[dict[str, Any]] = Field(
+        default_factory=list, description="Unknown or unresolved source facts."
+    )
+
+
+class _PaperExperimentDraftFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=240,
+        description=(
+            "Optional Objective context for later selection. It is not required "
+            "to reconstruct or save a paper-local experiment."
+        ),
+    )
+    document_id: str = Field(min_length=1, max_length=240)
+    experiments: list[_PaperExperimentDraftExperimentField] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Experiments reconstructed from the source; keep all keys response-local.",
+    )
+    source_labels: list[str] = Field(default_factory=list, max_length=100)
+    unresolved_issues: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
+
+    def raw_draft(self) -> dict[str, Any]:
+        return {
+            "experiments": [
+                item.model_dump(exclude_defaults=True) for item in self.experiments
+            ],
+            "source_labels": self.source_labels,
+            "unresolved_issues": self.unresolved_issues,
+        }
+
+
+class PaperExperimentDraftToolRequest(_PaperExperimentDraftFields):
+    pass
+
+
+class PaperExperimentRevisionToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    draft_id: str = Field(min_length=1, max_length=128)
+    draft_digest: str = Field(
+        min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    )
+
+
+def _draft_id(context: ToolExecutionContext, digest: str) -> str:
+    return (
+        "pexp_draft_"
+        + sha256(
+            f"{context.task_id}:{context.operation_id}:{digest}".encode("utf-8")
+        ).hexdigest()[:24]
+    )
+
+
+_DRAFT_TTL = timedelta(hours=24)
+task_repository = TaskRepository()
+
+
+def complete_source_reads(
+    successful_results: Mapping[str, list[Mapping[str, Any]]],
+) -> set[tuple[str, str, str, str]]:
+    """Collect whole Sources, including same-version text pages or table rows."""
+    completed: set[tuple[str, str, str, str]] = set()
+    pages: dict[tuple[str, str, str, str, str, int], list[tuple[int, int]]] = {}
+
+    def collect(
+        item: Mapping[str, Any], *, table: bool = False, parent_document_id: str = "",
+        paginated: bool = False,
+    ) -> None:
+        document_id = str(parent_document_id or item.get("document_id") or "").strip()
+        source_ref = str(item.get("source_ref") or item.get("table_ref") or "").strip()
+        source_kind = str(item.get("source_kind") or ("table" if table else "")).strip()
+        identity = (document_id, source_kind, source_ref)
+        digest = str(item.get("source_digest") or "")
+        if not document_id or not source_ref or not digest:
+            return
+        if paginated and "content_offset" in item:
+            offset = item.get("content_offset")
+            total = item.get("canonical_length")
+            content = item.get("content")
+            if (
+                type(offset) is int and type(total) is int and isinstance(content, str)
+                and 0 <= offset <= offset + len(content) <= total
+            ):
+                pages.setdefault((*identity, digest, "characters", total), []).append((offset, offset + len(content)))
+        elif table and item.get("complete_table") is False:
+            offset = item.get("row_offset")
+            total = item.get("data_row_count")
+            count = item.get("returned_row_count")
+            # The handler counts only intact rows. An oversized row preview
+            # has count zero and cannot fill a gap in the reading record.
+            if (
+                type(offset) is int and type(total) is int and type(count) is int
+                and count > 0 and 0 <= offset < offset + count <= total
+            ):
+                pages.setdefault((*identity, digest, "rows", total), []).append((offset, offset + count))
+        elif (
+            item.get("content_truncated") is False
+            and (not table or (item.get("complete_table") is not False and item.get("row_offset", 0) == 0))
+        ):
+            completed.add((*identity, digest))
+
+    for item in successful_results.get("read_source", ()):
+        collect(item, paginated=True)
+    for item in successful_results.get("inspect_table", ()):
+        collect(item, table=True)
+    for result in successful_results.get("inspect_document_sources", ()):
+        document = result.get("document")
+        if not isinstance(document, Mapping):
+            continue
+        for item in result.get("sources") or ():
+            if isinstance(item, Mapping):
+                collect(item, parent_document_id=str(document.get("document_id") or ""))
+    for (document_id, source_kind, source_ref, digest, _unit, total), intervals in pages.items():
+        covered = 0
+        for start, end in sorted(intervals):
+            if start > covered:
+                break
+            covered = max(covered, end)
+            if covered == total:
+                completed.add((document_id, source_kind, source_ref, digest))
+                break
+    return completed
+
+
+class ProposePaperExperimentDraftCapability:
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="propose_paper_experiment_draft",
+            description=(
+                "Validate a source-grounded PaperExperiment draft after reading the "
+                "complete Sources for one paper. An Objective is optional context; it is "
+                "not a prerequisite for recording paper facts. Reuse complete reads from this session "
+                "when their canonical content is unchanged. Read every cited Source; "
+                "one passage does not cover the paper. For a complete experiment request, "
+                "include all source-supported variants, tests, measurements and comparisons "
+                "before proposing a save. When correcting a Source error, "
+                "preserve the scientific payload and repair only the failed prerequisite; "
+                "do not shrink the draft to pass validation. Use only response-local experiment, "
+                "variant, test, measurement and comparison keys plus supplied Sxxx "
+                "source labels. Each experiment must provide label and scope_description; "
+                "each variant must provide variant_key, variant_label, and source_labels; "
+                "each test condition must provide test_key, test_type, source_labels, "
+                "and protocol_specificity, and should provide protocol_completeness when "
+                "the Source supports that assessment, with temperature, "
+                "rate, duration, replication, and other reported protocol values in "
+                "parameters. When a Source explicitly binds the test protocol to this "
+                "experiment, include binding_source_labels; mark completeness partial "
+                "when details are absent and list them in missing_parameters; incomplete "
+                "coverage is retained as a limitation and does not by itself prevent "
+                "Selection when the protocol identity, outcome scope, and measurement "
+                "binding edges are sufficient; "
+                "each comparison must provide both variant keys, both measurement-key "
+                "lists for one shared outcome only, outcome, source_labels, and binding_source_labels; "
+                "never combine elongation, strength, hardness or other distinct outcomes "
+                "in one comparison; each reported "
+                "interpretation must provide statement, kind (result_summary, "
+                "mechanism_hypothesis, or limitation), and source_labels. "
+                "Measurements must provide a local key, outcome, value or result_text, "
+                "and source_labels. This is a review-only draft; do not include formal "
+                "IDs, fingerprints, versions, workspace IDs, or objective IDs inside "
+                "the scientific payload. The draft does not write a PaperExperiment or "
+                "an Objective Selection."
+            ),
+            source="research",
+            handler=self.execute,
+            input_model=PaperExperimentDraftToolRequest,
+        )
+
+    async def execute(
+        self,
+        context: ToolExecutionContext,
+        arguments: PaperExperimentDraftToolRequest,
+    ) -> ChatToolResult:
+        prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
+            workspace_id=context.workspace_id,
+            user_id=context.user_id,
+            document_id=arguments.document_id,
+            raw_draft=arguments.raw_draft(),
+        )
+        records = await task_repository.read_successful_results(
+            task_id=context.task_id,
+            user_id=context.user_id,
+            names=("read_source", "inspect_table", "inspect_document_sources", "propose_paper_experiment_draft"),
+        )
+        results: dict[str, list[Mapping[str, Any]]] = {}
+        for name, result in records:
+            data = result.get("data")
+            if isinstance(data, dict):
+                results.setdefault(name, []).append(data)
+        completed = complete_source_reads(results)
+        labels: set[str] = set()
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key.endswith("source_labels") and isinstance(child, list):
+                        labels.update(item for item in child if isinstance(item, str))
+                    elif key == "source_label" and isinstance(child, str):
+                        labels.add(child)
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        collect(arguments.raw_draft())
+        missing = []
+        for label in sorted(labels):
+            source = prepared.output.output.source_labels[label]
+            identity = (
+                arguments.document_id,
+                source["source_kind"],
+                source["source_ref"],
+                prepared.source_digests[(source["source_kind"], source["source_ref"])],
+            )
+            if identity not in completed:
+                missing.append(
+                    {
+                        "source_label": label,
+                        "source_kind": source["source_kind"],
+                        "source_ref": source["source_ref"],
+                    }
+                )
+        if missing:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="source_read_incomplete",
+                error_message=(
+                    "Read the current complete canonical Sources listed in sources_to_read. "
+                    "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."
+                ),
+                data={"document_id": arguments.document_id, "sources_to_read": missing},
+            )
+        for name, prior in reversed(records):
+            if name != "propose_paper_experiment_draft":
+                continue
+            data = prior["data"]
+            if (
+                data.get("document_id") != arguments.document_id
+                or data.get("draft_digest") != prepared.draft_digest
+                or data.get("source_fingerprint") != prepared.source_fingerprint
+                or data.get("draft") != arguments.raw_draft()
+            ):
+                continue
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(
+                    str(data.get("draft_created_at") or "")
+                )
+            except (ValueError, TypeError):
+                continue
+            if timedelta(0) <= age <= _DRAFT_TTL and data.get("draft_id"):
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id,
+                    status=ToolResultStatus.SUCCEEDED,
+                    data=data,
+                    resource_refs=tuple(ChatResourceRef(**item) for item in prior["resource_refs"]),
+                )
+        draft_id = _draft_id(context, prepared.draft_digest)
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "draft_id": draft_id,
+                "draft_digest": prepared.draft_digest,
+                "draft_created_at": datetime.now(timezone.utc).isoformat(),
+                "status": "pending_approval",
+                "requires_user_approval": True,
+                "experiment_count": len(prepared.output.output.experiments),
+                "experiments": [
+                    item.payload for item in prepared.output.output.experiments
+                ],
+                "source_fingerprint": prepared.source_fingerprint,
+                "objective_id": arguments.objective_id,
+                "document_id": arguments.document_id,
+                "draft": arguments.raw_draft(),
+            },
+            resource_refs=(
+                ChatResourceRef(
+                    resource_type="paper_experiment_draft",
+                    resource_id=draft_id,
+                    href=(
+                        f"/workspaces/{context.workspace_id}/documents/"
+                        f"{arguments.document_id}?view=paper-experiment-draft"
+                    ),
+                ),
+            ),
+        )
+
+
+class CreatePaperExperimentRevisionCapability:
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="create_paper_experiment_revision",
+            description=(
+                "After the exact PaperExperiment draft has been reviewed and approved, "
+                "create the immutable paper-local PaperExperiment revisions. Submit the "
+                "stored draft ID and digest "
+                "unchanged; this saves exactly that draft, not the latest prose description. "
+                "Partial records may be saved, but empty measurements remain ineligible "
+                "for later Objective Selection. Do not substitute a reduced draft for a "
+                "reviewed complete one. The service reloads the prepared Source, resolves "
+                "formal identities, and writes all revisions atomically. Saving a revision "
+                "does not start or publish Objective analysis, create a Selection, or create "
+                "a Finding."
+            ),
+            source="research",
+            handler=self.execute,
+            requires_approval=True,
+            input_model=PaperExperimentRevisionToolRequest,
+        )
+
+    async def _stored_draft(
+        self,
+        context: ToolExecutionContext,
+        arguments: PaperExperimentRevisionToolRequest,
+    ) -> tuple[str, dict[str, Any]]:
+        records = await task_repository.read_successful_results(
+            task_id=context.task_id, user_id=context.user_id,
+            names=("propose_paper_experiment_draft",),
+        )
+        for _, result in reversed(records):
+            data = result.get("data")
+            if not isinstance(data, dict) or data.get("draft_id") != arguments.draft_id:
+                continue
+            if data.get("status") != "pending_approval":
+                continue
+            if (
+                str(data.get("draft_digest") or "").casefold()
+                != arguments.draft_digest.casefold()
+            ):
+                raise PaperExperimentAuthoringError(
+                    "stored paper experiment draft digest does not match approval"
+                )
+            created_at = str(data.get("draft_created_at") or "")
+            try:
+                is_expired = (
+                    datetime.now(timezone.utc)
+                    - datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                    > _DRAFT_TTL
+                )
+            except (ValueError, TypeError):
+                is_expired = True
+            if is_expired:
+                raise PaperExperimentAuthoringError(
+                    "paper experiment draft has expired; propose it again"
+                )
+            draft = data.get("draft")
+            if not isinstance(draft, dict):
+                continue
+            return (
+                str(data.get("document_id") or ""),
+                draft,
+            )
+        raise PaperExperimentAuthoringError(
+            "paper experiment draft was not found on this conversation path"
+        )
+
+    async def execute(
+        self,
+        context: ToolExecutionContext,
+        arguments: PaperExperimentRevisionToolRequest,
+    ) -> ChatToolResult:
+        document_id, raw_draft = await self._stored_draft(context, arguments)
+        if not document_id:
+            raise PaperExperimentAuthoringError(
+                "stored paper experiment draft is missing its scope"
+            )
+        prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
+            workspace_id=context.workspace_id,
+            user_id=context.user_id,
+            document_id=document_id,
+            raw_draft=raw_draft,
+        )
+        if prepared.draft_digest.casefold() != arguments.draft_digest.casefold():
+            raise PaperExperimentAuthoringError(
+                "paper experiment draft digest changed; review it again"
+            )
+        result = await paper_experiment_authoring_service.write_prepared_paper_experiments(
+            prepared=prepared,
+            workspace_id=context.workspace_id,
+            created_by=context.user_id,
+        )
+        refs = [
+            ChatResourceRef(
+                resource_type="paper_experiment",
+                resource_id=(
+                    f"{item.revision.experiment_id}:"
+                    f"{item.revision.experiment_version}"
+                ),
+                href=(
+                    f"/workspaces/{context.workspace_id}/documents/"
+                    f"{item.revision.document_id}?view=paper-experiment"
+                ),
+            )
+            for item in result.revisions
+        ]
+        revisions = [
+            {
+                "experiment_id": item.revision.experiment_id,
+                "document_id": item.revision.document_id,
+                "experiment_version": item.revision.experiment_version,
+                "source_fingerprint": item.revision.source_fingerprint,
+                "label": item.revision.label,
+                "scope_description": item.revision.scope_description,
+                "design_type": item.revision.design_type,
+                "identity_status": item.revision.identity_status,
+                "binding_status": item.revision.binding_status,
+                "variants": [
+                    {
+                        "variant_key": item.variant_key,
+                        "variant_label": item.variant_label,
+                        "subject_attributes": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.subject_attributes
+                        ],
+                        "intervention_attributes": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.intervention_attributes
+                        ],
+                        "state": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.state
+                        ],
+                        "population_scope": (
+                            dict(item.population_scope)
+                            if item.population_scope is not None
+                            else None
+                        ),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                        "identity_specificity": item.identity_specificity,
+                        "missing_dimensions": list(item.missing_dimensions),
+                        "identity_evidence": list(item.identity_evidence),
+                    }
+                    for item in item.revision.variants
+                ],
+                "test_conditions": [
+                    {
+                        "test_key": item.test_key,
+                        "test_type": item.test_type,
+                        "parameters": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.parameters
+                        ],
+                        "population_scope": (
+                            dict(item.population_scope)
+                            if item.population_scope is not None
+                            else None
+                        ),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                        "protocol_specificity": item.protocol_specificity,
+                        "test_identity_status": item.test_identity_status,
+                        "protocol_completeness": item.protocol_completeness,
+                        "missing_parameters": list(item.missing_parameters),
+                        "method": item.method,
+                        "standard": item.standard,
+                        "outcome_scope": list(item.outcome_scope),
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "protocol_evidence": list(item.protocol_evidence),
+                    }
+                    for item in item.revision.test_conditions
+                ],
+                "measurements": [
+                    {
+                        "measurement_key": item.measurement_key,
+                        "outcome": item.outcome,
+                        "variant_key": item.variant_key,
+                        "test_key": item.test_key,
+                        "value": item.value,
+                        "unit": item.unit,
+                        "result_text": item.result_text,
+                        "statistics": dict(item.statistics),
+                        "measurement_scope": dict(item.measurement_scope),
+                        "result_kind": item.result_kind,
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                    }
+                    for item in item.revision.measurements
+                ],
+                "comparisons": [
+                    {
+                        "comparison_key": item.comparison_key,
+                        "baseline_variant_key": item.baseline_variant_key,
+                        "target_variant_key": item.target_variant_key,
+                        "outcome": item.outcome,
+                        "baseline_measurement_keys": list(
+                            item.baseline_measurement_keys
+                        ),
+                        "target_measurement_keys": list(item.target_measurement_keys),
+                        "changed_variables": [
+                            {
+                                "name": item.name,
+                                "baseline_value": item.baseline_value,
+                                "target_value": item.target_value,
+                                "unit": item.unit,
+                            }
+                            for item in item.changed_variables
+                        ],
+                        "matched_conditions": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.matched_conditions
+                        ],
+                        "basis": item.basis,
+                        "direction": item.direction,
+                        "reported_statement": item.reported_statement,
+                        "attribution_scope": item.attribution_scope,
+                        "status": item.status,
+                        "reasons": list(item.reasons),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "relation_status": item.relation_status,
+                    }
+                    for item in item.revision.comparisons
+                ],
+                "reported_interpretations": [
+                    {
+                        "statement": item.statement,
+                        "kind": item.kind,
+                        "measurement_keys": list(item.measurement_keys),
+                        "comparison_keys": list(item.comparison_keys),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                    }
+                    for item in item.revision.reported_interpretations
+                ],
+                "source_refs": [
+                    {
+                        "document_id": item.document_id,
+                        "source_fingerprint": item.source_fingerprint,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "quote": item.quote,
+                    }
+                    for item in item.revision.source_refs
+                ],
+                "unresolved_issues": [
+                    dict(item) for item in item.revision.unresolved_issues
+                ],
+            }
+            for item in result.revisions
+        ]
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "revision_saved": True,
+                "revisions": revisions,
+                "selection_ids": [],
+                "finding_ids": [],
+            },
+            resource_refs=tuple(refs),
+        )
+
+
+__all__ = [
+    "PaperExperimentRevisionToolRequest",
+    "CreatePaperExperimentRevisionCapability",
+    "PaperExperimentDraftToolRequest",
+    "ProposePaperExperimentDraftCapability",
+]

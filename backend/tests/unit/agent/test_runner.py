@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from agent.application.runner import DurableRunner, RunnerState
 from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from agent.domain.models import AgentTask, Operation
-from application.chat.model import ModelTurn
+from agent.application.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
 
 

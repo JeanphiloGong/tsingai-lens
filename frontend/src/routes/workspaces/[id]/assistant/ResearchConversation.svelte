@@ -53,7 +53,6 @@
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
 	import ConversationHeader from './ConversationHeader.svelte';
-	import OperationPermissions from './OperationPermissions.svelte';
 	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
@@ -132,7 +131,6 @@
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: Operation | null = null;
 	let retryableDecision: Operation | null = null;
-	let permissionsPanel: { openPanel: () => void } | null = null;
 	let history: StoredChatSession[] = [];
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1458,12 +1456,6 @@
 
 	function handleSlashCommand(command: ResearchAgentSlashCommandName) {
 		switch (command) {
-			case 'permissions':
-				permissionsPanel?.openPanel();
-				return;
-			case 'settings':
-				void goto(resolve('/workspaces/[id]/settings', { id: workspaceId }));
-				return;
 			case 'new':
 				void startNewSession();
 				return;
@@ -1742,12 +1734,6 @@
 			/>
 		{/if}
 
-		{#if session}
-			{#key session.conversation_id}<OperationPermissions
-					bind:this={permissionsPanel}
-					sessionId={session.conversation_id}
-				/>{/key}
-		{/if}
 		{#if retryableDecision && !checkpointId}
 			<div
 				class="status status-notice decision-recovery"

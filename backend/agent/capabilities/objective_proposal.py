@@ -1,0 +1,256 @@
+"""Transient Objective drafts supported by workspace proposal context."""
+
+from __future__ import annotations
+
+from application.source import workspace_service
+from repositories.objective_repository import ObjectiveRepo
+from repositories.paper_map_repository import PaperMapRepo
+
+from domain.chat import ToolResultStatus
+
+from hashlib import sha256
+import json
+from typing import Any, Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+
+from agent.capabilities.registry import (
+    ToolExecutionContext,
+    ToolSpec,
+)
+from application.core.objectives import property_matching
+from domain.chat import ChatResourceRef, ChatToolResult
+
+
+ShortText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)
+]
+
+
+class ObjectiveDraftInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=5, max_length=500)
+    material_scope: list[ShortText] = Field(default_factory=list, max_length=6)
+    variables: list[ShortText] = Field(min_length=1, max_length=6)
+    outcomes: list[ShortText] = Field(
+        min_length=1, max_length=1,
+        description=(
+            "One specific outcome, preserving the researcher's measurement. "
+            "Do not bundle different endpoints inside a single string or parentheses. "
+            "For tensile strength use 'ultimate tensile strength (UTS)': yield "
+            "strength measures yielding and is a separate outcome, even though "
+            "both use MPa. Related measurements require separate questions."
+        ),
+        examples=[["ultimate tensile strength (UTS)"]],
+    )
+    mechanisms: list[ShortText] = Field(default_factory=list, max_length=6)
+    constraints: list[ShortText] = Field(default_factory=list, max_length=8)
+    requested_comparator: str | None = Field(default=None, max_length=240)
+
+    @field_validator(
+        "material_scope",
+        "variables",
+        "outcomes",
+        "mechanisms",
+        "constraints",
+    )
+    @classmethod
+    def _normalize_lists(cls, values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = value.casefold()
+            if key not in seen:
+                seen.add(key)
+                result.append(value)
+        return result
+
+    @field_validator("question")
+    @classmethod
+    def _normalize_question(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class ProposeObjectiveDraftsToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    drafts: list[ObjectiveDraftInput] = Field(min_length=1, max_length=3)
+
+
+class ProposeObjectiveDraftsCapability:
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="propose_objective_drafts",
+            description=(
+                "Record one to three focused transient Research Objective drafts for user "
+                "review. Each draft must have one specific outcome. The result may report "
+                "PaperResearchMap proposal context, but it is not Evidence and does not "
+                "create a Core Objective. Split a multi-outcome interest into separate "
+                "questions before scope screening. Preserve the intervention in variables, "
+                "all named materials in material_scope, and explicit process/test limits "
+                "in constraints; outcomes never belong in variables. Use scope preview "
+                "separately for each question when maps are available. Missing mapped "
+                "support leaves a draft unverified, not scientifically disproven."
+            ),
+            source="research",
+            handler=self.execute,
+            input_model=ProposeObjectiveDraftsToolRequest,
+        )
+
+    async def execute(
+        self,
+        context: ToolExecutionContext,
+        arguments: ProposeObjectiveDraftsToolRequest,
+    ) -> ChatToolResult:
+        await workspace_service.get_workspace_for_user(
+            context.workspace_id,
+            context.user_id,
+        )
+        paper_maps = await PaperMapRepo.list_workspace(
+            context.workspace_id
+        )
+        existing = await ObjectiveRepo.list_objectives(
+            context.workspace_id
+        )
+        records: list[dict[str, Any]] = []
+        refs: list[ChatResourceRef] = []
+        unsupported_count = 0
+        for position, draft in enumerate(arguments.drafts):
+            support_ids = self._supporting_documents(draft, paper_maps)
+            similar_ids = self._similar_objectives(draft, existing)
+            if not support_ids:
+                unsupported_count += 1
+            draft_id = self._draft_id(context.tool_call_id, position, draft)
+            records.append(
+                {
+                    "draft_id": draft_id,
+                    "status": "draft",
+                    **draft.model_dump(),
+                    "support_status": (
+                        "paper_map_context" if support_ids else "unsupported"
+                    ),
+                    "supporting_document_ids": list(support_ids),
+                    "similar_objective_ids": list(similar_ids),
+                    "support_is_evidence": False,
+                }
+            )
+            refs.append(
+                ChatResourceRef(
+                    resource_type="objective_draft",
+                    resource_id=draft_id,
+                )
+            )
+        warnings = (
+            (
+                f"{unsupported_count} drafts have no matching PaperResearchMap "
+                "relationship context; they remain unverified proposals.",
+            )
+            if unsupported_count
+            else ()
+        )
+        return ChatToolResult(
+            tool_call_id=context.tool_call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "draft_count": len(records),
+                "drafts": records,
+                "persistence": "transient_chat_result",
+            },
+            resource_refs=tuple(refs),
+            warnings=warnings,
+        )
+
+    @staticmethod
+    def _supporting_documents(
+        draft: ObjectiveDraftInput,
+        paper_maps: tuple,
+    ) -> tuple[str, ...]:
+        document_ids: list[str] = []
+        for paper_map in paper_maps:
+            if any(
+                ProposeObjectiveDraftsCapability._relationship_supports(
+                    draft,
+                    study.material_scope,
+                    relationship.varied_factors,
+                    relationship.outcome,
+                )
+                for study in paper_map.studies
+                for relationship in study.relationships
+            ):
+                document_ids.append(paper_map.document_id)
+        return tuple(dict.fromkeys(document_ids))
+
+    @staticmethod
+    def _relationship_supports(
+        draft: ObjectiveDraftInput,
+        study_materials: tuple[str, ...],
+        varied_factors: tuple[str, ...],
+        outcome: str,
+    ) -> bool:
+        material_matches = (
+            not draft.material_scope
+            or not study_materials
+            or any(
+                property_matching.axis_values_match(draft_material, study_material)
+                for draft_material in draft.material_scope
+                for study_material in study_materials
+            )
+        )
+        variables_match = all(
+            any(
+                property_matching.axis_values_match(variable, factor)
+                for factor in varied_factors
+            )
+            for variable in draft.variables
+        )
+        outcome_matches = property_matching.axis_values_match(
+            draft.outcomes[0],
+            outcome,
+        )
+        return material_matches and variables_match and outcome_matches
+
+    @staticmethod
+    def _similar_objectives(draft: ObjectiveDraftInput, objectives: tuple) -> tuple[str, ...]:
+        return tuple(
+            objective.objective_id
+            for objective in objectives
+            if len(objective.outcomes) == 1
+            and property_matching.axis_values_match(
+                draft.outcomes[0],
+                objective.outcomes[0],
+            )
+            and all(
+                any(
+                    property_matching.axis_values_match(variable, candidate)
+                    for candidate in objective.variables
+                )
+                for variable in draft.variables
+            )
+        )[:6]
+
+    @staticmethod
+    def _draft_id(
+        tool_call_id: str,
+        position: int,
+        draft: ObjectiveDraftInput,
+    ) -> str:
+        identity = json.dumps(
+            {
+                "tool_call_id": tool_call_id,
+                "position": position,
+                "draft": draft.model_dump(),
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return f"draft_{sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+
+
+__all__ = [
+    "ObjectiveDraftInput",
+    "ProposeObjectiveDraftsToolRequest",
+    "ProposeObjectiveDraftsCapability",
+]

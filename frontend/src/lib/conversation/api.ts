@@ -3,6 +3,7 @@ import type { ChatToolRequest, ChatToolResult } from '$lib/agent/api';
 import type { ChatSourceContext } from '$lib/document/source-context';
 
 export type ConversationMessage = {
+	can_rate?: boolean;
 	message_id: string;
 	conversation_id: string;
 	role: 'user' | 'assistant' | 'tool';

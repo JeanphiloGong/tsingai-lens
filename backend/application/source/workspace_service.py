@@ -7,14 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import Any
 from uuid import uuid4
 
-from domain.chat.permissions import change_permission
 from domain.source import Workspace
-from exceptions import ResourceConflictException, ResourceNotFoundException
+from exceptions import ResourceNotFoundException
 from repositories.workspace_repository import (
-    PermissionRevisionConflict,
     StoredWorkspace,
     StoredDocument,
 )
@@ -127,85 +124,6 @@ async def get_workspace_for_user(workspace_id: str, owner_user_id: str) -> Store
             data={"code": "workspace_not_found", "workspace_id": workspace_id},
         )
     return record
-
-
-async def get_agent_default_permission_for_user(
-    workspace_id: str, owner_user_id: str
-) -> dict[str, Any]:
-    if not await WorkspaceRepo.workspace_belongs_to_user(
-        workspace_id,
-        owner_user_id,
-    ):
-        raise ResourceNotFoundException(
-            f"workspace not found: {workspace_id}",
-            data={"code": "workspace_not_found", "workspace_id": workspace_id},
-        )
-    permission = {
-        "mode": "confirm",
-        "actions": [],
-        "expires_at": None,
-        "revision": 0,
-    }
-    saved = await WorkspaceRepo.read_agent_default_permission(workspace_id)
-    if saved:
-        permission.update(saved)
-    return permission
-
-
-async def set_agent_default_permission_for_user(
-    workspace_id: str,
-    owner_user_id: str,
-    *,
-    mode: str,
-    actions: list[str],
-    all_actions: bool = False,
-    expires_at: str | None,
-    expected_revision: int,
-) -> dict[str, Any]:
-    await get_workspace_for_user(workspace_id, owner_user_id)
-    current = {
-        "mode": "confirm",
-        "actions": [],
-        "expires_at": None,
-        "revision": 0,
-    }
-    saved = await WorkspaceRepo.read_agent_default_permission(workspace_id)
-    if saved:
-        current.update(saved)
-    try:
-        updated = change_permission(
-            current,
-            mode=mode,
-            actions=actions,
-            all_actions=all_actions,
-            expires_at=expires_at,
-            expected_revision=expected_revision,
-        )
-    except ValueError as exc:
-        raise ResourceConflictException(
-            str(exc),
-            data={"code": str(exc), "workspace_id": workspace_id},
-        ) from exc
-    try:
-        saved = await WorkspaceRepo.set_agent_default_permission(
-            workspace_id,
-            updated,
-            expected_revision=current["revision"],
-        )
-    except PermissionRevisionConflict as exc:
-        raise ResourceConflictException(
-            "Permission changed. Reload before saving.",
-            data={
-                "code": "permission_revision_conflict",
-                "workspace_id": workspace_id,
-            },
-        ) from exc
-    if not saved:
-        raise ResourceNotFoundException(
-            f"workspace not found: {workspace_id}",
-            data={"code": "workspace_not_found", "workspace_id": workspace_id},
-        )
-    return updated
 
 
 async def get_document(

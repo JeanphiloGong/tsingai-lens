@@ -21,7 +21,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 @pytest.fixture
-def postgres_sync_engine():
+def postgres_sync_engine(request):
     database_url = os.getenv("LENS_TEST_DATABASE_URL")
     if not database_url:
         pytest.skip("LENS_TEST_DATABASE_URL is not configured")
@@ -39,7 +39,7 @@ def postgres_sync_engine():
     try:
         with engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.upgrade(config, "head")
+            command.upgrade(config, getattr(request, "param", "head"))
         yield engine
     finally:
         reset_postgres_schema(engine)
@@ -82,7 +82,6 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         monkeypatch.setattr(
             "repositories.objective_repository.AsyncSessionLocal", factory
         )
-        monkeypatch.setattr("repositories.chat_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr(
             "conversation.repositories.conversation_repository.AsyncSessionLocal", factory,
         )
@@ -127,6 +126,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         monkeypatch.setattr(
             "repositories.workspace_repository.AsyncSessionLocal", factory
         )
+        monkeypatch.setattr("conversation.feedback.repository.AsyncSessionLocal", factory)
         yield factory
     finally:
         engine.sync_engine.dispose()
@@ -182,8 +182,7 @@ def workspace_service(postgres_session_factory):
 @pytest.fixture(autouse=True)
 def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
-    import application.chat.session_service as _test_chat_session_service
-    from application.chat.capabilities import (
+    from agent.capabilities import (
         workspace_context,
         research_scope,
         document_sources,
@@ -214,7 +213,6 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.source.reference_extraction_service as _test_source_reference_extraction_service
     import application.source.reference_workflow_service as _test_reference_workflow_service
     import application.source.source_import_service as _test_source_import_service
-    from controllers.chat import chat_session_routes
     from controllers.core import (
         document_routes,
         finding_review_routes,
@@ -228,20 +226,20 @@ def _isolate_application_module_dependencies(monkeypatch):
         reference_routes,
     )
 
-    from application.chat.capabilities import (
+    from agent.capabilities import (
         objective_candidate,
         objective_proposal,
         objective_analysis,
         objective_derivation,
     )
 
-    from application.chat.capabilities import (
+    from agent.capabilities import (
         finding_authoring,
         finding_review,
         paper_experiment_authoring,
     )
 
-    from application.chat.capabilities import published_findings, research_planning
+    from agent.capabilities import published_findings, research_planning
 
     dependencies = (
         (
@@ -265,7 +263,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (finding_review, ["workspace_service", "finding_feedback_service"]),
         (
             paper_experiment_authoring,
-            ["paper_experiment_authoring_service", "ChatRepo"],
+            ["paper_experiment_authoring_service", "task_repository"],
         ),
         (objective_candidate, ["objective_authoring_service"]),
         (objective_proposal, ["workspace_service", "ObjectiveRepo", "PaperMapRepo"]),
@@ -292,15 +290,6 @@ def _isolate_application_module_dependencies(monkeypatch):
         ),
         (research_scope, ["workspace_service", "PaperMapRepo"]),
         (_test_analysis_record_source, ["ObjectiveRepo"]),
-        (
-            _test_chat_session_service,
-            [
-                "ChatRepo",
-                "WorkspaceRepo",
-                "SourceArtifactRepo",
-                "workspace_service",
-            ],
-        ),
         (
             _test_document_profile_service,
             [
@@ -430,7 +419,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             ["SourceArtifactRepo", "workspace_service"],
         ),
         (_test_source_import_service, ["WorkspaceRepo"]),
-        (chat_session_routes, ["chat_session_service"]),
         (
             document_routes,
             [

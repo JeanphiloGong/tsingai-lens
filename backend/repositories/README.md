@@ -56,7 +56,6 @@ the persistence path.
 | [experiment_finding_repository.py](experiment_finding_repository.py) | Findings referencing fixed experiment selections |
 | [experiment_analysis_repository.py](experiment_analysis_repository.py) | Atomic experiment graph publication |
 | [model_connection_repository.py](model_connection_repository.py) | Read-only operator-managed model connections |
-| [chat_repository.py](chat_repository.py) | Sessions, messages, approvals, response snapshots and model-call audit |
 | [pipeline_run_repository.py](pipeline_run_repository.py) | Pipeline execution records, nodes, telemetry and history projections |
 | [experiment_plan_repository.py](experiment_plan_repository.py) | Experiment plan revisions and their record mappings |
 | [finding_review_repository.py](finding_review_repository.py) | Expert Finding feedback, curation and their record mappings |
@@ -93,10 +92,10 @@ service behavior, persistence, locking, constraints and rollback.
 
 The [ObjectStore contract](object_store.py) describes uploaded/extracted bytes,
 not database rows; its existing file implementation remains infrastructure.
-The [model-call observer](../application/chat/session_service.py) reports audit
-events through explicit `start` and `finish` arguments. It constructs the
-persisted `ChatModelCall` beside the application operation; the model client
-does not import repository types or wrap audit arguments in transfer models.
+[ConversationRepository](../conversation/repositories/conversation_repository.py)
+owns message paths. [TaskRepository](../agent/repositories/task_repository.py)
+owns execution checkpoints and receives audit events from the Agent model-call
+observer.
 
 Dedicated results reuse domain values when possible: `StoredObjective`,
 `StoredDataset`, `StoredWorkspace` and `StoredDocument` attach metadata without

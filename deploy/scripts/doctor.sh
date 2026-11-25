@@ -189,10 +189,6 @@ PY
       document-preparation-worker \
       objective-discovery-worker \
       objective-analysis-worker \
-      feedback-analysis-worker \
-      correction-signal-analysis-worker \
-      tool-failure-analysis-worker \
-      dataset-sample-worker
     do
       if printf '%s\n' "$RUNNING_SERVICES" | grep -qx "$worker"; then
         pass "$worker container is running"

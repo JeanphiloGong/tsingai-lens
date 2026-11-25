@@ -3,21 +3,83 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from datetime import datetime
+from hashlib import sha256
+from typing import Any
 import json
 from uuid import uuid4
 
 from agent.application.runner import DurableRunner, RunnerState
-from agent.capabilities.registry import CapabilityRegistry, ToolSpec
+from agent.capabilities.registry import CapabilityRegistry
+from agent.capabilities.research_tools import registry
 from agent.domain.models import AgentTask, Operation, TaskStep
 from agent.repositories.task_repository import TaskExecutionContext, TaskRepository
-from application.chat import capabilities
-from application.chat.context_builder import ChatModelContext
-from application.chat.model import AGENT_MISSION, RESEARCH_TASK_MODEL, ModelResponseError, ModelTurn
-from application.chat.session_service import RepositoryModelCallObserver
-from domain.chat import ChatMessage, ChatMessageRole, ToolRisk
+from agent.application.context_builder import ChatModelContext
+from agent.application.inline_citations import format_inline_citations
+from agent.application.model import AGENT_MISSION, RESEARCH_TASK_MODEL, ModelResponseError, ModelTurn
+from domain.chat import ChatMessage, ChatMessageRole, ChatResourceRef, ChatToolResult, ToolResultStatus
 from infra.llm.chat_model import OpenAIChatModel
 from infra.llm.model_credentials import decrypt_api_key, load_master_key
 from repositories.model_connection_repository import ModelConnectionRepo
+
+
+class RepositoryModelCallObserver:
+    def __init__(
+        self, repository: TaskRepository, *, task_id: str, model_connection_id: str
+    ) -> None:
+        self.repository = repository
+        self.task_id = task_id
+        self.model_connection_id = model_connection_id
+
+    async def start(
+        self,
+        *,
+        session_id: str,
+        trigger_message_id: str | None,
+        response_message_id: str | None,
+        purpose: str,
+        request: dict[str, Any],
+    ) -> str:
+        call_id = f"model_call_{uuid4().hex}"
+        request_digest = sha256(
+            json.dumps(
+                request, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        ).hexdigest()
+        await self.repository.start_model_call(
+            task_id=self.task_id,
+            conversation_id=session_id,
+            call_id=call_id,
+            trigger_message_id=trigger_message_id,
+            response_message_id=response_message_id,
+            model_connection_id=self.model_connection_id,
+            purpose=purpose,
+            request=request,
+            request_digest=request_digest,
+        )
+        return call_id
+
+    async def finish(
+        self,
+        call_id: str,
+        *,
+        status: str,
+        finished_at: str,
+        error_code: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+    ) -> None:
+        await self.repository.finish_model_call(
+            task_id=self.task_id,
+            call_id=call_id,
+            status=status,
+            finished_at=datetime.fromisoformat(finished_at),
+            error_code=error_code,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
 
 
 class TaskExecution:
@@ -211,7 +273,9 @@ class TaskExecution:
                     model_call_session_id=context.conversation_id,
                     max_context_tokens=connection.context_window_tokens or 200_000,
                     model_call_observer=RepositoryModelCallObserver(
-                        model_connection_id=connection.connection_id, task_id=context.task_id
+                        self.repository,
+                        model_connection_id=connection.connection_id,
+                        task_id=context.task_id,
                     ),
                     operation_messages=tuple(operation_messages),
                 ),
@@ -225,39 +289,31 @@ class TaskExecution:
             )
         finally:
             await model.aclose()
+        if not turn.tool_calls:
+            source_results = [
+                ChatToolResult(
+                    tool_call_id=operation.tool_call_id or operation.operation_id,
+                    status=ToolResultStatus.SUCCEEDED,
+                    data=operation.result.get("data", {}),
+                    resource_refs=tuple(
+                        ChatResourceRef(**ref)
+                        for ref in operation.result.get("resource_refs", [])
+                    ),
+                )
+                for operation in operations
+                if operation.status == "succeeded"
+                and operation.result
+                and operation.result.get("status") == "succeeded"
+            ]
+            display_content = format_inline_citations(
+                turn.content, calls=operations, results=source_results
+            )
+            if display_content.strip():
+                turn = replace(turn, content=display_content)
         return turn, connection.connection_id
 
 
 task_repository = TaskRepository()
-registry = CapabilityRegistry()
-for source, handlers in (
-    ("workspace", (capabilities.GetWorkspaceContextCapability, capabilities.BrowseWorkspacePapersCapability)),
-    ("document", (
-        capabilities.InspectDocumentSourcesCapability, capabilities.SearchSourcesCapability,
-        capabilities.InspectTableCapability, capabilities.ReadSourceCapability,
-    )),
-    ("research", (
-        capabilities.InspectResearchProcessCapability, capabilities.StartResearchProcessCapability,
-        capabilities.QueryPublishedFindingsCapability, capabilities.InspectPublishedFindingCapability,
-        capabilities.RecordFindingFeedbackCapability, capabilities.CurateFindingCapability,
-        capabilities.CreateFindingDraftCapability, capabilities.CreateFindingVersionCapability,
-        capabilities.ProposeObjectiveDraftsCapability, capabilities.PreviewResearchScopeCapability,
-        capabilities.CreateObjectiveCandidateCapability, capabilities.ConfirmObjectiveCapability,
-        capabilities.StartObjectiveAnalysisCapability, capabilities.InspectObjectiveAnalysisCapability,
-        capabilities.AssessObjectiveQualityCapability, capabilities.DeriveObjectiveCapability,
-        capabilities.ProposeResearchPlanCapability, capabilities.CreateResearchPlanCapability,
-        capabilities.InspectResearchPlansCapability, capabilities.ReviseResearchPlanCapability,
-    )),
-):
-    for handler_type in handlers:
-        handler = handler_type()
-        spec = handler.spec
-        registry.register(ToolSpec(
-            name=spec.name, description=spec.description, input_model=spec.input_model,
-            handler=handler.execute, source=source, parallel_safe=spec.parallel_safe,
-            requires_approval=spec.risk is not ToolRisk.READ,
-        ))
-
 task_execution = TaskExecution(task_repository, registry)
 
 

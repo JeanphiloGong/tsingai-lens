@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import MetaData, Table, literal_column, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -28,10 +29,10 @@ from infra.persistence.postgres.models.chat import (  # noqa: E402
     AgentOperationORM,
     AgentTaskORM,
     ChatModelCallORM,
-    ChatToolCallORM,
 )
 from infra.persistence.postgres.models.conversation import (  # noqa: E402
     ConversationORM,
+    MessageFeedbackORM,
     MessageORM,
 )
 
@@ -81,21 +82,14 @@ def _status(value: object) -> str | None:
     return value if isinstance(value, str) and value in allowed else None
 
 
-def _operation_status(call: ChatToolCallORM) -> tuple[str, bool]:
+def _operation_status(call) -> tuple[str, bool]:
     result_status = call.result_status
-    if result_status in {"unknown", "needs_reconciliation"}:
-        return "needs_reconciliation", True
-    if (
-        call.risk in {"write", "draft"}
-        and call.status == "running"
-        and call.finished_at is None
-    ):
+    if result_status in {"unknown", "needs_reconciliation"} or call.status == "running":
         return "needs_reconciliation", True
     allowed = {
         "requested",
         "approval_required",
         "approved",
-        "running",
         "succeeded",
         "failed",
         "rejected",
@@ -105,53 +99,45 @@ def _operation_status(call: ChatToolCallORM) -> tuple[str, bool]:
     return call.status, False
 
 
-async def _load_snapshots(
-    db: AsyncSession,
-) -> tuple[tuple[str, dict[str, object]], ...]:
-    async with db.begin():
-        conversations = (
-            await db.scalars(
-                select(ConversationORM)
-                .where(ConversationORM.response_snapshot.is_not(None))
-                .order_by(ConversationORM.conversation_id)
-            )
-        ).all()
-        snapshots: list[tuple[str, dict[str, object]]] = []
-        for conversation in conversations:
-            snapshot = conversation.response_snapshot
-            if not isinstance(snapshot, dict) or not snapshot.get("response_id"):
-                continue
-            snapshots.append((conversation.conversation_id, snapshot))
-    return tuple(snapshots)
-
-
 async def _backfill_one(
     db: AsyncSession,
     conversation: ConversationORM,
     snapshot: dict[str, object],
     report: TaskBackfillReport,
-) -> str | None:
+) -> tuple[str, tuple[MessageORM, ...]] | None:
     response_id = str(snapshot["response_id"])
     if snapshot.get("response_count", 1) != 1:
         report.add_unresolved(response_id, "response identity is not unique")
         return None
-    trigger_id = snapshot.get("trigger_message_id")
     final_id = snapshot.get("final_message_id")
-    if not isinstance(trigger_id, str) or not isinstance(final_id, str):
-        report.add_unresolved(response_id, "trigger or final Message identity is missing")
+    if final_id is None and snapshot.get("status") == "completed":
+        # The old runtime cleared streamed message_id at completion.
+        final_id = snapshot.get("checkpoint_message_id")
+    if not isinstance(final_id, str):
+        report.add_unresolved(response_id, "persisted final Message identity is missing")
         return None
 
+    tool_requests = literal_column("chat_messages.tool_requests", JSONB)
+    position = literal_column("chat_messages.position")
     messages = (
-        await db.scalars(
-            select(MessageORM).where(
-                MessageORM.conversation_id == conversation.conversation_id,
-                MessageORM.message_id.in_((trigger_id, final_id)),
-            )
+        await db.execute(
+            select(MessageORM, tool_requests)
+            .where(MessageORM.conversation_id == conversation.conversation_id)
+            .order_by(position, MessageORM.message_id)
         )
     ).all()
-    by_id = {message.message_id: message for message in messages}
-    trigger = by_id.get(trigger_id)
-    final = by_id.get(final_id)
+    final = None
+    trigger = None
+    turn = []
+    for message, requests in messages:
+        if message.role == "user":
+            trigger = message
+            turn.clear()
+        turn.append(message)
+        if message.message_id == final_id:
+            if not requests:
+                final = message
+            break
     status = _status(snapshot.get("status", "failed"))
     if trigger is None or trigger.role != "user":
         report.add_unresolved(response_id, "trigger Message is not a user Message")
@@ -159,12 +145,20 @@ async def _backfill_one(
     if final is None or final.role != "assistant" or not final.content:
         report.add_unresolved(response_id, "final Message is not a non-empty assistant Message")
         return None
-    if status is None:
-        report.add_unresolved(response_id, "Task status is not supported")
+    if status != "completed" or snapshot.get("completion_reason") not in {None, "model_answer"}:
+        report.add_unresolved(response_id, "legacy response is not a completed model answer")
         return None
-    if status == "completed" and final.message_id is None:
-        report.add_unresolved(response_id, "completed response has no final Message")
+    if snapshot.get("trigger_message_id", trigger.message_id) != trigger.message_id:
+        report.add_unresolved(response_id, "trigger Message does not match the legacy turn")
         return None
+    if conversation.forked_from_message_id or final.copied_from_message_id:
+        report.add_unresolved(response_id, "legacy Fork execution requires provenance review")
+        return None
+    if final.parent_message_id is not None:
+        for previous, current in zip(turn, turn[1:]):
+            if current.parent_message_id != previous.message_id:
+                report.add_unresolved(response_id, "legacy turn does not match the parent path")
+                return None
     task_id = stable_task_id(response_id)
     if final.produced_by_task_id not in {None, task_id}:
         report.add_unresolved(response_id, "final Message belongs to another Task")
@@ -195,14 +189,12 @@ async def _backfill_one(
 
     task = await db.get(AgentTaskORM, task_id, with_for_update=True)
     if task is None:
-        final.produced_by_task_id = task_id
         task = AgentTaskORM(
             task_id=task_id,
             session_id=conversation.conversation_id,
             trigger_kind="user_message",
             trigger_message_id=trigger.message_id,
-            final_message_id=final.message_id if status == "completed" else None,
-            status=status,
+            status="running",
             checkpoint_revision=revision,
             checkpoint=checkpoint,
             started_at=started_at,
@@ -211,11 +203,16 @@ async def _backfill_one(
         )
         db.add(task)
         await db.flush()
+        final.produced_by_task_id = task_id
+        await db.flush()
+        task.final_message_id = final.message_id
+        task.status = "completed"
         report.created_task_ids.append(task_id)
     elif (
         task.session_id != conversation.conversation_id
         or task.trigger_message_id != trigger.message_id
         or task.status != status
+        or task.final_message_id != final.message_id
     ):
         report.add_unresolved(response_id, "existing Task does not match the legacy identity")
         return None
@@ -224,33 +221,43 @@ async def _backfill_one(
     task.checkpoint_message_id = checkpoint_message_id or (
         final.message_id if status == "completed" else None
     )
-    return task_id
+    return task_id, tuple(turn)
 
 
 async def _backfill_operations(
     db: AsyncSession,
     conversation_id: str,
-    final_message_id: str,
+    turn: tuple[MessageORM, ...],
     task_id: str,
     report: TaskBackfillReport,
+    tool_calls: Table,
 ) -> None:
+    assistants = {
+        message.message_id: message for message in turn if message.role == "assistant"
+    }
     calls = (
-        await db.scalars(
-            select(ChatToolCallORM)
+        await db.execute(
+            select(tool_calls)
             .where(
-                ChatToolCallORM.session_id == conversation_id,
-                ChatToolCallORM.assistant_message_id == final_message_id,
+                tool_calls.c.session_id == conversation_id,
+                tool_calls.c.assistant_message_id.in_(assistants),
             )
-            .order_by(ChatToolCallORM.position, ChatToolCallORM.tool_call_id)
+            .order_by(tool_calls.c.position, tool_calls.c.tool_call_id)
         )
     ).all()
     for call in calls:
+        message = assistants[call.assistant_message_id]
+        if message.produced_by_task_id not in {None, task_id}:
+            report.add_unresolved(call.tool_call_id, "assistant Message belongs to another Task")
+            continue
         operation_id = stable_operation_id(task_id, call.tool_call_id)
         status, needs_reconciliation = _operation_status(call)
         if needs_reconciliation:
             report.reconciliation_operation_ids.append(operation_id)
         operation = await db.get(AgentOperationORM, operation_id, with_for_update=True)
         if operation is None:
+            message.produced_by_task_id = task_id
+            await db.flush()
             operation = AgentOperationORM(
                 operation_id=operation_id,
                 task_id=task_id,
@@ -261,7 +268,19 @@ async def _backfill_operations(
                 arguments_digest=call.arguments_digest,
                 risk=call.risk,
                 status=status,
-                result=call.result_data,
+                result=(
+                    {
+                        "tool_call_id": call.tool_call_id,
+                        "status": call.result_status,
+                        "data": call.result_data or {},
+                        "resource_refs": call.result_resource_refs or [],
+                        "warnings": call.result_warnings or [],
+                        "error_code": call.result_error_code,
+                        "error_message": call.result_error_message,
+                    }
+                    if call.result_status
+                    else None
+                ),
                 error_code=call.result_error_code or call.error_code,
                 error_message=call.result_error_message,
                 decision_user_id=call.decision_user_id,
@@ -294,7 +313,10 @@ async def _link_model_calls(
             .where(
                 ChatModelCallORM.session_id == conversation_id,
                 (ChatModelCallORM.trigger_message_id == trigger_message_id)
-                | (ChatModelCallORM.response_message_id == final_message_id),
+                & (
+                    (ChatModelCallORM.response_message_id == final_message_id)
+                    | (ChatModelCallORM.response_message_id.is_(None))
+                ),
             )
             .order_by(ChatModelCallORM.started_at, ChatModelCallORM.call_id)
         )
@@ -309,40 +331,88 @@ async def _link_model_calls(
 
 async def run(db: AsyncSession) -> TaskBackfillReport:
     report = TaskBackfillReport()
-    snapshots = await _load_snapshots(db)
-    for conversation_id, snapshot in snapshots:
-        async with db.begin():
-            conversation = await db.scalar(
-                select(ConversationORM)
-                .where(ConversationORM.conversation_id == conversation_id)
-                .with_for_update()
+    async with db.begin():
+        connection = await db.connection()
+        tool_calls = await connection.run_sync(
+            lambda sync: Table("chat_tool_calls", MetaData(), autoload_with=sync)
+        )
+        snapshot_column = literal_column("chat_conversations.response_snapshot", JSONB)
+        old_fork = literal_column("chat_conversations.parent_session_id")
+        rows = (
+            await db.execute(
+                select(ConversationORM, snapshot_column, old_fork)
+                .where(snapshot_column.is_not(None))
+                .with_for_update(of=ConversationORM)
             )
-            if conversation is None:
-                report.add_unresolved(
-                    str(snapshot["response_id"]), "conversation is missing"
-                )
+        ).all()
+        response_counts: dict[str, int] = {}
+        for _, snapshot, _ in rows:
+            if isinstance(snapshot, dict) and isinstance(snapshot.get("response_id"), str):
+                response_id = snapshot["response_id"]
+                response_counts[response_id] = response_counts.get(response_id, 0) + 1
+        for conversation, snapshot, old_parent in rows:
+            if snapshot is None:
                 continue
-            task_id = await _backfill_one(db, conversation, snapshot, report)
-            if task_id is None:
+            if not isinstance(snapshot, dict) or not isinstance(snapshot.get("response_id"), str):
+                report.add_unresolved(conversation.conversation_id, "response identity is missing")
                 continue
-            final_id = snapshot.get("final_message_id") or snapshot.get("message_id")
-            if not isinstance(final_id, str):
+            if response_counts[snapshot["response_id"]] != 1 or old_parent is not None:
+                report.add_unresolved(snapshot["response_id"], "response identity or Fork origin is ambiguous")
                 continue
+            migrated = await _backfill_one(db, conversation, snapshot, report)
+            if migrated is None:
+                continue
+            task_id, turn = migrated
             await _backfill_operations(
-                db,
-                conversation.conversation_id,
-                final_id,
-                task_id,
-                report,
+                db, conversation.conversation_id, turn, task_id, report, tool_calls
             )
             await _link_model_calls(
-                db,
-                conversation.conversation_id,
-                str(snapshot["trigger_message_id"]),
-                final_id,
-                task_id,
-                report,
+                db, conversation.conversation_id, turn[0].message_id, turn[-1].message_id,
+                task_id, report,
             )
+
+        unlinked = (
+            await db.scalars(
+                select(tool_calls.c.tool_call_id).where(
+                    ~select(1).where(
+                        AgentOperationORM.tool_call_id == tool_calls.c.tool_call_id,
+                        AgentOperationORM.assistant_message_id == tool_calls.c.assistant_message_id,
+                    ).exists()
+                )
+            )
+        ).all()
+        for call_id in unlinked:
+            report.add_unresolved(call_id, "tool call has no verified Task")
+        feedback = (
+            await db.execute(
+                select(
+                    MessageFeedbackORM.feedback_id,
+                    MessageFeedbackORM.user_id,
+                    MessageFeedbackORM.response_digest,
+                    MessageORM.content,
+                    ConversationORM.user_id,
+                    AgentTaskORM.task_id,
+                )
+                .join(MessageORM, MessageORM.message_id == MessageFeedbackORM.message_id)
+                .join(ConversationORM, ConversationORM.conversation_id == MessageORM.conversation_id)
+                .outerjoin(
+                    AgentTaskORM,
+                    (AgentTaskORM.task_id == MessageORM.produced_by_task_id)
+                    & (AgentTaskORM.final_message_id == MessageORM.message_id)
+                    & (AgentTaskORM.status == "completed"),
+                )
+            )
+        ).all()
+        for feedback_id, author_id, digest, content, owner_id, task_id in feedback:
+            if (
+                task_id is None
+                or author_id != owner_id
+                or digest != hashlib.sha256(content.encode("utf-8")).hexdigest()
+            ):
+                report.unresolved.append({
+                    "feedback_id": feedback_id,
+                    "reason": "Feedback target, owner or response digest requires review",
+                })
     return report
 
 

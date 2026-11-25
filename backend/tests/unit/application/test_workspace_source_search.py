@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
-from application.chat.capabilities import document_sources
-from application.chat.capabilities.document_sources import SearchSourcesCapability,SearchSourcesToolRequest
-from application.chat.capabilities.contracts import CapabilityExecutionContext
+from agent.capabilities import document_sources
+from agent.capabilities.document_sources import SearchSourcesCapability,SearchSourcesToolRequest
+from agent.capabilities.registry import ToolExecutionContext
 from domain.source import SourceDocument,SourceBlock
 
 @pytest.fixture
@@ -18,7 +18,7 @@ async def test_workspace_search_returns_ranked_papers_and_matching_window(monkey
     monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
     repo=SimpleNamespace(read_workspace_documents=AsyncMock(return_value=(other,target)),read_documents=AsyncMock(return_value=(target,)))
     monkeypatch.setattr(document_sources,'SourceArtifactRepo',repo)
-    cap=SearchSourcesCapability();context=CapabilityExecutionContext('chat','user','col','search')
+    cap=SearchSourcesCapability();context=ToolExecutionContext(task_id='chat', user_id='user', workspace_id='col', tool_call_id='search', operation_id="operation")
     result=await cap.execute(context,SearchSourcesToolRequest(query='IN718 elongation',match_mode='all'))
     assert result.status=='succeeded'
     assert result.data['papers'][0]['document_id']=='in718'
@@ -46,7 +46,7 @@ async def test_search_surfaces_other_papers_before_repeating_one_papers_passages
         read_workspace_documents=AsyncMock(return_value=documents),
     ))
     capability = SearchSourcesCapability()
-    context = CapabilityExecutionContext("chat", "user", "col", "search")
+    context = ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="search", operation_id="operation")
     result = await capability.execute(context, SearchSourcesToolRequest(query="IN718 elongation", limit=3))
     assert [hit["document_id"] for hit in result.data["matches"]] == [f"paper-{i}" for i in range(3)]
     assert result.data["matching_paper_total"] == 3
@@ -57,25 +57,10 @@ async def test_search_surfaces_other_papers_before_repeating_one_papers_passages
     assert [hit["source_ref"] for hit in next_page.data["matches"]] == [f"p{i}-1" for i in range(3)]
 
 
-def test_rewording_a_search_or_returning_a_subset_is_not_new_progress():
-    from application.chat.agent_runner import AgentRunLimits, _RunProgress
-    from domain.chat import ChatToolCall, ChatToolResult, ToolResultStatus, ToolRisk
-
-    progress = _RunProgress(AgentRunLimits())
-    call = ChatToolCall.requested(tool_call_id="search", session_id="chat", assistant_message_id="a",
-                                  name="search_sources", arguments={"query": "elongation"}, risk=ToolRisk.READ)
-    hits = [{"document_id": "paper", "source_kind": "text_window", "source_ref": f"result-{i}",
-             "source_digest": f"digest-{i}", "content_offset": 0, "content": "Elongation measured."}
-            for i in range(2)]
-    for matches, expected in ((hits, True), (hits[:1], False), ([{**hits[0], "content_offset": 800,
-                                                              "content": "Another measurement."}], True)):
-        result = ChatToolResult("search", ToolResultStatus.SUCCEEDED,
-                                data={"query": "differently worded search", "matches": matches})
-        assert progress.observe(call, result) is expected
 
 @pytest.mark.anyio
 async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeypatch):
-    from application.chat.capabilities.document_sources import InspectTableCapability,InspectTableToolRequest
+    from agent.capabilities.document_sources import InspectTableCapability,InspectTableToolRequest
     from domain.source import SourceTable
     header=('Condition','Elongation (%)')
     rows=tuple((f'condition-{i:02}',str(10+i/10)) for i in range(35))
@@ -85,7 +70,7 @@ async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeyp
     monkeypatch.setattr(document_sources,'SourceArtifactRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
     cap=InspectTableCapability();arguments={'document_id':'paper','table_ref':'table'};seen=[]
     for _ in range(40):
-        result=await cap.execute(CapabilityExecutionContext('chat','user','col','read',max_result_tokens=700),InspectTableToolRequest(**arguments))
+        result=await cap.execute(ToolExecutionContext(task_id='chat', user_id='user', workspace_id='col', tool_call_id='read', operation_id="operation", max_result_tokens=700),InspectTableToolRequest(**arguments))
         assert result.status=='succeeded'
         assert document_sources.InspectDocumentSourcesCapability._result_tokens(result)<=700
         assert 'Elongation (%)' in result.data['table_markdown']

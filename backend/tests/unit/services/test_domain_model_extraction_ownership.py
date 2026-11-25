@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from application.chat import model as chat_model
+from agent.application import model as chat_model
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.objectives import finding_summary
 from application.core.objectives.analysis.source_extraction import (

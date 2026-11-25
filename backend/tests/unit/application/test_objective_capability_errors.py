@@ -3,12 +3,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.objective_analysis import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.objective_analysis import (
     ConfirmObjectiveCapability,
     ConfirmObjectiveToolRequest,
 )
-from application.chat.capabilities.objective_candidate import (
+from agent.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
@@ -60,8 +60,9 @@ async def test_objective_tool_preserves_rejection_and_repair_reason(
     monkeypatch.setattr(objective_authoring_service, operation, AsyncMock(side_effect=error))
 
     result = await capability.execute(
-        CapabilityExecutionContext(
-            session_id="chat-1", user_id="user-1", workspace_id="col-1", tool_call_id="call-1",
+        ToolExecutionContext(
+            operation_id="operation",
+            task_id="chat-1", user_id="user-1", workspace_id="col-1", tool_call_id="call-1",
         ),
         arguments,
     )
@@ -84,8 +85,9 @@ async def test_objective_tool_does_not_disguise_internal_faults(
 
     with pytest.raises(exception_type, match="private implementation failure"):
         await capability.execute(
-            CapabilityExecutionContext(
-                session_id="chat-1", user_id="user-1", workspace_id="col-1", tool_call_id="call-1",
+            ToolExecutionContext(
+                operation_id="operation",
+                task_id="chat-1", user_id="user-1", workspace_id="col-1", tool_call_id="call-1",
             ),
             arguments,
         )
@@ -103,8 +105,9 @@ async def test_confirm_missing_objective_is_rejected_without_writing(
     )
 
     result = await ConfirmObjectiveCapability().execute(
-        CapabilityExecutionContext(
-            session_id="chat-1", user_id="local-user", workspace_id="missing-col", tool_call_id="call-1",
+        ToolExecutionContext(
+            operation_id="operation",
+            task_id="chat-1", user_id="local-user", workspace_id="missing-col", tool_call_id="call-1",
         ),
         ConfirmObjectiveToolRequest(objective_id="missing-objective"),
     )

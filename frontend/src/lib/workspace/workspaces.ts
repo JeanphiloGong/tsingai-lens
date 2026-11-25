@@ -1,7 +1,6 @@
 import { writable } from 'svelte/store';
 import { requestJson } from '../../routes/_shared/api';
 import type { WorkspaceDocument } from '../../routes/_shared/workspaceDocuments';
-import type { AgentPermission } from '$lib/agent/permissions';
 
 export type Workspace = {
 	workspace_id: string;
@@ -143,27 +142,4 @@ export async function deleteWorkspace(workspaceId: string) {
 		items.filter((item) => item.workspace_id !== record.workspace_id)
 	);
 	return record;
-}
-
-export async function fetchWorkspaceAgentPermission(workspaceId: string) {
-	return (await requestJson(`/workspaces/${encodeURIComponent(workspaceId)}/agent-permissions`, {
-		method: 'GET'
-	})) as AgentPermission;
-}
-
-export async function updateWorkspaceAgentPermission(
-	workspaceId: string,
-	permission: AgentPermission,
-	options: { allActions?: boolean } = {}
-) {
-	return (await requestJson(`/workspaces/${encodeURIComponent(workspaceId)}/agent-permissions`, {
-		method: 'PUT',
-		body: JSON.stringify({
-			mode: permission.mode,
-			actions: permission.actions,
-			all_actions: options.allActions ?? false,
-			expires_at: permission.expires_at,
-			expected_revision: permission.revision
-		})
-	})) as AgentPermission;
 }

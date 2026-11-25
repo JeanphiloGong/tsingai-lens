@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -73,17 +73,17 @@ async def backfill_conversation(
             return report
         report.target_conversation_id = conversation.conversation_id
 
-        messages = tuple(
-            (
-                await db.scalars(
-                    select(MessageORM)
-                    .where(MessageORM.conversation_id == conversation_id)
-                    .order_by(MessageORM.position, MessageORM.message_id)
-                    .with_for_update()
-                )
-            ).all()
-        )
-        positions = [message.position for message in messages]
+        position = literal_column("chat_messages.position")
+        rows = (
+            await db.execute(
+                select(MessageORM, position)
+                .where(MessageORM.conversation_id == conversation_id)
+                .order_by(position, MessageORM.message_id)
+                .with_for_update()
+            )
+        ).all()
+        messages = [message for message, _ in rows]
+        positions = [value for _, value in rows]
         if positions != list(range(len(messages))):
             report.add_unresolved(
                 "conversation",

@@ -16,24 +16,9 @@ User message
   -> final answer or exact write approval
 ```
 
-Ordinary conversation does not require a capability. The Agent receives a
-small, intent-matched set of workspace, Source, Finding, Objective, or plan
-actions for each decision; it does not receive the whole capability catalogue.
-Workspace screening stays separate from Source reading, and deriving a new
-Objective requires an explicit request. A Core write remains paused until the
-user approves the exact persisted arguments by default. The workspace Settings
-page controls the default for new workspace Agent sessions with read-only, per-call
-confirmation, and automatic grants. An automatic grant can stay active until revoked or be
-limited to at most 24 hours. A select-all control can authorize
-the complete current write-action set. The session permission control remains a
-session-scoped override for one active conversation; changing the workspace default
-never silently changes an active session. Branches continue to start with
-confirmation so a copied conversation cannot inherit automatic authority.
-Granting Evidence or Finding creation includes publishing its new analysis version. The control
-uses GET/PUT on the session's `/permissions` endpoint and an optimistic revision;
-conflicts require reload, never an automatic overwrite. Revoking during a turn
-blocks the next unclaimed write, not an operation already running. New sessions
-and messages/{message_id}/edits default to confirmation.
+Ordinary conversation can complete without invoking a tool. The Agent Registry
+supplies workspace, Source, Finding, Objective, and plan actions. Operations
+requiring approval present the stored arguments for review before execution.
 
 ## Product Boundary
 
@@ -104,8 +89,6 @@ POST /api/v1/conversations/{conversation_id}/messages/{message_id}/edits
 GET  /api/v1/conversations/{conversation_id}/tree
 PUT  /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback
 POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/operations/{operation_id}/decision
-GET  /api/v1/workspaces/{workspace_id}/agent-permissions
-PUT  /api/v1/workspaces/{workspace_id}/agent-permissions
 ```
 
 Both Chat entrypoints render the shared model picker inside the composer, just
@@ -281,9 +264,8 @@ prevents formulas from enabling external resources or affecting later replies.
 
 ## Answer Feedback
 
-Each saved Assistant text answer has Helpful and Not helpful icon toggles
-directly below its content. User messages, tool requests/results, and temporary
-streaming text have no feedback controls. Selecting the active rating withdraws
+The message path supplies `can_rate` for saved final Task answers. Eligible
+answers show Helpful and Not helpful icon toggles below their content. Selecting the active rating withdraws
 it; selecting the other rating replaces it and clears the previous details.
 
 A negative rating is saved immediately and opens an inline editor for an
@@ -295,7 +277,7 @@ Icon controls have labels, tooltips, and pressed state; the editor focuses its
 comment input and respects reduced motion and narrow viewports.
 
 `ResearchConversation.svelte` owns the message-keyed saved state, errors, and pending requests.
-It restores feedback from the trajectory's separate `feedback` array and
+It restores feedback from each message's `my_feedback` value and
 aborts/ignores stale responses after session, workspace, or account changes.
 `MessageFeedback.svelte` owns the per-answer editor. No feedback is stored in
 browser storage or sent as a conversation message or scientific review action.
@@ -306,7 +288,7 @@ results under differing conditions. The researcher rates it, requests missing
 test temperatures and Source links, retries a failed save, refreshes to recover
 the details, changes the rating, and withdraws it. Browser tests cover this
 sequence at 320, 768, 1024, and 1440 pixels; PostgreSQL integration tests cover
-the actual authenticated API, concurrent upserts, cascades, and migration.
+the authenticated API, Fork eligibility, and historical data migration.
 
 ## Message Revisions
 

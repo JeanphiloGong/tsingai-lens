@@ -14,7 +14,6 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
-    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -103,19 +102,6 @@ class ConversationORM(Base):
         server_default="false",
     )
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    root_session_id: Mapped[str | None] = mapped_column(
-        String(128), nullable=True, index=True
-    )
-    parent_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    fork_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    fork_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    fork_content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    response_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    operation_permission: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     current_message_id: Mapped[str | None] = mapped_column(
         String(128), nullable=True
     )
@@ -133,12 +119,10 @@ class ConversationORM(Base):
 class MessageORM(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (
-        CheckConstraint("position >= 0", name="position_non_negative"),
         CheckConstraint(
             "role IN ('user', 'assistant', 'tool')",
             name="role_valid",
         ),
-        UniqueConstraint("conversation_id", "position", name="uq_chat_messages_position"),
         UniqueConstraint(
             "conversation_id", "message_id", name="chat_message_in_session_unique"
         ),
@@ -170,7 +154,6 @@ class MessageORM(Base):
             name="chat_message_operation_same_task",
             use_alter=True,
         ),
-        Index("ix_chat_messages_session_role_position", "conversation_id", "role", "position"),
         Index("chat_message_children_idx", "conversation_id", "parent_message_id"),
     )
 
@@ -181,10 +164,8 @@ class MessageORM(Base):
         nullable=False,
         index=True,
     )
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    tool_call_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_contexts: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_DOCUMENT,
         nullable=False,
@@ -195,12 +176,6 @@ class MessageORM(Base):
     produced_by_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     copied_from_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     operation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    tool_requests: Mapped[list[dict[str, Any]]] = mapped_column(
-        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
-    )
-    tool_result: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

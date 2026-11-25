@@ -32,8 +32,8 @@ not in a parallel plan-doc tree.
   Evidence, and Finding orchestration.
 - [`../application/core/objectives/README.md`](../application/core/objectives/README.md):
   detailed Objective analysis behavior.
-- [`../application/chat/README.md`](../application/chat/README.md):
-  Research Agent trajectory, capabilities, and approval boundary.
+- [Conversation and Agent](specs/conversation-agent/README.md) describes the
+  message path, Task execution, and approval boundaries.
 - [`../infra/source/README.md`](../infra/source/README.md): parser boundary and
   Source artifacts.
 - [`../infra/persistence/README.md`](../infra/persistence/README.md): repository

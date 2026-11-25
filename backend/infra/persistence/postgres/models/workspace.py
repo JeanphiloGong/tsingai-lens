@@ -62,11 +62,6 @@ class WorkspaceORM(Base):
     discovery_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    agent_default_permission: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-
-
 class DocumentORM(Base):
     __tablename__ = "documents"
     __table_args__ = (

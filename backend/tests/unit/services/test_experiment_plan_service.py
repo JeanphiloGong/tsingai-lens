@@ -439,23 +439,17 @@ async def research_records(postgres_session_factory, anyio_backend):
 
     await seed_workspace(postgres_session_factory, "col_1", user_id="expert-a")
     await seed_objective(postgres_session_factory, "col_1", "objective_1")
-    from domain.chat import ChatMessage, ChatSession
-    from repositories.chat_repository import ChatRepository
+    from datetime import UTC, datetime
+    from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
 
-    chat = ChatRepository()
-    session = ChatSession.create(
-        workspace_id="col_1",
-        user_id="user-1",
-        session_id="chat_legacy",
-        created_at="2026-07-13T00:00:00+00:00",
-    )
-    await chat.add_session(session)
-    message = ChatMessage.assistant(
-        message_id="msg_legacy",
-        session_id=session.session_id,
-        content="Historical research plan.",
-        created_at=session.created_at,
-    )
-    await chat.save_trajectory(
-        chat_session=session, messages=(message,), tool_calls=(), tool_results=()
-    )
+    now = datetime(2026, 7, 13, tzinfo=UTC)
+    async with postgres_session_factory.begin() as db:
+        db.add(ConversationORM(
+            conversation_id="chat_legacy", workspace_id="col_1", user_id="user-1",
+            created_at=now, updated_at=now,
+        ))
+        await db.flush()
+        db.add(MessageORM(
+            message_id="msg_legacy", conversation_id="chat_legacy", role="assistant",
+            content="Historical research plan.", created_at=now,
+        ))

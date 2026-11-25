@@ -34,6 +34,7 @@ async def test_delete_soft_deletes_conversation_and_cancels_execution(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="delete-conversation",
@@ -47,7 +48,6 @@ async def test_delete_soft_deletes_conversation_and_cancels_execution(
             MessageORM(
                 message_id="delete-question",
                 conversation_id="delete-conversation",
-                position=0,
                 role="user",
                 content="Compare these Sources.",
                 created_at=now,
@@ -157,6 +157,7 @@ async def test_deleted_conversation_rejects_checkpoint_and_marks_tree_source(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="delete-tree-source",
@@ -170,7 +171,6 @@ async def test_deleted_conversation_rejects_checkpoint_and_marks_tree_source(
             MessageORM(
                 message_id="delete-tree-source-message",
                 conversation_id="delete-tree-source",
-                position=0,
                 role="user",
                 content="Source question.",
                 created_at=now,

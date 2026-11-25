@@ -1,11 +1,11 @@
-from application.chat.capabilities import finding_authoring
+from agent.capabilities import finding_authoring
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.finding_authoring import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.finding_authoring import (
     CreateFindingDraftCapability,
     CreateFindingDraftToolRequest,
     CreateFindingVersionCapability,
@@ -25,8 +25,9 @@ def anyio_backend():
 
 @pytest.fixture(params=["draft", "version"])
 def finding_call(request):
-    context = CapabilityExecutionContext(
-        session_id="chat-1",
+    context = ToolExecutionContext(
+        operation_id="operation",
+        task_id="chat-1",
         user_id="researcher-1",
         workspace_id="col-1",
         tool_call_id="finding-1",

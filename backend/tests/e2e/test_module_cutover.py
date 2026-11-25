@@ -14,7 +14,6 @@ from infra.identity.client import SESSION_COOKIE_NAME
 from infra.persistence.postgres.models.chat import (
     AgentOperationORM,
     ChatModelCallORM,
-    ChatToolCallORM,
 )
 from infra.persistence.postgres.models.model_connection import ModelConnectionORM
 from infra.persistence.postgres.models.workspace import WorkspaceORM
@@ -36,6 +35,12 @@ async def test_module_cutover_uses_one_task_and_final_tables(
     other = await identity_subjects.create_subject(email="cutover-other@example.test")
     other_session = await identity_subjects.issue_session(email="cutover-other@example.test")
     assert other["user_id"] != owner["user_id"]
+    assert not any(
+        path.startswith("/api/v1/chat-sessions")
+        or path.endswith(("/permissions", "/agent-permissions"))
+        or any(segment in path for segment in ("/feedback-cases", "/feedback-datasets", "/model-calls"))
+        for path in app.openapi()["paths"]
+    )
     now = datetime.now(UTC)
     async with postgres_session_factory.begin() as db:
         db.add(WorkspaceORM(
@@ -82,7 +87,7 @@ async def test_module_cutover_uses_one_task_and_final_tables(
             assert {item["function"]["name"] for item in tools} == {"read_source", "review_source"}
             if messages[-1]["role"] == "tool" and fail_once:
                 fail_once = False
-                from application.chat.model import ModelResponseError
+                from agent.application.model import ModelResponseError
                 raise ModelResponseError("Connection lost.", reason="transport_error")
             if messages[-1]["role"] == "tool":
                 assert '"hold_minutes": 30' in messages[-1]["content"]
@@ -141,6 +146,8 @@ async def test_module_cutover_uses_one_task_and_final_tables(
         messages = (await client.get(f"{path}/messages")).json()["data"]["items"]
         assert messages[-1]["message_id"] == completed["final_message_id"]
         assert messages[-1]["content"] == "The Methods report a 30-minute hold."
+        assert messages[-1]["can_rate"] is True
+        assert messages[-2]["can_rate"] is False
 
         approved_send = await client.post(f"{path}/messages", json={
             "message": "Please review the Methods", "parent_message_id": completed["final_message_id"],
@@ -181,4 +188,3 @@ async def test_module_cutover_uses_one_task_and_final_tables(
             .where(ChatModelCallORM.task_id == task_id)
             .order_by(ChatModelCallORM.sequence))).all()
         assert sequence == [0, 1, 2]
-        assert await db.scalar(select(func.count()).select_from(ChatToolCallORM)) == 0

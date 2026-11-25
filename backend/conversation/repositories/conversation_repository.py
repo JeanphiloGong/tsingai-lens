@@ -2,17 +2,20 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 from typing import Any, Literal, cast
 from uuid import uuid4
 
 from conversation.domain import ConversationPath, Message, Role, path_to
-from domain.chat.feedback import FeedbackRating, FeedbackReason
+from conversation.feedback.repository import (
+    CAN_RATE_MESSAGE,
+    MessageFeedbackView,
+    to_feedback_view,
+)
+from conversation.repositories.scope import ConversationNotFound, owned_conversation
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.chat import (
     AgentOperationORM,
     AgentTaskORM,
-    ChatToolCallORM,
 )
 from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import (
@@ -20,17 +23,9 @@ from infra.persistence.postgres.models.conversation import (
     MessageFeedbackORM,
     MessageORM,
 )
-from sqlalchemy import and_, case, delete, func, or_, select, text, true, update
-from sqlalchemy.dialects.postgresql import aggregate_order_by, insert
+from sqlalchemy import and_, case, func, or_, select, text, true, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
-class ConversationNotFound(FileNotFoundError):
-    """The conversation is absent or outside the caller's scope."""
-
-    def __init__(self, message: str, *, code: str = "conversation_not_found") -> None:
-        super().__init__(message)
-        self.code = code
 
 
 class ConversationPathConflict(ValueError):
@@ -43,10 +38,6 @@ class ConversationWriteConflict(ValueError):
     def __init__(self, code: str, message: str | None = None) -> None:
         super().__init__(message or code)
         self.code = code
-
-
-class FeedbackTargetInvalid(ValueError):
-    """Feedback requires a saved assistant answer without tool requests."""
 
 
 ConversationStatus = Literal["idle", "running", "approval"]
@@ -84,22 +75,6 @@ _CONVERSATION_STATUS = case(
 )
 
 
-def _owned_conversation(user_id: str, *, include_deleted: bool = False):
-    conditions = [
-        ConversationORM.user_id == user_id,
-        select(1)
-        .where(
-            WorkspaceORM.workspace_id == ConversationORM.workspace_id,
-            WorkspaceORM.owner_user_id == user_id,
-        )
-        .correlate(ConversationORM)
-        .exists(),
-    ]
-    if not include_deleted:
-        conditions.append(ConversationORM.deleted_at.is_(None))
-    return and_(*conditions)
-
-
 def _to_record(row: ConversationORM, status: ConversationStatus) -> ConversationRecord:
     return ConversationRecord(
         conversation_id=row.conversation_id,
@@ -113,29 +88,6 @@ def _to_record(row: ConversationORM, status: ConversationStatus) -> Conversation
         status=status,
         created_at=row.created_at,
         updated_at=row.updated_at,
-    )
-
-
-@dataclass(frozen=True)
-class MessageFeedbackView:
-    feedback_id: str
-    rating: str
-    reason: str | None
-    comment: str | None
-    response_digest: str
-    created_at: datetime
-    updated_at: datetime
-
-
-def _to_feedback_view(row: MessageFeedbackORM) -> MessageFeedbackView:
-    return MessageFeedbackView(
-        row.feedback_id,
-        row.rating,
-        row.reason,
-        row.comment,
-        row.response_digest,
-        row.created_at,
-        row.updated_at,
     )
 
 
@@ -158,6 +110,7 @@ class ConversationMessageView:
     created_at: datetime
     source_contexts: tuple[dict[str, Any], ...]
     my_feedback: MessageFeedbackView | None
+    can_rate: bool
 
 
 @dataclass(frozen=True)
@@ -200,7 +153,7 @@ class ConversationRepository:
             select(ConversationORM)
             .where(
                 ConversationORM.conversation_id == conversation_id,
-                _owned_conversation(user_id),
+                owned_conversation(user_id),
             )
             .with_for_update()
         )
@@ -224,7 +177,7 @@ class ConversationRepository:
             .where(
                 MessageORM.conversation_id == conversation_id,
                 MessageORM.message_id == message_id,
-                _owned_conversation(user_id),
+                owned_conversation(user_id),
             )
             .with_for_update()
         )
@@ -263,16 +216,10 @@ class ConversationRepository:
         content: str,
         source_contexts: tuple[dict[str, object], ...],
     ) -> None:
-        next_position = await db.scalar(
-            select(func.coalesce(func.max(MessageORM.position) + 1, 0)).where(
-                MessageORM.conversation_id == conversation_id
-            )
-        )
         db.add(
             MessageORM(
                 message_id=message_id,
                 conversation_id=conversation_id,
-                position=next_position,
                 parent_message_id=parent_message_id,
                 role="user",
                 content=content,
@@ -310,7 +257,7 @@ class ConversationRepository:
         statement = (
             select(ConversationORM, _CONVERSATION_STATUS)
             .where(
-                _owned_conversation(user_id),
+                owned_conversation(user_id),
                 ConversationORM.workspace_id == workspace_id,
             )
             .order_by(
@@ -358,7 +305,7 @@ class ConversationRepository:
     ) -> ConversationRecord:
         statement = select(ConversationORM, _CONVERSATION_STATUS).where(
             ConversationORM.conversation_id == conversation_id,
-            _owned_conversation(user_id),
+            owned_conversation(user_id),
         )
         async with AsyncSessionLocal() as db:
             record = (await db.execute(statement)).one_or_none()
@@ -374,7 +321,7 @@ class ConversationRepository:
                 select(ConversationORM)
                 .where(
                     ConversationORM.conversation_id == conversation_id,
-                    _owned_conversation(user_id, include_deleted=True),
+                    owned_conversation(user_id, include_deleted=True),
                 )
                 .with_for_update()
             )
@@ -483,7 +430,7 @@ class ConversationRepository:
             )
             .where(
                 ConversationORM.conversation_id == conversation_id,
-                _owned_conversation(user_id),
+                owned_conversation(user_id),
             )
             .cte("selected_conversation")
         )
@@ -507,6 +454,7 @@ class ConversationRepository:
                 ConversationORM,
                 MessageORM,
                 MessageFeedbackORM,
+                CAN_RATE_MESSAGE,
             )
             .select_from(selection)
             .join(
@@ -521,7 +469,7 @@ class ConversationRepository:
                     MessageFeedbackORM.conversation_id == selection.c.conversation_id,
                     MessageFeedbackORM.message_id == MessageORM.message_id,
                     MessageFeedbackORM.user_id == user_id,
-                    MessageORM.role == "assistant",
+                    CAN_RATE_MESSAGE,
                 ),
             )
         )
@@ -531,9 +479,9 @@ class ConversationRepository:
         if not rows:
             raise ConversationNotFound("Conversation not found.")
 
-        tip_id, status, tasks, conversation, _, _ = rows[0]
+        tip_id, status, tasks, conversation, _, _, _ = rows[0]
         items = {}
-        for _, _, _, _, row, feedback in rows:
+        for _, _, _, _, row, feedback, can_rate in rows:
             if row is None:
                 continue
             message = Message(
@@ -549,7 +497,8 @@ class ConversationRepository:
                 message=message,
                 created_at=row.created_at,
                 source_contexts=tuple(row.source_contexts),
-                my_feedback=_to_feedback_view(feedback)
+                can_rate=bool(can_rate),
+                my_feedback=to_feedback_view(feedback)
                 if feedback is not None
                 else None,
             )
@@ -570,7 +519,7 @@ class ConversationRepository:
             requested = await db.scalar(
                 select(ConversationORM).where(
                     ConversationORM.conversation_id == conversation_id,
-                    _owned_conversation(user_id),
+                    owned_conversation(user_id),
                 )
             )
             if requested is None:
@@ -579,7 +528,7 @@ class ConversationRepository:
                 await db.scalars(
                     select(ConversationORM)
                     .where(
-                        _owned_conversation(user_id, include_deleted=True),
+                        owned_conversation(user_id, include_deleted=True),
                         ConversationORM.workspace_id == requested.workspace_id,
                     )
                     .order_by(
@@ -886,13 +835,12 @@ class ConversationRepository:
             await db.flush()
 
             copied_ids: dict[str, str] = {}
-            for position, original in enumerate(path.items):
+            for original in path.items:
                 copied_ids[original.message_id] = f"msg_{uuid4().hex}"
                 db.add(
                     MessageORM(
                         message_id=copied_ids[original.message_id],
                         conversation_id=new_conversation_id,
-                        position=position,
                         parent_message_id=(
                             copied_ids.get(original.parent_message_id)
                             if original.parent_message_id
@@ -902,8 +850,6 @@ class ConversationRepository:
                         content=original.content,
                         copied_from_message_id=original.message_id,
                         source_contexts=source_contexts[original.message_id],
-                        tool_requests=[],
-                        tool_result=None,
                         created_at=now,
                     )
                 )
@@ -927,7 +873,7 @@ class ConversationRepository:
                     select(ConversationORM, _CONVERSATION_STATUS)
                     .where(
                         ConversationORM.conversation_id == conversation_id,
-                        _owned_conversation(user_id),
+                        owned_conversation(user_id),
                     )
                     .with_for_update(of=ConversationORM)
                 )
@@ -983,7 +929,7 @@ class ConversationRepository:
                     update(ConversationORM)
                     .where(
                         ConversationORM.conversation_id == conversation_id,
-                        _owned_conversation(user_id),
+                        owned_conversation(user_id),
                     )
                     .values(title=title)
                     .returning(ConversationORM, _CONVERSATION_STATUS)
@@ -1002,7 +948,7 @@ class ConversationRepository:
                     update(ConversationORM)
                     .where(
                         ConversationORM.conversation_id == conversation_id,
-                        _owned_conversation(user_id),
+                        owned_conversation(user_id),
                     )
                     .values(is_pinned=is_pinned)
                     .returning(ConversationORM, _CONVERSATION_STATUS)
@@ -1011,123 +957,3 @@ class ConversationRepository:
             if result is None:
                 raise ConversationNotFound("Conversation not found.")
             return _to_record(*result)
-
-    async def upsert_feedback(
-        self,
-        *,
-        conversation_id: str,
-        message_id: str,
-        user_id: str,
-        rating: FeedbackRating,
-        reason: FeedbackReason | None,
-        comment: str | None,
-    ) -> MessageFeedbackView:
-        async with AsyncSessionLocal() as db, db.begin():
-            message = await self._feedback_target(
-                db, conversation_id, message_id, user_id
-            )
-            row = MessageFeedbackORM
-            statement = insert(row).values(
-                feedback_id=f"feedback_{uuid4().hex}",
-                conversation_id=conversation_id,
-                message_id=message_id,
-                user_id=user_id,
-                rating=rating,
-                reason=reason,
-                comment=comment,
-                response_digest=sha256(message.content.encode("utf-8")).hexdigest(),
-                created_at=func.now(),
-                updated_at=func.now(),
-            )
-            submitted = statement.excluded
-            saved = (
-                await db.scalars(
-                    statement.on_conflict_do_update(
-                        constraint="uq_chat_message_feedback_user_message",
-                        set_={
-                            "rating": submitted.rating,
-                            "reason": submitted.reason,
-                            "comment": submitted.comment,
-                            "response_digest": submitted.response_digest,
-                            "updated_at": func.greatest(
-                                row.updated_at, submitted.updated_at
-                            ),
-                        },
-                        where=or_(
-                            row.rating != submitted.rating,
-                            row.reason.is_distinct_from(submitted.reason),
-                            row.comment.is_distinct_from(submitted.comment),
-                            row.response_digest != submitted.response_digest,
-                        ),
-                    ).returning(row)
-                )
-            ).one_or_none()
-            if saved is None:
-                saved = (
-                    await db.scalars(
-                        select(row).where(
-                            row.user_id == user_id,
-                            row.message_id == message_id,
-                        )
-                    )
-                ).one()
-            return _to_feedback_view(saved)
-
-    async def delete_feedback(
-        self, *, conversation_id: str, message_id: str, user_id: str
-    ) -> None:
-        async with AsyncSessionLocal() as db, db.begin():
-            await self._feedback_target(db, conversation_id, message_id, user_id)
-            await db.execute(
-                delete(MessageFeedbackORM).where(
-                    MessageFeedbackORM.conversation_id == conversation_id,
-                    MessageFeedbackORM.message_id == message_id,
-                    MessageFeedbackORM.user_id == user_id,
-                )
-            )
-
-    async def _feedback_target(
-        self,
-        db: AsyncSession,
-        conversation_id: str,
-        message_id: str,
-        user_id: str,
-    ) -> MessageORM:
-        target = (
-            await db.execute(
-                select(
-                    MessageORM,
-                    select(1)
-                    .where(
-                        ChatToolCallORM.assistant_message_id == MessageORM.message_id,
-                    )
-                    .correlate(MessageORM)
-                    .exists(),
-                )
-                .join(
-                    ConversationORM,
-                    ConversationORM.conversation_id == MessageORM.conversation_id,
-                )
-                .where(
-                    MessageORM.conversation_id == conversation_id,
-                    MessageORM.message_id == message_id,
-                    _owned_conversation(user_id),
-                )
-                .with_for_update(of=MessageORM, read=True)
-            )
-        ).one_or_none()
-        if target is None:
-            raise ConversationNotFound(
-                "Feedback message not found.", code="feedback_message_not_found"
-            )
-        message, has_legacy_tool_calls = target
-        if (
-            message.role != "assistant"
-            or not message.content
-            or message.tool_requests
-            or has_legacy_tool_calls
-        ):
-            raise FeedbackTargetInvalid(
-                "Feedback requires an assistant text answer without tool requests."
-            )
-        return message

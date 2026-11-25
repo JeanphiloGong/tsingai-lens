@@ -1,4 +1,4 @@
-from application.chat.capabilities import published_findings
+from agent.capabilities import published_findings
 import json
 from copy import deepcopy
 from dataclasses import replace
@@ -6,17 +6,18 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.published_findings import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.published_findings import (
     InspectPublishedFindingCapability,
 )
-from application.chat.context_builder import ChatContextBuilder
+from agent.application.context_builder import ChatContextBuilder
 from domain.evaluation import FindingFeedback
 
 
-def _context() -> CapabilityExecutionContext:
-    return CapabilityExecutionContext(
-        session_id="session-1",
+def _context() -> ToolExecutionContext:
+    return ToolExecutionContext(
+        operation_id="operation",
+        task_id="session-1",
         user_id="user-1",
         workspace_id="col-1",
         tool_call_id="call-1",

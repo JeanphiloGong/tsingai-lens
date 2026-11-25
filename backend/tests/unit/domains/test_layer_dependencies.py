@@ -32,12 +32,12 @@ def test_domain_imports_only_domain_and_general_purpose_libraries() -> None:
     assert not violations, "\n".join(violations)
 
 
-def test_chat_can_start_in_a_fresh_interpreter() -> None:
+def test_agent_can_start_in_a_fresh_interpreter() -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import application.chat.capability_policy",
+            "import agent.application.task_execution",
         ],
         cwd=Path(__file__).resolve().parents[3],
         capture_output=True,

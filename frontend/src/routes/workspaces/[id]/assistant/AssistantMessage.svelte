@@ -48,11 +48,13 @@
 						onClick={onRegenerate}><RotateCcw size={16} /></IconButton
 					>
 				{/if}
-				<MessageFeedback
-					messageId={message.message_id}
-					state={feedbackState}
-					onSave={(input) => onFeedback(message.message_id, input)}
-				/>
+				{#if message.can_rate}
+					<MessageFeedback
+						messageId={message.message_id}
+						state={feedbackState}
+						onSave={(input) => onFeedback(message.message_id, input)}
+					/>
+				{/if}
 			</div>
 		{/if}
 	</div>

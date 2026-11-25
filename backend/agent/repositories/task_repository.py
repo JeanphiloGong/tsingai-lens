@@ -12,6 +12,7 @@ from infra.persistence.postgres.models.chat import (
     AgentOperationORM,
     AgentTaskORM,
     AgentTaskStepORM,
+    ChatModelCallORM,
 )
 from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
@@ -57,6 +58,109 @@ def _now() -> datetime:
 
 
 class TaskRepository:
+    async def read_successful_results(
+        self, *, task_id: str, user_id: str, names: tuple[str, ...]
+    ) -> tuple[tuple[str, dict[str, Any]], ...]:
+        async with AsyncSessionLocal() as db:
+            task = await db.scalar(
+                select(AgentTaskORM)
+                .join(ConversationORM, ConversationORM.conversation_id == AgentTaskORM.session_id)
+                .join(WorkspaceORM, WorkspaceORM.workspace_id == ConversationORM.workspace_id)
+                .where(
+                    AgentTaskORM.task_id == task_id,
+                    ConversationORM.user_id == user_id,
+                    ConversationORM.deleted_at.is_(None),
+                    WorkspaceORM.owner_user_id == user_id,
+                )
+            )
+            if task is None:
+                raise TaskNotFound("task not found")
+            path = select(MessageORM.message_id, MessageORM.parent_message_id).where(
+                MessageORM.conversation_id == task.session_id,
+                MessageORM.message_id == task.trigger_message_id,
+            ).cte("selected_path", recursive=True)
+            path = path.union(
+                select(MessageORM.message_id, MessageORM.parent_message_id)
+                .join(path, MessageORM.message_id == path.c.parent_message_id)
+                .where(MessageORM.conversation_id == task.session_id)
+            )
+            rows = (await db.execute(
+                select(AgentOperationORM.name, AgentOperationORM.result)
+                .join(AgentTaskORM, AgentTaskORM.task_id == AgentOperationORM.task_id)
+                .where(
+                    AgentTaskORM.session_id == task.session_id,
+                    (AgentTaskORM.task_id == task_id)
+                    | AgentTaskORM.final_message_id.in_(select(path.c.message_id)),
+                    AgentOperationORM.status == "succeeded",
+                    AgentOperationORM.name.in_(names),
+                    AgentOperationORM.result.is_not(None),
+                )
+                .order_by(AgentOperationORM.created_at, AgentOperationORM.operation_id)
+            )).all()
+            return tuple((name, result) for name, result in rows)
+
+    async def start_model_call(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        call_id: str,
+        trigger_message_id: str | None,
+        response_message_id: str | None,
+        model_connection_id: str,
+        purpose: str,
+        request: dict[str, Any],
+        request_digest: str,
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            sequence = await db.scalar(
+                select(func.coalesce(func.max(ChatModelCallORM.sequence) + 1, 0))
+                .where(ChatModelCallORM.task_id == task_id)
+            )
+            db.add(ChatModelCallORM(
+                call_id=call_id,
+                task_id=task_id,
+                session_id=conversation_id,
+                sequence=sequence,
+                trigger_message_id=trigger_message_id,
+                response_message_id=response_message_id,
+                model_connection_id=model_connection_id,
+                purpose=purpose,
+                model=str(request.get("model") or "unknown"),
+                request=request,
+                request_digest=request_digest,
+                status="recorded",
+                started_at=_now(),
+            ))
+
+    async def finish_model_call(
+        self,
+        *,
+        task_id: str,
+        call_id: str,
+        status: str,
+        finished_at: datetime,
+        error_code: str | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        total_tokens: int | None,
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(ChatModelCallORM, call_id, with_for_update=True)
+            if row is None or row.task_id != task_id:
+                raise TaskNotFound(f"model call not found: {call_id}")
+            if row.finished_at is not None:
+                if row.status != status:
+                    raise ValueError("model call outcome cannot be reassigned")
+                return
+            row.status = status
+            row.finished_at = finished_at
+            row.error_code = error_code
+            row.provider_confirmed = status == "provider_succeeded"
+            row.prompt_tokens = prompt_tokens
+            row.completion_tokens = completion_tokens
+            row.total_tokens = total_tokens
+
     @asynccontextmanager
     async def execution_lock(self, task_id: str):
         """Hold one PostgreSQL advisory lock for the complete Task run."""
@@ -577,26 +681,15 @@ class TaskRepository:
         conversation_id = message.get("conversation_id", task.session_id)
         if conversation_id != task.session_id:
             raise ValueError("message conversation does not match Task")
-        position = message.get("position")
-        if position is None:
-            position = await db.scalar(
-                select(func.coalesce(func.max(MessageORM.position) + 1, 0)).where(
-                    MessageORM.conversation_id == task.session_id
-                )
-            )
         db.add(
             MessageORM(
                 message_id=message["message_id"],
                 conversation_id=conversation_id,
-                position=position,
                 parent_message_id=message.get("parent_message_id"),
                 role=message["role"],
                 content=message.get("content", ""),
                 source_contexts=message.get("source_contexts", []),
-                tool_call_id=message.get("tool_call_id"),
                 operation_id=message.get("operation_id"),
-                tool_requests=message.get("tool_requests", []),
-                tool_result=message.get("tool_result"),
                 produced_by_task_id=task.task_id,
                 created_at=message.get("created_at", _now()),
             )

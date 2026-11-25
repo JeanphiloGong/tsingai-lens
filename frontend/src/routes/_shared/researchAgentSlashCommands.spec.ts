@@ -8,20 +8,18 @@ import {
 
 describe('Research Agent slash commands', () => {
 	it('offers all local commands for a bare slash and filters by prefix', () => {
-		expect(matchingResearchAgentSlashCommands('/')).toHaveLength(7);
-		expect(matchingResearchAgentSlashCommands('/per').map((command) => command.name)).toEqual([
-			'permissions'
-		]);
+		expect(matchingResearchAgentSlashCommands('/')).toHaveLength(5);
+		expect(matchingResearchAgentSlashCommands('/per')).toEqual([]);
 		expect(matchingResearchAgentSlashCommands('/br').map((command) => command.name)).toEqual([
 			'tree'
 		]);
 	});
 
 	it('resolves aliases to the canonical command without accepting arguments', () => {
-		expect(resolveResearchAgentSlashCommand('/perm')?.name).toBe('permissions');
+		expect(resolveResearchAgentSlashCommand('/perm')).toBeNull();
 		expect(resolveResearchAgentSlashCommand('/RESET')?.name).toBe('new');
-		expect(resolveResearchAgentSlashCommand('/permissions now')).toBeNull();
-		expect(resolveResearchAgentSlashCommand('Please /permissions')).toBeNull();
+		expect(resolveResearchAgentSlashCommand('/status now')).toBeNull();
+		expect(resolveResearchAgentSlashCommand('Please /status')).toBeNull();
 	});
 
 	it('only treats an argument-free slash token as an active popup query', () => {

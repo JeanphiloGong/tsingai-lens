@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from application.chat.capabilities import objective_candidate
+from agent.capabilities import objective_candidate
 
 from application.core.objectives.analysis import analysis_record_source
 
@@ -8,8 +8,8 @@ from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 
 import pytest
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.objective_candidate import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
@@ -286,9 +286,10 @@ class _ParentExperimentProjection:
         return ()
 
 
-def _context() -> CapabilityExecutionContext:
-    return CapabilityExecutionContext(
-        session_id="chat-1",
+def _context() -> ToolExecutionContext:
+    return ToolExecutionContext(
+        operation_id="operation",
+        task_id="chat-1",
         user_id="user-1",
         workspace_id="col-1",
         tool_call_id="call-derived",

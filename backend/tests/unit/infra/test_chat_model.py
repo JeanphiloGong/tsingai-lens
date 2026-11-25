@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from application.chat import ChatModelContext
+from agent.application.context_builder import ChatModelContext
 
 import asyncio
 import logging
@@ -11,8 +11,8 @@ from openai import AsyncOpenAI
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from application.chat import ToolSpec
-from application.chat.model import (
+from agent.capabilities.registry import ToolSpec
+from agent.application.model import (
     AGENT_MISSION,
     ModelUsage,
     ModelResponseError,
@@ -20,7 +20,7 @@ from application.chat.model import (
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
 )
-from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ToolRisk
+from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext
 from infra.llm.chat_model import OpenAIChatModel
 
 
@@ -172,7 +172,7 @@ async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream
 
 @pytest.mark.parametrize("stream", [False, True])
 async def test_context_compaction_uses_json_without_executable_tools(stream):
-    from application.chat.model import RESEARCH_COMPACTION_SYSTEM_PROMPT
+    from agent.application.model import RESEARCH_COMPACTION_SYSTEM_PROMPT
 
     client, completions = _client([_stream_chunk(content='{"checks": []}')] if stream
                                   else _completion(content='{"checks": []}'))
@@ -192,7 +192,7 @@ async def test_context_compaction_rejects_executable_tools():
     with pytest.raises(ValueError, match="cannot expose"):
         await OpenAIChatModel(client=client).respond(
             context=ChatModelContext((), compacting=True),
-            tool_specs=(ToolSpec(name="write", description="Write", risk=ToolRisk.WRITE, input_model=_NoArguments),),
+            tool_specs=(ToolSpec(name="write", description="Write", handler=None, source="test", input_model=_NoArguments),),
         )
     assert completions.calls == []
 
@@ -362,7 +362,7 @@ async def test_required_research_action_sets_provider_tool_choice(required):
     )]))
     await OpenAIChatModel(client=client, model="test-model").respond(
         context=ChatModelContext((_message(),), require_tool_call=required),
-        tool_specs=(ToolSpec(name="read_source", description="Read a Source.", risk=ToolRisk.READ, input_model=_NoArguments),),
+        tool_specs=(ToolSpec(name="read_source", description="Read a Source.", handler=None, source="test", input_model=_NoArguments),),
     )
     assert completions.calls[0]["tool_choice"] == ("required" if required else "auto")
 
@@ -539,7 +539,7 @@ async def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     spec = ToolSpec(
         name="get_workspace_context",
         description="Read bounded workspace context.",
-        risk=ToolRisk.READ,
+        handler=None, source="test",
         input_model=_NoArguments,
     )
 
@@ -549,7 +549,7 @@ async def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     assert turn.tool_calls[0].name == "get_workspace_context"
     assert turn.tool_calls[0].arguments == {"include_documents": True}
     request = completions.calls[0]
-    assert request["parallel_tool_calls"] is True
+    assert request["parallel_tool_calls"] is False
     assert request["tools"][0]["function"]["name"] == "get_workspace_context"
 
 

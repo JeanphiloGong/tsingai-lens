@@ -2,7 +2,7 @@
 
 This package owns Goal intake and Objective-scoped experiment plans. It does not
 own assistant conversation state. Workspace-bound conversation, capability
-execution, structured results, and write approval live in `application/chat/`
+execution, structured results, and write approval live in `agent/`
 and `domain/chat/`.
 
 - `experiment_plan_service.py`
@@ -38,5 +38,5 @@ and `domain/chat/`.
   and creates an empty `Workspace` directly. Papers become `Document` members
   only when the user uploads or imports them; Goal owns no handoff record.
 
-Future research-assistant capabilities belong in `application/chat/` and must
+Future research-assistant capabilities belong in `agent/` and must
 consume Core artifacts without creating a parallel fact model.

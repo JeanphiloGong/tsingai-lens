@@ -29,82 +29,6 @@ from infra.persistence.postgres.base import Base
 _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
-class ChatToolCallORM(Base):
-    __tablename__ = "chat_tool_calls"
-    __table_args__ = (
-        CheckConstraint(
-            "risk IN ('unknown', 'read', 'draft', 'write')",
-            name="risk_valid",
-        ),
-        CheckConstraint(
-            "status IN ('requested', 'approval_required', 'approved', 'running', "
-            "'succeeded', 'failed', 'rejected')",
-            name="status_valid",
-        ),
-        UniqueConstraint(
-            "assistant_message_id",
-            "position",
-            name="uq_chat_tool_calls_assistant_position",
-        ),
-        CheckConstraint("position >= 0", name="position_non_negative"),
-    )
-
-    tool_call_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    session_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("chat_conversations.conversation_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    assistant_message_id: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
-    arguments: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    arguments_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    risk: Mapped[str] = mapped_column(String(16), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    decision_user_id: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-    )
-    decision_arguments_digest: Mapped[str | None] = mapped_column(
-        String(64), nullable=True
-    )
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    result_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    decision_basis: Mapped[str] = mapped_column(
-        String(32), nullable=False, server_default="explicit"
-    )
-    authorization_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    proposed_permission_revision: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
-    )
-    result_data: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    result_resource_refs: Mapped[list[dict[str, Any]] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    result_warnings: Mapped[list[str] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    result_error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    result_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
 class AgentTaskORM(Base):
     __tablename__ = "agent_tasks"
     __table_args__ = (
@@ -341,7 +265,6 @@ class ChatModelCallORM(Base):
 
 __all__ = [
     "ChatModelCallORM",
-    "ChatToolCallORM",
     "AgentTaskORM",
     "AgentOperationORM",
     "AgentTaskStepORM",

@@ -88,7 +88,6 @@ async def test_conversation_path_metadata_and_feedback(
             question = MessageORM(
                 message_id="question",
                 conversation_id=conversation_id,
-                position=0,
                 role="user",
                 content="Compare the heat treatments.",
                 created_at=now,
@@ -107,6 +106,7 @@ async def test_conversation_path_metadata_and_feedback(
                     updated_at=now,
                 )
                 for task_id, status in (
+                    ("answer-task", "running"),
                     ("retry-task", "running"),
                     ("approval-task", "approval_required"),
                 )
@@ -117,16 +117,15 @@ async def test_conversation_path_metadata_and_feedback(
                     MessageORM(
                         message_id="answer",
                         conversation_id=conversation_id,
-                        position=1,
                         role="assistant",
                         content="The test temperatures differ.",
+                        produced_by_task_id="answer-task",
                         parent_message_id="question",
                         created_at=now,
                     ),
                     MessageORM(
                         message_id="retry",
                         conversation_id=conversation_id,
-                        position=2,
                         role="assistant",
                         content="Compare matched test conditions first.",
                         parent_message_id="question",
@@ -138,6 +137,9 @@ async def test_conversation_path_metadata_and_feedback(
             await db.flush()
             row = await db.get(ConversationORM, conversation_id)
             row.current_message_id = "answer"
+            answer_task = await db.get(AgentTaskORM, "answer-task")
+            answer_task.final_message_id = "answer"
+            answer_task.status = "completed"
             task = await db.get(AgentTaskORM, "retry-task")
             task.checkpoint_message_id = "retry"
 
@@ -188,6 +190,7 @@ async def test_conversation_path_metadata_and_feedback(
         current = (await browser.get(f"{path}/messages")).json()["data"]
         assert current["items"][0]["source_contexts"] == [{"source_ref": "methods"}]
         assert current["items"][1]["my_feedback"] == saved
+        assert current["items"][1]["can_rate"] is True
         assert {task["task_id"] for task in current["active_tasks"]} == {
             "retry-task",
             "approval-task",

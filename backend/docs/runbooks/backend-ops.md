@@ -222,6 +222,10 @@ budget, allow at least 60 additional seconds for persistence and UI settling.
 
 ## Initialize Or Upgrade The Schema
 
+Existing Chat databases with historical records follow the
+[Chat retirement procedure](chat-retirement.md) before upgrading through
+`b71000000007`.
+
 Alembic is the only schema authority. Application startup never creates or
 changes tables. Existing model registries with environment references require
 the [credential import](model-key-operations.md#first-cutover-of-an-existing-database)
@@ -249,11 +253,10 @@ evidence. Upgrade a disposable copy of the old database and compare Source,
 Profile, Paper Map, Evidence, and Finding records before using it for replay.
 Do not manually add columns or stamp the revision to bypass a failed migration.
 
-An `UndefinedColumn` for `chat_sessions.root_session_id` when opening Chat means
-the running database still needs `20260909_0057` (conversation branches). Check
-the database configured for that backend process, apply the existing migration,
-and verify an authenticated `POST /api/v1/conversations`. Successful login or
-document reads alone do not exercise the Chat write schema.
+A missing retired Conversation column during a cutover means the database is
+using an old schema. Run the Chat retirement procedure against a disposable
+copy, then verify an authenticated `POST /api/v1/conversations`. Successful
+login or document reads alone do not exercise the Conversation write schema.
 
 The `0050`-`0055` aggregate migrations preserve existing PostgreSQL references
 using native table alterations. Pre-merge Evidence and Finding child tables

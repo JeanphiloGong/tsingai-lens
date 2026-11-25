@@ -299,12 +299,11 @@ to recover removed credentials. The PostgreSQL volume and `data/backend`
 survive normal `docker compose down`; `down --volumes` deletes database state.
 
 ## Research workers and model configuration
-`./scripts/lens up` starts the backend, frontend, user-service, PostgreSQL, three research
-Workers and four feedback analysis Workers together. The Workers are
-long-running processes built from the backend image; they do not expose HTTP
-ports. HTTP and Agent requests queue work. Research Workers prepare documents,
-discover Objectives and analyze Objectives; feedback Workers claim pending
-`analysis_jobs` and write analysis results or dataset samples.
+`./scripts/lens up` starts the backend, frontend, user-service, PostgreSQL, and the
+three existing research Workers. The Workers prepare documents, discover
+Objectives, and analyze Objectives. Conversation messages execute their Agent
+Task directly after the acceptance transaction. No feedback analysis consumer
+or Agent queue is part of the runtime.
 
 The expected service names are:
 
@@ -316,30 +315,18 @@ frontend
 document-preparation-worker
 objective-discovery-worker
 objective-analysis-worker
-feedback-analysis-worker
-correction-signal-analysis-worker
-tool-failure-analysis-worker
-dataset-sample-worker
 ```
 
-Inspect a particular Worker when a job remains pending:
+Inspect a particular research Worker when a pipeline run remains pending:
 
 ```bash
 ./scripts/lens logs document-preparation-worker
 ./scripts/lens logs objective-discovery-worker
 ./scripts/lens logs objective-analysis-worker
-./scripts/lens logs feedback-analysis-worker
-./scripts/lens logs correction-signal-analysis-worker
-./scripts/lens logs tool-failure-analysis-worker
-./scripts/lens logs dataset-sample-worker
 ```
 
-Stopping a Worker leaves newly created jobs in `pending`; starting the service
-again lets it continue polling. Docker's `restart: unless-stopped` restarts a
-Worker container after a process failure. Each claimed job has a database lease
-(`worker_id`, `lease_expires_at`, `heartbeat_at`, and `lease_version`). When a
-Worker exits, the next Worker pass returns an expired `running` job to
-`pending`; dataset sample jobs also return from `building` to `pending`.
+
+Stopping a research Worker leaves its pipeline run recoverable by the existing research execution process.
 
 
 Research Agent Chat requires an enabled model connection in PostgreSQL; the

@@ -14,10 +14,9 @@ from typing import Any, Callable, Mapping
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 
-from agent.capabilities.registry import ToolSpec as AgentToolSpec
-from application.chat.capabilities import ToolSpec
-from application.chat.context_builder import ChatContextBuilder, ChatModelContext
-from application.chat.model import (
+from agent.capabilities.registry import ToolSpec
+from agent.application.context_builder import ChatContextBuilder, ChatModelContext
+from agent.application.model import (
     CHAT_TITLE_SYSTEM_PROMPT,
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
@@ -27,7 +26,6 @@ from application.chat.model import (
     ModelTurn,
     ModelUsage,
 )
-from domain.chat import ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 logger = logging.getLogger(__name__)
@@ -89,7 +87,7 @@ class OpenAIChatModel:
         self,
         *,
         context: ChatModelContext,
-        tool_specs: tuple[ToolSpec | AgentToolSpec, ...],
+        tool_specs: tuple[ToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
         timeout_seconds: float | None = None,
         max_output_tokens: int = 16_384,
@@ -118,10 +116,7 @@ class OpenAIChatModel:
             request.update(
                 tools=[spec.model_schema() for spec in tool_specs],
                 tool_choice="required" if context.require_tool_call else "auto",
-                parallel_tool_calls=all(
-                    isinstance(spec, ToolSpec) and spec.risk is ToolRisk.READ
-                    for spec in tool_specs
-                ),
+                parallel_tool_calls=False,
             )
         request_tokens = ChatContextBuilder.estimate_tokens({
             "messages": request["messages"], "tools": request.get("tools", []),

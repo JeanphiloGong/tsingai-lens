@@ -30,6 +30,7 @@ async def test_task_checkpoint_and_bundle_persist_atomically(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="agent-v2-conversation",
@@ -43,7 +44,6 @@ async def test_task_checkpoint_and_bundle_persist_atomically(
             MessageORM(
                 message_id="agent-v2-question",
                 conversation_id="agent-v2-conversation",
-                position=0,
                 role="user",
                 content="Inspect the Source.",
                 created_at=now,

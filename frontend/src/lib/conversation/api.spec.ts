@@ -65,9 +65,7 @@ describe('chat history pinning', () => {
 describe('answer feedback requests', () => {
 	it('uses the same-origin API with encoded identities and explicit withdrawal', async () => {
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response(JSON.stringify({ code: 200, message: 'success', data: {}, meta: null }), {
-				headers: { 'Content-Type': 'application/json' }
-			})
+			new Response(null, { status: 204 })
 		);
 		const controller = new AbortController();
 		try {

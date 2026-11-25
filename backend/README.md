@@ -52,7 +52,8 @@ reuse revisions from one or more papers.
   run state, and Source reads.
 - `application/core/`: Document profiling, Paper Map creation, Objective
   discovery, PaperExperiment extraction, selection, and Finding synthesis.
-- `application/chat/`: Research Agent trajectory and approved capability calls.
+- `conversation/`: Workspace-owned conversation paths, forks, and answer ratings.
+- `agent/`: Task execution, registered tools, approvals, and ModelCall audit.
 - `application/pipeline/`: Technical execution creation and node transitions.
 - `domain/`: Business objects, invariants, and state transitions.
 - [`repositories/`](repositories/README.md): Concrete PostgreSQL
@@ -120,7 +121,9 @@ uvicorn main:app --reload --port 8010
 PostgreSQL is the maintained structured-state authority. Alembic is the only
 schema authority. Do not add a runtime schema fallback or compatibility read.
 See [model credential operations](docs/runbooks/model-key-operations.md) for
-master-key setup and the migration of existing provider keys.
+master-key setup and the migration of existing provider keys. Existing Chat
+databases can follow the [retirement procedure](docs/runbooks/chat-retirement.md)
+before upgrading to head.
 
 Research task execution requires the three independent workers documented in
 [`scripts/README.md`](scripts/README.md#research-workers). HTTP requests only

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from tests.support.research_jobs import analysis_job_fixture, claim_analysis_fixture
 
-from application.chat.capabilities import finding_review
+from agent.capabilities import finding_review
 
 from application.core.objectives.analysis import analysis_record_source
 
@@ -11,8 +11,8 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.finding_review import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.finding_review import (
     CurateFindingCapability,
     CurateFindingToolRequest,
 )
@@ -1540,8 +1540,9 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
         finding_review.workspace_service = workspace_service
         finding_review.finding_feedback_service = service
         result = await CurateFindingCapability().execute(
-            CapabilityExecutionContext(
-                session_id="review-session",
+            ToolExecutionContext(
+                operation_id="operation",
+                task_id="review-session",
                 user_id="user-1",
                 workspace_id="col-gold",
                 tool_call_id="curate-1",

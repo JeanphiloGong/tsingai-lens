@@ -55,7 +55,6 @@ async def test_task_api_approval_resume_and_sse(
             MessageORM(
                 message_id="agent-v4-question",
                 conversation_id="agent-v4-conversation",
-                position=0,
                 role="user",
                 content="Inspect Source.",
                 created_at=now,

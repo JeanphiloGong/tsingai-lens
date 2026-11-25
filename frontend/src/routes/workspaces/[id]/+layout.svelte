@@ -26,7 +26,7 @@
 	$: currentPath = $page.url.pathname;
 	$: isFindingRoute = Boolean($page.params.objective_id);
 	$: isObjectivesRoute = currentPath.startsWith(`/workspaces/${workspaceId}/objectives`);
-	$: isMoreRoute = ['graph', 'settings'].some((route) =>
+	$: isMoreRoute = ['graph'].some((route) =>
 		currentPath.startsWith(`/workspaces/${workspaceId}/${route}`)
 	);
 	let moreMenu: HTMLDetailsElement;
@@ -143,7 +143,7 @@
 	<details class="workspace-tabs__more" class:active={isMoreRoute} bind:this={moreMenu}>
 		<summary on:keydown={closeMoreOnEscape}>{$t('workspace.moreLabel')}</summary>
 		<div class="workspace-tabs__menu">
-			{#each ['graph', 'settings'] as route (route)}
+			{#each ['graph'] as route (route)}
 				{@const href = `/workspaces/${workspaceId}/${route}`}
 				{@const active = currentPath.startsWith(href)}
 				<a

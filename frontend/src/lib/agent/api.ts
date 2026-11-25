@@ -196,7 +196,7 @@ type TaskDetail = {
 
 type MessagePath = {
 	conversation: Conversation;
-	items: Array<ConversationMessage & { my_feedback: ChatMessageFeedback | null; tool_requests?: ChatToolRequest[] }>;
+	items: Array<ConversationMessage & { my_feedback: ChatMessageFeedback | null }>;
 };
 
 export async function fetchTaskState(
@@ -211,11 +211,11 @@ export async function fetchTaskState(
 		? (await requestJson(taskPath(conversationId, selected), { signal })) as TaskDetail
 		: null;
 	return {
-		items: path.items.map(({ my_feedback, tool_requests, ...item }) => ({
+		items: path.items.map(({ my_feedback, ...item }) => ({
 			...item,
 			conversation_id: conversationId,
 			tool_call_id: item.tool_call_id ?? null,
-			tool_calls: tool_requests ?? [],
+			tool_calls: [],
 			tool_result: item.tool_result ?? null,
 			source_contexts: item.source_contexts ?? []
 		})),

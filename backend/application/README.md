@@ -26,8 +26,6 @@ Inside it, business responsibilities are now grouped as:
 - [`source/README.md`](source/README.md)
   Workspace lifecycle, current Document membership, per-document preparation,
   and Source loading
-- [`chat/README.md`](chat/README.md)
-  Workspace-bound Research Agent trajectory, capabilities, and write approval
 - [`pipeline/README.md`](pipeline/README.md)
   Pipeline Run admission, telemetry, persistence, and recovery; scientific
   workflow ordering stays in owning services

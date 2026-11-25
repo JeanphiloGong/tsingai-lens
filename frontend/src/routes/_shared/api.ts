@@ -135,6 +135,7 @@ export async function requestJson(path: string, init: RequestInit = {}) {
 		headers.set('Content-Type', 'application/json');
 	}
 	const response = await fetch(buildApiUrl(path), { ...init, credentials: 'same-origin', headers });
+	if (response.status === 204) return null;
 	if (path.startsWith('/user-api/')) {
 		const payload = await response.json();
 		if (!response.ok) {

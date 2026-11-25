@@ -172,90 +172,17 @@ encrypted credentials, and administrative audit records.
 
 #### Chat Connection Binding
 
-`POST /api/v1/conversations/{conversation_id}/messages` accepts an optional
-`model_connection_id` alongside the existing message, Source, permission, and
-branch fields. Resolve it only after ownership checks and under the existing
-session execution lock. Omission selects the first enabled entry in the same
-priority order as the directory. No available model or an invalid/disabled
-selection fails before appending a user message
-or calling the provider. A valid choice binds the whole response to that connection ID;
-another user's selection cannot mutate that response's client.
-
-Response snapshots include nullable `model_connection_id` and
-`model_connection_name`. Internal model-call records retain the connection ID
-and the model actually called. Existing completed
-snapshots may have NULLs. Approval continuation reads the saved connection ID,
-even when disabled, and never substitutes another enabled configuration. Auto-approved
-tools and context compaction reuse the same response runner. GET event reconnects
-read that saved snapshot without selecting a model or generating another answer.
-
-Trajectory responses (GET messages and SSE trajectory events) include nullable
-`retryable_decision`. It is the original call with status `approved` or `rejected`
-when its decision is saved, no result has been recorded, and no worker is running.
-`pending_approval` remains reserved for a decision the user has not made. A client
-may explicitly retry the saved decision through the existing decision endpoint,
-using that call's original decision and `arguments_digest`; it sends no model
-selection and must never convert a rejection to an approval. A rejection with no
-result resumes its refusal observation and explanation, without executing a write.
-A recorded result suppresses this recovery projection, and repeated completed
-requests do not create another response or execute again. GET and reconnect only
-observe; they never perform the retry. New questions wait until this outstanding
-continuation has been handled.
-
-JSON endpoints keep HTTP 200 and return the existing business error envelope.
-An unknown or disabled choice uses `ResourceConflictException` (business code
-`200204`) and `data.code = "model_connection_unavailable"`. The request schema
-accepts IDs of 1–64 characters; invalid input uses `200100`. A missing default,
-missing saved binding, invalid configuration or an unreadable credential uses
-`ServiceUnavailableException` (`200205`) with the stable reason in `data.code`:
-`model_connection_default_unavailable`, `model_connection_binding_missing`,
-`model_connection_invalid_configuration`, or `model_credentials_unavailable`.
-Authentication failure uses the existing `200301` contract. The directory calls
-the concrete repository directly; unexpected database errors follow the existing
-application exception handler, without inventing a second directory error API.
-If an SSE stream has already started, connection failures arrive as sanitized
-`error` events within HTTP 200. No client may treat the status alone as a
-completed scientific answer. Provider failures after dispatch continue to use
-the existing `model_unavailable`/context error contract.
+The send command accepts an optional `model_connection_id`. The accepted Task
+stores the selection and its execution resolves the model connection. The
+connection ID remains bound to the Task during continuation. Provider calls
+record their actual connection and model in the internal ModelCall audit.
+[Task API](conversation-agent/task-api.md)
 
 ### Research Agent Chat
 
-Session operation permissions are exposed by authenticated
-`GET/PUT /api/v1/conversations/{conversation_id}/permissions`. PUT accepts `mode`
-(`read_only`, `confirm`, `auto`), an explicit `actions` list, and
-`expires_at` (`null` keeps an automatic grant active until it is
-revoked or changed, while a non-null value must be no more than 24 hours
-ahead), `all_actions`, and `expected_revision`. A session without a workspace default and every branched session defaults
-to `confirm`; revision conflicts and invalid grants return `200204`, inaccessible
-sessions return `200201`. The model cannot call this settings endpoint.
-
-Automatic grants can cover every currently registered write action listed in
-`domain/chat/permissions.py`, including research-process and Objective actions,
-Evidence/Finding publication, review annotations, and research-plan changes.
-Evidence and Finding version creation publish a new analysis version; there is no
-separate save-only permission. The user selects the exact actions and optional
-expiry in the session permission control, while the default mode still requires exact
-confirmation. Calls record `decision_basis` (`explicit` or `scope_grant`) and
-`authorization_revision`.
-
-Revocation and acquiring execution authority lock the same session row. A
-revocation completed first prevents a new claim; an already claimed operation
-may finish. Repeated claims never restart a running/terminal call. A crash
-after claim may leave an interrupted operation requiring investigation; this
-does not promise transactional exactly-once effects across every domain service.
-New grants do not automatically execute old pending calls. Read-only mode
-blocks even explicit approvals. Request-level no-save constraints further
-restrict writes; natural-language detection remains bounded, and read-only
-settings are the deterministic control.
-
-Workspace owners can set a default for newly created workspace Agent sessions through
-authenticated `GET/PUT /api/v1/workspaces/{workspace_id}/agent-permissions`.
-The endpoint uses the same mode, action, optional expiry, and revision contract and
-returns `200201` for a workspace the caller does not own. A workspace default is
-copied when a session is created; changing it does not silently change an
-active session. Branches continue to default to confirmation. `all_actions=true` is expanded by the backend to every current
-registered write action, so clients do not need to maintain that authoritative
-list.
+The Agent Registry supplies tool schemas. Operations marked as requiring approval
+wait for a decision on their stored argument digest. Tool handlers validate
+access to the resources they use.
 
 - `POST /api/v1/conversations`
 - `GET /api/v1/conversations?workspace_id={workspace_id}`
@@ -283,182 +210,20 @@ and `404` with `meta.error_code`.
 The target contract defines how explicit Fork assigns new Message IDs and
 preserves source execution ownership. [Tree API](conversation-agent/tree-api.md#3-explicit-fork)
 
-Chat is the independent conversation and Agent trajectory owner. A Chat session
-belongs to one authenticated user and one workspace. Its ordered messages
-record ordinary user and assistant conversation, model tool intent, and bounded
-structured tool results. Chat references Core resources through stable resource
-references; it does not own or duplicate Objective, Evidence, Finding, or
-Analysis records.
+Conversation owns selected message paths, editing, Fork and soft deletion.
+Agent owns Task execution, revisions, events, and Operation decisions. The
+browser uses `items[].can_rate` and `items[].my_feedback` to display answer
+ratings. PUT saves a rating and DELETE withdraws it with HTTP 204. The rating
+is keyed by the authenticated user and the final assistant message.
+[Conversation API](conversation-agent/conversation-api.md) ·
+[Task API](conversation-agent/task-api.md) ·
+[Answer Feedback API](conversation-agent/feedback-api.md)
 
-The workspace-scoped list returns the authenticated user's saved sessions,
-ordered by `is_pinned` descending, then `updated_at` descending and `conversation_id`
-descending, before applying `limit` and `offset` pagination. It is
-the source for restoring Chat history on another device; browser local storage
-may remember the active session but is not the authoritative history index. Each
-list item also includes `title`: the saved manual or generated title, otherwise the trimmed first line of the first user question
-(up to 160 characters), or `null` for an empty conversation. A client can render
-history without loading every trajectory or relying on a local title cache.
-
-`PUT .../{conversation_id}/title` accepts `{"title": "IN718 comparison"}` and
-returns the saved session. The application service trims titles and then checks
-the 1–160 character limit. NUL, CR and LF are rejected in the original input,
-including at its edges; invalid requests return 200100. Both session and workspace
-ownership are required; missing or unowned sessions return 200201. Renaming changes
-only the title, preserving messages, progress, pin state and activity time.
-Individual session reads expose the saved title or null. Later generation
-checkpoints do not overwrite it; a revision starts without a saved title.
-
-After the first normally completed answer, an untitled session receives a short
-model-generated topic title in the first question's language. Naming uses the
-same request-bound model connection, a bounded excerpt of the first question and
-answer, no tools, and a 45-second timeout. It runs in the background without
-holding the response or blocking the next question. It does not add a conversation message
-or change research evidence. Only a null title can be filled automatically, so
-manual renaming wins even while generation is pending. On naming failure the
-answer remains valid and the question-based label stays available; a later
-normally completed answer can retry naming. Named sessions are not regenerated.
-
-Session responses include `is_pinned` (false by default). `PUT .../{conversation_id}/pin`
-accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the
-saved session. Setting the same state is idempotent. The authenticated user must
-own both the session and its Workspace; missing or unowned sessions return 200201
-`chat_session_not_found`. Pinning is independent of execution and does not
-change `updated_at`, messages, approvals, or Source attachments. Generation
-checkpoints preserve the saved preference, and new revisions start unpinned.
-
-Deleting an owned idle session returns a success envelope with empty `data` and removes its trajectory. Execution
-conflicts return 200204 `chat_session_busy`. A session still referenced by another
-session's `parent_conversation_id` or `root_conversation_id` returns 200204
-`chat_session_has_branches`; delete the dependent versions first. This preserves
-their saved questions, Source attachments, and tree checkpoints. Missing or
-unowned sessions return 200201 `chat_session_not_found`. Deletion and branch copying
-serialize on the source session row so a concurrent branch cannot lose its source.
-
-Message editing and answer regeneration preserve the original trajectory.
-`POST /conversations/{conversation_id}/messages/{message_id}/edits` accepts a saved user `message_id`,
-a UUID `request_id`, and optional revised `message` (1-12000 non-whitespace
-characters). Omitting `message` retries the original question. It returns an
-owned `ChatSession` with `root_conversation_id`, `parent_conversation_id`,
-`fork_message_id`, `fork_position`, and `fork_content`; these fields are null
-for an original session. The same UUID and revision return the same branch.
-Reusing a UUID for different content is rejected with 200100.
-
-The optional `mode` is `revise` by default. `mode: continue` requires a new
-`message` and retains the selected question's completed answer before starting
-that question on a new branch. Its `fork_message_id` identifies the retained
-assistant answer and `fork_position` is the first position after that answer.
-An incomplete answer cannot be used as a continuation checkpoint (200100).
-Continuation drafts have no new Source attachments: earlier messages retain
-their own Source context. Both modes use the existing branch storage and require
-an idle session with no unresolved approvals or tool results.
-
-`GET /tree` returns the owned session family's `root_conversation_id`, `active_path`
-(canonical user-message IDs), and `nodes`. Each node contains its saved `message`,
-`parent_message_id` (the preceding canonical user turn or null), `answer`,
-`status`, and `can_branch`. Copied prefixes appear once. Status is `completed`,
-`running`, `approval_required`, `failed`, `interrupted`, `incomplete`, or `draft`;
-partial answer text comes only from the server-owned response snapshot. A draft
-is a synthetic user message with stable `draft_{conversation_id}` identity. The
-endpoint checks current user and Workspace ownership and does not mutate state.
-
-Branch creation atomically copies complete turns before the selected question,
-assigning new message and call identities while retaining canonical Source and
-resource references. Later answers and writes stay in their original branch.
-Copied terminal calls describe historical work; they cannot be claimed again.
-New writes require a new exact approval. Branching requires both session and
-current Workspace ownership, and returns 200204 during execution or unresolved
-approval/recovery, 200201 for an unavailable saved user message, and 200100 for an
-invalid revision or stale Source.
-
-To execute the saved revision, `POST /messages` accepts `branch_revision: true`
-with the exact `fork_content`. The backend restores Source contexts from the
-original question for revisions (none for continuations), validates them against current Sources, and accepts this
-branch's initial turn at most once. A repeated send returns 200204
-`chat_branch_already_started`; the client reads the saved trajectory to recover.
-Both ordinary JSON and SSE submission support this behavior.
-
-`POST /conversations/{conversation_id}/tasks/{task_id}/stop` requires the
-authenticated session owner and targets the exact current response. It returns
-the response snapshot with `stop_requested: true` while execution is stopping.
-The request survives ordinary snapshot updates and can be received by a different
-Web process. A stale response ID returns `200204` with `chat_response_changed`;
-repeating a request for the same finished response returns its terminal snapshot.
-The executing turn cancels pending model/read waits, preserves saved observations,
-and closes unresolved tool requests before saving response/turn status `cancelled`
-and `error_code: user_cancelled`. An already claimed write finishes and checkpoints
-first. Partial streamed text stays in the snapshot and is not a completed answer.
-GET trajectory, tree and SSE expose the saved cancellation. Once execution
-releases the session, an ordinary new message can revise the research direction.
-Disconnecting an event stream alone continues to leave execution running.
-
-`GET /messages` also returns `messages/{message_id}/edits` (per-question `message_id`, ordered
-`conversation_ids`, and `active_conversation_id`), `branch_draft` (the unsent revision or
-null), and `running`. These fields survive browser reloads. Execution uses a
-PostgreSQL transaction advisory lock shared by direct Task execution and Conversation commands.
-Each running turn holds one dedicated database connection outside the normal
-checkpoint pool; transaction completion or connection loss releases the lock.
-Browser disconnection does not cancel an already running turn. Apply migrations
-through `20260910_0058` before running this version against an existing database.
-
-Answer usefulness feedback is separate from scientific Finding review. For
-example, a researcher can mark an LPBF comparison answer incomplete, request
-the missing tensile test conditions, revise that assessment, or withdraw it.
-This never changes an Objective, Evidence, Finding, approval, or model context.
-
-`PUT /conversations/{conversation_id}/messages/{message_id}/feedback` accepts
-`rating: helpful | not_helpful | null`, optional
-`reason: incorrect | incomplete | unclear | other | null`, and an optional
-`comment` of at most 2000 characters. A reason requires `not_helpful`.
-`rating: null` withdraws the record and requires absent/null reason and comment;
-the response is HTTP 200 with `code: 200` and `data: {}`. Comments are trimmed and blank
-comments become null. Extra fields are rejected.
-
-A non-null rating returns `feedback_id`, `conversation_id`, `message_id`, `user_id`,
-`rating`, `reason`, `comment`, `response_digest`, `created_at`, and `updated_at`.
-The server computes `response_digest` as SHA-256 of the UTF-8 content of the
-canonical saved answer. Identity, authorship, digest, and timestamps cannot be
-supplied by the client. One user has at most one current rating per message;
-updates preserve identity and creation time, and identical PUTs also preserve
-update time. Withdrawal is idempotent and removes the optional details.
-
-The target must be a persisted, non-empty Assistant text message without tool
-requests in the owned session. Authentication is required (`200301`); unavailable
-session, workspace, or message ownership returns `200201`; ineligible message
-roles or invalid input return `200100`. Temporary streaming messages have no saved
-identity and cannot receive feedback.
-
-`GET /conversations/{conversation_id}/messages` returns a separate `feedback` array
-containing the current user's records, alongside `items` and `pending_approval`.
-The immutable message records and turn/stream contracts contain no feedback.
-The rating is not supplied directly to a model and does not itself assert that
-an answer is wrong. In the current feedback-workbench flow, a saved rating is
-an input signal for an internal analysis job. The analysis Worker creates a
-candidate case and the task-specific sample process prepares a candidate for
-each fixed task; a human then edits or confirms the task sample before an
-immutable DatasetExport can include it.
-
-### Conversation answer feedback
-
-Conversation answer feedback remains a small user-facing interaction separate from
-scientific Finding review. A researcher can mark a saved assistant answer helpful or
-not helpful, add an optional reason and comment, revise the rating, or withdraw it.
-The operation does not create an analysis job, FeedbackCase, dataset sample, export,
-or model call. It never changes an Objective, Evidence, Finding, approval, or model
-context.
-
-- `PUT /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
-- `DELETE /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
-
-The record is keyed by `(user_id, message_id)` and stores the server-computed
-`response_digest`. The message must be a persisted, non-empty final assistant text
-answer in the owned Conversation. Fork copies do not inherit the source rating. The
-message read path projects the current user's `my_feedback` value.
-
-The former FeedbackCase, correction-signal, tool-failure, dataset-sample, snapshot,
-and export APIs are retired. Historical migrations may retain their tables and ORM
-mappings as one-time data sources, but no current HTTP route, chat send path,
-application startup hook, or background consumer imports them. A future feedback
-analysis module requires a new contract and implementation.
+The Agent Registry controls the available tools. Workspace and Conversation
+permission-setting endpoints have been retired. Answer ratings are saved in
+`chat_message_feedback`. The former analysis, case, dataset, and export
+surfaces were retired with the legacy Chat storage.
+[Chat retirement](../runbooks/chat-retirement.md)
 
 ### Research Objectives
 

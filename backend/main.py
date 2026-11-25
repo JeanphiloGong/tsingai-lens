@@ -4,38 +4,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from time import perf_counter
 
 from infra.identity import client as identity
-from application.chat import AgentRunLimits, CapabilityRegistry
-from application.chat import session_service
-from application.chat.capabilities import (
-    AssessObjectiveQualityCapability,
-    BrowseWorkspacePapersCapability,
-    ConfirmObjectiveCapability,
-    CreateFindingDraftCapability,
-    CreateFindingVersionCapability,
-    CreateObjectiveCandidateCapability,
-    CreatePaperExperimentRevisionCapability,
-    CreateResearchPlanCapability,
-    CurateFindingCapability,
-    DeriveObjectiveCapability,
-    GetWorkspaceContextCapability,
-    InspectDocumentSourcesCapability,
-    InspectObjectiveAnalysisCapability,
-    InspectPublishedFindingCapability,
-    InspectResearchPlansCapability,
-    InspectResearchProcessCapability,
-    InspectTableCapability,
-    PreviewResearchScopeCapability,
-    ProposeObjectiveDraftsCapability,
-    ProposePaperExperimentDraftCapability,
-    ProposeResearchPlanCapability,
-    QueryPublishedFindingsCapability,
-    ReadSourceCapability,
-    RecordFindingFeedbackCapability,
-    ReviseResearchPlanCapability,
-    SearchSourcesCapability,
-    StartObjectiveAnalysisCapability,
-    StartResearchProcessCapability,
-)
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -61,12 +29,12 @@ from controllers.source import workspace_routes as workspaces
 from controllers.source import pipeline_run_routes as pipeline_runs
 from controllers.source import reference_routes as references
 from conversation.controllers.routes import conversation_error_handler, conversation_router
-from conversation.controllers.schemas import ConversationInputError
+from conversation.controllers.errors import ConversationInputError
+from conversation.feedback.repository import FeedbackTargetInvalid
+from conversation.repositories.scope import ConversationNotFound
 from conversation.repositories.conversation_repository import (
-    ConversationNotFound,
     ConversationPathConflict,
     ConversationWriteConflict,
-    FeedbackTargetInvalid,
 )
 from agent.controllers.routes import agent_router, task_error_handler
 from agent.repositories.task_repository import (
@@ -110,49 +78,6 @@ def _parse_cors_allowed_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
-def _parse_agent_run_limits() -> AgentRunLimits:
-    from math import isfinite
-
-    defaults = AgentRunLimits()
-    values = {}
-    for field_name, env_name in {
-        "max_elapsed_seconds": "LENS_AGENT_MAX_TURN_SECONDS",
-        "max_tool_calls": "LENS_AGENT_MAX_TOOL_CALLS",
-        "max_model_tokens": "LENS_AGENT_MAX_MODEL_TOKENS",
-        "max_consecutive_no_progress": "LENS_AGENT_NO_PROGRESS_LIMIT",
-        "emergency_max_model_cycles": "LENS_AGENT_EMERGENCY_MAX_CYCLES",
-        "max_model_retries": "LENS_AGENT_MAX_MODEL_RETRIES",
-        "max_request_seconds": "LENS_AGENT_MAX_REQUEST_SECONDS",
-        "max_context_tokens": "LENS_AGENT_CONTEXT_TOKENS",
-        "max_parallel_reads": "LENS_AGENT_MAX_PARALLEL_READS",
-        "max_model_output_tokens": "LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS",
-        "max_finalization_seconds": "LENS_AGENT_MAX_FINALIZATION_SECONDS",
-        "max_finalization_output_tokens": "LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS",
-    }.items():
-        default = getattr(defaults, field_name)
-        try:
-            raw = os.getenv(env_name, "").strip()
-            if raw == "0" and field_name in {
-                "max_elapsed_seconds",
-                "max_tool_calls",
-                "max_model_tokens",
-                "emergency_max_model_cycles",
-                "max_request_seconds",
-                "max_finalization_seconds",
-            }:
-                values[field_name] = None
-                continue
-            parser = float if field_name.endswith("_seconds") else int
-            value = parser(raw) if raw else default
-            if value is not None and (value <= 0 or not isfinite(value)):
-                raise ValueError("non-positive or non-finite limit")
-        except (ValueError, OverflowError):
-            logger.warning("Invalid %s; using default=%s", env_name, default)
-            value = default
-        values[field_name] = value
-    return AgentRunLimits(**values)
-
-
 @asynccontextmanager
 async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
     async with AsyncExitStack() as cleanup:
@@ -178,43 +103,6 @@ async def lifespan(_application: object | None = None) -> AsyncIterator[None]:
                 decrypt_api_key(master_key, connection_id, ciphertext)
         identity.Client = identity.IdentityClient()
         cleanup.push_async_callback(identity.Client.close)
-        service = session_service.ChatSessionService(
-            limits=_parse_agent_run_limits(),
-            capabilities=CapabilityRegistry(
-                (
-                    GetWorkspaceContextCapability(),
-                    BrowseWorkspacePapersCapability(),
-                    InspectDocumentSourcesCapability(),
-                    SearchSourcesCapability(),
-                    InspectTableCapability(),
-                    ReadSourceCapability(),
-                    InspectResearchProcessCapability(),
-                    StartResearchProcessCapability(),
-                    QueryPublishedFindingsCapability(),
-                    InspectPublishedFindingCapability(),
-                    RecordFindingFeedbackCapability(),
-                    CurateFindingCapability(),
-                    CreateFindingDraftCapability(),
-                    CreateFindingVersionCapability(),
-                    ProposePaperExperimentDraftCapability(),
-                    CreatePaperExperimentRevisionCapability(),
-                    ProposeObjectiveDraftsCapability(),
-                    PreviewResearchScopeCapability(),
-                    CreateObjectiveCandidateCapability(),
-                    ConfirmObjectiveCapability(),
-                    StartObjectiveAnalysisCapability(),
-                    InspectObjectiveAnalysisCapability(),
-                    AssessObjectiveQualityCapability(),
-                    DeriveObjectiveCapability(),
-                    ProposeResearchPlanCapability(),
-                    CreateResearchPlanCapability(),
-                    InspectResearchPlansCapability(),
-                    ReviseResearchPlanCapability(),
-                )
-            ),
-        )
-        cleanup.push_async_callback(service.close)
-        session_service.ChatService = service
         yield
 
 

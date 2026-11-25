@@ -1,29 +1,21 @@
 from __future__ import annotations
 
-from application.chat.capabilities import research_planning
+from agent.capabilities import research_planning
 
 import pytest
-from application.chat import (
-    AgentContext,
-    CapabilityRegistry,
-    ModelToolCall,
-    ModelTurn,
-    ResearchAgentRunner,
-)
-from application.chat.capabilities import (
+from agent.capabilities.research_planning import (
     CreateResearchPlanCapability,
     InspectResearchPlansCapability,
     ProposeResearchPlanCapability,
     ReviseResearchPlanCapability,
 )
-from application.chat.capabilities.contracts import CapabilityExecutionContext
-from application.chat.capabilities.research_planning import (
+from agent.capabilities.registry import ToolExecutionContext
+from agent.capabilities.research_planning import (
     ProposeResearchPlanToolRequest,
 )
 from domain.goal import ExperimentPlanRecord
 from exceptions import ResourceConflictException
 from pydantic import ValidationError
-from tests.unit.application.test_research_agent_runner import _Model
 
 pytestmark = pytest.mark.anyio
 
@@ -198,9 +190,10 @@ class _StaleExperimentPlanService(_ExperimentPlanService):
         )
 
 
-def _context(call_id: str) -> CapabilityExecutionContext:
-    return CapabilityExecutionContext(
-        session_id="chat-1",
+def _context(call_id: str) -> ToolExecutionContext:
+    return ToolExecutionContext(
+        operation_id="operation",
+        task_id="chat-1",
         user_id="user-1",
         workspace_id="col-1",
         tool_call_id=call_id,
@@ -297,7 +290,7 @@ async def test_research_plan_draft_is_structured_traceable_and_transient() -> No
         capability.spec.input_model(**_plan_arguments()),
     )
 
-    assert capability.spec.risk.value == "draft"
+    assert capability.spec.requires_approval is False
     assert feedback_service.calls == [("col-1", "objective-1")]
     assert result.data["draft_status"] == "ready_for_researcher_review"
     assert result.data["persistence"] == "transient_chat_result"
@@ -377,103 +370,6 @@ def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
         capability.spec.input_model(**payload)
 
 
-async def test_research_plan_write_waits_for_exact_approval_after_draft() -> None:
-    feedback_service = _FindingFeedbackService()
-    plan_service = _ExperimentPlanService()
-    research_planning.workspace_service = _WorkspaceService()
-    research_planning.finding_dataset_service = feedback_service
-    proposal = ProposeResearchPlanCapability()
-    research_planning.experiment_plan_service = plan_service
-    writer = CreateResearchPlanCapability()
-    plan_arguments = _plan_arguments()
-    write_arguments = {
-        **plan_arguments,
-        "source_snapshots": _source_snapshots(),
-    }
-    runner = ResearchAgentRunner(
-        model=_Model(
-            ModelTurn(
-                tool_calls=(
-                    ModelToolCall(
-                        name="propose_research_plan",
-                        arguments=plan_arguments,
-                    ),
-                )
-            ),
-            ModelTurn(
-                tool_calls=(
-                    ModelToolCall(
-                        name="update_execution_plan",
-                        arguments={
-                            "steps": [
-                                {
-                                    "step_id": "save",
-                                    "action": "Save the reviewed plan",
-                                    "status": "in_progress",
-                                }
-                            ],
-                            "status": "in_progress",
-                            "explanation": "The reviewed plan is ready for approval.",
-                        },
-                    ),
-                )
-            ),
-            ModelTurn(
-                content="The research plan draft is ready for approval.",
-                tool_calls=(
-                    ModelToolCall(
-                        name="create_research_plan",
-                        arguments=write_arguments,
-                    ),
-                ),
-            ),
-            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
-                "steps": [{"step_id": "save", "action": "Save the approved research plan", "status": "completed"}],
-                "status": "completed", "explanation": "The exact approved write succeeded.",
-            }),)),
-            ModelTurn(content="The approved research plan draft has been saved."),
-        ),
-        capabilities=CapabilityRegistry((proposal, writer)),
-    )
-    context = AgentContext("chat-1", "user-1", "col-1")
-
-    proposed = await runner.run_turn(
-        context=context,
-        previous_messages=(),
-        user_message="Draft and save a plan to test this conclusion.",
-    )
-
-    assert proposed.status.value == "approval_required"
-    assert proposed.tool_results[1].data["persistence"] == "transient_chat_result"
-    assert proposed.pending_approval.name == "create_research_plan"
-    assert plan_service.calls == []
-
-    approved = proposed.pending_approval.approve(
-        user_id="user-1",
-        arguments_digest=proposed.pending_approval.arguments_digest,
-        decided_at="2026-09-06T08:00:00+00:00",
-    )
-    completed = await runner.resume_claimed_call(
-        context=context,
-        previous_messages=proposed.messages,
-        claimed_call=approved.start("2026-08-19T00:01:01+00:00"),
-    )
-
-    assert completed.status.value == "completed"
-    saved_plan = max(
-        (item for item in completed.tool_results if item.data.get("plan")),
-        key=lambda item: item.data["plan"].get("plan_version", 0),
-    )
-    assert saved_plan.data["plan"]["plan_id"] == "exp-agent-1"
-    assert len(plan_service.calls) == 1
-    assert plan_service.calls[0]["created_by"] == "user-1"
-    assert plan_service.calls[0]["created_by_tool_call_id"] == (
-        proposed.pending_approval.tool_call_id
-    )
-    assert (
-        plan_service.calls[0]["structured_plan"]
-        == proposed.tool_results[1].data["structured_plan"]
-    )
 
 
 async def test_research_plan_write_rejects_changed_source_snapshot_without_persistence() -> (
@@ -549,149 +445,3 @@ async def test_agent_can_inspect_current_or_named_research_plan_revision() -> No
     assert historical.data["plan"]["plan_version"] == 1
     assert historical.data["history_scope"] == "named_revision"
     assert {ref.resource_type for ref in historical.resource_refs} == {"research_plan"}
-
-
-@pytest.mark.parametrize("label_status", ["gold", "unreviewed"])
-async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(
-    label_status,
-) -> None:
-    research_planning.workspace_service = _WorkspaceService()
-    research_planning.finding_dataset_service = _FindingFeedbackService(label_status=label_status)
-    proposal = ProposeResearchPlanCapability()
-    model = _Model(
-        ModelTurn(
-            tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)
-        ),
-        ModelTurn(
-            content=(
-                "The provisional plan is ready for your review and has not been saved."
-                + (
-                    " supporting conclusions still require researcher review."
-                    if label_status != "gold"
-                    else ""
-                )
-            )
-        ),
-    )
-    chunks = []
-    result = await ResearchAgentRunner(
-        model=model, capabilities=CapabilityRegistry((proposal,))
-    ).run_turn(
-        context=AgentContext("chat-1", "user-1", "col-1"),
-        previous_messages=(),
-        user_message="Propose a plan to test the conclusion. Do not save.",
-        text_delta_callback=chunks.append,
-    )
-    assert result.status.value == "completed"
-    assert result.pending_approval is None
-    draft = next(
-        item for item in result.tool_results if item.data.get("structured_plan")
-    )
-    assert "not been saved" in result.messages[-1].content
-    assert (
-        "supporting conclusions still require researcher review"
-        in result.messages[-1].content
-    ) == (label_status != "gold")
-    assert "".join(chunks) == result.messages[-1].content
-    assert not model.turns
-
-
-async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service() -> (
-    None
-):
-    feedback_service = _FindingFeedbackService()
-    plan_service = _ExperimentPlanService()
-    research_planning.workspace_service = _WorkspaceService()
-    research_planning.finding_dataset_service = feedback_service
-    research_planning.experiment_plan_service = plan_service
-    capability = ReviseResearchPlanCapability()
-    arguments = {
-        **_plan_arguments(),
-        "parent_plan_id": "exp-agent-1",
-        "source_snapshots": _source_snapshots(),
-    }
-    runner = ResearchAgentRunner(
-        model=_Model(
-            ModelTurn(
-                tool_calls=(
-                    ModelToolCall(
-                        name="inspect_research_plans",
-                        arguments={
-                            "objective_id": arguments["objective_id"],
-                            "plan_id": "exp-agent-1",
-                        },
-                    ),
-                )
-            ),
-            ModelTurn(
-                tool_calls=(
-                    ModelToolCall(
-                        name="update_execution_plan",
-                        arguments={
-                            "steps": [
-                                {
-                                    "step_id": "save",
-                                    "action": "Save the revised plan",
-                                    "status": "in_progress",
-                                }
-                            ],
-                            "status": "in_progress",
-                            "explanation": "The revision is ready for approval.",
-                        },
-                    ),
-                )
-            ),
-            ModelTurn(
-                content="The revision is ready for approval.",
-                tool_calls=(
-                    ModelToolCall(
-                        name="revise_research_plan",
-                        arguments=arguments,
-                    ),
-                ),
-            ),
-            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
-                "steps": [{"step_id": "save", "action": "Save the approved research plan", "status": "completed"}],
-                "status": "completed", "explanation": "The exact approved write succeeded.",
-            }),)),
-            ModelTurn(content="The approved revision has been saved."),
-        ),
-        capabilities=CapabilityRegistry(
-            (
-                capability,
-                InspectResearchPlansCapability(),
-            )
-        ),
-    )
-    context = AgentContext("chat-1", "user-1", "col-1")
-
-    proposed = await runner.run_turn(
-        context=context,
-        previous_messages=(),
-        user_message="Revise the saved plan using the current evidence.",
-    )
-
-    assert proposed.status.value == "approval_required"
-    assert plan_service.calls == []
-    approved = proposed.pending_approval.approve(
-        user_id="user-1",
-        arguments_digest=proposed.pending_approval.arguments_digest,
-        decided_at="2026-09-07T00:00:00+00:00",
-    )
-    completed = await runner.resume_claimed_call(
-        context=context,
-        previous_messages=proposed.messages,
-        claimed_call=approved.start("2026-09-07T00:00:01+00:00"),
-    )
-
-    assert completed.status.value == "completed"
-    saved_plan = max(
-        (item for item in completed.tool_results if item.data.get("plan")),
-        key=lambda item: item.data["plan"].get("plan_version", 0),
-    )
-    assert saved_plan.data["plan"]["plan_version"] == 2
-    assert plan_service.calls[0]["plan_id"] == "exp-agent-1"
-    assert plan_service.calls[0]["updated_by"] == "user-1"
-    assert plan_service.calls[0]["updated_by_tool_call_id"] == (
-        proposed.pending_approval.tool_call_id
-    )

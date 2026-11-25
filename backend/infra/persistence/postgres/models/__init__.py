@@ -3,32 +3,17 @@
 from infra.persistence.postgres.models.model_connection import ModelConnectionAuditORM, ModelConnectionORM
 from infra.persistence.postgres.models.execution import (
     PipelineRunORM,
-    AnalysisJobORM,
 )
 from infra.persistence.postgres.models.chat import (
     AgentOperationORM,
     AgentTaskORM,
     AgentTaskStepORM,
-    ChatToolCallORM,
 )
 from infra.persistence.postgres.models.chat import ChatModelCallORM
 from infra.persistence.postgres.models.conversation import (
     ConversationORM,
     MessageFeedbackORM,
     MessageORM,
-)
-# Historical Feedback analysis mappings remain registered for Alembic metadata
-# and migration inspection. Runtime rating reads and writes use MessageFeedbackORM.
-from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackSignalAnalysisResultORM, ToolFailureAnalysisResultORM, FeedbackAnnotationORM, FeedbackCaseORM, FeedbackReviewDecisionORM, FeedbackDatasetSnapshotORM
-from infra.persistence.postgres.models.feedback_dataset import (
-    FeedbackDatasetORM,
-    FeedbackDatasetSampleORM,
-    FeedbackSampleRevisionORM,
-    FeedbackSampleActionORM,
-    FeedbackDatasetExportPreviewORM,
-    FeedbackDatasetExportORM,
-    FeedbackDatasetExportMemberORM,
-    FeedbackDatasetMigrationRunORM,
 )
 from infra.persistence.postgres.models.workspace import (
     WorkspaceORM,
@@ -66,7 +51,6 @@ from infra.persistence.postgres.models.paper_experiment import (
 __all__ = [
     "ModelConnectionORM",
     "ModelConnectionAuditORM",
-    "AnalysisJobORM",
     "ChatModelCallORM",
     "AgentOperationORM",
     "MessageORM",
@@ -74,7 +58,6 @@ __all__ = [
     "ConversationORM",
     "AgentTaskORM",
     "AgentTaskStepORM",
-    "ChatToolCallORM",
     "WorkspaceORM",
     "ComparisonGroupMemberORM",
     "ComparisonGroupORM",
@@ -91,21 +74,6 @@ __all__ = [
     "ExperimentMeasurementResultORM",
     "ExperimentTestConditionORM",
     "ExperimentalVariantORM",
-    "FeedbackAnalysisResultORM",
-    "FeedbackSignalAnalysisResultORM",
-    "ToolFailureAnalysisResultORM",
-    "FeedbackAnnotationORM",
-    "FeedbackCaseORM",
-    "FeedbackReviewDecisionORM",
-    "FeedbackDatasetSnapshotORM",
-    "FeedbackDatasetORM",
-    "FeedbackDatasetSampleORM",
-    "FeedbackSampleRevisionORM",
-    "FeedbackSampleActionORM",
-    "FeedbackDatasetExportPreviewORM",
-    "FeedbackDatasetExportORM",
-    "FeedbackDatasetExportMemberORM",
-    "FeedbackDatasetMigrationRunORM",
     "FindingCurationORM",
     "FindingFeedbackORM",
     "ObjectiveAnalysisORM",

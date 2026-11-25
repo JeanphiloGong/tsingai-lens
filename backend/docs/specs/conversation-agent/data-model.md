@@ -318,8 +318,9 @@ Conversation V2 Alembic revision `b71000000002` renames the Conversation table a
 ownership columns in place. It preserves existing Conversation, Message, and
 Feedback identities and constrains Feedback and its target Message to the same
 Conversation. `workspace_id` continues to reference `workspaces.workspace_id`
-at this stage. Parent-chain backfill for existing Messages, Agent runtime migration,
-and HTTP cutover happen in later stages.
+at this stage. The retirement revision `b71000000007` removes the legacy
+columns and tables after history backfill and archive. See the
+[Chat retirement procedure](../../runbooks/chat-retirement.md).
 
 The conceptual mapping is:
 

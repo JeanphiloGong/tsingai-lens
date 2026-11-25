@@ -80,7 +80,7 @@ async def test_execute_rejects_unknown_tool_and_invalid_arguments_before_calling
         pytest.fail("invalid tool call reached the handler")
 
     registry = CapabilityRegistry((replace(make_spec(), handler=unexpected_handler),))
-    context = ToolExecutionContext("user-1", "workspace-1", "task-1", "operation-1")
+    context = ToolExecutionContext(task_id="user-1", user_id="workspace-1", workspace_id="task-1", tool_call_id="operation-1", operation_id="operation")
 
     with pytest.raises(LookupError, match="^unknown_tool$"):
         await registry.execute("missing_tool", {}, context=context)

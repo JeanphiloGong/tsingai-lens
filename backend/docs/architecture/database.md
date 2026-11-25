@@ -91,8 +91,8 @@ class is in `infra/persistence/postgres/models`.
 | Parse and analyze a paper | `infra/source`, `application/source`, `application/core/document_profiles` | `document_preparations` | One document-keyed preparation aggregate containing Source, Profile, Paper Map, and the provenance for each generated section. |
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `workspaces`, `document_preparations`, `research_objectives` | Workspace-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
 | Inspect experiments and compare papers | `application/core/objectives`, `application/core/paper_facts` | `paper_experiment`, `objective_experiment_selection`, `comparison_group`, `experiment_finding`, `objective_analyses` | Automatic analysis stores immutable experiment revisions, explicit selections, optional cross-paper groups, and Finding references. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
-| Run workspace-bound Agent Chat | `application/chat`, `domain/chat` | `chat_conversations`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
-| Assess an answer's usefulness | `application/chat`, `domain/chat/feedback.py` | `chat_message_feedback` | One mutable user assessment of a saved answer, separate from scientific Finding review and model context. |
+| Run workspace-bound Agent Chat | `conversation/`, `agent/` | `chat_conversations`, `chat_messages`, `agent_tasks`, `agent_operations` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
+| Assess an answer's usefulness | `conversation/feedback/` | `chat_message_feedback` | One mutable user assessment of a saved answer, separate from scientific Finding review and model context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
 | Review and evaluate outputs | `application/evaluation`, `controllers/core/finding_review` | `finding_feedback_records`, `finding_curation_records`, `evaluation_gold_sets`, `evaluation_prediction_snapshots`, `evaluation_runs` | Human review of exact Finding versions and reproducible prediction/gold evaluation lineage. Evaluation items, scores, and failures remain inside their aggregate payloads. |
 
@@ -103,7 +103,7 @@ count. The remaining tables are separate for these concrete reasons:
 
 | Group | Why it remains relationally separate |
 | --- | --- |
-| `chat_conversations`, `chat_messages`, `chat_tool_calls` | A conversation contains messages, and each assistant turn can contain ordered capability calls with approval and execution state. Tool results are embedded in their call. |
+| `chat_conversations`, `chat_messages`, `agent_tasks`, `agent_operations` | Messages form a parent-linked conversation path. Tasks hold execution and Operations hold tool requests, decisions and results. |
 | `chat_message_feedback` | A user can revise or withdraw an assessment without rewriting the append-only answer or its tool trajectory. |
 | `workspaces`, `documents`, `document_preparations` | Workspace ownership, file identity, and generated preparation have different replacement and deletion semantics. A preparation is one current child per document. |
 | `pipeline_runs` | Technical retry/progress history must remain observable without being confused with scientific artifacts. |
@@ -128,10 +128,9 @@ Repositories import their mapped classes directly from the owning module.
 | `paper_experiment.py` | Immutable paper experiments and revision-local measurements/comparisons |
 | `objective.py` | Research objectives, analysis versions, selections, comparison groups and follow-up plans |
 | `finding.py` | Findings, selection/group links, expert feedback and curation |
-| `execution.py` | Worker analysis-job envelopes and pipeline execution history |
-| `chat.py` | Sessions, messages, capability calls and model-call records |
-| `feedback.py` | Historical answer-feedback analysis, case, annotation and review mappings used by migration inspection |
-| `feedback_dataset.py` | Historical dataset membership, sample revision and export mappings used by migration inspection |
+| `execution.py` | Pipeline execution history |
+| `conversation.py` | Conversations, messages, and answer ratings |
+| `chat.py` | Agent Tasks, Operations, Steps, and internal ModelCalls |
 | `evaluation.py` | Gold sets, prediction snapshots and evaluation runs |
 | `model_connection.py` | Shared model connection configuration and its administrative audit when available |
 
@@ -272,22 +271,9 @@ Chat selects provider settings from `model_connections`. The
 [model connection data contract](../specs/model-connections/data-model.md)
 describes its fields and ciphertext format.
 
-`application.chat.session_service`, `ResearchAgentRunner`, and the Chat capability registry
-persist an auditable trajectory. Chat references Core records; it does not
-create a parallel paper-fact model.
-
-| Table | Primary identity | Important columns and constraints |
-| --- | --- | --- |
-| `chat_conversations` | `conversation_id` | Authenticated user and Workspace ownership, current path selection, creation/update timestamps, and monotonic timestamp check. |
-| `chat_messages` | `message_id` | Conversation ownership, optional parent, role (`user`, `assistant`, `tool`), content, tool metadata, and selected `source_contexts`. `(conversation_id, position)` preserves the existing Chat order. |
-| `chat_message_feedback` | `feedback_id` | User/message uniqueness, usefulness rating, optional reason/comment, saved-answer digest, and timestamps. Foreign keys cascade with the message or conversation. |
-| `chat_tool_calls` | `tool_call_id` | Session and assistant-message ownership, capability name/arguments, argument digest, risk (`unknown`, `read`, `draft`, `write`), approval/execution status, timing, decision-user provenance, and the optional structured result. One call is allowed per assistant message. |
-
-Tool approval is an explicit state transition recorded with the exact argument
-digest and authenticated decision user. Source context on a message is a
-selected, source-digest-bound navigation snapshot; it does not prove that the
-Agent read a complete Source unless the corresponding Source operation is
-recorded in the trajectory.
+Conversation persists parent-linked messages and selected Sources. Agent Tasks
+persist checkpoints, Operations, and internal ModelCall audits. See the
+[Conversation and Agent data model](../specs/conversation-agent/data-model.md).
 
 ### 8. Objective-Scoped Experiment Plans
 
@@ -370,15 +356,16 @@ erDiagram
     OBJECTIVE_EXPERIMENT_SELECTION ||--o{ FINDING_SELECTION : supports
     COMPARISON_GROUP ||--o{ FINDING_COMPARISON_GROUP : supports
     OBJECTIVE_ANALYSES ||--o{ FINDING : publishes
-    CHAT_SESSIONS ||--o{ CHAT_MESSAGES : contains
-    CHAT_SESSIONS ||--o{ CHAT_TOOL_CALLS : executes
+    CHAT_CONVERSATIONS ||--o{ CHAT_MESSAGES : contains
+    CHAT_CONVERSATIONS ||--o{ AGENT_TASKS : executes
+    AGENT_TASKS ||--o{ AGENT_OPERATIONS : records
     RESEARCH_OBJECTIVES ||--o{ OBJECTIVE_EXPERIMENT_PLANS : plans
     FINDING ||--o{ FINDING_FEEDBACK_RECORDS : reviews
     FINDING ||--o{ FINDING_CURATION_RECORDS : curates
     COLLECTIONS ||--o{ EVALUATION_GOLD_SETS : defines
     EVALUATION_GOLD_SETS ||--o{ EVALUATION_RUNS : scores_against
     EVALUATION_PREDICTION_SNAPSHOTS ||--o{ EVALUATION_RUNS : evaluates
-    CHAT_TOOL_CALLS }o..|| RESEARCH_OBJECTIVES : provenance_id
+    AGENT_OPERATIONS }o..|| RESEARCH_OBJECTIVES : provenance_id
 ```
 
 The Source JSON envelope replaces the former normalized `source_*` tables. The
@@ -390,7 +377,7 @@ Profile, and Paper Map preparation result lives on `document_preparations`,
 discovery state lives on `workspaces`, and automatic experiment selections and
 Findings use their own versioned tables. Authored Evidence/Finding snapshots
 remain in `objective_analyses.payload`; capability results live on
-`chat_tool_calls`.
+`agent_operations`.
 
 ## Fingerprints, Versions, and Reuse
 
@@ -504,7 +491,8 @@ identity used by the Evidence or Finding.
 | `ObjectiveRepository` | `workspaces.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
 | `PaperExperimentRepository` / `ObjectiveExperimentSelectionRepository` | Immutable automatic experiment revisions and Objective-scoped selections |
 | `ComparisonGroupRepository` / `ExperimentFindingRepository` | Optional comparison groups and Findings that reference fixed selections |
-| `ChatRepository` | `chat_conversations`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
+| `TaskRepository` | `agent_tasks`, `agent_operations`, `agent_task_steps`, `chat_model_calls` |
+| `FeedbackRepository` | `chat_message_feedback` |
 | `ConversationRepository` | `chat_conversations`, `chat_messages`, `chat_message_feedback`, `agent_tasks`, `workspaces` for the selected path read |
 | `ExperimentPlanRepository` | `objective_experiment_plans` |
 | `FindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
@@ -781,90 +769,13 @@ revisions from another run.
 
 ### Agent Chat
 
-Chat is an auditable Workspace-bound Agent trajectory. It records user-visible messages, model
-capability requests, approval decisions, and structured results; it references Core Artifacts instead of creating a parallel
-paper-fact model.
+The [Conversation and Agent data model](../specs/conversation-agent/data-model.md)
+defines messages, path selection, Task, Operation, Step, and answer Feedback
+storage. `chat_model_calls` holds internal provider audit records.
 
-V2 renamed the conversation table and its keys in place. The existing Chat
-routes still use `session_id` in HTTP and read messages by `position`. The
-Conversation repository follows explicit parent links and returns the selected
-path, Source contexts, and the caller's feedback. Historical path backfill is a
-separate migration. See the [Conversation and Agent data model](../specs/conversation-agent/data-model.md#14-迁移边界).
-
-#### `chat_conversations` — Conversations
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `conversation_id` | `VARCHAR(128)` | No | PK | Stable conversation identity carried forward from `chat_sessions.session_id`. |
-| `user_id` | `VARCHAR(64)` | No | IDX; external user ID | Stable identifier for the authenticated user. |
-| `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX; `ON DELETE CASCADE` | Workspace bound to the conversation. |
-| `current_message_id`, `current_task_id` | `VARCHAR(128)` | Yes | Same-conversation FKs; at most one is set | Selected path tip or Task. |
-| `path_revision` | `BIGINT` | No | `>= 0`; default `0` | Version of the selected path. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `updated_at >= created_at` | Updated timestamp. |
-
-#### `chat_messages` — Ordered chat messages
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `message_id` | `VARCHAR(128)` | No | PK | Stable identifier of the Chat message. |
-| `conversation_id` | `VARCHAR(128)` | No | FK -> `chat_conversations.conversation_id`; IDX; `ON DELETE CASCADE` | Conversation that owns the message. |
-| `parent_message_id` | `VARCHAR(128)` | Yes | Same-conversation FK | Previous message on this branch. |
-| `position` | `INTEGER` | No | `>= 0`; UQ per session | Strict message order within the Chat session. |
-| `role` | `VARCHAR(16)` | No | `user` / `assistant` / `tool` | Message role: user, assistant, or tool. |
-| `content` | `TEXT` | No | — | Human- or system-readable text content. |
-| `tool_call_id` | `VARCHAR(128)` | Yes | — | Stable identifier of the capability call. |
-| `source_contexts` | `JSONB` | No | default `[]` | User-selected, Source-digest-bound navigation contexts attached to the message. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
-
-#### `chat_message_feedback` - Answer usefulness feedback
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `feedback_id` | `VARCHAR(64)` | No | PK | Stable assessment identity until withdrawal. |
-| `conversation_id` | `VARCHAR(128)` | No | FK -> `chat_conversations`; IDX; CASCADE | The composite foreign key with `message_id` enforces that the answer belongs to this conversation. |
-| `message_id` | `VARCHAR(128)` | No | FK -> `chat_messages`; IDX; CASCADE | Saved Assistant text answer without tool requests. |
-| `user_id` | `VARCHAR(64)` | No | External user ID; UQ with `message_id` | Authenticated assessor. |
-| `rating` | `VARCHAR(16)` | No | `helpful` / `not_helpful` | Current usefulness assessment. Withdrawal deletes the row. |
-| `reason` | `VARCHAR(16)` | Yes | `incorrect` / `incomplete` / `unclear` / `other`; negative rating only | Optional improvement category. |
-| `comment` | `TEXT` | Yes | At most 2000 characters | Optional plain text, trimmed before persistence. |
-| `response_digest` | `VARCHAR(64)` | No | Length 64 | Server-computed SHA-256 of the saved answer's UTF-8 content. |
-| `created_at` | `TIMESTAMP WITH TIME ZONE` | No | Preserved on update | First assessment timestamp. |
-| `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | `>= created_at` | Last changed assessment timestamp. Identical PUTs preserve it. |
-
-PostgreSQL upserts enforce one current row for concurrent submissions. This is
-not a review history or scientific validity label. It does not modify message
-content, session recency, approvals, Findings, Evidence, or model prompts.
-
-#### `chat_tool_calls` — Capability calls and approvals
-
-| Field | Type | Nullable | Key / constraints | Description |
-| :--- | :--- | :---: | :--- | :--- |
-| `tool_call_id` | `VARCHAR(128)` | No | PK | Stable identifier of the capability call. |
-| `session_id` | `VARCHAR(128)` | No | FK -> `chat_conversations.conversation_id`; IDX; `ON DELETE CASCADE` | Stable conversation identity for the existing Chat tool-call flow. |
-| `assistant_message_id` | `VARCHAR(128)` | No | FK -> `chat_messages.message_id`; UQ with `position`; `ON DELETE CASCADE` | Assistant message that triggered this call. Multiple ordered calls are allowed per assistant message. |
-| `name` | `VARCHAR(128)` | No | — | Capability name requested by the Agent. |
-| `position` | `INTEGER` | No | `>= 0`; UQ per assistant message | Order of this capability call within the assistant turn. |
-| `arguments` | `JSONB` | No | — | Schema-validated capability arguments. |
-| `arguments_digest` | `VARCHAR(64)` | No | — | Normalized argument digest used to verify exact approval. |
-| `risk` | `VARCHAR(16)` | No | `unknown` / `read` / `draft` / `write` | Capability risk classification. |
-| `status` | `VARCHAR(32)` | No | `requested` / `approval_required` / `approved` / `running` / `succeeded` / `failed` / `rejected` | Technical state from request through approval, execution, and terminal result. |
-| `started_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Started timestamp. |
-| `finished_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Finished timestamp. |
-| `error_code` | `VARCHAR(128)` | Yes | — | Machine-readable technical failure or rejection code. |
-| `decision_user_id` | `VARCHAR(64)` | Yes | External user ID | Authenticated user who approved or rejected the call. |
-| `decision_arguments_digest` | `VARCHAR(64)` | Yes | — | Digest confirmed at approval; must match `arguments_digest`. |
-| `decided_at` | `TIMESTAMP WITH TIME ZONE` | Yes | — | Decided timestamp. |
-| `result_status` | `VARCHAR(32)` | Yes | `succeeded` / `queued` / `failed` | Lifecycle status of the result returned by this call. |
-| `result_data` | `JSONB` | Yes | — | Structured data returned by the capability. |
-| `result_resource_refs` | `JSONB` | Yes | — | Navigable references to Objectives, Findings, Sources, or other result resources. |
-| `result_warnings` | `JSONB` | Yes | — | Structured list of non-blocking warnings. |
-| `result_error_code` | `VARCHAR(128)` | Yes | — | Machine-readable failure code returned by the capability. |
-| `result_error_message` | `TEXT` | Yes | — | Human-readable failure explanation returned by the capability. |
-
-The result is nullable because a call can be requested, approved, or running
-before execution completes. Keeping it on the call row makes the call and its
-single result one auditable lifecycle record.
+The [retirement migration](../runbooks/chat-retirement.md) drops the old
+linear positions, Task checkpoints, tool-call table, and derived Feedback
+analysis tables after the historical data is reviewed and archived.
 
 ### Experiment plans
 

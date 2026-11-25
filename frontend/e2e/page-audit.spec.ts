@@ -1626,7 +1626,7 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [390, 1440]) {
-		test(`keeps approval recovery beside the reply after reload at ${width}px`, async ({
+		test(`restores a pending Operation and approves it after reload at ${width}px`, async ({
 			page
 		}) => {
 			await page.setViewportSize({ width, height: 900 });
@@ -1634,48 +1634,62 @@ test.describe('page interaction audit', () => {
 				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1')
 			);
 			const initial = agentTurn('Create the reviewed LPBF research question', 4);
-			let approved = false;
-			let completed = false;
+			const taskId = 'task_reviewed_question';
+			const operation = {
+				...initial.pending_approval!,
+				operation_id: 'op_reviewed_question',
+				task_id: taskId
+			};
+			const conversation = { ...chatSession(), current_task_id: taskId };
 			let decisions = 0;
 			await page.route('**/api/v1/conversations/chat_1/messages', (route) =>
 				route.fulfill(
 					json({
-						feedback: [],
-						pending_approval: approved ? null : initial.pending_approval,
-						items: completed
+						conversation,
+						items: decisions
 							? [...initial.messages, ...approvedAgentTurn('call_write_1').messages]
-							: initial.messages
+							: initial.messages,
+						active_tasks: []
 					})
 				)
 			);
+			await page.route(`**/api/v1/conversations/chat_1/tasks/${taskId}`, (route) =>
+				route.fulfill(
+					json({
+						task_id: taskId,
+						conversation_id: sessionId,
+						status: decisions ? 'completed' : 'approval_required',
+						checkpoint_revision: decisions ? 3 : 1,
+						active_operation: decisions ? null : operation,
+						started_at: now(),
+						updated_at: now()
+					})
+				)
+			);
+			await page.route(`**/api/v1/conversations/chat_1/tasks/${taskId}/events?*`, (route) =>
+				route.fulfill({ contentType: 'text/event-stream', body: '' })
+			);
 			await page.route(
-				'**/api/v1/conversations/chat_1/tool-calls/call_write_1/decision',
+				`**/api/v1/conversations/chat_1/tasks/${taskId}/operations/${operation.operation_id}/decision`,
 				(route) => {
-					approved = true;
+					expect(route.request().method()).toBe('POST');
+					expect(route.request().postDataJSON()).toMatchObject({
+						decision: 'approved',
+						arguments_digest: operation.arguments_digest
+					});
 					decisions += 1;
-					return route.abort('failed');
+					return route.fulfill(json({ task_id: taskId, status: 'approved' }));
 				}
 			);
 			await page.goto('/workspaces/col_123/assistant');
-			await page.getByRole('button', { name: 'Approve and create', exact: true }).click();
-			await expect(page.getByTestId('research-recovery')).toBeVisible();
+			const approve = page.getByRole('button', { name: 'Approve and create', exact: true });
+			await expect(approve).toBeVisible();
 			await page.reload();
-			const recovery = page.getByTestId('research-recovery');
-			await expect(recovery).toBeVisible();
-			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeDisabled();
-			const activityBox = await page.getByTestId('research-activity').boundingBox();
-			const recoveryBox = await recovery.boundingBox();
-			expect(recoveryBox!.y).toBeGreaterThanOrEqual(activityBox!.y + activityBox!.height);
-			expect(recoveryBox!.x + recoveryBox!.width).toBeLessThanOrEqual(width);
-			if (screenshotDir)
-				await page.screenshot({ path: join(screenshotDir, `approval-recovery-${width}.png`) });
-			completed = true;
-			await page.getByRole('button', { name: 'Check result', exact: true }).click();
+			await approve.click();
 			await expect(
 				page.getByText('The objective candidate was created for your review.', { exact: true })
 			).toBeVisible();
-			await expect(recovery).toHaveCount(0);
-			await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+			await expect(approve).toHaveCount(0);
 			expect(decisions).toBe(1);
 		});
 	}
@@ -1751,6 +1765,7 @@ test.describe('page interaction audit', () => {
 			await page.route(`**/api/v1/conversations/${sessionId}/messages`, (route) =>
 				route.fulfill(
 					json({
+						conversation: chatSession(),
 						items: [
 							agentMessage(
 								'question',
@@ -1760,17 +1775,21 @@ test.describe('page interaction audit', () => {
 							agentMessage(
 								'answer',
 								'assistant',
-								'The studies used different tensile test temperatures. Compare results measured under matching conditions before attributing the strength difference to heat treatment.'
+								'The studies used different tensile test temperatures. Compare results measured under matching conditions before attributing the strength difference to heat treatment.',
+								{ can_rate: true, my_feedback: feedback }
 							)
 						],
-						pending_approval: null,
-						feedback: feedback ? [feedback] : []
+						active_tasks: []
 					})
 				)
 			);
 			await page.route(
 				`**/api/v1/conversations/${sessionId}/messages/answer/feedback`,
 				async (route) => {
+					if (route.request().method() === 'DELETE') {
+						feedback = null;
+						return route.fulfill({ status: 204 });
+					}
 					expect(route.request().method()).toBe('PUT');
 					const input = route.request().postDataJSON() as ChatFeedbackInput;
 					if (holdSave)
@@ -2987,7 +3006,6 @@ async function mockMessageBranches(
 		const method = route.request().method();
 		const parts = path.split('/');
 		const id = parts[4] || sessionId;
-		if (parts[5] === 'permissions') return route.fallback();
 		if (!parts[4])
 			return route.fulfill(json({ items: [...sessions.values()], limit: 12, offset: 0 }));
 		if (parts[5] === 'tree') {
@@ -3269,23 +3287,6 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/workspaces/${workspaceId}/objectives/${objectiveId}/evidence-map`) {
 			return route.fulfill(json(objectiveEvidenceMap()));
-		}
-		if (/^\/api\/v1\/conversations\/[^/]+\/permissions$/.test(path)) {
-			if (method === 'PUT') {
-				const body = route.request().postDataJSON() as Record<string, unknown>;
-				return route.fulfill(
-					json({
-						mode: body.mode ?? 'confirm',
-						actions: body.actions ?? [],
-						expires_at: body.expires_at ?? null,
-						revision: Number(body.expected_revision ?? 0) + 1
-					})
-				);
-			}
-			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
-		}
-		if (/^\/api\/v1\/workspaces\/[^/]+\/agent-permissions$/.test(path)) {
-			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
 		}
 		if (path === '/api/v1/conversations') return route.fulfill(json(chatSession(), 201));
 		if (path === `/api/v1/conversations/${sessionId}`) return route.fulfill(json(chatSession()));

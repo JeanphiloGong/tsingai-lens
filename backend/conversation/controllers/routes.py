@@ -1,12 +1,16 @@
 import logging
 from typing import Annotated
 
+from agent.application.task_execution import task_execution
 from controllers.dependencies.auth import get_current_user_id
-from controllers.chat.schemas import ChatPermissionRequest
+from conversation.controllers.errors import ConversationInputError
+from conversation.feedback.repository import FeedbackTargetInvalid
+from conversation.feedback.routes import feedback_router
+from conversation.feedback.schemas import MessageFeedbackResponse
+from conversation.repositories.scope import ConversationNotFound
 from conversation.controllers.schemas import (
     ActivePathRequest,
     ActiveTaskResponse,
-    ConversationInputError,
     ConversationListResponse,
     ConversationMessagesResponse,
     ConversationPinRequest,
@@ -15,31 +19,28 @@ from conversation.controllers.schemas import (
     ConversationTitleRequest,
     CreateConversationRequest,
     EditMessageRequest,
-    FeedbackRequest,
     ForkRequest,
-    MessageFeedbackResponse,
     MessageResponse,
     RegenerateMessageRequest,
     SendMessageRequest,
     TaskAcceptedResponse,
     TreeNodeResponse,
+    source_contexts_from_request,
 )
 from conversation.application.send_message import (
     conversation_service,
     send_conversation_message,
 )
-from application.chat import session_service as legacy_chat_service
 from conversation.repositories.conversation_repository import (
-    ConversationNotFound,
     ConversationPathConflict,
     ConversationWriteConflict,
-    FeedbackTargetInvalid,
 )
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from utils.response import ApiResponse
 
 conversation_router = APIRouter(prefix="/conversations", tags=["conversations"])
+conversation_router.include_router(feedback_router)
 repository = conversation_service.repository
 service = conversation_service
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
@@ -158,9 +159,7 @@ async def get_messages(
                     my_feedback=MessageFeedbackResponse.model_validate(item.my_feedback)
                     if item.my_feedback is not None
                     else None,
-                    tool_call_id=None,
-                    tool_requests=[],
-                    tool_result=None,
+                    can_rate=item.can_rate,
                 )
                 for item in result.items
             ],
@@ -200,7 +199,7 @@ async def send_message(
         user_id=user_id,
         parent_message_id=payload.parent_message_id,
         content=payload.message,
-        source_contexts=tuple(payload.source_contexts),
+        source_contexts=source_contexts_from_request(payload.source_contexts),
         model_connection_id=payload.model_connection_id,
     )
     return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
@@ -223,11 +222,12 @@ async def edit_message(
         user_id=user_id,
         content=payload.message,
         source_contexts=(
-            tuple(payload.source_contexts)
+            source_contexts_from_request(payload.source_contexts)
             if payload.source_contexts is not None
             else None
         ),
     )
+    await task_execution.run_task(task_id=accepted.task_id, user_id=user_id)
     return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
 
 
@@ -247,6 +247,7 @@ async def regenerate_message(
         message_id=message_id,
         user_id=user_id,
     )
+    await task_execution.run_task(task_id=accepted.task_id, user_id=user_id)
     return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
 
 
@@ -306,57 +307,3 @@ async def update_pin(
         is_pinned=payload.is_pinned,
     )
     return ApiResponse(data=ConversationResponse.model_validate(item))
-
-
-@conversation_router.put("/{conversation_id}/messages/{message_id}/feedback")
-async def upsert_feedback(
-    conversation_id: str,
-    message_id: str,
-    payload: FeedbackRequest,
-    user_id: CurrentUserId,
-) -> ApiResponse[MessageFeedbackResponse]:
-    item = await repository.upsert_feedback(
-        conversation_id=conversation_id,
-        message_id=message_id,
-        user_id=user_id,
-        rating=payload.rating,
-        reason=payload.reason,
-        comment=payload.comment,
-    )
-    return ApiResponse(data=MessageFeedbackResponse.model_validate(item))
-
-
-@conversation_router.delete(
-    "/{conversation_id}/messages/{message_id}/feedback", status_code=204
-)
-async def delete_feedback(
-    conversation_id: str, message_id: str, user_id: CurrentUserId
-) -> Response:
-    await repository.delete_feedback(
-        conversation_id=conversation_id, message_id=message_id, user_id=user_id
-    )
-    return Response(status_code=204)
-
-
-@conversation_router.get("/{conversation_id}/permissions")
-async def get_permissions(
-    conversation_id: str, user_id: CurrentUserId
-) -> ApiResponse[dict[str, object]]:
-    return ApiResponse(
-        data=await legacy_chat_service.ChatService.get_permission_for_user(
-            conversation_id, user_id
-        )
-    )
-
-
-@conversation_router.put("/{conversation_id}/permissions")
-async def update_permissions(
-    conversation_id: str,
-    payload: ChatPermissionRequest,
-    user_id: CurrentUserId,
-) -> ApiResponse[dict[str, object]]:
-    return ApiResponse(
-        data=await legacy_chat_service.ChatService.set_permission_for_user(
-            conversation_id, user_id, **payload.model_dump()
-        )
-    )

@@ -1,10 +1,10 @@
-from application.chat.capabilities import document_sources
+from agent.capabilities import document_sources
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 from domain.source import SourceDocument, SourceBlock
-from application.chat.capabilities import CapabilityExecutionContext
-from application.chat.capabilities.document_sources import (
+from agent.capabilities import ToolExecutionContext
+from agent.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
 )
@@ -60,9 +60,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         SimpleNamespace(read_document=AsyncMock(return_value=doc)),
     )
     cap = InspectDocumentSourcesCapability()
-    context = CapabilityExecutionContext(
-        "chat", "user", "col", "call", max_result_tokens=8000
-    )
+    context = ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation", max_result_tokens=8000)
     seen = []
     offset = 0
     pages = 0
@@ -104,7 +102,7 @@ async def test_permission_failure_stops_before_loading_sources(monkeypatch):
     cap = InspectDocumentSourcesCapability()
     with pytest.raises(PermissionError):
         await cap.execute(
-            CapabilityExecutionContext("chat", "user", "col", "call"),
+            ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation"),
             InspectDocumentSourcesToolRequest(document_id="paper"),
         )
     repo.read_document.assert_not_called()
@@ -141,9 +139,7 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
     )
     capability = InspectDocumentSourcesCapability()
     result = await capability.execute(
-        CapabilityExecutionContext(
-            "chat", "user", "col", "call", max_result_tokens=2000
-        ),
+        ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation", max_result_tokens=2000),
         InspectDocumentSourcesToolRequest(document_id="paper", heading_path="Methods"),
     )
     assert result.status == "succeeded"
@@ -173,7 +169,7 @@ async def test_parent_section_reads_its_subsections_without_unrelated_sections(m
     offset = 0
     while True:
         result = await capability.execute(
-            CapabilityExecutionContext("chat", "user", "col", "call"),
+            ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation"),
             InspectDocumentSourcesToolRequest(document_id="paper", heading_path="2 Methods", offset=offset, limit=2),
         )
         seen.extend(source["source_ref"] for source in result.data["sources"])

@@ -1,6 +1,4 @@
 export type ResearchAgentSlashCommandName =
-	| 'permissions'
-	| 'settings'
 	| 'status'
 	| 'new'
 	| 'history'
@@ -19,17 +17,6 @@ export type ResearchAgentSlashCommand = {
  * message so a control action cannot become research context by accident.
  */
 export const RESEARCH_AGENT_SLASH_COMMANDS: readonly ResearchAgentSlashCommand[] = [
-	{
-		name: 'permissions',
-		aliases: ['perm'],
-		labelKey: 'researchAgent.commands.permissionsLabel',
-		descriptionKey: 'researchAgent.commands.permissionsDescription'
-	},
-	{
-		name: 'settings',
-		labelKey: 'researchAgent.commands.settingsLabel',
-		descriptionKey: 'researchAgent.commands.settingsDescription'
-	},
 	{
 		name: 'status',
 		labelKey: 'researchAgent.commands.statusLabel',

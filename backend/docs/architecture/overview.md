@@ -17,7 +17,7 @@ Read this page first, then follow the first entry point that matches the task:
 | Form candidate questions | `controllers/core/research_objective_routes.py:discover_workspace_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
 | Create or confirm a question | `application/core/objectives/objective_authoring_service.py:create_chat_assisted_candidate` or `confirm_objective` | exact candidate or approved arguments | No | Objective |
 | Analyze one confirmed question | `controllers/core/research_objective_routes.py:start_workspace_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
-| Chat or Agent request | `application/chat/session_service.py:send_message` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
+| Conversation send | `conversation/application/send_message.py` | Message path and canonical Sources | Yes, through Agent Task execution | messages, Operations, approvals |
 
 The normal reading path is:
 
@@ -92,7 +92,7 @@ approval and revision rules remain with the operations that own them.
 | How does a file become a ready paper? | [Source](../../application/source/README.md) |
 | How are questions discovered, created, and confirmed? | [Objectives](../../application/core/objectives/README.md) |
 | Why did a Source become Evidence, or fail to support a Finding? | [Analysis](../../application/core/objectives/analysis/README.md) |
-| Why did the Agent read a tool, ask permission, or stop? | [Chat](../../application/chat/README.md) |
+| Why did the Agent read a tool, ask permission, or stop? | [Conversation and Agent](../specs/conversation-agent/README.md) |
 | Where are records stored and reloaded? | [Persistence model](persistence-model.md) |
 | Which test should accompany my change? | [Backend tests](../../tests/README.md) |
 
@@ -181,7 +181,7 @@ analysis of an explicitly selected ready subset.
 - `application/source/` owns Workspace and Document preparation use cases.
 - `application/core/` owns scientific preparation, Objective discovery, and
   Objective analysis.
-- `application/chat/` owns conversation, capability trajectory, and approval;
+- `conversation/` owns message paths and answer ratings. `agent/` owns Task execution, tools, and approvals.
   it references rather than duplicates scientific records.
 - `domain/` owns business objects, evidence, invariants, and business transitions.
 - [`repositories/`](../../repositories/README.md) owns concrete PostgreSQL
@@ -207,8 +207,8 @@ but have separate owners.
 | --- | --- | --- |
 | Source and Workspace | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
 | Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `repositories/objective_repository.py` |
-| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `repositories/chat_repository.py` |
-| Feedback | User ratings on saved Conversation answers, keyed by user and message with a response digest | Conversation repositories own synchronous rating writes and reads. Historical analysis and dataset tables remain migration inputs for a later redesign |
+| Conversation and Agent | Owned message paths, Workspace scope, selected Sources, execution state and Operation decisions | ConversationRepository owns paths. TaskRepository owns checkpoints, Operations and ModelCall audit. |
+| Feedback | User ratings on saved Conversation answers, keyed by user and message with a response digest | Conversation Feedback owns synchronous rating writes and reads |
 | Goal | Authored experiment-plan content, immutable revision identity and revision-conflict rules | Repositories own record persistence; controllers validate requests and format responses |
 | Evaluation | Reference items, prediction snapshots, scores, failure judgments and expert Finding review | `evaluation_repository.py` owns persistence; controllers own review response schemas |
 | Pipeline | No scientific objects; a successful technical run is not scientific proof | `repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |

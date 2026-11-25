@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from application.chat import session_service as shared_chat_service
+from agent.application.task_execution import task_execution
 
 import asyncio
 import json
@@ -123,7 +123,6 @@ def test_app_lifespan_uses_shared_module_dependencies(
     *,
     postgres_session_factory,
 ) -> None:
-    from application.chat import session_service as chat_session_service
     from application.core.document_profiles import service as document_profile_service
     from application.core.objectives import analysis_service, objective_analysis_service
     from application.goal import brief_service
@@ -151,7 +150,6 @@ def test_app_lifespan_uses_shared_module_dependencies(
             document_markdown_service,
             document_profile_service,
             brief_service,
-            chat_session_service,
             objective_analysis_service,
             analysis_service.experiment_analysis_service,
         )
@@ -162,7 +160,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
         )
         capability_names = {
             spec.name
-            for spec in shared_chat_service.ChatService.capabilities.specs
+            for spec in task_execution.registry.specs
         }
         assert {
             "get_workspace_context",

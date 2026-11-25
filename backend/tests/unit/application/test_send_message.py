@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from conversation.application.conversation_service import AcceptedTask
-from conversation.application.send_message import SendConversationMessage
+from conversation.application.send_message import SendConversationMessage, task_execution
 
 
 pytestmark = pytest.mark.anyio
@@ -14,7 +14,9 @@ def anyio_backend():
     return "asyncio"
 
 
-async def test_send_conversation_message_delegates_to_conversation_service():
+async def test_send_conversation_message_runs_the_accepted_task(monkeypatch):
+    execute = AsyncMock()
+    monkeypatch.setattr(task_execution, "run_task", execute)
     service = AsyncMock()
     service.accept_message.return_value = AcceptedTask(
         task_id="task-1",
@@ -28,7 +30,8 @@ async def test_send_conversation_message_delegates_to_conversation_service():
         user_id="user-1",
         parent_message_id=None,
         content="Compare these Sources.",
-        source_contexts=({"source_ref": "source-1"},),
+        source_contexts=(),
+        model_connection_id=None,
     )
 
     assert result == AcceptedTask(
@@ -41,5 +44,7 @@ async def test_send_conversation_message_delegates_to_conversation_service():
         user_id="user-1",
         parent_message_id=None,
         content="Compare these Sources.",
-        source_contexts=({"source_ref": "source-1"},),
+        source_contexts=(),
+        model_connection_id=None,
     )
+    execute.assert_awaited_once_with(task_id="task-1", user_id="user-1")

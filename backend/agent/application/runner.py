@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from agent.capabilities.registry import CapabilityRegistry, ToolExecutionContext
 from agent.domain.models import AgentTask, Operation, TaskStep, digest_arguments
-from application.chat.model import ModelTurn
+from agent.application.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
 
 
@@ -62,7 +62,7 @@ class DurableRunner:
                     state,
                     operation=replace(
                         pending,
-                        status="succeeded" if result.status is ToolResultStatus.SUCCEEDED else "failed",
+                        status="failed" if result.status is ToolResultStatus.FAILED else "succeeded",
                         result=asdict(result),
                         error_code=result.error_code,
                         error_message=result.error_message,

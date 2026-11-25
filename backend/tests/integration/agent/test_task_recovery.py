@@ -5,7 +5,6 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from agent.application.runner import DurableRunner
 from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from agent.application.task_execution import TaskExecution
 from agent.domain.models import Operation
@@ -55,6 +54,7 @@ async def test_recovery_reuses_committed_operation(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="agent-v3-conversation",
@@ -64,6 +64,7 @@ async def test_recovery_reuses_committed_operation(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             MessageORM(
                 message_id="agent-v3-question",
@@ -127,21 +128,18 @@ async def test_recovery_reuses_committed_operation(
             data={"hold_time_minutes": 30},
         )
 
-    source_runner = DurableRunner(
-        registry=CapabilityRegistry(
-            (
-                ToolSpec(
-                    name="read_source",
-                    description="Read one Source.",
-                    input_model=ReadSourceArguments,
-                    handler=read_source,
-                    source="document",
-                ),
-            )
-        ),
-        checkpoint=lambda _: None,
+    registry = CapabilityRegistry(
+        (
+            ToolSpec(
+                name="read_source",
+                description="Read one Source.",
+                input_model=ReadSourceArguments,
+                handler=read_source,
+                source="document",
+            ),
+        )
     )
-    first = TaskExecution(repository, source_runner)
+    first = TaskExecution(repository, registry)
     with pytest.raises(ExecutionInterrupted):
         await first.run_task(
             task_id="agent-v3-task",
@@ -150,7 +148,7 @@ async def test_recovery_reuses_committed_operation(
         )
     assert attempts == 1
 
-    second = TaskExecution(repository, source_runner)
+    second = TaskExecution(repository, registry)
     assert (
         await second.run_task(
             task_id="agent-v3-task",

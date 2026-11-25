@@ -5,14 +5,15 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 
 from agent.application.runner import DurableRunner, RunnerState
+from agent.capabilities.registry import CapabilityRegistry
 from agent.domain.models import AgentTask, Operation, TaskStep
 from agent.repositories.task_repository import TaskRepository
 
 
 class TaskExecution:
-    def __init__(self, repository: TaskRepository, runner: DurableRunner) -> None:
+    def __init__(self, repository: TaskRepository, registry: CapabilityRegistry) -> None:
         self.repository = repository
-        self.runner = runner
+        self.registry = registry
 
     async def run_task(self, *, task_id: str, user_id: str, request: str) -> str:
         async with self.repository.execution_lock(task_id):
@@ -102,7 +103,7 @@ class TaskExecution:
                 previous_state = replace(next_state, steps=tuple(steps))
 
             runner = DurableRunner(
-                registry=self.runner.registry,
+                registry=self.registry,
                 checkpoint=save,
             )
             final = await runner.run(

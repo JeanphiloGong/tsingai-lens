@@ -109,9 +109,13 @@ The server completes these steps in one transaction:
 
 1. Verify that the source Message belongs to the authenticated user, workspace, and Conversation.
 2. Verify that required Operations on the selected path are terminal.
-3. Create the new Conversation.
-4. Copy the selected Message path and write `copied_from_message_id`.
-5. Set the new Conversation's initial current path.
+3. Create the new Conversation with `forked_from_message_id` pointing to the selected source Message.
+4. Copy the path from the root through the selected Message, including its content
+   and SourceContext. Assign each copy a new `message_id` and the new `conversation_id`.
+   Rebuild `parent_message_id` with the copied IDs and set `copied_from_message_id`
+   to the corresponding source Message.
+5. Set `current_message_id` to the last copy, `current_task_id` to `null`, and
+   `path_revision` to `0`.
 
 The Fork returns the new Conversation:
 
@@ -127,8 +131,10 @@ The Fork returns the new Conversation:
 }
 ```
 
-Creating a Fork does not create a new Task. A new Task is created only when the
-user sends the first question in the new Conversation.
+The Fork starts with only the copied Messages. Their `produced_by_task_id`,
+`tool_call_id`, and `operation_id` are `null`. Tasks, Operations, ModelCalls,
+checkpoints, and Feedback stay with the source Conversation. The first send, edit,
+or regeneration creates a Task in the new Conversation. [Feedback API](feedback-api.md)
 
 ## 4. Opening a Tree Node
 
@@ -148,5 +154,4 @@ Fork connects Conversations in the tree only through the source relationship.
 | `tree_message_not_found` | The tree node Message does not exist or is not visible |
 | `tree_target_not_saved` | The target is still an unpersisted increment |
 | `fork_source_not_ready` | The source path contains an unfinished Operation |
-| `fork_request_conflict` | The same Fork request identity points to another source |
 | `fork_conversation_conflict` | The source Conversation has an active state that cannot be copied |

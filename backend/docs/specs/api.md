@@ -267,7 +267,9 @@ list.
 - `POST /api/v1/conversations/{conversation_id}/messages`
 - `POST /api/v1/conversations/{conversation_id}/messages/{message_id}/edits`
 - `GET /api/v1/conversations/{conversation_id}/tree`
+- `POST /api/v1/conversations/{conversation_id}/forks`
 - `PUT /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
+- `DELETE /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 - `POST /api/v1/conversations/{conversation_id}/tasks/{task_id}/operations/{operation_id}/decision`
 
 Model-call records are internal. Public Chat APIs no longer expose their list
@@ -277,6 +279,9 @@ or detail.
 the selected message path, and [answer feedback](conversation-agent/feedback-api.md)
 under `/api/v1/conversations`. Its path-conflict and resource errors use HTTP `409`
 and `404` with `meta.error_code`.
+
+The target contract defines how explicit Fork assigns new Message IDs and
+preserves source execution ownership. [Tree API](conversation-agent/tree-api.md#3-explicit-fork)
 
 Chat is the independent conversation and Agent trajectory owner. A Chat session
 belongs to one authenticated user and one workspace. Its ordered messages

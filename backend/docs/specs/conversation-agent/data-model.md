@@ -14,8 +14,7 @@ observation window are complete.
 2. A Task represents one complete and resumable Agent execution.
 3. A user Message can trigger a Task, but it is normally not produced by that Task.
 4. Assistant and tool Messages belong to a Task through `produced_by_task_id`.
-5. Model tool requests belong to an assistant Message, with execution state stored in
-   `agent_operations`. There is no separate `chat_tool_calls` table.
+5. `agent_operations` stores tool requests, execution state, and results.
 6. `task_id` is the unique identity of a complete execution. `response_id` is not a
    second execution identity.
 7. `operation_id` identifies one logical Operation. Physical retries reuse the same
@@ -91,8 +90,8 @@ after creation.
 Ordinary user Messages have no `produced_by_task_id`. A Task reading historical
 context does not create a new ownership relationship.
 
-An assistant Message stores structured tool requests from the model. A tool request
-is part of that Message and is not a separate entity in `chat_tool_calls`.
+`agent_operations.assistant_message_id` identifies the assistant Message that
+requested the tool. The Operation stores the tool name, arguments, and result.
 
 A model-produced tool Message uses `tool_call_id` to connect the assistant request
 and Operation. An internal Operation without a model tool call uses `operation_id`
@@ -122,7 +121,10 @@ Constraints:
 - `message_id` must reference an assistant Message in the same Conversation.
 - `(user_id, message_id)` is unique, so each user has one current rating per answer.
 - `user_id` comes from the authentication context and is not submitted by the client.
-- The messages endpoint projects the current user's row as `items[].my_feedback`, or `null` when absent.
+- A Message with assistant content is eligible when its completed producing Task
+  in the same Conversation points to it through `final_message_id`. The messages
+  endpoint derives `items[].can_rate` from this relationship and returns
+  `items[].my_feedback` only for eligible Messages.
 - Deleting feedback deletes only the feedback row, not the assistant Message.
 
 ## 6. `agent_tasks`
@@ -245,10 +247,10 @@ T1
 
 M2 assistant: request read_file
   produced_by_task_id = T1
-  tool_call_id = TC1
 
 OP1
   task_id = T1
+  assistant_message_id = M2
   tool_call_id = TC1
   operation_id = OP1
   status = approved
@@ -280,11 +282,13 @@ new Message triggers a new Task.
 
 ### Explicit Fork
 
-Fork creates a new Conversation and copies the selected Message path. Copied
-Messages receive new IDs and retain the source in `copied_from_message_id`. Copy
-ended Task, Operation, and ModelCall records as read-only history only when the
-selected path needs that execution history. The first new question in the new
-Conversation creates its first new Task.
+Fork creates a new Conversation and copies the selected Message path in one
+transaction. The copied Messages receive new IDs, point to copied parents, and
+retain their source through `copied_from_message_id`. Their `produced_by_task_id`,
+`tool_call_id`, and `operation_id` are `null`. The new Conversation starts with the
+last copied Message selected and a `null` `current_task_id`. Tasks, Operations,
+ModelCalls, checkpoints, and Feedback retain their original ownership. A send,
+edit, or regeneration creates the first Task in the new Conversation. [Tree API](tree-api.md#3-explicit-fork)
 
 ## 12. Required Invariants
 
@@ -334,3 +338,8 @@ The conceptual mapping is:
 Migration must preserve Message identities, Source context, Feedback, tool results,
 and audit records. Legacy linear branch data is backfilled as an explicit Fork only
 when the stored data proves that explicit Fork intent.
+
+Migration restores a historical final answer's producing Task when the old
+records establish the relationship. Unresolved historical answers and ratings
+are recorded in the migration report. Fork copies intentionally have no producing
+Task and need no ownership backfill.

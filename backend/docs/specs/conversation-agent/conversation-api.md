@@ -253,10 +253,10 @@ The only documented error is `conversation_not_found`.
 ### `GET /api/v1/conversations/{conversation_id}/messages`
 
 Return the Message path from the Conversation's saved current selection. Each
-Message includes the authenticated user's feedback, and the response includes
-active Task summaries. Each active Task contains `task_id`, `status`, and
-`checkpoint_revision` for `accepted`, `running`, `approval_required`, and
-`interrupted` Tasks. `source_contexts` preserves saved source-location metadata.
+Message includes `can_rate` and the authenticated user's `my_feedback`, and the
+response includes summaries of `accepted`, `running`, `approval_required`, and
+`interrupted` Tasks, each with `task_id`, `status`, and `checkpoint_revision`.
+`source_contexts` preserves saved source-location metadata.
 
 ```json
 {
@@ -264,18 +264,20 @@ active Task summaries. Each active Task contains `task_id`, `status`, and
   "message": "success",
   "data": {
     "conversation": {"conversation_id":"conv_01","path_revision":3},
-    "tip_message_id": "msg_06",
+    "tip_message_id": "msg_02",
     "items": [
       {
         "message_id":"msg_01",
         "role":"user",
         "content":"Compare these two papers.",
+        "can_rate":false,
         "my_feedback":null
       },
       {
         "message_id":"msg_02",
         "role":"assistant",
         "content":"Both papers examine 316L.",
+        "can_rate":true,
         "my_feedback":{
           "feedback_id":"feedback_01",
           "rating":"helpful",
@@ -294,10 +296,11 @@ active Task summaries. Each active Task contains `task_id`, `status`, and
 }
 ```
 
-`items` are ordered from the root Message to the current tip. Historical context
-Messages do not acquire Task ownership when a new Task reads them. `my_feedback` is
-the authenticated user's feedback object, or `null` when no feedback exists. User
-and tool Messages normally have `null` feedback.
+`items` are ordered from the root Message to the current tip. Reading a Message
+as Task context preserves its existing ownership. The client uses `can_rate` to
+show the rating controls. An eligible Message has `my_feedback: null` until the
+authenticated user rates it. Ineligible Messages, including Fork copies, return
+`can_rate: false` and `my_feedback: null`. [Feedback API](feedback-api.md)
 
 ## 3. Save the Current Path
 

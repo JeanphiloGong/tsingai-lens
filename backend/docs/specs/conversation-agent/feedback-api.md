@@ -1,17 +1,22 @@
 # Feedback API
 
-This document defines user feedback on saved assistant Messages. Feedback belongs
-to a specific Message, not to a Task or the current path.
+Each user rates a saved answer by its Message ID.
 
-The `items[].my_feedback` projection in the message path is defined by the
-[Conversation API](conversation-api.md#2-read-the-current-message-path). It is
-`null` when no feedback exists, so the client does not need another feedback query.
+The message path returns eligibility in `items[].can_rate` and the current
+user's rating in `items[].my_feedback`. [Conversation API](conversation-api.md#2-read-the-current-message-path)
 
 ## 1. Create or Update Feedback
 
 ### `PUT /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 
-The target must be a visible assistant Message with content and no tool requests.
+The target must be a visible assistant Message with content. Its producing Task
+must be completed, belong to the same Conversation, and reference that Message
+as its `final_message_id`. Migration restores historical Task ownership when the
+old records establish it and reports unresolved ownership.
+
+Fork copies return `can_rate: false` and `my_feedback: null`. The original rating
+stays with the source answer. A completed Task in the new Conversation can produce
+its own eligible answer. [Tree API](tree-api.md#3-explicit-fork)
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -19,18 +24,18 @@ The target must be a visible assistant Message with content and no tool requests
 | `reason` | string / null | no | `incorrect`, `incomplete`, `unclear`, or `other`, only for `not_helpful` |
 | `comment` | string / null | no | Additional user comment, trimmed to at most 2000 characters |
 
-Success returns the saved feedback. Repeating a submission with the same content
-preserves its identity and timestamps. The server stores the `response_digest` at
-submission time. If the Message content later changes, the feedback remains bound
-to the original answer digest and does not move to a new version.
+HTTP `200` returns the saved feedback in `data`. Repeating a submission with the
+same content preserves its identity and timestamps. The server stores the
+`response_digest` at submission time. If the Message content later changes, the
+feedback stays bound to the original answer digest.
 
 ## 2. Delete Feedback
 
 ### `DELETE /api/v1/conversations/{conversation_id}/messages/{message_id}/feedback`
 
-Delete the authenticated user's feedback for the assistant Message. If the target
-is still visible, repeating the delete returns HTTP `204`. The answer Message
-remains stored.
+Withdraw the authenticated user's rating from an eligible answer. Repeating the
+delete for the same eligible answer returns HTTP `204`. The message path then
+returns `my_feedback: null`.
 
 The feedback relationship follows these rules:
 
@@ -42,7 +47,7 @@ The feedback relationship follows these rules:
 
 | `error_code` | Description |
 | --- | --- |
-| `feedback_message_not_found` | The Message does not exist or is not visible |
-| `feedback_message_not_assistant` | The target is not an assistant Message |
+| `feedback_message_not_found` | HTTP `404` when the Message is missing or invisible to the caller |
+| `feedback_message_not_assistant` | HTTP `422` when the Message is ineligible, including intermediate tool requests and Fork copies |
 | `feedback_rating_invalid` | The rating is outside the allowed values |
 | `feedback_reason_invalid` | The reason is outside the allowed values |

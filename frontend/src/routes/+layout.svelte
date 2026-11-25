@@ -157,7 +157,6 @@
 
 	$: workspaceRouteMatch = /^\/workspaces\/([^/]+)/.exec($page.url.pathname);
 	$: isWorkspaceRoute = Boolean(workspaceRouteMatch);
-	$: isFeedbackRoute = /^\/workspaces\/[^/]+\/feedback(?:\/|$)/.test($page.url.pathname);
 	$: headerWorkspaceId = workspaceRouteMatch?.[1] ? decodeRoutePart(workspaceRouteMatch[1]) : '';
 	$: headerWorkspace = $workspaces.find((item) => item.workspace_id === headerWorkspaceId);
 	$: headerWorkspaceName = headerWorkspace?.name || headerWorkspaceId;
@@ -165,7 +164,6 @@
 
 <div
 	class="app-shell"
-	class:app-shell--feedback={isFeedbackRoute}
 	class:app-shell--login={isAuthRoute}
 >
 	<header class="site-header" class:site-header--workspace={isWorkspaceRoute}>

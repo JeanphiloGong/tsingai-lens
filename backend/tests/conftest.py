@@ -80,9 +80,6 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "application.core.objectives.analysis_service.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "repositories.feedback_dataset_repository.AsyncSessionLocal", factory
-        )
-        monkeypatch.setattr(
             "repositories.objective_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr("repositories.chat_repository.AsyncSessionLocal", factory)
@@ -107,22 +104,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "repositories.model_connection_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "repositories.analysis_job_repository.AsyncSessionLocal", factory
-        )
-        monkeypatch.setattr(
-            "repositories.feedback_dataset_export_repository.AsyncSessionLocal", factory
-        )
-        monkeypatch.setattr(
-            "repositories.feedback_dataset_sample_repository.AsyncSessionLocal", factory
-        )
-        monkeypatch.setattr(
-            "repositories.feedback_case_repository.AsyncSessionLocal", factory
-        )
-        monkeypatch.setattr(
             "repositories.pipeline_run_repository.AsyncSessionLocal", factory
-        )
-        monkeypatch.setattr(
-            "repositories.dataset_snapshot_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
             "repositories.finding_review_repository.AsyncSessionLocal", factory
@@ -223,10 +205,6 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.evaluation.finding_feedback_service as _test_finding_feedback_service
     import application.evaluation.finding_dataset_service as _test_finding_dataset_service
     import application.evaluation.finding_snapshot_service as _test_finding_snapshot_service
-    import application.feedback.dataset_export_service as _test_dataset_export_service
-    import application.feedback.dataset_service as _test_dataset_service
-    import application.feedback.dataset_snapshot_service as _test_dataset_snapshot_service
-    import application.feedback.feedback_case_service as _test_feedback_case_service
     import application.goal.brief_service as _test_goal_service
     import application.goal.experiment_plan_service as _test_experiment_plan_service
     import application.pipeline.pipeline_run_service as _test_pipeline_run_service
@@ -236,7 +214,6 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.source.reference_extraction_service as _test_source_reference_extraction_service
     import application.source.reference_workflow_service as _test_reference_workflow_service
     import application.source.source_import_service as _test_source_import_service
-    from controllers import feedback_case_routes
     from controllers.chat import chat_session_routes
     from controllers.core import (
         document_routes,
@@ -244,7 +221,6 @@ def _isolate_application_module_dependencies(monkeypatch):
         paper_experiment_routes,
         research_objective_routes,
     )
-    from controllers.feedback import dataset_snapshot_routes, feedback_dataset_routes
     from controllers.goal import experiment_plan_routes, goal_routes
     from controllers.source import (
         workspace_routes,
@@ -267,39 +243,7 @@ def _isolate_application_module_dependencies(monkeypatch):
 
     from application.chat.capabilities import published_findings, research_planning
 
-    from application.feedback import (
-        analysis_handler,
-        correction_signal_handler,
-        tool_failure_handler,
-        conversation_context,
-    )
-
-    from application.feedback import (
-        analysis_worker,
-        correction_signal_worker,
-        tool_failure_worker,
-        sample_build_worker,
-        worker_lease,
-    )
-
     dependencies = (
-        (analysis_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
-        (correction_signal_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
-        (tool_failure_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
-        (
-            sample_build_worker,
-            [
-                "AnalysisJobRepo",
-                "FeedbackCaseRepo",
-                "FeedbackDatasetRepo",
-                "FeedbackDatasetSampleRepo",
-            ],
-        ),
-        (worker_lease, ["AnalysisJobRepo"]),
-        (analysis_handler, ["ChatRepo"]),
-        (conversation_context, ["ChatRepo"]),
-        (correction_signal_handler, ["ChatRepo"]),
-        (tool_failure_handler, ["ChatRepo"]),
         (
             published_findings,
             [
@@ -351,7 +295,6 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_chat_session_service,
             [
-                "AnalysisJobRepo",
                 "ChatRepo",
                 "WorkspaceRepo",
                 "SourceArtifactRepo",
@@ -460,36 +403,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_finding_snapshot_service,
             ["ObjectiveRepo", "FindingReviewRepo", "experiment_projection"],
         ),
-        (
-            _test_dataset_export_service,
-            [
-                "FeedbackDatasetExportRepo",
-                "FeedbackDatasetSampleRepo",
-                "dataset_service",
-            ],
-        ),
-        (
-            _test_dataset_service,
-            [
-                "FeedbackCaseRepo",
-                "FeedbackDatasetRepo",
-                "FeedbackDatasetSampleRepo",
-                "workspace_service",
-            ],
-        ),
-        (
-            _test_dataset_snapshot_service,
-            [
-                "ChatRepo",
-                "DatasetSnapshotRepo",
-                "FeedbackCaseRepo",
-                "workspace_service",
-            ],
-        ),
-        (
-            _test_feedback_case_service,
-            ["ChatRepo", "WorkspaceRepo", "FeedbackCaseRepo", "workspace_service"],
-        ),
         (_test_goal_service, ["workspace_service"]),
         (
             _test_experiment_plan_service,
@@ -543,9 +456,6 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "list_objectives",
             ],
         ),
-        (dataset_snapshot_routes, ["dataset_snapshot_service"]),
-        (feedback_dataset_routes, ["dataset_service", "dataset_export_service"]),
-        (feedback_case_routes, ["feedback_case_service"]),
         (experiment_plan_routes, ["experiment_plan_service"]),
         (goal_routes, ["brief_service"]),
         (

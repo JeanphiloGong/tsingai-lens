@@ -2,9 +2,9 @@ import { requestJson } from '../../routes/_shared/api';
 import type { ChatToolRequest, ChatToolResult } from '$lib/agent/api';
 import type { ChatSourceContext } from '$lib/document/source-context';
 
-export type ChatMessage = {
+export type ConversationMessage = {
 	message_id: string;
-	session_id: string;
+	conversation_id: string;
 	role: 'user' | 'assistant' | 'tool';
 	content: string;
 	created_at: string;
@@ -14,8 +14,8 @@ export type ChatMessage = {
 	source_contexts: ChatSourceContext[];
 };
 
-export type ChatSession = {
-	session_id: string;
+export type Conversation = {
+	conversation_id: string;
 	user_id: string;
 	workspace_id: string;
 	created_at: string;
@@ -23,21 +23,26 @@ export type ChatSession = {
 	title?: string | null;
 	is_pinned: boolean;
 	status: 'idle' | 'running' | 'approval';
-	root_session_id?: string | null;
-	parent_session_id?: string | null;
-	fork_message_id?: string | null;
+	current_message_id?: string | null;
+	current_task_id?: string | null;
+	path_revision?: number;
+	root_conversation_id?: string | null;
+	parent_conversation_id?: string | null;
+	forked_from_message_id?: string | null;
 	fork_position?: number | null;
 	fork_content?: string | null;
 };
 
 export type ChatBranchOptions = {
 	message_id: string;
-	session_ids: string[];
-	active_session_id: string;
+	conversation_ids: string[];
+	active_conversation_id: string;
 };
 
-export type ChatTreeNode = {
-	message: ChatMessage;
+export type ConversationTreeNode = {
+	kind?: 'conversation' | 'message' | 'task';
+	task_id?: string | null;
+	message: ConversationMessage;
 	parent_message_id: string | null;
 	answer: string;
 	status:
@@ -52,10 +57,10 @@ export type ChatTreeNode = {
 	can_branch: boolean;
 };
 
-export type ChatTree = {
-	root_session_id: string;
+export type ConversationTreeData = {
+	root_conversation_id: string;
 	active_path: string[];
-	nodes: ChatTreeNode[];
+	nodes: ConversationTreeNode[];
 };
 
 export type ChatFeedbackReason = 'incorrect' | 'incomplete' | 'unclear' | 'other';
@@ -68,7 +73,7 @@ export type ChatFeedbackInput = {
 
 export type ChatMessageFeedback = {
 	feedback_id: string;
-	session_id: string;
+	conversation_id: string;
 	message_id: string;
 	user_id: string;
 	rating: 'helpful' | 'not_helpful';
@@ -89,15 +94,15 @@ export function conversationPath(sessionId = '') {
 	return `/conversations${sessionId ? `/${encodeURIComponent(sessionId)}` : ''}`;
 }
 
-export async function createChatSession(workspaceId: string, signal?: AbortSignal) {
-	return toChatSession(await requestJson(conversationPath(), {
+export async function createConversation(workspaceId: string, signal?: AbortSignal) {
+	return toConversation(await requestJson(conversationPath(), {
 		signal,
 		method: 'POST',
 		body: JSON.stringify({ workspace_id: workspaceId })
 	}));
 }
 
-export async function listChatSessions(
+export async function listConversations(
 	workspaceId: string,
 	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
 ) {
@@ -108,67 +113,100 @@ export async function listChatSessions(
 		signal: options.signal,
 		method: 'GET'
 	}) as { items: unknown[]; limit: number; offset: number };
-	return { ...page, items: page.items.map(toChatSession) };
+	return { ...page, items: page.items.map(toConversation) };
 }
 
-export async function fetchChatSession(sessionId: string, signal?: AbortSignal) {
-	return toChatSession(await requestJson(conversationPath(sessionId), {
+export async function fetchConversation(sessionId: string, signal?: AbortSignal) {
+	return toConversation(await requestJson(conversationPath(sessionId), {
 		signal,
 		method: 'GET'
 	}));
 }
 
-export async function deleteChatSession(sessionId: string, signal?: AbortSignal) {
+export async function deleteConversation(sessionId: string, signal?: AbortSignal) {
 	await requestJson(conversationPath(sessionId), { signal, method: 'DELETE' });
 }
 
-export async function setChatSessionPin(
+export async function setConversationPin(
 	sessionId: string,
 	isPinned: boolean,
 	signal?: AbortSignal
 ) {
-	return toChatSession(await requestJson(`${conversationPath(sessionId)}/pin`, {
+	return toConversation(await requestJson(`${conversationPath(sessionId)}/pin`, {
 		signal,
 		method: 'PUT',
 		body: JSON.stringify({ is_pinned: isPinned })
 	}));
 }
 
-export async function setChatSessionTitle(sessionId: string, title: string, signal?: AbortSignal) {
-	return toChatSession(await requestJson(`${conversationPath(sessionId)}/title`, {
+export async function setConversationTitle(sessionId: string, title: string, signal?: AbortSignal) {
+	return toConversation(await requestJson(`${conversationPath(sessionId)}/title`, {
 		signal,
 		method: 'PUT',
 		body: JSON.stringify({ title })
 	}));
 }
 
+export type AcceptedTask = {
+	task_id: string;
+	trigger_message_id: string;
+	status: 'accepted';
+};
+
+export async function sendConversationMessage(
+	conversationId: string,
+	message: string,
+	parentMessageId: string | null,
+	sourceContexts: ChatSourceContext[],
+	modelConnectionId: string,
+	signal?: AbortSignal
+) {
+	return (await requestJson(`${conversationPath(conversationId)}/messages`, {
+		signal, method: 'POST',
+		body: JSON.stringify({
+			request_id: crypto.randomUUID(),
+			parent_message_id: parentMessageId,
+			message,
+			source_contexts: sourceContexts,
+			model_connection_id: modelConnectionId
+		})
+	})) as AcceptedTask;
+}
+
 export async function branchChatMessage(
-	sessionId: string,
+	conversationId: string,
 	messageId: string,
 	requestId: string,
-	message?: string,
+	message: string | undefined,
 	signal?: AbortSignal,
 	mode: 'revise' | 'continue' = 'revise'
 ) {
-	const path =
-		mode === 'continue'
-			? `${conversationPath(sessionId)}/messages/${encodeURIComponent(messageId)}/regenerations`
-			: `${conversationPath(sessionId)}/messages/${encodeURIComponent(messageId)}/edits`;
-	const value = await requestJson(path, {
-		signal,
-		method: 'POST',
-		body: JSON.stringify({
-			request_id: requestId,
-			...(message === undefined ? {} : { message })
-		})
-	});
-	if (value && typeof value === 'object' && 'task_id' in value) {
-		return fetchChatSession(sessionId, signal);
-	}
-	return toChatSession(value);
+	const action = mode === 'continue' ? 'regenerations' : 'edits';
+	return (await requestJson(
+		`${conversationPath(conversationId)}/messages/${encodeURIComponent(messageId)}/${action}`,
+		{
+			signal, method: 'POST',
+			body: JSON.stringify({ request_id: requestId, ...(mode === 'revise' ? { message } : {}) })
+		}
+	)) as AcceptedTask;
 }
 
-export async function fetchChatTree(sessionId: string, signal?: AbortSignal): Promise<ChatTree> {
+export async function forkConversation(conversationId: string, messageId: string, signal?: AbortSignal) {
+	return toConversation(await requestJson(`${conversationPath(conversationId)}/forks`, {
+		signal, method: 'POST', body: JSON.stringify({ message_id: messageId })
+	}));
+}
+
+export async function selectConversationPath(
+	conversationId: string, revision: number, target: { task_id: string } | { tip_message_id: string },
+	signal?: AbortSignal
+) {
+	return toConversation(await requestJson(`${conversationPath(conversationId)}/active-path`, {
+		signal, method: 'PUT', body: JSON.stringify({ expected_path_revision: revision, ...target })
+	}));
+}
+
+export async function fetchConversationTree(sessionId: string, signal?: AbortSignal): Promise<ConversationTreeData> {
 	const value = await requestJson(`${conversationPath(sessionId)}/tree`, {
 		signal,
 		method: 'GET'
@@ -179,7 +217,7 @@ export async function fetchChatTree(sessionId: string, signal?: AbortSignal): Pr
 		nodes: Array<Record<string, unknown>>;
 	};
 	return {
-		root_session_id: tree.root_conversation_id,
+		root_conversation_id: tree.root_conversation_id,
 		active_path: tree.active_path,
 		nodes: tree.nodes.map((node) => {
 			const messageId =
@@ -188,9 +226,11 @@ export async function fetchChatTree(sessionId: string, signal?: AbortSignal): Pr
 					: String(node.node_id);
 			const role = node.kind === 'task' ? 'assistant' : 'user';
 			return {
+				kind: node.kind as ConversationTreeNode['kind'],
+				task_id: node.kind === 'task' ? String(node.task_id) : null,
 				message: {
 					message_id: messageId,
-					session_id: String(node.conversation_id),
+					conversation_id: String(node.conversation_id),
 					role,
 					content: String(node.preview ?? ''),
 					created_at: new Date(0).toISOString(),
@@ -224,15 +264,14 @@ export async function setChatMessageFeedback(
 			? { signal, method: 'DELETE' }
 			: { signal, method: 'PUT', body: JSON.stringify(input) }
 	);
-	if (Object.keys(data as object).length === 0) return null;
-	return { ...(data as ChatMessageFeedback), session_id: sessionId };
+	if (input.rating === null) return null;
+	return { ...(data as ChatMessageFeedback), conversation_id: sessionId };
 }
 
-function toChatSession(value: unknown): ChatSession {
+function toConversation(value: unknown): Conversation {
 	const item = value as Record<string, unknown>;
-	if (typeof item.conversation_id !== 'string') return value as ChatSession;
 	return {
-		session_id: item.conversation_id,
+		conversation_id: String(item.conversation_id),
 		user_id: '',
 		workspace_id: String(item.workspace_id ?? ''),
 		created_at: String(item.created_at ?? ''),
@@ -243,9 +282,12 @@ function toChatSession(value: unknown): ChatSession {
 			item.status === 'running' || item.status === 'approval'
 				? item.status
 				: 'idle',
-		root_session_id: null,
-		parent_session_id: null,
-		fork_message_id:
+		current_message_id: item.current_message_id as string | null,
+		current_task_id: item.current_task_id as string | null,
+		path_revision: item.path_revision as number,
+		root_conversation_id: null,
+		parent_conversation_id: null,
+		forked_from_message_id:
 			typeof item.forked_from_message_id === 'string'
 				? item.forked_from_message_id
 				: null

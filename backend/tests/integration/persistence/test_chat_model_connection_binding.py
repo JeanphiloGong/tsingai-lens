@@ -74,14 +74,11 @@ async def test_sync_sse_audit_and_reconnect_read_the_persisted_binding(branch_ap
     fresh = ChatRepository()
     for session_id in sessions:
         snapshot = await fresh.read_response_snapshot(session_id)
-        calls = await fresh.read_model_calls(session_id)
         assert snapshot.status == "completed"
         assert snapshot.model_connection_id == "lab-a"
-        assert calls and all(call.model_connection_id == "lab-a" for call in calls)
         response = await fixture.client.get(f"/api/v1/chat-sessions/{session_id}/events", params={"response_id": snapshot.response_id})
         assert response.status_code == 200
-        assert len(await fresh.read_model_calls(session_id)) == len(calls)
-        assert token not in str(snapshot) + str(calls) + response.text
+        assert token not in str(snapshot) + response.text
     assert len(requests) == 2 and all(client.is_closed() for client in clients)
     async with factory.begin() as database:
         await database.execute(update(ModelConnectionORM).values(enabled=False))

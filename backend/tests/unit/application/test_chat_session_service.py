@@ -24,7 +24,6 @@ from application.chat import session_service as chat_session_service
 from application.chat.capabilities.document_sources import ReadSourceCapability
 from application.chat.session_service import (
     ChatApprovalPendingError,
-    ChatFeedbackAnalysisEnqueueError,
     ChatSessionNotFoundError,
     ChatSourceContextError,
     resolve_canonical_objective_source,
@@ -190,56 +189,6 @@ async def test_chat_session_access_uses_workspace_owner_probe(
     await service.list_sessions_for_user(workspace_id="col-1", user_id="user-1")
 
     assert chat_session_service.workspace_service.full_reads == 0
-
-
-class _FailingAnalysisJobs:
-    async def enqueue_feedback_analysis(self, **kwargs):
-        raise RuntimeError("database unavailable")
-
-
-async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(
-    *, postgres_session_factory
-) -> None:
-    repository = ChatRepository()
-    chat_session_service.workspace_service = _WorkspaceService()
-    chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.ChatRepo = repository
-    runner = ResearchAgentRunner(
-        model=_Model(ModelTurn(content="answer")), capabilities=CapabilityRegistry(())
-    )
-    chat_session_service.AnalysisJobRepo = _FailingAnalysisJobs()
-    service = make_scripted_chat_service(runner)
-    session = await service.create_session(workspace_id="col-1", user_id="user-1")
-    await repository.save_trajectory(
-        chat_session=session,
-        messages=(
-            ChatMessage.user(
-                message_id="question-1",
-                session_id=session.session_id,
-                content="question",
-                created_at="2026-09-24T00:00:00+00:00",
-            ),
-            ChatMessage.assistant(
-                message_id="answer-1",
-                session_id=session.session_id,
-                content="answer",
-                created_at="2026-09-24T00:00:01+00:00",
-            ),
-        ),
-        tool_calls=(),
-        tool_results=(),
-    )
-
-    with pytest.raises(ChatFeedbackAnalysisEnqueueError):
-        await service.set_message_feedback_for_user(
-            session.session_id,
-            "answer-1",
-            "user-1",
-            rating="not_helpful",
-            reason="incorrect",
-        )
-
-    assert len(await repository.read_feedback(session.session_id, "user-1")) == 1
 
 
 async def test_chat_session_service_persists_selected_source_with_user_message(

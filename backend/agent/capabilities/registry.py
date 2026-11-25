@@ -19,6 +19,7 @@ class ToolExecutionContext:
     task_id: str
     operation_id: str
     tool_call_id: str | None = None
+    max_result_tokens: int = 12_000
 
 
 ToolHandler = Callable[
@@ -38,6 +39,7 @@ class ToolSpec:
     source: str
     parallel_safe: bool = False
     initially_available: bool = False
+    requires_approval: bool = False
 
     def model_schema(self) -> dict[str, Any]:
         return {

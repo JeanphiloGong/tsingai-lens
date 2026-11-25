@@ -47,12 +47,6 @@ from domain.chat import (
 )
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 from domain.chat.permissions import PermissionChangeError, permits_automatic
-from domain.feedback.correction_signal import (
-    CorrectionSignal,
-    correction_signal_id,
-    is_correction_challenge,
-)
-from domain.feedback.tool_failure import tool_result_digest
 from exceptions import (
     ProjectException,
     RequestInvalidException,
@@ -61,10 +55,6 @@ from exceptions import (
     ServiceUnavailableException,
 )
 from infra.source.artifact_bundle import source_table_payload
-from repositories.analysis_job_repository import (
-    correction_signal_idempotency_key,
-    tool_failure_idempotency_key,
-)
 from repositories.chat_repository import (
     ChatModelCall,
     ChatRecordNotFound,
@@ -150,8 +140,9 @@ def _now_iso() -> str:
 class RepositoryModelCallObserver:
     """Persist provider-call facts before and after the SDK submission."""
 
-    def __init__(self, *, model_connection_id: str | None = None) -> None:
+    def __init__(self, *, model_connection_id: str | None = None, task_id: str | None = None) -> None:
         self.model_connection_id = model_connection_id
+        self.task_id = task_id
         self._sessions: dict[str, str] = {}
 
     async def start(
@@ -184,7 +175,8 @@ class RepositoryModelCallObserver:
                 request=normalized_request,
                 request_digest=digest,
                 started_at=_now_iso(),
-            )
+            ),
+            task_id=self.task_id,
         )
         self._sessions[call_id] = session_id
         return call_id
@@ -224,20 +216,6 @@ class ChatSessionNotFoundError(ResourceNotFoundException):
         )
 
 
-class ChatFeedbackAnalysisEnqueueError(ServiceUnavailableException):
-    """Feedback is durable, but its asynchronous analysis could not be queued."""
-
-    def __init__(self, feedback_id: str) -> None:
-        self.feedback_id = feedback_id
-        super().__init__(
-            "feedback was saved; analysis can be retried",
-            data={
-                "code": "feedback_analysis_enqueue_failed",
-                "feedback_id": feedback_id,
-            },
-        )
-
-
 class ChatSourceContextError(RequestInvalidException):
     def __init__(self, message: str) -> None:
         super().__init__(message, data={"code": "chat_source_context_invalid"})
@@ -263,7 +241,6 @@ class ChatApprovalPendingError(ResourceConflictException):
 
 
 from application.source import workspace_service as workspace_service
-from repositories.analysis_job_repository import AnalysisJobRepo
 from repositories.chat_repository import ChatRepo
 from repositories.workspace_repository import WorkspaceRepo
 from repositories.source_artifact_repository import SourceArtifactRepo
@@ -902,27 +879,9 @@ class ChatSessionService:
                     "withdrawn feedback cannot have a reason or comment",
                     data={"code": "chat_feedback_invalid"},
                 )
-            current_feedback = next(
-                (
-                    item
-                    for item in await ChatRepo.read_feedback(session_id, user_id)
-                    if item.message_id == message_id
-                ),
-                None,
-            )
             await ChatRepo.delete_feedback(
                 session_id=session_id, message_id=message_id, user_id=user_id
             )
-            if current_feedback is not None and AnalysisJobRepo is not None:
-                try:
-                    await AnalysisJobRepo.cancel_feedback_analysis_jobs(
-                        feedback_id=current_feedback.feedback_id,
-                        finished_at=_now_iso(),
-                    )
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "feedback analysis cancellation failed after withdrawal"
-                    )
             return None
         try:
             feedback = ChatMessageFeedback.for_answer(
@@ -938,23 +897,7 @@ class ChatSessionService:
             raise RequestInvalidException(
                 str(exc), data={"code": "chat_feedback_invalid"}
             ) from exc
-        saved = await ChatRepo.save_feedback(feedback)
-        if AnalysisJobRepo is not None:
-            idempotency_key = saved.analysis_version_key
-            try:
-                await AnalysisJobRepo.enqueue_feedback_analysis(
-                    feedback_id=saved.feedback_id,
-                    idempotency_key=idempotency_key,
-                    now=_now_iso(),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.exception(
-                    "feedback analysis enqueue failed feedback_id=%s", saved.feedback_id
-                )
-                # Keep the feedback visible while making the lost asynchronous
-                # hand-off explicit to the caller.
-                raise ChatFeedbackAnalysisEnqueueError(saved.feedback_id) from exc
-        return saved
+        return await ChatRepo.save_feedback(feedback)
 
     async def send_message(
         self,
@@ -991,23 +934,6 @@ class ChatSessionService:
                     model_connection_id=model_connection_id,
                     permission_mode=effective_permission_mode,
                 )
-                if (
-                    await self._enqueue_correction_signal_candidate(
-                        session,
-                        previous_messages=previous_messages,
-                        result=result,
-                    )
-                    is False
-                ):
-                    result = replace(
-                        result,
-                        warnings=(*result.warnings, "correction_signal_enqueue_failed"),
-                    )
-                if await self._enqueue_tool_failure_candidates(session, result=result) is False:
-                    result = replace(
-                        result,
-                        warnings=(*result.warnings, "tool_failure_enqueue_failed"),
-                    )
             return {
                 "status": result.status.value,
                 "completion_reason": (
@@ -1091,29 +1017,6 @@ class ChatSessionService:
                                 emit=emit,
                                 permission_mode=effective_permission_mode,
                             )
-                        if (
-                            await self._enqueue_correction_signal_candidate(
-                                session,
-                                previous_messages=current_messages,
-                                result=result,
-                            )
-                            is False
-                        ):
-                            result = replace(
-                                result,
-                                warnings=(
-                                    *result.warnings,
-                                    "correction_signal_enqueue_failed",
-                                ),
-                            )
-                        if (
-                            await self._enqueue_tool_failure_candidates(session, result=result)
-                            is False
-                        ):
-                            result = replace(
-                                result,
-                                warnings=(*result.warnings, "tool_failure_enqueue_failed"),
-                            )
                         emit(
                             {
                                 "type": "turn",
@@ -1173,174 +1076,6 @@ class ChatSessionService:
             raise ResourceNotFoundException(
                 str(exc), data={"code": "chat_record_not_found", "session_id": session_id}
             ) from exc
-
-    async def _enqueue_correction_signal_candidate(
-        self,
-        session: ChatSession,
-        *,
-        previous_messages: tuple[ChatMessage, ...],
-        result: AgentRunResult,
-    ) -> bool | None:
-        """Queue only an adjacent, explicit challenge after a final answer.
-
-        ``None`` means the turn was ordinary Chat and produced no candidate;
-        ``True`` means a candidate was durably accepted or deduplicated;
-        ``False`` means the trigger was valid but the hand-off failed.  The
-        latter is surfaced as a warning while preserving the completed Chat
-        response, because this signal is auxiliary to the user conversation.
-        """
-
-        repository = AnalysisJobRepo
-        if repository is None or not previous_messages:
-            return None
-        anchor = previous_messages[-1]
-        if (
-            anchor.session_id != session.session_id
-            or anchor.role.value != "assistant"
-            or not anchor.content.strip()
-            or anchor.tool_calls
-        ):
-            return None
-        messages = result.messages
-        if len(messages) <= len(previous_messages):
-            return None
-        if tuple(item.message_id for item in messages[: len(previous_messages)]) != tuple(
-            item.message_id for item in previous_messages
-        ):
-            return None
-        trigger = messages[len(previous_messages)]
-        if (
-            trigger.session_id != session.session_id
-            or trigger.role.value != "user"
-            or not trigger.content.strip()
-            or not is_correction_challenge(trigger.content)
-        ):
-            return None
-        # The new user message must be immediately after the anchor in the
-        # durable trajectory.  The worker repeats this check from storage.
-        signal = CorrectionSignal(
-            session_id=session.session_id,
-            anchor_message_id=anchor.message_id,
-            trigger_message_id=trigger.message_id,
-            content=trigger.content.strip(),
-            created_at=trigger.created_at,
-            trigger_digest=sha256(trigger.content.strip().encode("utf-8")).hexdigest(),
-            signal_id=correction_signal_id(trigger.message_id),
-        )
-        key = correction_signal_idempotency_key(
-            session_id=session.session_id,
-            anchor_message_id=anchor.message_id,
-            trigger_message_id=trigger.message_id,
-            trigger_digest=signal.trigger_digest,
-        )
-        try:
-            await repository.enqueue_correction_signal_analysis(
-                session_id=signal.session_id,
-                anchor_message_id=signal.anchor_message_id,
-                trigger_message_id=signal.trigger_message_id,
-                trigger_digest=signal.trigger_digest,
-                idempotency_key=key,
-                now=_now_iso(),
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "correction signal enqueue failed session_id=%s trigger_message_id=%s",
-                session.session_id,
-                trigger.message_id,
-            )
-            return False
-        return True
-
-    async def _enqueue_tool_failure_candidates(
-        self,
-        session: ChatSession,
-        *,
-        result: AgentRunResult,
-    ) -> bool | None:
-        """Queue failed tool observations after their trajectory checkpoint."""
-
-        repository = AnalysisJobRepo
-        if repository is None:
-            return None
-        calls = {call.tool_call_id: call for call in result.tool_calls}
-        messages = {message.message_id: message for message in result.messages}
-        result_messages = {
-            message.tool_call_id: message
-            for message in result.messages
-            if message.role.value == "tool"
-            and message.tool_result is not None
-            and message.tool_call_id
-        }
-        excluded_errors = {
-            "user_rejected",
-            "user_cancelled",
-            "permission_write_denied",
-            "tool_permission_denied",
-        }
-        queued = False
-        failed = False
-        for tool_result in result.tool_results:
-            if tool_result.status is not ToolResultStatus.FAILED:
-                continue
-            if tool_result.error_code in excluded_errors:
-                continue
-            call = calls.get(tool_result.tool_call_id)
-            result_message = result_messages.get(tool_result.tool_call_id)
-            if call is None or result_message is None:
-                continue
-            assistant = messages.get(call.assistant_message_id)
-            if (
-                assistant is None
-                or assistant.session_id != session.session_id
-                or result_message.session_id != session.session_id
-            ):
-                continue
-            digest = tool_result_digest(
-                {
-                    "tool_call_id": tool_result.tool_call_id,
-                    "status": tool_result.status.value,
-                    "data": tool_result.data,
-                    "resource_refs": [
-                        {
-                            "resource_type": item.resource_type,
-                            "resource_id": item.resource_id,
-                            "href": item.href,
-                        }
-                        for item in tool_result.resource_refs
-                    ],
-                    "warnings": list(tool_result.warnings),
-                    "error_code": tool_result.error_code,
-                    "error_message": tool_result.error_message,
-                }
-            )
-            key = tool_failure_idempotency_key(
-                session_id=session.session_id,
-                tool_call_id=call.tool_call_id,
-                assistant_message_id=call.assistant_message_id,
-                result_message_id=result_message.message_id,
-                result_digest=digest,
-            )
-            queued = True
-            try:
-                await repository.enqueue_tool_failure_analysis(
-                    session_id=session.session_id,
-                    tool_call_id=call.tool_call_id,
-                    assistant_message_id=call.assistant_message_id,
-                    result_message_id=result_message.message_id,
-                    result_digest=digest,
-                    idempotency_key=key,
-                    now=_now_iso(),
-                )
-            except Exception:  # noqa: BLE001
-                failed = True
-                logger.exception(
-                    "tool failure enqueue failed session_id=%s tool_call_id=%s",
-                    session.session_id,
-                    call.tool_call_id,
-                )
-        if failed:
-            return False
-        return True if queued else None
 
     async def _resolve_model_connection(
         self, requested_id: str | None, prior_snapshot: ChatResponseSnapshot | None,
@@ -2170,11 +1905,6 @@ class ChatSessionService:
                         session,
                         previous_messages=previous_messages,
                         approved_call=decided,
-                    )
-                if await self._enqueue_tool_failure_candidates(session, result=run_result) is False:
-                    run_result = replace(
-                        run_result,
-                        warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
                     )
             return {
                 "status": run_result.status.value,

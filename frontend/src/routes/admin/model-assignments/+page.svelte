@@ -12,7 +12,6 @@
 	const purposes = [
 		{ value: 'document_profile', label: 'modelAssignments.documentProfile' },
 		{ value: 'research_analysis', label: 'modelAssignments.researchAnalysis' },
-		{ value: 'feedback', label: 'modelAssignments.feedback' },
 		{ value: 'embedding', label: 'modelAssignments.embedding' }
 	];
 	let purpose = 'document_profile';

@@ -1,4 +1,4 @@
-"""SQLAlchemy mappings for feedback analysis and review."""
+"""Historical SQLAlchemy mappings for feedback analysis and review migration data."""
 
 from __future__ import annotations
 

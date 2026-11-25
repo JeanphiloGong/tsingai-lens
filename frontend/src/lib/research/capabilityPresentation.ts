@@ -1,4 +1,4 @@
-import type { ChatMessage } from '$lib/conversation/api';
+import type { ConversationMessage } from '$lib/conversation/api';
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 
 export function capabilityName(toolName: string | null, translate: Translate) {
@@ -78,7 +78,7 @@ export function numberValue(data: Record<string, unknown>, key: string) {
 	return typeof value === 'number' && Number.isFinite(value) ? value : '--';
 }
 
-export function paperSourceIssues(message: ChatMessage | null) {
+export function paperSourceIssues(message: ConversationMessage | null) {
 	const result = message?.tool_result;
 	if (!Array.isArray(result?.data.papers)) return [];
 	return result.data.papers.flatMap((value) => {
@@ -114,7 +114,7 @@ export function paperSourceIssues(message: ChatMessage | null) {
 	});
 }
 
-export function resultSummary(message: ChatMessage, toolName: string | null, translate: Translate) {
+export function resultSummary(message: ConversationMessage, toolName: string | null, translate: Translate) {
 	const result = message.tool_result;
 	if (!result) return '';
 	const name = toolName;
@@ -292,7 +292,7 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 	}
 	return translate('researchAgent.capability.succeeded', { name: capabilityName(name, translate) });
 }
-export function resultTitle(message: ChatMessage, toolName: string | null, translate: Translate) {
+export function resultTitle(message: ConversationMessage, toolName: string | null, translate: Translate) {
 	const result = message.tool_result;
 	if (toolName === 'inspect_research_process' && result?.status === 'succeeded') {
 		return translate('researchAgent.capability.researchProcessStatus');
@@ -302,7 +302,7 @@ export function resultTitle(message: ChatMessage, toolName: string | null, trans
 	if (result?.status === 'queued') return translate('researchAgent.capability.queued', { name });
 	return translate('researchAgent.capability.succeeded', { name });
 }
-export function resultStatusLabel(message: ChatMessage, translate: Translate) {
+export function resultStatusLabel(message: ConversationMessage, translate: Translate) {
 	switch (message.tool_result?.status) {
 		case 'queued':
 			return translate('researchAgent.capability.statusQueued');

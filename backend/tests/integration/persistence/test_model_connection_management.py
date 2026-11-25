@@ -227,8 +227,6 @@ async def test_embedding_assignment_drives_benchmark_without_entering_chat_catal
     assert (await assign("research_analysis", vector_id))["code"] == "processing_model_unavailable"
     assert (await assign("embedding", vector_id))["connection_id"] == vector_id
     assert (await assign("research_analysis", chat_id))["connection_id"] == chat_id
-    assert (await assign("feedback", chat_id))["connection_id"] == chat_id
-
     research = await build_research_response_client()
     with research.client as provider:
         completion = await asyncio.to_thread(
@@ -265,67 +263,6 @@ async def test_embedding_assignment_drives_benchmark_without_entering_chat_catal
         ("/v1/embeddings", "vectors", "Bearer vector-test-key"),
         ("/v1/embeddings", "vectors", "Bearer vector-test-key"),
     ]
-
-
-async def test_feedback_workers_use_feedback_assignment(management, profile_provider, monkeypatch):
-    from dataclasses import replace
-    from datetime import datetime, timezone
-    from application.feedback import analysis_handler, conversation_context
-    from application.feedback import correction_signal_handler, correction_signal_worker
-    from application.feedback import sample_build_worker, worker_lease
-    from tests.unit.feedback.test_correction_signal import _Cases, _Chat, _Jobs, _job, _messages
-    from tests.unit.feedback import test_sample_build_worker as sample_fixture
-
-    client, _ = management
-    base_url, calls = profile_provider
-    messages = _messages()
-    jobs = _Jobs(_job(messages))
-    cases = _Cases()
-    chat = _Chat(messages)
-    for module in (correction_signal_handler, analysis_handler, conversation_context):
-        monkeypatch.setattr(module, "ChatRepo", chat)
-    monkeypatch.setattr(correction_signal_worker, "AnalysisJobRepo", jobs)
-    monkeypatch.setattr(correction_signal_worker, "FeedbackCaseRepo", cases)
-    now = datetime.now(timezone.utc).isoformat()
-    unassigned = await jobs.claim_next_correction_signal_analysis_job(now)
-    await correction_signal_worker.execute_correction_signal_analysis_job(unassigned)
-    assert jobs.finished == ("failed", "processing_model_unassigned")
-    assert cases.calls == [] and calls == []
-
-    connection = await create(client, base_url=base_url, model="feedback", api_key="feedback-test-key")
-    connection_id = connection["connection_id"]
-    response = await client.patch(
-        f"/api/v1/admin/model-connections/{connection_id}",
-        json={"expected_version": 1, "enabled": True},
-    )
-    assert response.json()["data"]["enabled"]
-    response = await client.put(
-        "/api/v1/admin/model-assignments/feedback",
-        json={"connection_id": connection_id, "expected_version": 0},
-    )
-    assert response.json()["code"] == 200
-    jobs.job = _job(messages)
-    job = await jobs.claim_next_correction_signal_analysis_job(now)
-    await correction_signal_worker.execute_correction_signal_analysis_job(job)
-    assert len(cases.calls) == 1
-    assert cases.calls[0]["result"].model == "feedback"
-
-    sample_job = sample_fixture._job()
-    sample_jobs = sample_fixture._Jobs(replace(
-        sample_job, payload={**sample_job.payload, "review_note": "Use the original evidence."}
-    ))
-    samples = sample_fixture._Samples(sample_fixture._sample(), sample_jobs)
-    monkeypatch.setattr(sample_build_worker, "AnalysisJobRepo", sample_jobs)
-    monkeypatch.setattr(worker_lease, "AnalysisJobRepo", sample_jobs)
-    monkeypatch.setattr(sample_build_worker, "FeedbackDatasetRepo", sample_fixture._Datasets())
-    monkeypatch.setattr(sample_build_worker, "FeedbackDatasetSampleRepo", samples)
-    monkeypatch.setattr(sample_build_worker, "FeedbackCaseRepo", sample_fixture._Cases())
-    claimed = await sample_jobs.claim_next_dataset_sample_build_job(now=now)
-    outcome = await sample_build_worker.execute_dataset_sample_build_job(claimed)
-    assert outcome.status == "succeeded"
-    assert samples.completed["outcome"] == "candidate"
-    assert samples.revision.provenance["builder"] == "feedback"
-    assert calls == [("/v1/chat/completions", "feedback", "Bearer feedback-test-key")] * 2
 
 
 async def test_permissions_origin_and_secret_validation_precede_effects(management, monkeypatch):

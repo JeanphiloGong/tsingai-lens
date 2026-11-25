@@ -6,13 +6,13 @@ import { fetchCurrentSession, login, logout } from '../../../_shared/auth';
 import { workspaces } from '$lib/workspace/workspaces';
 import { language } from '../../../_shared/i18n';
 
-import type { ChatMessage } from '$lib/conversation/api';
+import type { ConversationMessage } from '$lib/conversation/api';
 import type {
-	ChatResponseSnapshot,
-	ChatToolCall,
+	TaskSnapshot,
+	Operation,
 	ChatToolResult,
-	ChatTrajectory,
-	ChatTurn
+	TaskState,
+	AgentTurn
 } from '$lib/agent/api';
 
 type AssistantPageState = {
@@ -75,7 +75,7 @@ const Conversation = (await import('./ResearchConversation.svelte')).default;
 
 const createdAt = '2026-08-19T08:00:00+00:00';
 const session = {
-	session_id: 'chat_1',
+	conversation_id: 'chat_1',
 	user_id: 'researcher_1',
 	workspace_id: 'col_123',
 	created_at: createdAt,
@@ -89,7 +89,7 @@ function jsonResponse(data: unknown, code = 200, message = 'success') {
 	});
 }
 
-function streamResponse(turn: ChatTurn, deltas: string[] = [], delayMs = 0) {
+function streamResponse(turn: AgentTurn, deltas: string[] = [], delayMs = 0) {
 	const encoder = new TextEncoder();
 	const event = (name: string, data: unknown) =>
 		encoder.encode(`event: ${name}\r\ndata: ${JSON.stringify(data)}\r\n\r\n`);
@@ -134,13 +134,13 @@ function requestBody(input: string | URL | Request, init?: RequestInit) {
 
 function message(
 	messageId: string,
-	role: ChatMessage['role'],
+	role: ConversationMessage['role'],
 	content: string,
-	overrides: Partial<ChatMessage> = {}
-): ChatMessage {
+	overrides: Partial<ConversationMessage> = {}
+): ConversationMessage {
 	return {
 		message_id: messageId,
-		session_id: session.session_id,
+		conversation_id: session.conversation_id,
 		role,
 		content,
 		created_at: createdAt,
@@ -165,10 +165,11 @@ function baseToolResult(toolCallId: string): ChatToolResult {
 	};
 }
 
-function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
+function pendingCall(overrides: Partial<Operation> = {}): Operation {
 	return {
 		tool_call_id: 'call_write_1',
-		session_id: session.session_id,
+		operation_id: 'op_write_1',
+		task_id: 'task_write_1',
 		assistant_message_id: 'msg_call_write',
 		position: 0,
 		name: 'create_objective_candidate',
@@ -200,13 +201,13 @@ function installApi({
 	prepareDocument
 }: {
 	trajectory?: Pick<
-		ChatTrajectory,
+		TaskState,
 		'items' | 'feedback' | 'pending_approval' | 'retryable_decision' | 'response'
 	>;
-	messageTurn?: ChatTurn;
+	messageTurn?: AgentTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
-	decisionTurn?: ChatTurn;
+	decisionTurn?: AgentTurn;
 	uploadDocument?: (file: File) => Response | Promise<Response>;
 	prepareDocument?: (documentId: string) => Response | Promise<Response>;
 } = {}) {
@@ -233,17 +234,17 @@ function installApi({
 		if (path === '/api/v1/conversations' && method === 'POST') {
 			return Promise.resolve(jsonResponse(session, 200, 'Request failed.'));
 		}
-		if (path === `/api/v1/conversations/${session.session_id}` && method === 'GET') {
+		if (path === `/api/v1/conversations/${session.conversation_id}` && method === 'GET') {
 			return Promise.resolve(jsonResponse(session));
 		}
-		if (path === `/api/v1/conversations/${session.session_id}/messages` && method === 'GET') {
+		if (path === `/api/v1/conversations/${session.conversation_id}/messages` && method === 'GET') {
 			return Promise.resolve(jsonResponse(trajectory));
 		}
-		if (path === `/api/v1/conversations/${session.session_id}/messages` && method === 'POST') {
+		if (path === `/api/v1/conversations/${session.conversation_id}/messages` && method === 'POST') {
 			return Promise.resolve(streamResponse(messageTurn!, messageDeltas, messageDelayMs));
 		}
 		if (
-			path === `/api/v1/conversations/${session.session_id}/tool-calls/call_write_1/decision` &&
+			path === `/api/v1/conversations/${session.conversation_id}/tool-calls/call_write_1/decision` &&
 			method === 'POST'
 		) {
 			return Promise.resolve(jsonResponse(decisionTurn));
@@ -348,11 +349,11 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	});
 
 	it('stops a response, ignores a late running acknowledgement, and accepts revised instructions', async () => {
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		const question = message('question', 'user', 'Compare the tensile tests.');
-		const snapshot: ChatResponseSnapshot = {
-			response_id: 'response-one',
-			sequence: 1,
+		const snapshot: TaskSnapshot = {
+			task_id: 'response-one',
+			checkpoint_revision: 1,
 			started_at: createdAt,
 			updated_at: createdAt,
 			status: 'running',
@@ -468,8 +469,8 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				retryable_decision: savedCall,
 				running: false,
 				response: {
-					response_id: 'saved-decision',
-					sequence: 1,
+					task_id: 'saved-decision',
+					checkpoint_revision: 1,
 					started_at: createdAt,
 					updated_at: createdAt,
 					status: 'approval_required',
@@ -487,7 +488,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			};
 			localStorage.setItem(
 				`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`,
-				session.session_id
+				session.conversation_id
 			);
 			installApi({ trajectory: initial });
 			const original = fetchMock.getMockImplementation()!;
@@ -749,9 +750,9 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	it('changing the selection during generation preserves the active request', async () => {
 		installApi();
 		const fallback = fetchMock.getMockImplementation()!;
-		const snapshot: ChatResponseSnapshot = {
-			response_id: 'active-answer',
-			sequence: 1,
+		const snapshot: TaskSnapshot = {
+			task_id: 'active-answer',
+			checkpoint_revision: 1,
 			started_at: createdAt,
 			updated_at: createdAt,
 			status: 'running',
@@ -915,9 +916,9 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			const fallback = fetchMock.getMockImplementation()!;
 			const question = message('question-1', 'user', 'Compare matched LPBF tensile conditions');
 			const partial = 'Match test temperature, specimen orientation, and heat treatment.';
-			const snapshot: ChatResponseSnapshot = {
-				response_id: 'response-1',
-				sequence: 1,
+			const snapshot: TaskSnapshot = {
+				task_id: 'response-1',
+				checkpoint_revision: 1,
 				started_at: createdAt,
 				updated_at: createdAt,
 				status: 'running',
@@ -930,7 +931,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				error_code: null,
 				warnings: []
 			};
-			const trajectory: ChatTrajectory = {
+			const trajectory: TaskState = {
 				items: [question],
 				feedback: [],
 				pending_approval: null,
@@ -967,7 +968,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					return Promise.resolve(
 						jsonResponse({
 							...trajectory,
-							response: { ...snapshot, sequence: 2, content: partial }
+							response: { ...snapshot, checkpoint_revision: 2, content: partial }
 						})
 					);
 				}
@@ -983,7 +984,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 								],
 								response: {
 									...snapshot,
-									sequence: 3,
+									checkpoint_revision: 3,
 									status: 'completed',
 									message_id: null,
 									content: ''
@@ -1053,7 +1054,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					return jsonResponse({
 						items: Array.from({ length: created }, (_, index) => ({
 							...session,
-							session_id: `chat_${index + 1}`,
+							conversation_id: `chat_${index + 1}`,
 							title: index === 0 ? originalQuestion.content : 'Check specimen counts',
 							status: index === 0 && !completed ? 'running' : 'idle'
 						})).reverse(),
@@ -1063,13 +1064,13 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				}
 				if (path === '/api/v1/conversations' && method === 'POST') {
 					return jsonResponse(
-						{ ...session, session_id: `chat_${++created}` },
+						{ ...session, conversation_id: `chat_${++created}` },
 						200,
 						'Request failed.'
 					);
 				}
 				const id = path.split('/')[4];
-				if (!path.endsWith('/messages')) return jsonResponse({ ...session, session_id: id });
+				if (!path.endsWith('/messages')) return jsonResponse({ ...session, conversation_id: id });
 				if (method === 'GET') {
 					return jsonResponse({
 						items: completed ? [originalQuestion, originalAnswer] : [],
@@ -1100,8 +1101,8 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					completion_reason: 'model_answer',
 					warnings: [],
 					messages: [
-						message('question-b', 'user', 'Check specimen counts', { session_id: id }),
-						message('answer-b', 'assistant', 'Second research completed', { session_id: id })
+						message('question-b', 'user', 'Check specimen counts', { conversation_id: id }),
+						message('answer-b', 'assistant', 'Second research completed', { conversation_id: id })
 					],
 					pending_approval: null,
 					error_code: null
@@ -1128,7 +1129,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				JSON.parse(sessionStorage.getItem('lens.chatSourceContext.researcher_1:col_123')!)
 			).toMatchObject({
 				contexts: [source],
-				submission: { session_id: 'chat_1' }
+				submission: { conversation_id: 'chat_1' }
 			});
 			await newSession.click();
 			await expect.element(composer).toBeEnabled();
@@ -1162,7 +1163,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 
 	it('uses the saved question as the compact title and preserves the Objective link', async () => {
 		const question = 'Compare the heat-treatment conditions across these LPBF papers';
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/workspaces/col_123/assistant?objective_id=obj_1')
@@ -1189,11 +1190,11 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	it.each([null, 'New conversation'])(
 		'restores server history titles and the selected session with cached title %s',
 		async (cachedTitle) => {
-			const oldSession = { ...session, session_id: 'chat_old' };
-			const newSession = { ...session, session_id: 'chat_new', status: 'idle' };
+			const oldSession = { ...session, conversation_id: 'chat_old' };
+			const newSession = { ...session, conversation_id: 'chat_new', status: 'idle' };
 			const question = 'Compare LPBF tensile conditions';
 			const oldQuestion = message('old-question', 'user', question, {
-				session_id: oldSession.session_id
+				conversation_id: oldSession.conversation_id
 			});
 			if (cachedTitle) {
 				localStorage.setItem(
@@ -1217,7 +1218,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				if (path === '/api/v1/conversations' && method === 'POST') {
 					return jsonResponse(newSession, 200, 'Request failed.');
 				}
-				if (path === `/api/v1/conversations/${oldSession.session_id}` && method === 'GET') {
+				if (path === `/api/v1/conversations/${oldSession.conversation_id}` && method === 'GET') {
 					return jsonResponse({
 						...oldSession,
 						title: question,
@@ -1225,7 +1226,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					});
 				}
 				if (
-					path === `/api/v1/conversations/${oldSession.session_id}/messages` &&
+					path === `/api/v1/conversations/${oldSession.conversation_id}/messages` &&
 					method === 'GET'
 				) {
 					return jsonResponse({
@@ -1250,7 +1251,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			await oldConversation.click();
 			await expect.element(browserPage.getByTestId('user-message')).toHaveTextContent(question);
 			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
-				oldSession.session_id
+				oldSession.conversation_id
 			);
 			expect(
 				fetchMock.mock.calls.filter(([input, init]) => requestMethod(input, init) === 'POST')
@@ -1258,7 +1259,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			expect(
 				fetchMock.mock.calls.some(
 					([input, requestInit]) =>
-						requestPath(input) === `/api/v1/conversations/${oldSession.session_id}/messages` &&
+						requestPath(input) === `/api/v1/conversations/${oldSession.conversation_id}/messages` &&
 						requestMethod(input, requestInit) === 'GET'
 				)
 			).toBe(true);
@@ -1350,7 +1351,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			const saved = { ...session, title: null as string | null, is_pinned: false };
 			const question = {
 				message_id: 'msg_title',
-				session_id: session.session_id,
+				conversation_id: session.conversation_id,
 				role: 'user' as const,
 				content: 'Original research question',
 				created_at: createdAt,
@@ -1455,7 +1456,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 		async (embedded) => {
 			const old = {
 				...session,
-				session_id: 'chat_old',
+				conversation_id: 'chat_old',
 				title: 'Compare LPBF conditions',
 				updated_at: '2026-08-19T07:00:00+00:00',
 				is_pinned: false
@@ -1499,7 +1500,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			);
 			const readCache = () =>
 				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!);
-			expect(readCache()[0]).toMatchObject({ session_id: 'chat_old', is_pinned: true });
+			expect(readCache()[0]).toMatchObject({ conversation_id: 'chat_old', is_pinned: true });
 			expect(
 				localStorage.getItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`)
 			).toBe('chat_1');
@@ -1519,7 +1520,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			);
 			await userEvent.click(row().querySelector('button[aria-label="Unpin conversation"]')!);
 			await vi.waitFor(() =>
-				expect(readCache().at(-1)).toMatchObject({ session_id: 'chat_old', is_pinned: false })
+				expect(readCache().at(-1)).toMatchObject({ conversation_id: 'chat_old', is_pinned: false })
 			);
 			expect(
 				fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_old/messages'))
@@ -1534,7 +1535,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				session,
 				...Array.from({ length: 24 }, (_, index) => ({
 					...session,
-					session_id: `chat_older_${index}`,
+					conversation_id: `chat_older_${index}`,
 					title: `Comparison ${index}`,
 					updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString()
 				}))
@@ -1593,7 +1594,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			expect(
 				new Set(
 					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).map(
-						(item: { session_id: string }) => item.session_id
+						(item: { conversation_id: string }) => item.conversation_id
 					)
 				).size
 			).toBe(25);
@@ -1633,14 +1634,14 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	it('rechecks page boundaries after unpinning when the first refresh fails', async () => {
 		const old = {
 			...session,
-			session_id: 'chat_old',
+			conversation_id: 'chat_old',
 			title: 'Pinned old comparison',
 			is_pinned: true,
 			updated_at: '2026-08-18T08:00:00+00:00'
 		};
 		const others = Array.from({ length: 20 }, (_, index) => ({
 			...session,
-			session_id: `comparison_${index}`,
+			conversation_id: `comparison_${index}`,
 			title: `Comparison ${index}`,
 			updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString()
 		}));
@@ -1681,10 +1682,10 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 		).click();
 		const readIds = () =>
 			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).map(
-				(item: { session_id: string }) => item.session_id
+				(item: { conversation_id: string }) => item.conversation_id
 			);
 		await vi.waitFor(() =>
-			expect(readIds()).toEqual([session, ...others].slice(0, 20).map((item) => item.session_id))
+			expect(readIds()).toEqual([session, ...others].slice(0, 20).map((item) => item.conversation_id))
 		);
 	});
 
@@ -1693,7 +1694,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			session,
 			...Array.from({ length: 9 }, (_, index) => ({
 				...session,
-				session_id: `chat_${index + 2}`,
+				conversation_id: `chat_${index + 2}`,
 				title: `Comparison ${index}`
 			}))
 		];
@@ -1736,7 +1737,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				operation === 'pin'
 					? { ...session, is_pinned: true }
 					: {
-							items: [{ ...session, session_id: 'private_late', title: 'Private late comparison' }],
+							items: [{ ...session, conversation_id: 'private_late', title: 'Private late comparison' }],
 							limit: 10,
 							offset: 10
 						}
@@ -1775,12 +1776,12 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(
 				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
-			).toEqual([expect.objectContaining({ session_id: session.session_id })]);
+			).toEqual([expect.objectContaining({ conversation_id: session.conversation_id })]);
 		}
 	);
 
 	it('removes server-deleted conversations from cached history', async () => {
-		const deleted = { ...session, session_id: 'chat_deleted', title: 'Deleted comparison' };
+		const deleted = { ...session, conversation_id: 'chat_deleted', title: 'Deleted comparison' };
 		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([deleted]));
 		installApi();
 		const original = fetchMock.getMockImplementation()!;
@@ -1793,7 +1794,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 		await renderReady();
 		expect(
 			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
-		).toEqual([expect.objectContaining({ session_id: session.session_id })]);
+		).toEqual([expect.objectContaining({ conversation_id: session.conversation_id })]);
 		expect(
 			fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_deleted'))
 		).toBe(false);
@@ -1804,7 +1805,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 		async (trigger) => {
 			const remote = {
 				...session,
-				session_id: 'chat_remote',
+				conversation_id: 'chat_remote',
 				title: 'Compare tensile conditions',
 				status: 'idle'
 			};
@@ -1845,7 +1846,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			await vi.waitFor(() =>
 				expect(
 					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).find(
-						(item: { session_id: string }) => item.session_id === remote.session_id
+						(item: { conversation_id: string }) => item.conversation_id === remote.conversation_id
 					).status
 				).toBe('running')
 			);
@@ -1861,7 +1862,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				localStorage.getItem(
 					`lens.chatSession.researcher_1:col_123${trigger === 'embedded history' ? ':documents' : ''}`
 				)
-			).toBe(session.session_id);
+			).toBe(session.conversation_id);
 			expect(
 				fetchMock.mock.calls.filter(([input, init]) => requestMethod(input, init) === 'POST')
 			).toHaveLength(1);
@@ -1869,7 +1870,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	);
 
 	it('keeps cached history when the server index is unavailable', async () => {
-		const cached = { ...session, session_id: 'chat_cached', title: 'Compare specimen orientation' };
+		const cached = { ...session, conversation_id: 'chat_cached', title: 'Compare specimen orientation' };
 		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([cached]));
 		installApi();
 		const original = fetchMock.getMockImplementation()!;
@@ -1884,8 +1885,8 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
 		).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ session_id: session.session_id }),
-				expect.objectContaining({ session_id: cached.session_id, title: cached.title })
+				expect.objectContaining({ conversation_id: session.conversation_id }),
+				expect.objectContaining({ conversation_id: cached.conversation_id, title: cached.title })
 			])
 		);
 	});
@@ -1911,7 +1912,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				.element(browserPage.getByRole('alert'))
 				.toHaveTextContent('Delete those versions first.');
 			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
-				session.session_id
+				session.conversation_id
 			);
 			expect(
 				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
@@ -1935,7 +1936,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					}
 				]
 			});
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
 			const original = fetchMock.getMockImplementation()!;
 			let running = false;
@@ -2013,7 +2014,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				{ tool_call_id: call.tool_call_id, name: call.name, arguments: call.arguments, position: 0 }
 			]
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		installApi({ trajectory: { feedback: [], items: [request], pending_approval: null } });
 		render(Page);
 		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
@@ -2060,7 +2061,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					}
 				]
 			});
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
 			const original = fetchMock.getMockImplementation()!;
 			let decisions = 0;
@@ -2131,7 +2132,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				}
 			]
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		installApi({ trajectory: { feedback: [], items: [request], pending_approval: call } });
 		const original = fetchMock.getMockImplementation()!;
 		let running = false;
@@ -2243,7 +2244,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				)
 					return Promise.resolve(
 						jsonResponse(
-							{ ...session, session_id: 'chat_2', workspace_id: 'col_456' },
+							{ ...session, conversation_id: 'chat_2', workspace_id: 'col_456' },
 							200,
 							'Request failed.'
 						)
@@ -2293,7 +2294,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	);
 
 	it('keeps a saved rating when approval recovery returns an older feedback snapshot', async () => {
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		const answer = message('answer', 'assistant', 'Review the test temperatures before comparing.');
 		const call = pendingCall();
 		const request = message('request', 'assistant', '', {
@@ -2335,7 +2336,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			jsonResponse({
 				feedback_id: 'feedback-1',
 				message_id: answer.message_id,
-				session_id: session.session_id,
+				conversation_id: session.conversation_id,
 				user_id: session.user_id,
 				rating: 'helpful',
 				reason: null,
@@ -2354,7 +2355,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	it.each(['workspace', 'account'])(
 		'aborts pending feedback and ignores its response after changing %s',
 		async (scope) => {
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			installApi({
 				trajectory: {
 					items: [message('answer', 'assistant', 'Compare matching tensile test conditions.')],
@@ -2377,7 +2378,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					return Promise.resolve(
 						jsonResponse({
 							...session,
-							session_id: 'chat_new',
+							conversation_id: 'chat_new',
 							workspace_id: scope === 'workspace' ? 'col_456' : 'col_123',
 							user_id: scope === 'account' ? 'researcher_2' : session.user_id
 						})
@@ -2413,10 +2414,10 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	it.each([503, 403, 'offline'] as const)(
 		'retains the selected conversation after %s and retries it',
 		async (failure) => {
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			const history = [
 				{
-					session_id: session.session_id,
+					conversation_id: session.conversation_id,
 					title: 'Compare LPBF grain morphology',
 					updated_at: createdAt
 				}
@@ -2447,7 +2448,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			render(Page);
 			await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
 			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
-				session.session_id
+				session.conversation_id
 			);
 			expect(
 				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
@@ -2469,7 +2470,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 		localStorage.setItem(
 			'lens.chatSessionHistory.researcher_1:col_123',
 			JSON.stringify([
-				{ session_id: 'missing', title: 'Missing conversation', updated_at: createdAt }
+				{ conversation_id: 'missing', title: 'Missing conversation', updated_at: createdAt }
 			])
 		);
 		installApi();
@@ -2480,17 +2481,17 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				: original(input, init)
 		);
 		await renderReady();
-		expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(session.session_id);
+		expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(session.conversation_id);
 		await expect.element(browserPage.getByText('Missing conversation')).not.toBeInTheDocument();
 	});
 
 	it('clears private conversation data on logout and isolates the next account', async () => {
 		const privateTitle = 'Unpublished alloy treatment result';
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		localStorage.setItem(
 			'lens.chatSessionHistory.researcher_1:col_123',
 			JSON.stringify([
-				{ session_id: session.session_id, title: privateTitle, updated_at: createdAt }
+				{ conversation_id: session.conversation_id, title: privateTitle, updated_at: createdAt }
 			])
 		);
 		installApi({
@@ -2513,7 +2514,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			if (path === '/api/v1/conversations')
 				return Promise.resolve(
 					jsonResponse(
-						{ ...session, user_id: 'researcher_2', session_id: 'chat_2' },
+						{ ...session, user_id: 'researcher_2', conversation_id: 'chat_2' },
 						200,
 						'Request failed.'
 					)
@@ -2642,13 +2643,13 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				finish = resolve;
 			});
 			if (stage !== 'creation')
-				localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+				localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				if (path === '/api/v1/conversations') {
 					return requestBody(input, init).workspace_id === 'col_456'
 						? Promise.resolve(
-								jsonResponse({ ...session, session_id: 'chat_2', workspace_id: 'col_456' })
+								jsonResponse({ ...session, conversation_id: 'chat_2', workspace_id: 'col_456' })
 							)
 						: pending;
 				}
@@ -2680,7 +2681,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			expect(localStorage.getItem('lens.chatSession.researcher_1:col_456')).toBe('chat_2');
 			expect(
 				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_456')!)[0]
-					.session_id
+					.conversation_id
 			).toBe('chat_2');
 			await expect.element(browserPage.getByText('Old workspace answer')).not.toBeInTheDocument();
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
@@ -2694,7 +2695,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			const pending = new Promise<Response>((resolve) => {
 				finish = resolve;
 			});
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			installApi({
 				trajectory: {
 					feedback: [],
@@ -2706,7 +2707,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 				if (requestPath(input) === '/api/v1/conversations')
 					return Promise.resolve(
-						jsonResponse({ ...session, session_id: 'chat_2', workspace_id: 'col_456' })
+						jsonResponse({ ...session, conversation_id: 'chat_2', workspace_id: 'col_456' })
 					);
 				if (requestMethod(input, init) === 'POST') return pending;
 				return original(input, init);
@@ -2730,7 +2731,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 			});
 			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
 			expect(request?.[1]?.signal.aborted).toBe(true);
-			const turn: ChatTurn = {
+			const turn: AgentTurn = {
 				status: 'completed',
 				completion_reason: 'model_answer',
 				warnings: [],
@@ -2763,7 +2764,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				requestBody(input, init)?.workspace_id === 'col_456'
 			) {
 				return Promise.resolve(
-					jsonResponse({ ...session, session_id: 'chat_2', workspace_id: 'col_456' })
+					jsonResponse({ ...session, conversation_id: 'chat_2', workspace_id: 'col_456' })
 				);
 			}
 			return original(input, init);
@@ -3192,15 +3193,15 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 	] as const)(
 		'restores %s recovery without an execution plan or warnings',
 		async (status, reason, errorCode, title) => {
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			installApi({
 				trajectory: {
 					items: [message('saved-question', 'user', 'Compare the papers')],
 					pending_approval: null,
 					feedback: [],
 					response: {
-						response_id: 'saved-response',
-						sequence: 2,
+						task_id: 'saved-response',
+						checkpoint_revision: 2,
 						started_at: createdAt,
 						updated_at: createdAt,
 						status,
@@ -3223,26 +3224,6 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 		}
 	);
 
-	it('does not label an ordinary answer with an auxiliary warning as resource exhaustion', async () => {
-		installApi({
-			messageTurn: {
-				status: 'completed',
-				completion_reason: 'model_answer',
-				error_code: null,
-				warnings: ['correction_signal_enqueue_failed'],
-				pending_approval: null,
-				messages: [message('ordinary-answer', 'assistant', 'The comparison is complete.')]
-			}
-		});
-		await send('Compare the papers');
-		await expect.element(browserPage.getByText('The comparison is complete.')).toBeVisible();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Continue research' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('Run resource limit reached', { exact: true }))
-			.not.toBeInTheDocument();
-	});
 
 	for (const embedded of [false, true]) {
 		it.each([320, 768, 1024, 1440])(
@@ -3252,7 +3233,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				try {
 					localStorage.setItem(
 						`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`,
-						session.session_id
+						session.conversation_id
 					);
 					installApi({
 						trajectory: {
@@ -3260,8 +3241,8 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 							feedback: [],
 							pending_approval: null,
 							response: {
-								response_id: 'failed-response',
-								sequence: 1,
+								task_id: 'failed-response',
+								checkpoint_revision: 1,
 								status: 'failed',
 								error_code: 'provider_timeout',
 								started_at: createdAt,
@@ -3381,7 +3362,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 						if (restored)
 							localStorage.setItem(
 								`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`,
-								session.session_id
+								session.conversation_id
 							);
 						const items = [
 							message('saved-question', 'user', 'Compare the tensile conditions.'),
@@ -3392,9 +3373,9 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 							})
 						];
 						const partial = 'The test temperatures have not yet been checked.';
-						const response: ChatResponseSnapshot = {
-							response_id: 'failed-response',
-							sequence: 3,
+						const response: TaskSnapshot = {
+							task_id: 'failed-response',
+							checkpoint_revision: 3,
 							started_at: createdAt,
 							updated_at: createdAt,
 							status,
@@ -3543,7 +3524,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					}
 				]
 			};
-			const turn: ChatTurn = {
+			const turn: AgentTurn = {
 				status,
 				completion_reason: status === 'completed' ? 'model_answer' : null,
 				warnings: [],
@@ -3569,8 +3550,8 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 					pending_approval: pending,
 					feedback: [],
 					response: {
-						response_id: 'response-plan',
-						sequence: 5,
+						task_id: 'response-plan',
+						checkpoint_revision: 5,
 						started_at: createdAt,
 						updated_at: createdAt,
 						status,
@@ -3736,7 +3717,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				await expect.element(progress).toHaveTextContent('Waiting for the research model');
 				await expect.element(progress).toHaveTextContent(`${elapsed / 1000}s`);
 			}
-			const turn: ChatTurn = {
+			const turn: AgentTurn = {
 				status: 'completed',
 				completion_reason: 'model_answer',
 				warnings: [],
@@ -3805,7 +3786,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 
 		const composer = await renderReady();
 		const activity = document.querySelector<HTMLDetailsElement>(
@@ -3913,7 +3894,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				pending_approval: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 
 		render(Page);
 		await expect.element(browserPage.getByTestId('research-recovery')).toBeVisible();
@@ -4744,7 +4725,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 							: []
 				}
 			});
-			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+			localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 			render(Page);
 
 			await browserPage
@@ -4869,7 +4850,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Reject' }).click();
@@ -5058,7 +5039,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Reject' }).click();
@@ -5100,7 +5081,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Reject' }).click();
@@ -5177,7 +5158,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 				error_code: null
 			}
 		});
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		render(Page);
 
 		await browserPage.getByRole('button', { name: 'Approve and create' }).click();
@@ -5202,7 +5183,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 
 	it('restores a persisted pending approval after refresh', async () => {
 		const call = pendingCall();
-		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.conversation_id);
 		installApi({
 			trajectory: {
 				feedback: [],
@@ -5240,7 +5221,7 @@ describe('workspaces/[id]/assistant Research Agent', () => {
 
 	it('discards stale Goal storage and starts Chat without a compatibility request', async () => {
 		localStorage.setItem('lens.goalSession.col_123', 'goal_legacy_1');
-		localStorage.setItem('lens.goalSessionHistory.col_123', '[{"session_id":"goal_legacy_1"}]');
+		localStorage.setItem('lens.goalSessionHistory.col_123', '[{"conversation_id":"goal_legacy_1"}]');
 		installApi();
 		fetchMock.mockImplementationOnce(() =>
 			Promise.resolve(

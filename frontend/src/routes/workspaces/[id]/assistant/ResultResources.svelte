@@ -3,10 +3,10 @@
 	import { ChevronDown, ExternalLink } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import { resolve } from '$app/paths';
-	import type { ChatMessage } from '$lib/conversation/api';
+	import type { ConversationMessage } from '$lib/conversation/api';
 	import type { ChatResourceRef } from '$lib/document/source-context';
 
-	export let message: ChatMessage;
+	export let message: ConversationMessage;
 	$: resources = visibleResources(message);
 	type SourceRecord = Record<string, unknown>;
 	type VisibleResource = ChatResourceRef & { href: `/workspaces/${string}`; label: string };
@@ -15,7 +15,7 @@
 		return typeof value === 'string' && value.trim() ? value.trim() : '';
 	}
 
-	function sourceRecords(message: ChatMessage) {
+	function sourceRecords(message: ConversationMessage) {
 		const data = message.tool_result?.data ?? {};
 		const document = data.document;
 		const documentTitle =
@@ -87,7 +87,7 @@
 		);
 	}
 
-	function visibleResources(message: ChatMessage): VisibleResource[] {
+	function visibleResources(message: ConversationMessage): VisibleResource[] {
 		const records = sourceRecords(message);
 		const seen = new SvelteSet<string>();
 		return (message.tool_result?.resource_refs ?? []).flatMap((resource) => {

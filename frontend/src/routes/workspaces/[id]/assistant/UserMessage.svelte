@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { Pencil, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Quote } from '@lucide/svelte';
+	import { Pencil, ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Quote, GitBranch } from '@lucide/svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import { resolve } from '$app/paths';
-	import type { ChatMessage, ChatBranchOptions } from '$lib/conversation/api';
+	import type { ConversationMessage, ChatBranchOptions } from '$lib/conversation/api';
 	import type { ChatSourceContext } from '$lib/document/source-context';
 	import { formatTime } from '$lib/research/conversationPresentation';
 	import MessageContent from './MessageContent.svelte';
-	export let message: ChatMessage;
+	export let message: ConversationMessage;
 	export let disabled = false;
 	export let retryAvailable = false;
 	export let versions: ChatBranchOptions | undefined = undefined;
-	export let onRevise: (message: ChatMessage, content?: string) => Promise<boolean> = async () =>
+	export let onFork: (message: ConversationMessage) => void = () => {};
+	export let onRevise: (message: ConversationMessage, content?: string) => Promise<boolean> = async () =>
 		false;
 	export let onSwitchVersion: (sessionId: string) => void = () => {};
 	let editing = false;
@@ -21,7 +22,7 @@
 	let editError = '';
 	let editor: HTMLTextAreaElement;
 	let actions: HTMLDivElement;
-	$: versionIndex = versions?.session_ids.indexOf(versions.active_session_id) ?? 0;
+	$: versionIndex = versions?.conversation_ids.indexOf(versions.active_conversation_id) ?? 0;
 
 	async function openEditor() {
 		draft = message.content;
@@ -129,6 +130,9 @@
 					<IconButton label={$t('researchAgent.revision.edit')} {disabled} onClick={openEditor}
 						><Pencil size={16} /></IconButton
 					>
+					<IconButton label={$t('researchAgent.revision.fork')} {disabled} onClick={() => onFork(message)}>
+						<GitBranch size={16} />
+					</IconButton>
 					{#if retryAvailable}
 						<IconButton
 							label={$t('researchAgent.revision.regenerate')}
@@ -136,26 +140,26 @@
 							onClick={() => void onRevise(message)}><RotateCcw size={16} /></IconButton
 						>
 					{/if}
-					{#if versions && versions.session_ids.length > 1}
+					{#if versions && versions.conversation_ids.length > 1}
 						<IconButton
 							label={$t('researchAgent.revision.previous')}
 							disabled={disabled || versionIndex <= 0}
-							onClick={() => onSwitchVersion(versions!.session_ids[versionIndex - 1])}
+							onClick={() => onSwitchVersion(versions!.conversation_ids[versionIndex - 1])}
 							><ChevronLeft size={16} /></IconButton
 						>
 						<span
 							class="version"
 							aria-label={$t('researchAgent.revision.version', {
 								current: versionIndex + 1,
-								total: versions.session_ids.length
+								total: versions.conversation_ids.length
 							})}
 						>
-							{versionIndex + 1} / {versions.session_ids.length}
+							{versionIndex + 1} / {versions.conversation_ids.length}
 						</span>
 						<IconButton
 							label={$t('researchAgent.revision.next')}
-							disabled={disabled || versionIndex >= versions.session_ids.length - 1}
-							onClick={() => onSwitchVersion(versions!.session_ids[versionIndex + 1])}
+							disabled={disabled || versionIndex >= versions.conversation_ids.length - 1}
+							onClick={() => onSwitchVersion(versions!.conversation_ids[versionIndex + 1])}
 							><ChevronRight size={16} /></IconButton
 						>
 					{/if}

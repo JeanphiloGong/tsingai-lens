@@ -48,6 +48,8 @@ class TaskExecutionContext:
     status: str
     checkpoint_revision: int
     checkpoint: dict[str, Any]
+    model_connection_id: str | None
+    messages: tuple[dict[str, Any], ...]
 
 
 def _now() -> datetime:
@@ -127,6 +129,26 @@ class TaskRepository:
             if row is None:
                 raise TaskNotFound("task not found")
             task, workspace_id = row
+            history = []
+            message_id = task.trigger_message_id
+            while message_id is not None:
+                message = await db.scalar(
+                    select(MessageORM).where(
+                        MessageORM.conversation_id == task.session_id,
+                        MessageORM.message_id == message_id,
+                    )
+                )
+                if message is None:
+                    raise TaskNotFound("task message not found")
+                if message.role in {"user", "assistant"} and message.content:
+                    history.append({
+                        "message_id": message.message_id,
+                        "role": message.role,
+                        "content": message.content,
+                        "created_at": message.created_at.isoformat(),
+                        "source_contexts": message.source_contexts,
+                    })
+                message_id = message.parent_message_id
             return TaskExecutionContext(
                 task_id=task.task_id,
                 conversation_id=task.session_id,
@@ -135,7 +157,17 @@ class TaskRepository:
                 status=task.status,
                 checkpoint_revision=task.checkpoint_revision,
                 checkpoint=dict(task.checkpoint),
+                model_connection_id=task.model_connection_id,
+                messages=tuple(reversed(history)),
             )
+
+    async def bind_model_connection(
+        self, *, task_id: str, connection_id: str, display_name: str
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            task = await self._lock_task_for_checkpoint(db, task_id)
+            task.model_connection_id = connection_id
+            task.model_connection_name = display_name
 
     async def save_checkpoint(
         self,
@@ -154,6 +186,17 @@ class TaskRepository:
             task.status = status
             task.updated_at = _now()
             return revision
+
+    async def record_model_failure(
+        self, *, task_id: str, expected_revision: int, error_code: str
+    ) -> None:
+        async with AsyncSessionLocal() as db, db.begin():
+            task = await self._lock_task_for_checkpoint(db, task_id)
+            self._require_revision(task, expected_revision)
+            task.checkpoint = {**task.checkpoint, "error_code": error_code}
+            task.checkpoint_revision += 1
+            task.status = "interrupted"
+            task.updated_at = _now()
 
     async def read_task(
         self, *, conversation_id: str, task_id: str, user_id: str
@@ -193,6 +236,7 @@ class TaskRepository:
                 "trigger_message_id": task.trigger_message_id,
                 "final_message_id": task.final_message_id,
                 "status": task.status,
+                "error_code": task.checkpoint.get("error_code"),
                 "checkpoint_revision": task.checkpoint_revision,
                 "active_operation_id": (
                     operation_id.operation_id if operation_id is not None else None
@@ -205,6 +249,8 @@ class TaskRepository:
                         "arguments": operation_id.arguments,
                         "arguments_digest": operation_id.arguments_digest,
                         "decision_basis": operation_id.decision_basis,
+                        "tool_call_id": operation_id.tool_call_id,
+                        "assistant_message_id": operation_id.assistant_message_id,
                         "risk": operation_id.risk,
                         "status": operation_id.status,
                     }
@@ -367,6 +413,7 @@ class TaskRepository:
                 "task_id": operation.task_id,
                 "tool_call_id": operation.tool_call_id,
                 "name": operation.name,
+                "assistant_message_id": operation.assistant_message_id,
                 "arguments": operation.arguments,
                 "arguments_digest": operation.arguments_digest,
                 "decision_basis": operation.decision_basis,
@@ -428,7 +475,7 @@ class TaskRepository:
                 raise TaskNotFound("task not found")
             if task.checkpoint_revision != expected_checkpoint_revision:
                 raise CheckpointConflict("checkpoint revision is stale")
-            if task.status not in {"interrupted", "accepted"}:
+            if task.status not in {"interrupted", "accepted", "running"}:
                 raise TaskResumeConflict("task is not resumable")
             task.status = "running"
             task.checkpoint_revision += 1
@@ -445,6 +492,7 @@ class TaskRepository:
             "trigger_message_id": task.trigger_message_id,
             "final_message_id": task.final_message_id,
             "status": task.status,
+            "error_code": task.checkpoint.get("error_code"),
             "checkpoint_revision": task.checkpoint_revision,
             "active_operation_id": active_operation_id,
             "active_operation": None,
@@ -466,10 +514,9 @@ class TaskRepository:
         async with AsyncSessionLocal() as db, db.begin():
             task = await self._lock_task_for_checkpoint(db, task_id)
             self._require_revision(task, expected_revision)
-            if task.status == "interrupted" and status != "interrupted":
-                raise CheckpointConflict("task was interrupted")
             if message is not None:
                 await self._insert_message(db, task, message)
+                await db.flush()
             if operation is not None:
                 await self._upsert_operation(db, task_id, operation)
             await self._upsert_step(db, task_id, step)
@@ -578,7 +625,7 @@ class TaskRepository:
                     arguments=operation.get("arguments", {}),
                     arguments_digest=operation["arguments_digest"],
                     decision_basis=operation.get("decision_basis", "registry"),
-                    risk=operation.get("risk", "read"),
+                    risk=operation.get("risk", "write" if operation["status"] == "approval_required" else "read"),
                     status=operation["status"],
                     idempotency_key=operation.get("idempotency_key"),
                     result=operation.get("result"),

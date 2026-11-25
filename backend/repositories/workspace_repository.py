@@ -16,7 +16,6 @@ from infra.persistence.postgres.models.workspace import (
     DocumentORM,
     DocumentPreparationORM,
 )
-from repositories.feedback_dataset_repository import ensure_system_datasets
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,12 +82,6 @@ class WorkspaceRepository:
                 )
             )
             await db.flush()
-            await ensure_system_datasets(
-                db,
-                workspace_id=record.workspace.workspace_id,
-                owner_user_id=record.workspace.owner_user_id,
-                now=_datetime(record.created_at),
-            )
 
     async def list_workspaces(
         self,

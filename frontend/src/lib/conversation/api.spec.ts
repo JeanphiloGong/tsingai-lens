@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
 	setChatMessageFeedback,
-	deleteChatSession,
-	setChatSessionPin
+	deleteConversation,
+	setConversationPin
 } from '$lib/conversation/api';
 
 describe('chat session deletion', () => {
@@ -13,7 +13,7 @@ describe('chat session deletion', () => {
 				new Response(JSON.stringify({ code: 200, message: 'success', data: {}, meta: null }))
 			);
 		try {
-			await deleteChatSession('session/one');
+			await deleteConversation('session/one');
 			expect(fetch).toHaveBeenCalledWith(
 				'/api/v1/conversations/session%2Fone',
 				expect.objectContaining({ method: 'DELETE', credentials: 'same-origin' })
@@ -33,7 +33,7 @@ describe('chat history pinning', () => {
 					JSON.stringify({
 						code: 200,
 						message: 'success',
-						data: { session_id: 'session/one', is_pinned: isPinned },
+						data: { conversation_id: 'session/one', is_pinned: isPinned },
 						meta: null
 					}),
 					{
@@ -44,7 +44,7 @@ describe('chat history pinning', () => {
 			const controller = new AbortController();
 			try {
 				await expect(
-					setChatSessionPin('session/one', isPinned, controller.signal)
+					setConversationPin('session/one', isPinned, controller.signal)
 				).resolves.toMatchObject({ is_pinned: isPinned });
 				expect(fetch).toHaveBeenCalledWith(
 					'/api/v1/conversations/session%2Fone/pin',

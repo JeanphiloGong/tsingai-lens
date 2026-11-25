@@ -167,7 +167,7 @@ test.describe('page interaction audit', () => {
 			const second = first + 'specimen orientation, and heat treatment.\n\n$\\sigma = F/A$';
 			const started = new Date().toISOString();
 			const snapshot = (content: string, sequence: number, complete = false) => ({
-				response_id: 'response_1',
+				task_id: 'response_1',
 				sequence,
 				started_at: started,
 				updated_at: started,
@@ -287,13 +287,13 @@ test.describe('page interaction audit', () => {
 						'lens.chatSessionHistory.user_1:col_123',
 						JSON.stringify([
 							{
-								session_id: 'chat_work',
+								conversation_id: 'chat_work',
 								title: question,
 								created_at: started,
 								updated_at: started
 							},
 							{
-								session_id: 'chat_done',
+								conversation_id: 'chat_done',
 								title: 'Earlier comparison',
 								created_at: started,
 								updated_at: started
@@ -308,7 +308,7 @@ test.describe('page interaction audit', () => {
 				const id = path.split('/')[4];
 				requests.push(route.request().method());
 				if (!path.endsWith('/messages'))
-					return route.fulfill(json({ ...chatSession(), session_id: id }));
+					return route.fulfill(json({ ...chatSession(), conversation_id: id }));
 				if (id === 'chat_done')
 					return route.fulfill(
 						json({
@@ -326,12 +326,12 @@ test.describe('page interaction audit', () => {
 				if (!checkpoint)
 					return route.fulfill(json({ items: [], feedback: [], pending_approval: null, running }));
 				const items = [
-					agentMessage('work-q', 'user', question, { session_id: id, created_at: started })
+					agentMessage('work-q', 'user', question, { conversation_id: id, created_at: started })
 				];
 				if (toolResults)
 					items.push(
 						agentMessage('work-tools', 'assistant', '', {
-							session_id: id,
+							conversation_id: id,
 							tool_calls: [
 								{
 									tool_call_id: 'read_a',
@@ -348,7 +348,7 @@ test.describe('page interaction audit', () => {
 							]
 						}),
 						agentMessage('result-a', 'tool', '', {
-							session_id: id,
+							conversation_id: id,
 							tool_result: {
 								tool_call_id: 'read_a',
 								status: 'succeeded',
@@ -363,7 +363,7 @@ test.describe('page interaction audit', () => {
 				if (!running)
 					items.push(
 						agentMessage('result-b', 'tool', '', {
-							session_id: id,
+							conversation_id: id,
 							tool_result: {
 								tool_call_id: 'read_b',
 								status: 'succeeded',
@@ -378,7 +378,7 @@ test.describe('page interaction audit', () => {
 							'work-a',
 							'assistant',
 							'The reported heat treatments differ; compare matched tensile conditions.',
-							{ session_id: id }
+							{ conversation_id: id }
 						)
 					);
 				return route.fulfill(json({ items, feedback: [], pending_approval: null, running }));
@@ -389,13 +389,13 @@ test.describe('page interaction audit', () => {
 						items: [
 							{
 								...chatSession(),
-								session_id: 'chat_work',
+								conversation_id: 'chat_work',
 								title: question,
 								status: running ? 'running' : 'idle'
 							},
 							{
 								...chatSession(),
-								session_id: 'chat_done',
+								conversation_id: 'chat_done',
 								title: 'Earlier comparison',
 								status: 'idle'
 							}
@@ -485,14 +485,14 @@ test.describe('page interaction audit', () => {
 			await page.route('**/api/v1/conversations', (route) => {
 				const id = `scope_${++created}`;
 				turns.set(id, []);
-				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
+				return route.fulfill(json({ ...chatSession(), conversation_id: id }, 201));
 			});
 			await page.route('**/api/v1/conversations/*{,/messages}', (route) => {
 				const parts = new URL(route.request().url()).pathname.split('/');
 				const id = parts[4];
 				if (!turns.has(id)) return route.fulfill(json({ detail: 'Session not found' }, 404));
 				if (parts.at(-1) !== 'messages')
-					return route.fulfill(json({ ...chatSession(), session_id: id }));
+					return route.fulfill(json({ ...chatSession(), conversation_id: id }));
 				if (route.request().method() === 'GET')
 					return route.fulfill(
 						json({ items: turns.get(id), feedback: [], pending_approval: null })
@@ -501,14 +501,14 @@ test.describe('page interaction audit', () => {
 				submissions.push(id);
 				const messages = [
 					agentMessage(`${id}-user-${submissions.length}`, 'user', body.message, {
-						session_id: id,
+						conversation_id: id,
 						source_contexts: body.source_contexts ?? []
 					}),
 					agentMessage(
 						`${id}-answer-${submissions.length}`,
 						'assistant',
 						`Answer for ${id}. [Read paper](/workspaces/${workspaceId}/documents/${documentId}).`,
-						{ session_id: id }
+						{ conversation_id: id }
 					)
 				];
 				turns.set(id, [...turns.get(id)!, ...messages]);
@@ -554,7 +554,7 @@ test.describe('page interaction audit', () => {
 			await other.route('**/api/v1/conversations', (route) => {
 				const id = `scope_${++created}`;
 				turns.set(id, []);
-				return route.fulfill(json({ ...chatSession(), session_id: id }, 201));
+				return route.fulfill(json({ ...chatSession(), conversation_id: id }, 201));
 			});
 			await other.route('**/api/v1/conversations/*{,/messages}', (route) => {
 				const path = new URL(route.request().url()).pathname;
@@ -562,7 +562,7 @@ test.describe('page interaction audit', () => {
 					json(
 						path.endsWith('/messages')
 							? { items: [], feedback: [], pending_approval: null }
-							: { ...chatSession(), session_id: path.split('/')[4] }
+							: { ...chatSession(), conversation_id: path.split('/')[4] }
 					)
 				);
 			});
@@ -1785,7 +1785,7 @@ test.describe('page interaction audit', () => {
 						? {
 								feedback_id: feedback?.feedback_id ?? 'feedback-1',
 								message_id: 'answer',
-								session_id: sessionId,
+								conversation_id: sessionId,
 								user_id: 'user_1',
 								rating: input.rating,
 								reason: input.reason ?? null,
@@ -2367,7 +2367,7 @@ test.describe('page interaction audit', () => {
 				'lens.chatSessionHistory.user_1:col_123',
 				JSON.stringify(
 					Array.from({ length: 12 }, (_, index) => ({
-						session_id: `past_${index}`,
+						conversation_id: `past_${index}`,
 						title: `Prior alloy comparison ${index}`,
 						created_at: '2026-09-09T08:00:00Z',
 						updated_at: '2026-09-09T08:00:00Z'
@@ -2962,7 +2962,7 @@ async function mockMessageBranches(
 			: [])
 	];
 	const base = {
-		session_id: sessionId,
+		conversation_id: sessionId,
 		user_id: 'user_1',
 		workspace_id: workspaceId,
 		created_at: now(),
@@ -2998,7 +2998,7 @@ async function mockMessageBranches(
 						? []
 						: [
 								{
-									message: { ...message, session_id: owner },
+									message: { ...message, conversation_id: owner },
 									parent_message_id:
 										index > start
 											? items[index - 2].message_id
@@ -3017,7 +3017,7 @@ async function mockMessageBranches(
 			});
 			return route.fulfill(
 				json({
-					root_session_id: sessionId,
+					root_conversation_id: sessionId,
 					active_path: trajectories
 						.get(id)!
 						.filter((item) => item.role === 'user')
@@ -3041,10 +3041,10 @@ async function mockMessageBranches(
 				branchParents.set(branchId, body.mode === 'continue' ? originalMessage.message_id : null);
 				sessions.set(branchId, {
 					...base,
-					session_id: branchId,
-					root_session_id: sessionId,
-					parent_session_id: sessionId,
-					fork_message_id: 'question',
+					conversation_id: branchId,
+					root_conversation_id: sessionId,
+					parent_conversation_id: sessionId,
+					forked_from_message_id: 'question',
 					fork_position: forkPosition,
 					fork_content: body.message ?? originalMessage.content
 				});
@@ -3061,11 +3061,11 @@ async function mockMessageBranches(
 				const messages = [
 					...trajectories.get(id)!,
 					agentMessage(`${id}-question`, 'user', body.message, {
-						session_id: id,
+						conversation_id: id,
 						source_contexts: body.source_contexts ?? []
 					}),
 					agentMessage(`${id}-answer`, 'assistant', `Revised comparison ${sent.length}`, {
-						session_id: id
+						conversation_id: id
 					})
 				];
 				trajectories.set(id, messages);
@@ -3085,7 +3085,7 @@ async function mockMessageBranches(
 				options.condition === 'approval'
 					? {
 							tool_call_id: 'pending',
-							session_id: id,
+							conversation_id: id,
 							assistant_message_id: 'request',
 							position: 0,
 							name: 'create_objective_candidate',
@@ -3106,8 +3106,8 @@ async function mockMessageBranches(
 							? [
 									{
 										message_id: messages[0]?.message_id ?? original[0].message_id,
-										session_ids: [...sessions.keys()],
-										active_session_id: id
+										conversation_ids: [...sessions.keys()],
+										active_conversation_id: id
 									}
 								]
 							: [],
@@ -3115,7 +3115,7 @@ async function mockMessageBranches(
 						messages.length === sessions.get(id)!.fork_position && id !== sessionId
 							? {
 									...original[0],
-									session_id: id,
+									conversation_id: id,
 									source_contexts: branchParents.get(id) ? [] : [source],
 									content: sessions.get(id)!.fork_content
 								}
@@ -3342,7 +3342,7 @@ function agentMessage(
 ) {
 	return {
 		message_id: messageId,
-		session_id: sessionId,
+		conversation_id: sessionId,
 		role,
 		content,
 		created_at: now(),
@@ -3480,7 +3480,7 @@ function agentTurn(prompt: string, sequence: number) {
 	};
 	const approval = {
 		tool_call_id: callId,
-		session_id: sessionId,
+		conversation_id: sessionId,
 		assistant_message_id: `msg_call_${sequence}`,
 		position: 0,
 		name: 'create_objective_candidate',
@@ -4107,7 +4107,7 @@ function objectiveEvidence() {
 
 function chatSession() {
 	return {
-		session_id: sessionId,
+		conversation_id: sessionId,
 		user_id: 'user_1',
 		workspace_id: workspaceId,
 		created_at: now(),

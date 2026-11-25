@@ -180,11 +180,6 @@ test('administrator assigns the document profile model and ordinary accounts can
 	expect(assignmentWrites[1]).toEqual({ connection_id: 'vectors', expected_version: 0 });
 	await purpose.selectOption('research_analysis');
 	await expect(select).toHaveValue('');
-	await purpose.selectOption('feedback');
-	await select.selectOption('lab-a');
-	await save.click();
-	await expect(page.getByRole('status')).toHaveText('Assignment saved for new jobs.');
-	expect(assignmentWrites[2]).toEqual({ connection_id: 'lab-a', expected_version: 0 });
 
 	state.codes = ['users.manage'];
 	await page.reload();

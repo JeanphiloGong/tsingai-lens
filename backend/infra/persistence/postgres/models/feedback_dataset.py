@@ -1,4 +1,4 @@
-"""PostgreSQL records for maintained feedback datasets."""
+"""Historical PostgreSQL mappings for feedback dataset migration data."""
 
 from __future__ import annotations
 

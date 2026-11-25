@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 
+from agent.capabilities.registry import ToolSpec as AgentToolSpec
 from application.chat.capabilities import ToolSpec
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.model import (
@@ -88,10 +89,11 @@ class OpenAIChatModel:
         self,
         *,
         context: ChatModelContext,
-        tool_specs: tuple[ToolSpec, ...],
+        tool_specs: tuple[ToolSpec | AgentToolSpec, ...],
         text_delta_callback: Callable[[str], None] | None = None,
         timeout_seconds: float | None = None,
         max_output_tokens: int = 16_384,
+        system_prompt: str = RESEARCH_AGENT_SYSTEM_PROMPT,
     ) -> ModelTurn:
         timeout = timeout_seconds
         if self.request_timeout is not None:
@@ -103,7 +105,7 @@ class OpenAIChatModel:
             "max_completion_tokens": max_output_tokens,
             "messages": context.provider_messages(
                 RESEARCH_COMPACTION_SYSTEM_PROMPT if context.compacting else
-                RESEARCH_AGENT_SYSTEM_PROMPT
+                system_prompt
             ),
         }
         if self.reasoning_effort is not None:
@@ -116,7 +118,10 @@ class OpenAIChatModel:
             request.update(
                 tools=[spec.model_schema() for spec in tool_specs],
                 tool_choice="required" if context.require_tool_call else "auto",
-                parallel_tool_calls=all(spec.risk is ToolRisk.READ for spec in tool_specs),
+                parallel_tool_calls=all(
+                    isinstance(spec, ToolSpec) and spec.risk is ToolRisk.READ
+                    for spec in tool_specs
+                ),
             )
         request_tokens = ChatContextBuilder.estimate_tokens({
             "messages": request["messages"], "tools": request.get("tools", []),

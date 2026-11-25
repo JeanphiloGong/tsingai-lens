@@ -1,25 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
-import { stopChatResponse } from '$lib/agent/api';
+import { stopTask } from '$lib/agent/api';
 import { getTurnNotice } from '$lib/research/conversationPresentation';
 
 describe('stopping research responses', () => {
 	it('targets an exact response through the same-origin stop endpoint', async () => {
-		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					code: 200,
-					message: 'success',
-					meta: null,
-					data: { task_id: 'response/one', status: 'interrupted' }
-				})
-			)
-		);
+		const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+			const data = String(input).endsWith('/messages')
+				? { conversation: { current_task_id: 'task/one' }, items: [] }
+				: { task_id: 'task/one', status: 'interrupted', checkpoint_revision: 3 };
+			return Response.json({ code: 200, message: 'success', data, meta: null });
+		});
 		try {
-			await expect(stopChatResponse('session/one', 'response/one')).resolves.toMatchObject({
+			await expect(stopTask('session/one', 'task/one')).resolves.toMatchObject({
 				status: 'interrupted'
 			});
 			expect(fetch).toHaveBeenCalledWith(
-				'/api/v1/conversations/session%2Fone/tasks/response%2Fone/stop',
+				'/api/v1/conversations/session%2Fone/tasks/task%2Fone/stop',
 				expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
 			);
 		} finally {

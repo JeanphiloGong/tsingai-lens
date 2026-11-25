@@ -241,11 +241,8 @@ async def test_real_sdk_records_binding_without_recording_key(monkeypatch, postg
         ), tool_specs=())
     assert model.client.is_closed()
     assert requests[0].headers["authorization"] == f"Bearer {token}"
-    saved = (await repository.read_model_calls("s1"))[0]
-    assert saved.model_connection_id == "lab-a"
-    assert saved.request["reasoning_effort"] == "high"
     assert json.loads(requests[0].content)["reasoning_effort"] == "high"
-    assert token not in str(saved) and record.api_key_ciphertext.hex() not in str(saved)
+    assert token not in str(requests[0].content) and record.api_key_ciphertext.hex() not in str(requests[0].content)
 
 
 @pytest.mark.parametrize("failure", ["cancel", "snapshot"])

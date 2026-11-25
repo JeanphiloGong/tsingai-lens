@@ -17,6 +17,8 @@ from infra.persistence.postgres.models.conversation import (
     MessageFeedbackORM,
     MessageORM,
 )
+# Historical Feedback analysis mappings remain registered for Alembic metadata
+# and migration inspection. Runtime rating reads and writes use MessageFeedbackORM.
 from infra.persistence.postgres.models.feedback import FeedbackAnalysisResultORM, FeedbackSignalAnalysisResultORM, ToolFailureAnalysisResultORM, FeedbackAnnotationORM, FeedbackCaseORM, FeedbackReviewDecisionORM, FeedbackDatasetSnapshotORM
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetORM,

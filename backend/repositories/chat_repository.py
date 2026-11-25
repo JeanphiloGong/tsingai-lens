@@ -906,7 +906,9 @@ class ChatRepository:
                 else None
             )
 
-    async def start_model_call(self, call: ChatModelCall) -> ChatModelCall:
+    async def start_model_call(
+        self, call: ChatModelCall, *, task_id: str | None = None
+    ) -> ChatModelCall:
         async with AsyncSessionLocal() as db, db.begin():
             if await db.get(ConversationORM, call.session_id) is None:
                 raise ChatRecordNotFound(f"chat session not found: {call.session_id}")
@@ -938,7 +940,15 @@ class ChatRepository:
                     completion_tokens=existing.completion_tokens,
                     total_tokens=existing.total_tokens,
                 )
+            sequence = None
+            if task_id is not None:
+                sequence = await db.scalar(
+                    select(func.coalesce(func.max(ChatModelCallORM.sequence) + 1, 0))
+                    .where(ChatModelCallORM.task_id == task_id)
+                )
             row = ChatModelCallORM(
+                task_id=task_id,
+                sequence=sequence,
                 call_id=call.call_id,
                 session_id=call.session_id,
                 trigger_message_id=call.trigger_message_id,
@@ -1025,69 +1035,6 @@ class ChatRepository:
             row.completion_tokens = completion_tokens
             row.total_tokens = total_tokens
             await db.flush()
-            return ChatModelCall(
-                call_id=row.call_id,
-                session_id=row.session_id,
-                trigger_message_id=row.trigger_message_id,
-                response_message_id=row.response_message_id,
-                purpose=row.purpose,
-                model=row.model,
-                model_connection_id=row.model_connection_id,
-                request=dict(row.request),
-                request_digest=row.request_digest,
-                started_at=_iso(row.started_at),
-                status=row.status,
-                finished_at=_optional_iso(row.finished_at),
-                error_code=row.error_code,
-                provider_confirmed=row.provider_confirmed,
-                prompt_tokens=row.prompt_tokens,
-                completion_tokens=row.completion_tokens,
-                total_tokens=row.total_tokens,
-            )
-
-    async def read_model_calls(
-        self, session_id: str, *, limit: int = 50, offset: int = 0
-    ) -> tuple[ChatModelCall, ...]:
-        limit = max(1, min(int(limit), 200))
-        offset = max(0, int(offset))
-        async with AsyncSessionLocal() as db:
-            rows = await db.scalars(
-                select(ChatModelCallORM)
-                .where(ChatModelCallORM.session_id == session_id)
-                .order_by(ChatModelCallORM.started_at, ChatModelCallORM.call_id)
-                .offset(offset)
-                .limit(limit)
-            )
-            return tuple(
-                ChatModelCall(
-                    call_id=row.call_id,
-                    session_id=row.session_id,
-                    trigger_message_id=row.trigger_message_id,
-                    response_message_id=row.response_message_id,
-                    purpose=row.purpose,
-                    model=row.model,
-                    model_connection_id=row.model_connection_id,
-                    request=dict(row.request),
-                    request_digest=row.request_digest,
-                    started_at=_iso(row.started_at),
-                    status=row.status,
-                    finished_at=_optional_iso(row.finished_at),
-                    error_code=row.error_code,
-                    provider_confirmed=row.provider_confirmed,
-                    prompt_tokens=row.prompt_tokens,
-                    completion_tokens=row.completion_tokens,
-                    total_tokens=row.total_tokens,
-                )
-                for row in rows
-            )
-
-    async def read_model_call(
-        self, session_id: str, call_id: str
-    ) -> ChatModelCall | None:
-        async with AsyncSessionLocal() as db:
-            row = await db.get(ChatModelCallORM, call_id)
-            if row is None or row.session_id != session_id:
-                return None
             return ChatModelCall(
                 call_id=row.call_id,
                 session_id=row.session_id,

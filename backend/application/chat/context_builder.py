@@ -32,6 +32,7 @@ class ChatModelContext:
     model_call_purpose: str = "decision"
     model_call_response_message_id: str | None = None
     model_call_session_id: str | None = None
+    operation_messages: tuple[dict[str, Any], ...] = ()
 
     def provider_messages(self, system_prompt: str) -> list[dict[str, Any]]:
         messages = [{"role": "system", "content": system_prompt}]
@@ -78,6 +79,7 @@ class ChatModelContext:
             ], ensure_ascii=False)})
         else:
             messages.extend(ChatContextBuilder.model_message(message) for message in self.messages)
+            messages.extend(self.operation_messages)
         return messages
 
 

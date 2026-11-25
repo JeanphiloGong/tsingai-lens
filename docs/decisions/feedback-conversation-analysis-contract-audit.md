@@ -1,31 +1,28 @@
 # Conversation Case Analysis Contract Audit
 
-Status: deferred pending a domain contract. This audit records why the
-`conversation_case_analysis` task type is not implemented in the current
-checkpoint (`fc0c73a7`). It is a decision boundary, not an implementation
-specification.
+Status: historical. The former Feedback workbench and its analysis consumers
+were retired before a replacement contract was implemented. This audit records
+why the `conversation_case_analysis` task type was never added. It remains a
+decision boundary for a future redesign, not an active runtime specification.
 
 ## What the production code already means
 
-The feedback workbench currently has two different signals:
+The retired feedback workbench had two different signals:
 
-1. `ChatMessageFeedback` records an explicit thumbs rating and optional reason
-   or comment. `feedback_analysis` reads that signal and produces a candidate
+1. `ChatMessageFeedback` recorded an explicit thumbs rating and optional reason
+   or comment. `feedback_analysis` read that signal and produced a candidate
    analysis.
 2. A user message immediately following a final assistant answer can be an
    explicit natural-language challenge. `correction_signal_analysis` verifies
    the session, message order, final-answer shape, content digest, and
    challenge marker before producing an unresolved candidate.
 
-The second path deliberately does not classify every follow-up as a problem.
+The second path deliberately did not classify every follow-up as a problem.
 Its result cannot modify Chat, declare the answer wrong, supply a training
-target, or bypass annotation and review. The implementation is owned by:
-
-- `backend/application/feedback/correction_signal_handler.py`
-- `backend/application/feedback/correction_signal_worker.py`
-- `backend/domain/feedback/correction_signal.py`
-- `backend/repositories/analysis_job_repository.py`
-- `backend/migrations/versions/20260925_0076_feedback_signal_analysis.py`
+target, or bypass annotation and review. The runtime implementation was
+removed. The historical migration remains under
+`backend/migrations/versions/20260925_0076_feedback_signal_analysis.py` so old
+databases can still be inspected during migration.
 
 The shared `analysis_jobs` table is an execution envelope. A job's
 `job_type`, `payload_version`, and type-specific JSON payload are validated by

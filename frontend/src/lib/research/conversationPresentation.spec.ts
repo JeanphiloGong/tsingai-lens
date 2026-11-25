@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '$lib/conversation/api';
-import type { ChatToolResult, ChatTurn } from '$lib/agent/api';
+import type { ConversationMessage } from '$lib/conversation/api';
+import type { ChatToolResult, AgentTurn } from '$lib/agent/api';
 import {
 	buildChatPresentation,
 	getChatSessionActivity,
@@ -70,7 +70,7 @@ describe('getTurnRecoveryState', () => {
 });
 
 describe('getTurnNotice', () => {
-	const failed: ChatTurn = {
+	const failed: AgentTurn = {
 		status: 'failed',
 		completion_reason: null,
 		error_code: null,
@@ -171,17 +171,17 @@ describe('sanitizeStreamingCitationText', () => {
 
 function message(
 	messageId: string,
-	role: ChatMessage['role'],
+	role: ConversationMessage['role'],
 	options: {
 		content?: string;
 		toolCallId?: string;
 		toolName?: string;
 		toolResult?: ChatToolResult;
 	} = {}
-): ChatMessage {
+): ConversationMessage {
 	return {
 		message_id: messageId,
-		session_id: 'session_1',
+		conversation_id: 'session_1',
 		role,
 		content: options.content ?? '',
 		created_at: '2026-09-03T10:00:00+08:00',

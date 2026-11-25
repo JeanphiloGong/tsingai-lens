@@ -213,7 +213,7 @@ erDiagram
   preparation artifacts and `0055` merges public Objective result records.
   Revisions `20260924_0066`-`20260924_0070` add the immutable experiment,
   selection, comparison-group, and Finding graph. Revisions
-  `20260924_0071`-`20260924_0074` add the feedback workbench aggregates, and
+  `20260924_0071`-`20260924_0074` add the historical feedback workbench aggregates, and
   `20260924_0075` classifies retired per-document checkpoints for manual review.
 
 ## Research Execution Leases

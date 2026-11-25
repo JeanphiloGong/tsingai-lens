@@ -26,11 +26,6 @@ class ChatMessageFeedback:
     created_at: str
     updated_at: str
 
-    @property
-    def analysis_version_key(self) -> str:
-        """Identify the exact persisted feedback version used by analysis."""
-        return ":".join((self.feedback_id, self.updated_at, self.response_digest))
-
     def __post_init__(self) -> None:
         if self.reason is not None and self.rating != "not_helpful":
             raise ValueError("only negative feedback may have a reason")

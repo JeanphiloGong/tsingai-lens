@@ -1,5 +1,5 @@
-import type { ChatExecutionPlan, ChatProgress, ChatTurn, ChatResponseSnapshot } from '$lib/agent/api';
-import type { ChatMessage } from '$lib/conversation/api';
+import type { ChatExecutionPlan, ChatProgress, AgentTurn, TaskSnapshot } from '$lib/agent/api';
+import type { ConversationMessage } from '$lib/conversation/api';
 
 type RecoveryState =
 	| 'resourceLimited'
@@ -9,7 +9,7 @@ type RecoveryState =
 	| null;
 
 export function getTurnRecoveryState(
-	turn: Pick<ChatTurn | ChatResponseSnapshot, 'status' | 'completion_reason'> & {
+	turn: Pick<AgentTurn | TaskSnapshot, 'status' | 'completion_reason'> & {
 		execution_plan?: ChatExecutionPlan | null;
 		progress?: Pick<ChatProgress, 'execution_plan'>;
 	}
@@ -60,7 +60,7 @@ export function getModelServiceErrorKey(errorCode: string | null | undefined): s
 }
 
 /** Derive one terminal notice from the current turn, including restored snapshots. */
-export function getTurnNotice(turn: ChatTurn | ChatResponseSnapshot | null) {
+export function getTurnNotice(turn: AgentTurn | TaskSnapshot | null) {
 	if (!turn) return null;
 	if (turn.status === 'cancelled')
 		return {
@@ -112,7 +112,7 @@ export function sanitizeStreamingCitationText(content: string): string {
 export type ChatSessionActivity = 'running' | 'approval' | 'recovering' | 'idle' | 'unavailable';
 
 export function getChatSessionActivity(
-	messages: ChatMessage[],
+	messages: ConversationMessage[],
 	running: boolean,
 	pendingApprovalId: string | null
 ): ChatSessionActivity {
@@ -130,7 +130,7 @@ export function getChatSessionActivity(
 		: 'idle';
 }
 
-export function getRecoveredChatProgress(messages: ChatMessage[], now: number): ChatProgress {
+export function getRecoveredChatProgress(messages: ConversationMessage[], now: number): ChatProgress {
 	const questionIndex = messages.map((message) => message.role).lastIndexOf('user');
 	const currentTurn = questionIndex < 0 ? [] : messages.slice(questionIndex);
 	const calls = currentTurn.flatMap((message) => message.tool_calls);
@@ -160,7 +160,7 @@ export type CurrentReading = {
 	query: string;
 };
 
-export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
+export function getCurrentReadings(messages: ConversationMessage[]): CurrentReading[] {
 	const questionIndex = messages.map((message) => message.role).lastIndexOf('user');
 	if (questionIndex < 0) return [];
 	const kinds = {
@@ -318,15 +318,15 @@ const hiddenPresentationTools = new Set(['discover_research_tools']);
 export type ToolActivityOperation = {
 	toolCallId: string;
 	toolName: string | null;
-	requestMessage: ChatMessage | null;
-	resultMessage: ChatMessage | null;
+	requestMessage: ConversationMessage | null;
+	resultMessage: ConversationMessage | null;
 };
 
 export type ChatPresentationItem =
 	| {
 			kind: 'message';
 			id: string;
-			message: ChatMessage;
+			message: ConversationMessage;
 	  }
 	| {
 			kind: 'activity';
@@ -336,11 +336,11 @@ export type ChatPresentationItem =
 			status: 'completed' | 'in_progress' | 'pending' | 'failed';
 	  };
 
-function isToolActivity(message: ChatMessage) {
+function isToolActivity(message: ConversationMessage) {
 	return Boolean(message.tool_calls.length || message.tool_result);
 }
 
-function operationsFrom(messages: ChatMessage[]) {
+function operationsFrom(messages: ConversationMessage[]) {
 	const operations: ToolActivityOperation[] = [];
 
 	for (const message of messages) {
@@ -386,11 +386,11 @@ function activityStatus(operations: ToolActivityOperation[]) {
 }
 
 export function buildChatPresentation(
-	messages: ChatMessage[],
+	messages: ConversationMessage[],
 	pendingApprovalToolCallId: string | null = null
 ): ChatPresentationItem[] {
 	const items: ChatPresentationItem[] = [];
-	let activityMessages: ChatMessage[] = [];
+	let activityMessages: ConversationMessage[] = [];
 
 	const flushActivity = () => {
 		if (!activityMessages.length) return;

@@ -10,9 +10,9 @@
 		getTurnNotice
 	} from '$lib/research/conversationPresentation';
 	import { ArrowRight, RotateCw } from '@lucide/svelte';
-	import type { ChatToolCall, ChatProgress, ChatTurn, ChatResponseSnapshot } from '$lib/agent/api';
+	import type { Operation, ChatProgress, AgentTurn, TaskSnapshot } from '$lib/agent/api';
 	import type {
-		ChatMessage,
+		ConversationMessage,
 		ChatFeedbackInput,
 		ChatFeedbackState,
 		ChatBranchOptions
@@ -23,11 +23,12 @@
 	import ResearchActivity from './ResearchActivity.svelte';
 	import ResearchArtifact from './ResearchArtifact.svelte';
 	import ApprovalPanel from './ApprovalPanel.svelte';
-	export let messages: ChatMessage[] = [];
+	export let messages: ConversationMessage[] = [];
 	$: readings = getCurrentReadings(messages);
 	export let branches: ChatBranchOptions[] = [];
 	export let revisionDisabled = false;
-	export let onRevise: (message: ChatMessage, content?: string) => Promise<boolean> = async () =>
+	export let onFork: (message: ConversationMessage) => void = () => {};
+	export let onRevise: (message: ConversationMessage, content?: string) => Promise<boolean> = async () =>
 		false;
 	export let onSwitchVersion: (sessionId: string) => void = () => {};
 	export let running = false;
@@ -40,8 +41,8 @@
 		Boolean(pendingApproval) ||
 		Boolean(recoveringCallId || recoveryError);
 	$: questionsByAnswer = (() => {
-		let question: ChatMessage | undefined;
-		const questions = new SvelteMap<string, ChatMessage>();
+		let question: ConversationMessage | undefined;
+		const questions = new SvelteMap<string, ConversationMessage>();
 		for (const message of messages) {
 			if (message.role === 'user') question = message;
 			else if (message.role === 'assistant' && question)
@@ -70,12 +71,12 @@
 	export let onFeedback: (messageId: string, input: ChatFeedbackInput) => Promise<boolean>;
 	export let sessionId = '';
 	export let streamingText = '';
-	export let responseSnapshot: ChatResponseSnapshot | null = null;
-	export let pendingApproval: ChatToolCall | null = null;
+	export let responseSnapshot: TaskSnapshot | null = null;
+	export let pendingApproval: Operation | null = null;
 	export let workspaceId = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
-	export let settledTurn: ChatTurn | null = null;
+	export let settledTurn: AgentTurn | null = null;
 	$: currentTurn = responseSnapshot ?? settledTurn;
 	$: turnNotice = getTurnNotice(currentTurn);
 	$: executionPlan =
@@ -119,7 +120,7 @@
 		!messages.some((message) => message.message_id === responseSnapshot?.message_id)
 			? {
 					message_id: responseSnapshot.message_id,
-					session_id: sessionId,
+					conversation_id: sessionId,
 					role: 'assistant' as const,
 					content: responseSnapshot.content,
 					created_at: responseSnapshot.message_created_at ?? responseSnapshot.started_at,
@@ -140,7 +141,7 @@
 		!messages.some((message) => message.message_id.startsWith('local-stream-'));
 	$: recoveryMessage = {
 		message_id: `local-recovery-${sessionId}`,
-		session_id: sessionId,
+		conversation_id: sessionId,
 		role: 'assistant' as const,
 		content: '',
 		created_at: '',
@@ -308,6 +309,7 @@
 								disabled={actionsDisabled}
 								versions={branches.find((branch) => branch.message_id === item.message.message_id)}
 								retryAvailable={unansweredQuestions.has(item.message.message_id)}
+								{onFork}
 								{onRevise}
 								{onSwitchVersion}
 							/>{:else if item.message.role === 'assistant'}<AssistantMessage

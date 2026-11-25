@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from agent.application.runner import DurableRunner, RunnerState
 from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from agent.domain.models import AgentTask, Operation
+from application.chat.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
 
 
@@ -55,7 +56,7 @@ async def test_runner_reuses_committed_operation_after_checkpoint_interrupt():
     async def checkpoint(state: RunnerState) -> None:
         nonlocal committed, interrupt_after_checkpoint
         committed = state
-        if interrupt_after_checkpoint:
+        if interrupt_after_checkpoint and state.operations[0].status == 'succeeded':
             interrupt_after_checkpoint = False
             raise ExecutionInterrupted()
 
@@ -75,11 +76,14 @@ async def test_runner_reuses_committed_operation_after_checkpoint_interrupt():
         steps=(),
         messages=(),
     )
-    runner = DurableRunner(registry=registry, checkpoint=checkpoint)
+    async def respond(operations):
+        assert operations[0].result["data"] == {"hold_time_minutes": 30}
+        return ModelTurn(content="The inspected Source reports a 30-minute hold.")
+
+    runner = DurableRunner(registry=registry, checkpoint=checkpoint, respond=respond)
     with pytest.raises(ExecutionInterrupted):
         await runner.run(
             initial,
-            request="inspect Source",
             user_id="user-1",
             workspace_id="workspace-1",
         )
@@ -88,7 +92,6 @@ async def test_runner_reuses_committed_operation_after_checkpoint_interrupt():
 
     resumed = await runner.run(
         committed,
-        request="inspect Source",
         user_id="user-1",
         workspace_id="workspace-1",
     )
@@ -143,14 +146,17 @@ async def test_runner_records_unknown_tool_without_calling_a_handler():
     async def checkpoint(next_state: RunnerState) -> None:
         saved.append(next_state)
 
-    result = await DurableRunner(registry=registry, checkpoint=checkpoint).run(
+    async def respond(operations):
+        assert operations[0].error_code == "unknown_tool"
+        return ModelTurn(content="The requested tool is unavailable.")
+
+    result = await DurableRunner(registry=registry, checkpoint=checkpoint, respond=respond).run(
         state,
-        request="inspect Source",
         user_id="user-1",
         workspace_id="workspace-1",
     )
 
     assert calls == 0
-    assert saved[0].operations[0].status == "failed"
-    assert saved[0].operations[0].error_code == "unknown_tool"
+    assert saved[-2].operations[0].status == "failed"
+    assert saved[-2].operations[0].error_code == "unknown_tool"
     assert result.task.status == "completed"

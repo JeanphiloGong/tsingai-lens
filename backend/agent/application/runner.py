@@ -1,14 +1,16 @@
-"""Deterministic durable execution loop over an in-memory RunnerState."""
+"""Run model turns and persist each operation before advancing the Task."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, replace
+from uuid import uuid4
 
 from pydantic import ValidationError
 
 from agent.capabilities.registry import CapabilityRegistry, ToolExecutionContext
-from agent.domain.models import AgentTask, Operation, TaskStep
+from agent.domain.models import AgentTask, Operation, TaskStep, digest_arguments
+from application.chat.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
 
 
@@ -21,144 +23,127 @@ class RunnerState:
 
 
 Checkpoint = Callable[[RunnerState], Awaitable[None]]
+Respond = Callable[[tuple[Operation, ...]], Awaitable[ModelTurn]]
 
 
 class DurableRunner:
-    def __init__(self, *, registry: CapabilityRegistry, checkpoint: Checkpoint) -> None:
+    def __init__(self, *, registry: CapabilityRegistry, checkpoint: Checkpoint, respond: Respond) -> None:
         self.registry = registry
         self.checkpoint = checkpoint
+        self.respond = respond
 
     async def run(
-        self,
-        state: RunnerState,
-        *,
-        request: str,
-        user_id: str,
-        workspace_id: str,
+        self, state: RunnerState, *, user_id: str, workspace_id: str
     ) -> RunnerState:
-        if state.task.status in {"completed", "failed", "cancelled"}:
+        if state.task.status in {"completed", "failed", "cancelled", "approval_required"}:
             return state
         if state.task.status in {"accepted", "interrupted"}:
-            state = replace(state, task=state.task.transition("running"))
-        if state.task.status == "approval_required":
-            return state
+            state = await self._save(state, status="running")
 
-        pending = next(
-            (
-                item
-                for item in state.operations
-                if item.status in {"requested", "approved"}
-            ),
-            None,
-        )
-        if pending is not None:
-            context = ToolExecutionContext(
-                user_id=user_id,
-                workspace_id=workspace_id,
-                task_id=state.task.task_id,
-                operation_id=pending.operation_id,
-                tool_call_id=pending.tool_call_id,
+        while True:
+            pending = next(
+                (item for item in state.operations if item.status in {
+                    "requested", "approved", "running", "needs_reconciliation", "approval_required",
+                }),
+                None,
             )
-            try:
-                result = await self.registry.execute(
-                    pending.name,
-                    pending.arguments,
-                    context=context,
+            if pending is not None:
+                if pending.status in {"running", "needs_reconciliation"}:
+                    return await self._save(
+                        state, status="interrupted",
+                        operation=replace(pending, status="needs_reconciliation"),
+                    )
+                if pending.status == "approval_required":
+                    return await self._save(state, status="approval_required")
+                pending = replace(pending, status="running")
+                state = await self._save(state, operation=pending)
+                result = await self._execute(pending, state.task, user_id, workspace_id)
+                state = await self._save(
+                    state,
+                    operation=replace(
+                        pending,
+                        status="succeeded" if result.status is ToolResultStatus.SUCCEEDED else "failed",
+                        result=asdict(result),
+                        error_code=result.error_code,
+                        error_message=result.error_message,
+                    ),
                 )
-            except LookupError as error:
-                if str(error) != "unknown_tool":
-                    raise
-                result = ChatToolResult(
-                    tool_call_id=context.tool_call_id or pending.operation_id,
-                    status=ToolResultStatus.FAILED,
-                    error_code="unknown_tool",
-                    error_message="tool is not registered",
-                )
-            except ValidationError as error:
-                result = ChatToolResult(
-                    tool_call_id=context.tool_call_id or pending.operation_id,
-                    status=ToolResultStatus.FAILED,
-                    error_code="invalid_arguments",
-                    error_message=str(error),
-                )
-            operation_status = (
-                "succeeded"
-                if result.status is ToolResultStatus.SUCCEEDED
-                else "failed"
-            )
-            error_code = result.error_code
-            error_message = result.error_message
-            if operation_status != "succeeded":
-                error_code = error_code or "tool_execution_failed"
-                error_message = error_message or "tool did not succeed"
-            updated_operation = replace(
-                pending,
-                status=operation_status,
-                result=asdict(result),
-                error_code=error_code,
-                error_message=error_message,
-            )
-            next_state = replace(
-                state,
-                task=state.task.checkpoint(state.task.checkpoint_revision + 1),
-                operations=tuple(
-                    updated_operation
-                    if item.operation_id == pending.operation_id
-                    else item
-                    for item in state.operations
-                ),
-            )
-            await self.checkpoint(next_state)
-            state = next_state
+                continue
 
-        if any(
-            message.get("role") == "assistant"
-            and message.get("produced_by_task_id") == state.task.task_id
-            for message in state.messages
-        ):
-            return state
+            if len(state.operations) >= 24:
+                return await self._save(state, status="failed")
+            turn = await self.respond(state.operations)
+            if not turn.tool_calls:
+                return await self._save(
+                    state, status="completed", message={"role": "assistant", "content": turn.content, "produced_by_task_id": state.task.task_id}
+                )
+            # Persist every requested operation before running any of them.
+            for call in turn.tool_calls:
+                operation_id = f"op_{uuid4().hex}"
+                arguments = dict(call.arguments)
+                spec = self.registry.get(call.name)
+                requires_approval = spec is not None and spec.requires_approval
+                state = await self._save(
+                    state,
+                    status="approval_required" if requires_approval else state.task.status,
+                    message={"role": "assistant", "content": turn.content, "message_id": f"msg_{uuid4().hex}"},
+                    operation=Operation(
+                        operation_id, state.task.task_id, call.name, digest_arguments(arguments),
+                        "approval_required" if requires_approval else "requested",
+                        arguments=arguments,
+                        tool_call_id=f"call_{uuid4().hex}",
+                    ),
+                )
+                if requires_approval:
+                    return state
 
-        committed = {
-            item.operation_id
-            for item in state.operations
-            if item.status == "succeeded"
-        }
-        result = next(
-            (
-                item.result
-                for item in state.operations
-                if item.status == "succeeded" and item.result is not None
-            ),
-            None,
+    async def _save(
+        self, state: RunnerState, *, status=None, operation: Operation | None = None,
+        message: dict[str, object] | None = None,
+    ) -> RunnerState:
+        task = state.task.checkpoint(state.task.checkpoint_revision + 1)
+        if status is not None and status != task.status:
+            task = task.transition(status)
+        operations = state.operations
+        if operation is not None:
+            if message is not None:
+                operation = replace(operation, assistant_message_id=str(message["message_id"]))
+            if any(item.operation_id == operation.operation_id for item in operations):
+                operations = tuple(
+                    operation if item.operation_id == operation.operation_id else item
+                    for item in operations
+                )
+            else:
+                operations += (operation,)
+        next_state = replace(
+            state, task=task, operations=operations,
+            messages=state.messages + (message,) if message is not None else state.messages,
         )
-        result_data = (
-            result.get("data", result) if result is not None else None
+        await self.checkpoint(next_state)
+        return next_state
+
+    async def _execute(
+        self, operation: Operation, task: AgentTask, user_id: str, workspace_id: str
+    ) -> ChatToolResult:
+        context = ToolExecutionContext(
+            user_id=user_id, workspace_id=workspace_id, task_id=task.task_id,
+            operation_id=operation.operation_id,
+            tool_call_id=operation.tool_call_id or operation.operation_id,
         )
-        hold_time = (
-            result_data.get("hold_time_minutes")
-            if isinstance(result_data, dict)
-            else None
-        )
-        if isinstance(hold_time, int) and not isinstance(hold_time, bool):
-            content = f"The inspected Source reports a {hold_time}-minute hold."
-        elif committed:
-            content = "The inspected Source reports a 30-minute hold."
-        else:
-            content = request
-        final = {
-            "role": "assistant",
-            "content": content,
-            "produced_by_task_id": state.task.task_id,
-        }
-        final_state = replace(
-            state,
-            task=state.task.checkpoint(
-                state.task.checkpoint_revision + 1
-            ).transition("completed"),
-            messages=state.messages + (final,),
-        )
-        await self.checkpoint(final_state)
-        return final_state
+        spec = self.registry.get(operation.name)
+        if spec is None:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="unknown_tool", error_message="Tool is not registered.",
+            )
+        try:
+            arguments = spec.input_model.model_validate(operation.arguments)
+        except ValidationError as exc:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="invalid_arguments", error_message=exc.title,
+            )
+        return await spec.handler(context, arguments)
 
 
 __all__ = ["Checkpoint", "DurableRunner", "RunnerState"]

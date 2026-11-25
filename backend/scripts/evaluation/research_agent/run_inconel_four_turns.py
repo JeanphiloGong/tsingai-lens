@@ -120,25 +120,12 @@ async def run(args):
                 ]
                 seen_calls.update(call.tool_call_id for call in new_calls)
                 snapshot = await ChatRepo.read_response_snapshot(session.session_id)
-                audits = await ChatRepo.read_model_calls(session_id=session.session_id)
                 report["turns"].append(
                     {
                         "number": number,
                         "response": response,
                         "trajectory": trajectory,
                         "calls": new_calls,
-                        "model_calls": [
-                            {
-                                "call_id": call.call_id,
-                                "purpose": call.purpose,
-                                "status": call.status,
-                                "error_code": call.error_code,
-                                "prompt_tokens": call.prompt_tokens,
-                                "completion_tokens": call.completion_tokens,
-                                "total_tokens": call.total_tokens,
-                            }
-                            for call in audits
-                        ],
                         "progress": snapshot.progress if snapshot is not None else None,
                     }
                 )

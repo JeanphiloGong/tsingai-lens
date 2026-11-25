@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { t } from '../../../_shared/i18n';
-	import type { ChatMessage } from '$lib/conversation/api';
+	import type { ConversationMessage } from '$lib/conversation/api';
 	import type { ToolActivityOperation } from '$lib/research/conversationPresentation';
 	import {
 		numberValue,
@@ -14,7 +14,7 @@
 	import MessageContent from './MessageContent.svelte';
 	type ResearchProcessStep = { step_id: string; status: string };
 	export let artifact: ToolActivityOperation;
-	function findingStatement(message: ChatMessage) {
+	function findingStatement(message: ConversationMessage) {
 		const finding = message.tool_result?.data.finding;
 		return finding &&
 			typeof finding === 'object' &&
@@ -24,7 +24,7 @@
 			: '';
 	}
 
-	function resultResearchSteps(message: ChatMessage): ResearchProcessStep[] {
+	function resultResearchSteps(message: ConversationMessage): ResearchProcessStep[] {
 		if (artifact.toolName !== 'inspect_research_process') return [];
 		const process = message.tool_result?.data.process;
 		if (!process || typeof process !== 'object' || !('steps' in process)) return [];
@@ -61,7 +61,7 @@
 		}
 	}
 
-	function researchProcessContext(message: ChatMessage) {
+	function researchProcessContext(message: ConversationMessage) {
 		const process = message.tool_result?.data.process;
 		if (!process || typeof process !== 'object') return '';
 		const active = 'active_document' in process ? process.active_document : null;
@@ -80,19 +80,19 @@
 		return activeTitle;
 	}
 
-	function resultDrafts(message: ChatMessage) {
+	function resultDrafts(message: ConversationMessage) {
 		const drafts = message.tool_result?.data.drafts;
 		return (drafts ?? []) as Record<string, unknown>[];
 	}
 
-	function resultDraft(message: ChatMessage): Record<string, unknown> | null {
+	function resultDraft(message: ConversationMessage): Record<string, unknown> | null {
 		const draft = message.tool_result?.data.draft;
 		return draft && typeof draft === 'object' && !Array.isArray(draft)
 			? (draft as Record<string, unknown>)
 			: null;
 	}
 
-	function resultDraftDetails(message: ChatMessage) {
+	function resultDraftDetails(message: ConversationMessage) {
 		const draft = resultDraft(message);
 		if (!draft) return [];
 		const details: Array<{ label: string; value: string }> = [];
@@ -134,7 +134,7 @@
 		}
 	}
 
-	function resultPlanData(message: ChatMessage): Record<string, unknown> | null {
+	function resultPlanData(message: ConversationMessage): Record<string, unknown> | null {
 		const data = message.tool_result?.data ?? {};
 		const plan = data.plan;
 		if (plan && typeof plan === 'object' && !Array.isArray(plan)) {
@@ -143,27 +143,27 @@
 		return data;
 	}
 
-	function resultPlanContent(message: ChatMessage) {
+	function resultPlanContent(message: ConversationMessage) {
 		const toolName = artifact.toolName;
 		if (toolName !== 'propose_research_plan' && toolName !== 'create_research_plan') return '';
 		const data = resultPlanData(message);
 		return data && typeof data.content === 'string' ? data.content.trim() : '';
 	}
 
-	function resultPlanTitle(message: ChatMessage) {
+	function resultPlanTitle(message: ConversationMessage) {
 		const toolName = artifact.toolName;
 		if (toolName !== 'propose_research_plan' && toolName !== 'create_research_plan') return '';
 		const data = resultPlanData(message);
 		return data && typeof data.title === 'string' ? data.title.trim() : '';
 	}
 
-	function resultTableMarkdown(message: ChatMessage) {
+	function resultTableMarkdown(message: ConversationMessage) {
 		if (artifact.toolName !== 'inspect_table') return '';
 		const markdown = message.tool_result?.data.table_markdown;
 		return typeof markdown === 'string' ? markdown.trim() : '';
 	}
 
-	function resultSourceContent(message: ChatMessage) {
+	function resultSourceContent(message: ConversationMessage) {
 		if (artifact.toolName !== 'read_source') return '';
 		const data = message.tool_result?.data ?? {};
 		for (const key of ['content', 'source_content', 'source_excerpt', 'text']) {
@@ -173,7 +173,7 @@
 		return '';
 	}
 
-	function resultContinuationNote(message: ChatMessage) {
+	function resultContinuationNote(message: ConversationMessage) {
 		const name = artifact.toolName;
 		const data = message.tool_result?.data ?? {};
 		if (
@@ -193,7 +193,7 @@
 		return '';
 	}
 
-	function resultSourceMatches(message: ChatMessage) {
+	function resultSourceMatches(message: ConversationMessage) {
 		if (artifact.toolName !== 'search_sources') return [];
 		const matches = message.tool_result?.data.matches;
 		return (matches ?? []) as Record<string, unknown>[];
@@ -206,7 +206,7 @@
 		return $t('researchAgent.capability.sourcePassage');
 	}
 
-	function resultQuality(message: ChatMessage) {
+	function resultQuality(message: ConversationMessage) {
 		if (artifact.toolName !== 'assess_objective_quality') return null;
 		return message.tool_result?.data ?? null;
 	}

@@ -7,6 +7,8 @@ from infra.identity.client import SESSION_COOKIE_NAME
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
 from infra.persistence.postgres.models.workspace import WorkspaceORM
 from infra.persistence.postgres.models.conversation import ConversationORM, MessageORM
+from agent.application.task_execution import task_execution
+from agent.repositories.task_repository import TaskRepository
 from main import app
 
 
@@ -15,7 +17,7 @@ BASE = "/api/v1/conversations"
 
 
 async def test_task_api_approval_resume_and_sse(
-    postgres_session_factory, identity_subjects
+    postgres_session_factory, identity_subjects, monkeypatch
 ):
     owner = await identity_subjects.create_subject(email="agent-v4-owner@example.test")
     outsider = await identity_subjects.create_subject(
@@ -39,6 +41,7 @@ async def test_task_api_approval_resume_and_sse(
                 updated_at=now,
             )
         )
+        await db.flush()
         db.add(
             ConversationORM(
                 conversation_id="agent-v4-conversation",
@@ -100,6 +103,18 @@ async def test_task_api_approval_resume_and_sse(
                 updated_at=now,
             )
         )
+
+    async def execute_without_provider(*, task_id, user_id, conversation_id=None, resume_revision=None):
+        if resume_revision is not None:
+            await TaskRepository().resume_task(
+                conversation_id=conversation_id,
+                task_id=task_id,
+                user_id=user_id,
+                expected_checkpoint_revision=resume_revision,
+            )
+        return "running"
+
+    monkeypatch.setattr(task_execution, "run_task", execute_without_provider)
 
     async with (
         AsyncClient(

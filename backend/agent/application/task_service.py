@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+from agent.application.task_execution import task_execution
 from agent.repositories.task_repository import TaskRepository
 
 
@@ -60,16 +61,16 @@ class TaskService:
         user_id: str,
         request_id: str,
         expected_checkpoint_revision: int,
-    ) -> dict[str, object]:
+    ) -> None:
         logger.info(
             "task resume requested",
             extra={"request_id": request_id, "task_id": task_id},
         )
-        return await self.repository.resume_task(
+        await task_execution.run_task(
             conversation_id=conversation_id,
             task_id=task_id,
             user_id=user_id,
-            expected_checkpoint_revision=expected_checkpoint_revision,
+            resume_revision=expected_checkpoint_revision,
         )
 
     async def decide(
@@ -99,6 +100,7 @@ class TaskService:
             decision=decision,
             arguments_digest=arguments_digest,
         )
+        await task_execution.run_task(task_id=task_id, user_id=user_id)
 
     async def events(
         self,

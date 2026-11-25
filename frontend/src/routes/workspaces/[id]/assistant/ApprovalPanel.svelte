@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { Check, X, FileCheck2, ChevronDown } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatToolCall } from '$lib/agent/api';
+	import type { Operation } from '$lib/agent/api';
 	import { fetchWorkspaceObjectives } from '../../../_shared/researchView';
 	import { capabilityName, formatValue } from '$lib/research/capabilityPresentation';
-	export let call: ChatToolCall;
+	export let call: Operation;
 	export let workspaceId = '';
 	export let deciding = false;
 	export let onDecide: (decision: 'approved' | 'rejected') => void;
@@ -21,7 +21,7 @@
 	$: review = reviewFields.filter(
 		(key) => call.arguments[key] != null && formatValue(call.arguments[key]) !== ''
 	);
-	function approvalArguments(call: ChatToolCall) {
+	function approvalArguments(call: Operation) {
 		return Object.entries(call.arguments).filter(
 			([key]) => !review.includes(key) && !isInternalReferenceKey(key)
 		);
@@ -58,7 +58,7 @@
 		}
 	}
 
-	function approvalBody(call: ChatToolCall) {
+	function approvalBody(call: Operation) {
 		if (call.name === 'start_research_process') {
 			return $t('researchAgent.approval.startResearchBody');
 		}
@@ -88,7 +88,7 @@
 		return $t('researchAgent.approval.body');
 	}
 
-	function approvalAction(call: ChatToolCall) {
+	function approvalAction(call: Operation) {
 		if (call.name === 'start_research_process') {
 			return $t('researchAgent.approval.startResearch');
 		}

@@ -17,7 +17,7 @@ from infra.persistence.postgres.models.model_connection import (
 )
 
 
-ModelPurpose = Literal["document_profile", "research_analysis", "feedback", "embedding"]
+ModelPurpose = Literal["document_profile", "research_analysis", "embedding"]
 ModelKind = Literal["chat", "embedding"]
 
 

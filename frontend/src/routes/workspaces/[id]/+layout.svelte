@@ -26,11 +26,10 @@
 	$: currentPath = $page.url.pathname;
 	$: isFindingRoute = Boolean($page.params.objective_id);
 	$: isObjectivesRoute = currentPath.startsWith(`/workspaces/${workspaceId}/objectives`);
-	$: isMoreRoute = ['graph', 'feedback', 'settings'].some((route) =>
+	$: isMoreRoute = ['graph', 'settings'].some((route) =>
 		currentPath.startsWith(`/workspaces/${workspaceId}/${route}`)
 	);
 	let moreMenu: HTMLDetailsElement;
-	$: isFeedbackRoute = currentPath.startsWith(`/workspaces/${workspaceId}/feedback`);
 	$: statusTone = processingDocumentCount ? 'processing' : readyDocumentCount ? 'ready' : 'pending';
 	$: statusLabel = processingDocumentCount
 		? $t('overview.currentModel.status.processing')
@@ -84,7 +83,7 @@
 	}
 </script>
 
-{#if isObjectivesRoute || isFeedbackRoute}
+{#if isObjectivesRoute}
 	<div class="workspace-context-bar">
 		<a
 			href={resolve('/workspaces/[id]', { id: workspaceId })}
@@ -144,7 +143,7 @@
 	<details class="workspace-tabs__more" class:active={isMoreRoute} bind:this={moreMenu}>
 		<summary on:keydown={closeMoreOnEscape}>{$t('workspace.moreLabel')}</summary>
 		<div class="workspace-tabs__menu">
-			{#each ['graph', 'feedback', 'settings'] as route (route)}
+			{#each ['graph', 'settings'] as route (route)}
 				{@const href = `/workspaces/${workspaceId}/${route}`}
 				{@const active = currentPath.startsWith(href)}
 				<a

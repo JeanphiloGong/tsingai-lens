@@ -14,7 +14,7 @@
 	import type { ChatSessionActivity } from '$lib/research/conversationPresentation';
 
 	type SessionSummary = {
-		session_id: string;
+		conversation_id: string;
 		title: string;
 		updated_at: string;
 		is_pinned: boolean;
@@ -85,9 +85,9 @@
 	>
 		<h2>{$t('researchAgent.historyTitle')}</h2>
 		<div class="history-list" on:scroll={loadMoreOnScroll}>
-			{#each history as item (item.session_id)}
-				{@const activity = sessionActivities[item.session_id]}
-				<div class="history-item" class:active={item.session_id === activeSessionId}>
+			{#each history as item (item.conversation_id)}
+				{@const activity = sessionActivities[item.conversation_id]}
+				<div class="history-item" class:active={item.conversation_id === activeSessionId}>
 					<button
 						class="history-select"
 						title={item.title}
@@ -95,7 +95,7 @@
 						{disabled}
 						on:click={() => {
 							mobileHistoryOpen = false;
-							onSwitchSession(item.session_id);
+							onSwitchSession(item.conversation_id);
 						}}
 					>
 						<span class="history-title">{item.title}</span>
@@ -118,7 +118,7 @@
 						{disabled}
 						aria-label={$t('researchAgent.renameSession')}
 						title={$t('researchAgent.renameSession')}
-						on:click={() => onRenameSession(item.session_id)}
+						on:click={() => onRenameSession(item.conversation_id)}
 						><Pencil size={14} aria-hidden="true" /></button
 					>
 					<button
@@ -131,10 +131,10 @@
 						)}
 						title={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
 						aria-pressed={item.is_pinned}
-						aria-busy={pinningSessionId === item.session_id}
-						on:click|stopPropagation={() => onTogglePin(item.session_id)}
+						aria-busy={pinningSessionId === item.conversation_id}
+						on:click|stopPropagation={() => onTogglePin(item.conversation_id)}
 					>
-						{#if pinningSessionId === item.session_id}<LoaderCircle size={14} />
+						{#if pinningSessionId === item.conversation_id}<LoaderCircle size={14} />
 						{:else if item.is_pinned}<PinOff size={14} aria-hidden="true" />
 						{:else}<Pin size={14} aria-hidden="true" />{/if}
 					</button>
@@ -144,7 +144,7 @@
 						{disabled}
 						aria-label={$t('researchAgent.deleteSession')}
 						title={$t('researchAgent.deleteSession')}
-						on:click|stopPropagation={() => onDeleteSession(item.session_id)}
+						on:click|stopPropagation={() => onDeleteSession(item.conversation_id)}
 						><Trash2 size={14} aria-hidden="true" /></button
 					>
 				</div>

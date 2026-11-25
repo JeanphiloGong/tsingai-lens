@@ -225,13 +225,3 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
     assert saved[: len(history)] == tuple(history)
     assert saved[-1].content == answer
     assert restored["items"][-1]["content"] == answer
-    audits = await fixture.repository.read_model_calls(session_id=session.session_id)
-    assert any(
-        call.error_code == "context_window_exceeded"
-        and call.status == "provider_failed"
-        for call in audits
-    )
-    assert any(
-        call.purpose == "decision" and call.status == "provider_succeeded"
-        for call in audits
-    )

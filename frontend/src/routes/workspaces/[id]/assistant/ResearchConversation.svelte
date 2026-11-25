@@ -9,23 +9,26 @@
 
 	import { workspaces } from '$lib/workspace/workspaces';
 	import {
-		createChatSession,
-		deleteChatSession,
-		setChatSessionPin,
-		setChatSessionTitle,
-		listChatSessions,
+		createConversation,
+		deleteConversation,
+		setConversationPin,
+		setConversationTitle,
+		listConversations,
 		branchChatMessage,
-		fetchChatSession,
-		fetchChatTree,
+		selectConversationPath,
+		forkConversation,
+		sendConversationMessage,
+		fetchConversation,
+		fetchConversationTree,
 		setChatMessageFeedback,
 		type ChatFeedbackInput,
 		type ChatBranchOptions,
 		type ChatFeedbackState,
 		type ChatMessageFeedback,
-		type ChatMessage,
-		type ChatSession,
-		type ChatTree,
-		type ChatTreeNode
+		type ConversationMessage,
+		type Conversation,
+		type ConversationTreeData,
+		type ConversationTreeNode
 	} from '$lib/conversation/api';
 	import { fetchModelConnections, type ModelConnectionChoice } from '$lib/agent/model-connections';
 	import {
@@ -35,17 +38,17 @@
 		type ChatSourceContext
 	} from '$lib/document/source-context';
 	import {
-		decideChatToolCall,
-		fetchChatTrajectory,
+		decideOperation,
+		fetchTaskState,
 		appendChatProgress,
-		streamChatMessage,
-		streamChatUpdates,
-		stopChatResponse,
+		resumeTask,
+		readTaskUpdates,
+		stopTask,
 		type ChatProgress,
-		type ChatResponseSnapshot,
-		type ChatTrajectory,
-		type ChatToolCall,
-		type ChatTurn
+		type TaskSnapshot,
+		type TaskState,
+		type Operation,
+		type AgentTurn
 	} from '$lib/agent/api';
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
@@ -93,7 +96,7 @@
 	);
 	let showHistory = false;
 	let showTree = false;
-	let tree: ChatTree | null = null;
+	let tree: ConversationTreeData | null = null;
 	let treeLoading = false;
 	let treeError = '';
 	let treeController: AbortController | null = null;
@@ -111,7 +114,7 @@
 	$: checkpointQuestion = checkpointIndex < 0 ? '' : messages[checkpointIndex].content;
 
 	type StoredChatSession = {
-		session_id: string;
+		conversation_id: string;
 		title: string;
 		created_at: string;
 		updated_at: string;
@@ -119,16 +122,16 @@
 		is_pinned: boolean;
 	};
 
-	let session: ChatSession | null = null;
-	let messages: ChatMessage[] = [];
+	let session: Conversation | null = null;
+	let messages: ConversationMessage[] = [];
 	let branches: ChatBranchOptions[] = [];
-	let branchDraft: ChatMessage | null = null;
+	let branchDraft: ConversationMessage | null = null;
 	let running = false;
 	let revising = false;
 	let revisionRequest: { key: string; id: string } | null = null;
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
-	let pendingApproval: ChatToolCall | null = null;
-	let retryableDecision: ChatToolCall | null = null;
+	let pendingApproval: Operation | null = null;
+	let retryableDecision: Operation | null = null;
 	let permissionsPanel: { openPanel: () => void } | null = null;
 	let history: StoredChatSession[] = [];
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
@@ -165,10 +168,10 @@
 		Boolean(deletingSessionId || pinningSessionId) ||
 		renameSaving;
 	let progress: ChatProgress | null = null;
-	let settledTurn: ChatTurn | null = null;
+	let settledTurn: AgentTurn | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
-	let responseSnapshot: ChatResponseSnapshot | null = null;
+	let responseSnapshot: TaskSnapshot | null = null;
 	let modelConnections: ModelConnectionChoice[] = [];
 	let selectedModelConnectionId = '';
 	let modelPicker: HTMLDetailsElement | null = null;
@@ -270,7 +273,7 @@
 			appliedReviewKey = reviewKey;
 		}
 	}
-	$: activeSessionId = session?.session_id ?? '';
+	$: activeSessionId = session?.conversation_id ?? '';
 	$: if (browser && (workspaceId !== loadedWorkspaceId || userId !== loadedUserId)) {
 		loadedWorkspaceId = workspaceId;
 		loadedUserId = userId;
@@ -279,7 +282,7 @@
 	$: if (session && !loading) {
 		sessionActivities = {
 			...sessionActivities,
-			[session.session_id]: recoveryError
+			[session.conversation_id]: recoveryError
 				? 'unavailable'
 				: getChatSessionActivity(
 						messages,
@@ -304,7 +307,7 @@
 			workspaceId,
 			session
 				? {
-						sessionId: session.session_id,
+						sessionId: session.conversation_id,
 						messages: messages.filter((message) => !message.message_id.startsWith('local-'))
 					}
 				: undefined
@@ -341,9 +344,9 @@
 			const parsed = raw ? JSON.parse(raw) : [];
 			if (!Array.isArray(parsed)) return [];
 			return parsed
-				.filter((item) => item && typeof item.session_id === 'string')
+				.filter((item) => item && typeof item.conversation_id === 'string')
 				.map((item) => ({
-					session_id: item.session_id,
+					conversation_id: item.conversation_id,
 					title:
 						typeof item.title === 'string' && item.title.trim()
 							? item.title
@@ -365,7 +368,7 @@
 			(a, b) =>
 				Number(b.is_pinned) - Number(a.is_pinned) ||
 				Date.parse(b.updated_at) - Date.parse(a.updated_at) ||
-				(a.session_id < b.session_id ? 1 : a.session_id > b.session_id ? -1 : 0)
+				(a.conversation_id < b.conversation_id ? 1 : a.conversation_id > b.conversation_id ? -1 : 0)
 		);
 		if (!browser) return;
 		window.localStorage.setItem(historyStorageKey(), JSON.stringify(history));
@@ -377,19 +380,19 @@
 		return firstLine.length > 160 ? `${firstLine.slice(0, 160)}...` : firstLine;
 	}
 
-	function titleFromMessages(nextMessages: ChatMessage[]) {
+	function titleFromMessages(nextMessages: ConversationMessage[]) {
 		const firstUserMessage = nextMessages.find((message) => message.role === 'user');
 		const text = firstUserMessage?.content ?? '';
 		return titleFromText(text);
 	}
 
-	function upsertHistory(nextSession: ChatSession, title = '') {
+	function upsertHistory(nextSession: Conversation, title = '') {
 		const stored = readHistory();
-		const previous = stored.find((item) => item.session_id === nextSession.session_id);
-		const existing = stored.filter((item) => item.session_id !== nextSession.session_id);
+		const previous = stored.find((item) => item.conversation_id === nextSession.conversation_id);
+		const existing = stored.filter((item) => item.conversation_id !== nextSession.conversation_id);
 		writeHistory([
 			{
-				session_id: nextSession.session_id,
+				conversation_id: nextSession.conversation_id,
 				title:
 					nextSession.title ||
 					title ||
@@ -408,15 +411,15 @@
 	async function refreshSessionTitle(attempt = 0) {
 		clearTimeout(titleTimer);
 		if (!session || session.title) return;
-		const sessionId = session.session_id;
+		const sessionId = session.conversation_id;
 		const generation = sessionGeneration;
 		const ownerWorkspaceId = workspaceId;
 		const historyRequest = historyGeneration;
 		try {
-			const saved = await fetchChatSession(sessionId, sessionController?.signal);
+			const saved = await fetchConversation(sessionId, sessionController?.signal);
 			if (
 				!isCurrentSession(generation, ownerWorkspaceId) ||
-				session?.session_id !== sessionId ||
+				session?.conversation_id !== sessionId ||
 				historyRequest !== historyGeneration ||
 				session.title
 			)
@@ -440,11 +443,11 @@
 	) {
 		const historyRequest = ++historyGeneration;
 		try {
-			const items: ChatSession[] = [];
+			const items: Conversation[] = [];
 			let hasMore = false;
 			// Refresh only pages already opened; initial recovery requests one page.
 			do {
-				const response = await listChatSessions(ownerWorkspaceId, {
+				const response = await listConversations(ownerWorkspaceId, {
 					limit: historyPageSize,
 					offset: items.length,
 					signal: sessionController?.signal
@@ -465,7 +468,7 @@
 	}
 
 	function applyServerHistory(
-		items: ChatSession[],
+		items: Conversation[],
 		generation: number,
 		ownerWorkspaceId: string,
 		append = false,
@@ -476,16 +479,16 @@
 		// The list is a navigation index. Do not download every trajectory just
 		// to derive sidebar titles; a trajectory is loaded when selected.
 		const serverHistory = items.map((item) => {
-			const previous = stored.find((entry) => entry.session_id === item.session_id);
+			const previous = stored.find((entry) => entry.conversation_id === item.conversation_id);
 			const status: ChatSessionActivity =
 				item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
 			const title =
 				item.title?.trim() ||
-				(item.session_id === session?.session_id && messages.length
+				(item.conversation_id === session?.conversation_id && messages.length
 					? titleFromMessages(messages)
 					: previous?.title || $t('researchAgent.untitledSession'));
 			return {
-				session_id: item.session_id,
+				conversation_id: item.conversation_id,
 				title,
 				created_at: item.created_at,
 				updated_at: item.updated_at,
@@ -495,17 +498,17 @@
 		});
 		sessionActivities = {
 			...sessionActivities,
-			...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
+			...Object.fromEntries(serverHistory.map((item) => [item.conversation_id, item.status]))
 		};
-		const receivedIds = new Set(items.map((item) => item.session_id));
-		const retained = append ? stored.filter((item) => !receivedIds.has(item.session_id)) : [];
+		const receivedIds = new Set(items.map((item) => item.conversation_id));
+		const retained = append ? stored.filter((item) => !receivedIds.has(item.conversation_id)) : [];
 		writeHistory([...retained, ...serverHistory]);
 		historyPageOffset = append ? historyPageOffset + items.length : items.length;
 		historyHasMore = hasMore;
 		historyPageError = false;
 		if (!append) historyNeedsRefresh = false;
 		if (session) {
-			const current = items.find((item) => item.session_id === session?.session_id);
+			const current = items.find((item) => item.conversation_id === session?.conversation_id);
 			if (current) session = { ...session, is_pinned: current.is_pinned === true };
 		}
 	}
@@ -548,7 +551,7 @@
 		}
 		const historyRequest = ++historyGeneration;
 		try {
-			const response = await listChatSessions(ownerWorkspaceId, {
+			const response = await listConversations(ownerWorkspaceId, {
 				limit: historyPageSize,
 				offset: historyPageOffset,
 				signal: sessionController?.signal
@@ -593,16 +596,16 @@
 		if (!isCurrentSession(generation, ownerWorkspaceId)) return;
 		const candidates = history.filter(
 			(item) =>
-				item.session_id !== session?.session_id &&
+				item.conversation_id !== session?.conversation_id &&
 				['running', 'approval', 'recovering', 'unavailable'].includes(
-					sessionActivities[item.session_id]
+					sessionActivities[item.conversation_id]
 				)
 		);
 		await Promise.all(
 			candidates.map(async (item) => {
 				let activity: ChatSessionActivity;
 				try {
-					const trajectory = await fetchChatTrajectory(item.session_id, sessionController?.signal);
+					const trajectory = await fetchTaskState(item.conversation_id, sessionController?.signal);
 					activity = getChatSessionActivity(
 						trajectory.items,
 						Boolean(trajectory.running || trajectory.response?.status === 'running'),
@@ -613,10 +616,10 @@
 				}
 				if (
 					!isCurrentSession(generation, ownerWorkspaceId) ||
-					item.session_id === session?.session_id
+					item.conversation_id === session?.conversation_id
 				)
 					return;
-				sessionActivities = { ...sessionActivities, [item.session_id]: activity };
+				sessionActivities = { ...sessionActivities, [item.conversation_id]: activity };
 			})
 		);
 		if (!isCurrentSession(generation, ownerWorkspaceId)) return;
@@ -624,9 +627,9 @@
 		if (
 			history.some(
 				(item) =>
-					item.session_id !== session?.session_id &&
+					item.conversation_id !== session?.conversation_id &&
 					['running', 'approval', 'recovering', 'unavailable'].includes(
-						sessionActivities[item.session_id]
+						sessionActivities[item.conversation_id]
 					)
 			)
 		) {
@@ -732,11 +735,11 @@
 
 		try {
 			const storedSessionId = requestedSessionId || readStoredSessionId();
-			let nextSession: ChatSession | null = null;
+			let nextSession: Conversation | null = null;
 			let createdSession = false;
 			if (storedSessionId) {
 				try {
-					nextSession = await fetchChatSession(storedSessionId, controller.signal);
+					nextSession = await fetchConversation(storedSessionId, controller.signal);
 					if (!isCurrentSession(generation, activeWorkspaceId)) return;
 					if (nextSession.workspace_id !== activeWorkspaceId) nextSession = null;
 				} catch (err) {
@@ -744,23 +747,23 @@
 					if (!isApiErrorCode(err, 200201)) throw err;
 					nextSession = null;
 					clearStoredSessionId();
-					writeHistory(readHistory().filter((item) => item.session_id !== storedSessionId));
+					writeHistory(readHistory().filter((item) => item.conversation_id !== storedSessionId));
 				}
 			}
 
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
 			if (nextSession === null) {
-				nextSession = await createChatSession(activeWorkspaceId, controller.signal);
+				nextSession = await createConversation(activeWorkspaceId, controller.signal);
 				if (!isCurrentSession(generation, activeWorkspaceId)) return;
 				createdSession = true;
 			} else {
-				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
+				const trajectory = await fetchTaskState(nextSession.conversation_id, controller.signal);
 				if (!isCurrentSession(generation, activeWorkspaceId)) return;
 				acceptTrajectory(trajectory);
 			}
 			session = nextSession;
 			const savedCheckpoint = window.localStorage.getItem(
-				`${sessionStorageKey()}:checkpoint:${session.session_id}`
+				`${sessionStorageKey()}:checkpoint:${session.conversation_id}`
 			);
 			if (
 				savedCheckpoint &&
@@ -771,7 +774,7 @@
 				checkpointId = savedCheckpoint;
 			refreshPendingSources();
 			onSourcesChanged();
-			storeSessionId(nextSession.session_id);
+			storeSessionId(nextSession.conversation_id);
 			upsertHistory(nextSession);
 			const initialHistory = await initialHistoryPromise;
 			if (initialHistory) {
@@ -833,24 +836,24 @@
 		}
 	}
 
-	function acceptSnapshot(snapshot: ChatResponseSnapshot) {
+	function acceptSnapshot(snapshot: TaskSnapshot) {
 		if (
-			responseSnapshot?.response_id === snapshot.response_id &&
-			(responseSnapshot.sequence > snapshot.sequence ||
-				(responseSnapshot.sequence === snapshot.sequence &&
+			responseSnapshot?.task_id === snapshot.task_id &&
+			(responseSnapshot.checkpoint_revision > snapshot.checkpoint_revision ||
+				(responseSnapshot.checkpoint_revision === snapshot.checkpoint_revision &&
 					responseSnapshot.status === snapshot.status))
 		)
 			return;
 		responseSnapshot = snapshot;
 		settledTurn = null;
-		running = snapshot.status === 'running';
+		running = snapshot.status === 'running' || snapshot.status === 'accepted';
 		recoveryError = '';
 		streamingText = snapshot.content;
 		progress = snapshot.progress;
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
 	}
 
-	function acceptTrajectory(trajectory: ChatTrajectory) {
+	function acceptTrajectory(trajectory: TaskState) {
 		messages = trajectory.items;
 		branches = trajectory.branches ?? [];
 		branchDraft = trajectory.branch_draft ?? null;
@@ -864,7 +867,7 @@
 		retryableDecision = trajectory.retryable_decision ?? null;
 		if (trajectory.response) {
 			acceptSnapshot(trajectory.response);
-			running = responseSnapshot?.status === 'running';
+			running = responseSnapshot?.status === 'running' || responseSnapshot?.status === 'accepted';
 		} else {
 			responseSnapshot = null;
 			settledTurn = null;
@@ -883,33 +886,20 @@
 			updatesController === controller &&
 			!controller.signal.aborted;
 		try {
-			await streamChatUpdates(
-				session.session_id,
-				responseSnapshot.response_id,
-				(snapshot) => {
-					if (!current()) return;
-					acceptSnapshot(snapshot);
-					recoveryError = '';
-				},
-				(trajectory) => {
-					if (!current()) return;
-					acceptTrajectory(trajectory);
-					recoveryError = '';
-					refreshPendingSources();
-					onSourcesChanged();
-					if (session) upsertHistory(session);
-				},
-				controller.signal
+			const trajectory = await readTaskUpdates(
+				session.conversation_id, responseSnapshot.task_id,
+				responseSnapshot.checkpoint_revision, controller.signal
 			);
-			if (current() && running && responseSnapshot?.status === 'running') {
-				recoveryError = $t('researchAgent.responseDisconnected');
-			}
+			if (!current()) return;
+			acceptTrajectory(trajectory);
+			refreshPendingSources();
+			onSourcesChanged();
 		} catch (err) {
 			if (current() && running) recoveryError = errorMessage(err);
 		} finally {
 			if (current()) {
 				updatesController = null;
-				scheduleRecovery();
+				if (running) recoveryTimer = setTimeout(() => void resumeResponse(), 1000);
 			}
 		}
 	}
@@ -924,8 +914,8 @@
 		clearTimeout(recoveryTimer);
 		recoveryLoading = true;
 		try {
-			const trajectory = await fetchChatTrajectory(
-				activeSession.session_id,
+			const trajectory = await fetchTaskState(
+				activeSession.conversation_id,
 				sessionController?.signal
 			);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return;
@@ -972,7 +962,7 @@
 		};
 		try {
 			const saved = await setChatMessageFeedback(
-				session.session_id,
+				session.conversation_id,
 				messageId,
 				input,
 				sessionController?.signal
@@ -1022,7 +1012,7 @@
 
 	async function toggleSessionPin(sessionId: string) {
 		if (sessionNavigationDisabled) return;
-		const item = history.find((entry) => entry.session_id === sessionId);
+		const item = history.find((entry) => entry.conversation_id === sessionId);
 		if (!item) return;
 		const generation = sessionGeneration;
 		const ownerWorkspaceId = workspaceId;
@@ -1031,16 +1021,16 @@
 		historyPageLoading = false;
 		error = '';
 		try {
-			const saved = await setChatSessionPin(sessionId, !item.is_pinned, sessionController?.signal);
+			const saved = await setConversationPin(sessionId, !item.is_pinned, sessionController?.signal);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return;
 			historyGeneration += 1;
 			historyNeedsRefresh = true;
 			writeHistory(
 				history.map((entry) =>
-					entry.session_id === sessionId ? { ...entry, is_pinned: saved.is_pinned } : entry
+					entry.conversation_id === sessionId ? { ...entry, is_pinned: saved.is_pinned } : entry
 				)
 			);
-			if (session?.session_id === sessionId) session = { ...session, is_pinned: saved.is_pinned };
+			if (session?.conversation_id === sessionId) session = { ...session, is_pinned: saved.is_pinned };
 			await refreshServerHistory(generation, ownerWorkspaceId);
 		} catch (err) {
 			if (isCurrentSession(generation, ownerWorkspaceId)) error = errorMessage(err);
@@ -1051,7 +1041,7 @@
 
 	function beginRename(item: StoredChatSession) {
 		if (sessionNavigationDisabled) return;
-		renamingSessionId = item.session_id;
+		renamingSessionId = item.conversation_id;
 		renameDraft = item.title;
 		renameError = '';
 		renameDialog.showModal();
@@ -1075,15 +1065,15 @@
 		historyGeneration += 1;
 		historyPageLoading = false;
 		try {
-			const saved = await setChatSessionTitle(targetId, title, sessionController?.signal);
+			const saved = await setConversationTitle(targetId, title, sessionController?.signal);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return;
 			historyGeneration += 1;
 			writeHistory(
 				history.map((entry) =>
-					entry.session_id === targetId ? { ...entry, title: saved.title || title } : entry
+					entry.conversation_id === targetId ? { ...entry, title: saved.title || title } : entry
 				)
 			);
-			if (session?.session_id === targetId) session = { ...session, title: saved.title };
+			if (session?.conversation_id === targetId) session = { ...session, title: saved.title };
 			renameSaving = false;
 			cancelRename();
 		} catch (err) {
@@ -1095,7 +1085,7 @@
 
 	async function removeSession(sessionId: string) {
 		if (sessionNavigationDisabled || !browser) return;
-		const item = history.find((entry) => entry.session_id === sessionId);
+		const item = history.find((entry) => entry.conversation_id === sessionId);
 		if (!item || !window.confirm($t('researchAgent.deleteSessionConfirm', { title: item.title })))
 			return;
 		const generation = sessionGeneration;
@@ -1103,12 +1093,12 @@
 		deletingSessionId = sessionId;
 		error = '';
 		try {
-			await deleteChatSession(sessionId, sessionController?.signal);
+			await deleteConversation(sessionId, sessionController?.signal);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return;
 			historyGeneration += 1;
 			historyPageLoading = false;
 			historyNeedsRefresh = true;
-			const remaining = history.filter((entry) => entry.session_id !== sessionId);
+			const remaining = history.filter((entry) => entry.conversation_id !== sessionId);
 			writeHistory(remaining);
 			if (sessionId !== activeSessionId) {
 				await refreshServerHistory(generation, ownerWorkspaceId);
@@ -1119,7 +1109,7 @@
 			messages = [];
 			pendingApproval = null;
 			retryableDecision = null;
-			await loadSession(remaining[0]?.session_id ?? '');
+			await loadSession(remaining[0]?.conversation_id ?? '');
 		} catch (err) {
 			if (isCurrentSession(generation, ownerWorkspaceId)) error = errorMessage(err);
 		} finally {
@@ -1146,7 +1136,7 @@
 		const generation = sessionGeneration;
 		const ownerWorkspaceId = workspaceId;
 		try {
-			const result = await fetchChatTree(session.session_id, controller.signal);
+			const result = await fetchConversationTree(session.conversation_id, controller.signal);
 			if (!isCurrentSession(generation, ownerWorkspaceId) || treeController !== controller) return;
 			const checkpoint = result.active_path.indexOf(checkpointId);
 			tree =
@@ -1168,28 +1158,41 @@
 	function returnToLatest() {
 		checkpointId = '';
 		if (session)
-			window.localStorage.removeItem(`${sessionStorageKey()}:checkpoint:${session.session_id}`);
+			window.localStorage.removeItem(`${sessionStorageKey()}:checkpoint:${session.conversation_id}`);
 	}
 
-	async function selectTreeNode(node: ChatTreeNode) {
+	async function selectTreeNode(node: ConversationTreeNode) {
 		if (sessionNavigationDisabled) return;
-		const owner = userId;
 		closeTree();
-		await switchSession(node.message.session_id, true);
-		if (owner !== userId || session?.session_id !== node.message.session_id) return;
-		if (node.status === 'completed') {
-			checkpointId = node.message.message_id;
-			window.localStorage.setItem(
-				`${sessionStorageKey()}:checkpoint:${session.session_id}`,
-				checkpointId
-			);
-		} else returnToLatest();
+		const conversationId = node.message.conversation_id;
+		try {
+			if (node.kind !== 'conversation') {
+				const saved = await fetchConversation(conversationId);
+				await selectConversationPath(
+					conversationId, saved.path_revision ?? 0,
+					node.task_id ? { task_id: node.task_id } : { tip_message_id: node.message.message_id }
+				);
+			}
+			await switchSession(conversationId, true);
+			returnToLatest();
+		} catch (err) {
+			error = errorMessage(err);
+		}
+	}
+
+	async function forkFromMessage(message: ConversationMessage) {
+		try {
+			const fork = await forkConversation(message.conversation_id, message.message_id);
+			await switchSession(fork.conversation_id, true);
+		} catch (err) {
+			error = errorMessage(err);
+		}
 	}
 
 	async function reviseMessage(
-		message: ChatMessage,
+		message: ConversationMessage,
 		content?: string,
-		mode: 'revise' | 'continue' = 'revise'
+		mode: 'revise' | 'continue' = content === undefined ? 'continue' : 'revise'
 	): Promise<boolean> {
 		if (
 			!session ||
@@ -1206,18 +1209,16 @@
 			return false;
 		const ownerWorkspaceId = workspaceId;
 		let generation = sessionGeneration;
-		const key = JSON.stringify([message.session_id, message.message_id, content, mode]);
+		const key = JSON.stringify([message.conversation_id, message.message_id, content, mode]);
 		if (revisionRequest?.key !== key) {
-			const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-				byte.toString(16).padStart(2, '0')
-			).join('');
+			const id = crypto.randomUUID();
 			revisionRequest = { key, id };
 		}
 		revising = true;
 		error = '';
 		try {
-			const branch = await branchChatMessage(
-				message.session_id,
+			const accepted = await branchChatMessage(
+				message.conversation_id,
 				message.message_id,
 				revisionRequest.id,
 				content,
@@ -1225,7 +1226,10 @@
 				mode
 			);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return false;
-			const trajectory = await fetchChatTrajectory(branch.session_id, sessionController?.signal);
+			const branch = await fetchConversation(message.conversation_id, sessionController?.signal);
+			const trajectory = await readTaskUpdates(
+				branch.conversation_id, accepted.task_id, 0, sessionController?.signal
+			);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return false;
 			clearTimeout(recoveryTimer);
 			closeTree();
@@ -1240,7 +1244,7 @@
 			responseSnapshot = null;
 			streamingText = '';
 			acceptTrajectory(trajectory);
-			storeSessionId(branch.session_id);
+			storeSessionId(branch.conversation_id);
 			upsertHistory(branch, content ?? message.content);
 			revising = false;
 			revisionRequest = null;
@@ -1259,10 +1263,6 @@
 
 	async function sendMessage(nextText = input.trim(), revisionSources?: ChatSourceContext[]) {
 		const draft = nextText.trim();
-		if (checkpointId && revisionSources === undefined && draft && checkpointIndex >= 0) {
-			await reviseMessage(messages[checkpointIndex], draft, 'continue');
-			return;
-		}
 		if (branchDraft && revisionSources === undefined) return;
 		if (
 			!session ||
@@ -1298,19 +1298,7 @@
 		const activeWorkspaceId = workspaceId;
 		const generation = sessionGeneration;
 		const signal = sessionController?.signal;
-		let pendingText = '';
-		let textFrame = 0;
-		const cancelTextFrame = () => {
-			cancelAnimationFrame(textFrame);
-			textFrame = 0;
-		};
-		const flushText = () => {
-			textFrame = 0;
-			if (!isCurrentSession(generation, activeWorkspaceId)) return;
-			streamingText += pendingText;
-			pendingText = '';
-		};
-		signal?.addEventListener('abort', cancelTextFrame, { once: true });
+		const parentMessageId = checkpointId || messages.filter((message) => message.role !== 'tool' && message.content).at(-1)?.message_id || null;
 		const previousMessageCount = messages.length;
 		const optimisticId = `local-${Date.now()}`;
 		const streamingId = `local-stream-${Date.now()}`;
@@ -1318,14 +1306,14 @@
 		const sourceContexts = revisionSources ?? [...pendingSourceContexts];
 		if (!isRevision && sourceContexts.length) {
 			storePendingChatSourceContexts(userId, activeWorkspaceId, sourceContexts, {
-				session_id: activeSession.session_id,
+				conversation_id: activeSession.conversation_id,
 				content: text,
 				after_message_id: messages.at(-1)?.message_id ?? null
 			});
 		}
-		const optimisticMessage: ChatMessage = {
+		const optimisticMessage: ConversationMessage = {
 			message_id: optimisticId,
-			session_id: activeSession.session_id,
+			conversation_id: activeSession.conversation_id,
 			role: 'user',
 			content: text,
 			created_at: createdAt,
@@ -1334,7 +1322,7 @@
 			tool_result: null,
 			source_contexts: sourceContexts
 		};
-		const streamingMessage: ChatMessage = {
+		const streamingMessage: ConversationMessage = {
 			...optimisticMessage,
 			message_id: streamingId,
 			role: 'assistant',
@@ -1365,45 +1353,16 @@
 			}
 		};
 		try {
-			const turn = await streamChatMessage(
-				activeSession.session_id,
-				text,
-				(content) => {
-					if (!isCurrentSession(generation, activeWorkspaceId)) return;
-					acknowledgeSubmission();
-					pendingText += content;
-					if (!textFrame) textFrame = requestAnimationFrame(flushText);
-				},
-				sourceContexts,
-				(nextProgress) => {
-					if (!isCurrentSession(generation, activeWorkspaceId)) return;
-					acknowledgeSubmission();
-					progress = nextProgress;
-					progressHistory = appendChatProgress(progressHistory, nextProgress);
-				},
-				signal,
-				isRevision,
-				(snapshot) => {
-					if (!isCurrentSession(generation, activeWorkspaceId)) return;
-					cancelTextFrame();
-					pendingText = '';
-					acceptSnapshot(snapshot);
-					messages = messages.filter((message) => message.message_id !== streamingId);
-					acknowledgeSubmission();
-				},
-				(trajectory) => {
-					if (!isCurrentSession(generation, activeWorkspaceId)) return;
-					cancelTextFrame();
-					pendingText = '';
-					acceptTrajectory(trajectory);
-					acknowledgeSubmission();
-				},
-				modelConnectionId
+			const accepted = await sendConversationMessage(
+				activeSession.conversation_id, text, parentMessageId, sourceContexts,
+				modelConnectionId, signal
 			);
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
-			cancelTextFrame();
-			flushText();
-			applyTurn(turn, [optimisticId, streamingId]);
+			acknowledgeSubmission();
+			const trajectory = await readTaskUpdates(activeSession.conversation_id, accepted.task_id, 0, signal);
+			if (!isCurrentSession(generation, activeWorkspaceId)) return;
+			returnToLatest();
+			acceptTrajectory(trajectory);
 			branchDraft = null;
 			if (!isRevision && sourceContexts.length) {
 				clearPendingChatSourceContexts(userId, activeWorkspaceId);
@@ -1412,15 +1371,9 @@
 			}
 		} catch (err) {
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
-			cancelTextFrame();
-			flushText();
-			const receivedResponse = responseSnapshot as ChatResponseSnapshot | null;
-			if (receivedResponse?.status === 'running') {
-				responseSnapshot = { ...receivedResponse, content: streamingText };
-			}
 			let reconciled = false;
 			try {
-				const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
+				const trajectory = await fetchTaskState(activeSession.conversation_id, signal);
 				if (!isCurrentSession(generation, activeWorkspaceId)) return;
 				acceptTrajectory(trajectory);
 				reconciled = true;
@@ -1431,7 +1384,7 @@
 					input = draft;
 				}
 				pendingSourceContexts = readPendingChatSourceContexts(userId, activeWorkspaceId, {
-					sessionId: activeSession.session_id,
+					sessionId: activeSession.conversation_id,
 					messages
 				});
 				onSourcesChanged();
@@ -1445,12 +1398,10 @@
 			}
 			const key = getModelServiceErrorKey(getApiErrorReason(err));
 			if (key) turnRequestError = $t(key);
-			if ((!reconciled || running) && (!responseSnapshot || responseSnapshot.status === 'running'))
+			if (!reconciled || running)
 				recoveryError = errorMessage(err);
 			else if (!responseSnapshot && !pendingApproval && !key) turnRequestError = errorMessage(err);
 		} finally {
-			cancelTextFrame();
-			signal?.removeEventListener('abort', cancelTextFrame);
 			if (isCurrentSession(generation, activeWorkspaceId)) {
 				sending = false;
 				submitting = false;
@@ -1463,7 +1414,7 @@
 				scheduleRecovery();
 				if (isRevision) {
 					try {
-						const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
+						const trajectory = await fetchTaskState(activeSession.conversation_id, signal);
 						if (isCurrentSession(generation, activeWorkspaceId)) {
 							branches = trajectory.branches ?? [];
 							branchDraft = trajectory.branch_draft ?? null;
@@ -1484,10 +1435,10 @@
 		const ownerWorkspaceId = workspaceId;
 		stopping = true;
 		try {
-			const snapshot = await stopChatResponse(session.session_id, responseSnapshot.response_id);
+			const snapshot = await stopTask(session.conversation_id, responseSnapshot.task_id);
 			if (
 				isCurrentSession(generation, ownerWorkspaceId) &&
-				responseSnapshot?.response_id === snapshot.response_id &&
+				responseSnapshot?.task_id === snapshot.task_id &&
 				responseSnapshot.status === 'running'
 			) {
 				if (snapshot.status === 'running')
@@ -1559,87 +1510,51 @@
 		onSourcesChanged();
 	}
 
-	function applyTurn(
-		turn: ChatTurn,
-		localMessageIds: string[] = [],
-		decidedToolName: string | null = null
-	) {
-		const taskStillRunning =
-			turn.messages.length === 0 && responseSnapshot?.status === 'running';
-		running = taskStillRunning;
-		stopping = false;
-		if (!taskStillRunning) responseSnapshot = null;
-		settledTurn = turn;
-		recoveryError = '';
-		const prior = localMessageIds.length
-			? messages.filter((message) => !localMessageIds.includes(message.message_id))
-			: messages;
-		const knownIds = new Set(prior.map((message) => message.message_id));
-		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
-		pendingApproval = turn.pending_approval;
-		retryableDecision = null;
-		if (turn.status === 'rejected') {
-			notice = $t(rejectionNoticeKey(decidedToolName));
-		}
-		if (session) {
-			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
-			session = { ...session, updated_at: updatedAt };
-			upsertHistory(session, titleFromMessages(messages));
-			void refreshSessionTitle();
-		}
-	}
-
 	async function decide(
 		decision: 'approved' | 'rejected',
-		call: ChatToolCall | null = pendingApproval
+		call: Operation | null = pendingApproval
 	) {
 		if (!session || !call || deciding) return;
 		const activeSession = session;
 		const generation = sessionGeneration;
 		const activeWorkspaceId = workspaceId;
 		deciding = true;
-		failedSessionId = null;
 		error = '';
 		notice = '';
-		let decisionError: unknown;
 		try {
-			const turn = await decideChatToolCall(
-				activeSession.session_id,
-				call,
-				decision,
-				sessionController?.signal
-			).catch((err: unknown) => {
-				decisionError = err;
-				return null;
-			});
+			const trajectory = await decideOperation(
+				activeSession.conversation_id, call, decision, sessionController?.signal
+			);
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
-			if (!turn || !turn.messages.length) {
-				// A lost response or idempotent acknowledgement needs the persisted result.
-				const trajectory = await fetchChatTrajectory(
-					activeSession.session_id,
-					sessionController?.signal
-				);
-				if (!isCurrentSession(generation, activeWorkspaceId)) return;
-				acceptTrajectory(trajectory);
-				upsertHistory(activeSession);
-				if (turn && !running)
-					applyTurn({ ...turn, pending_approval: pendingApproval }, [], call.name);
-				else if (
-					!running &&
-					!messages.some((message) => message.tool_result?.tool_call_id === call.tool_call_id)
-				) {
-					error = errorMessage(decisionError);
-					failedSessionId = retryableDecision ? null : activeSession.session_id;
-				}
-			} else {
-				applyTurn(turn, [], call.name);
-			}
+			acceptTrajectory(trajectory);
+			upsertHistory(activeSession);
+			if (decision === 'rejected') notice = $t(rejectionNoticeKey(call.name));
 			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
-			error = errorMessage(decisionError ?? err);
+			error = errorMessage(err);
+			refreshRecovery();
 		} finally {
 			if (isCurrentSession(generation, activeWorkspaceId)) deciding = false;
+		}
+	}
+
+	async function resumeInterruptedTask() {
+		if (!session || responseSnapshot?.status !== 'interrupted' || recoveryLoading) return;
+		const generation = sessionGeneration;
+		const ownerWorkspace = workspaceId;
+		recoveryLoading = true;
+		error = '';
+		try {
+			const trajectory = await resumeTask(
+				session.conversation_id, responseSnapshot.task_id,
+				responseSnapshot.checkpoint_revision, sessionController?.signal
+			);
+			if (isCurrentSession(generation, ownerWorkspace)) acceptTrajectory(trajectory);
+		} catch (err) {
+			if (isCurrentSession(generation, ownerWorkspace)) error = errorMessage(err);
+		} finally {
+			if (isCurrentSession(generation, ownerWorkspace)) recoveryLoading = false;
 		}
 	}
 
@@ -1705,7 +1620,7 @@
 			onDeleteSession={removeSession}
 			onTogglePin={toggleSessionPin}
 			onRenameSession={(id) => {
-				const item = history.find((entry) => entry.session_id === id);
+				const item = history.find((entry) => entry.conversation_id === id);
 				if (item) beginRename(item);
 			}}
 			{pinningSessionId}
@@ -1748,17 +1663,17 @@
 					aria-label={$t('researchAgent.historyTitle')}
 					on:scroll={loadMoreOnScroll}
 				>
-					{#each history as item (item.session_id)}
-						{@const activity = sessionActivities[item.session_id]}
+					{#each history as item (item.conversation_id)}
+						{@const activity = sessionActivities[item.conversation_id]}
 						<div class="embedded-history-item">
 							<button
 								class="embedded-history-select"
 								type="button"
 								title={item.title}
-								class:active={item.session_id === activeSessionId}
+								class:active={item.conversation_id === activeSessionId}
 								disabled={sessionNavigationDisabled}
 								on:click={() => {
-									void switchSession(item.session_id);
+									void switchSession(item.conversation_id);
 									showHistory = false;
 								}}
 							>
@@ -1792,10 +1707,10 @@
 									item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession'
 								)}
 								aria-pressed={item.is_pinned}
-								aria-busy={pinningSessionId === item.session_id}
-								on:click={() => toggleSessionPin(item.session_id)}
+								aria-busy={pinningSessionId === item.conversation_id}
+								on:click={() => toggleSessionPin(item.conversation_id)}
 							>
-								{#if pinningSessionId === item.session_id}<LoaderCircle size={14} />
+								{#if pinningSessionId === item.conversation_id}<LoaderCircle size={14} />
 								{:else if item.is_pinned}<PinOff size={14} aria-hidden="true" />
 								{:else}<Pin size={14} aria-hidden="true" />{/if}
 							</button>
@@ -1828,9 +1743,9 @@
 		{/if}
 
 		{#if session}
-			{#key session.session_id}<OperationPermissions
+			{#key session.conversation_id}<OperationPermissions
 					bind:this={permissionsPanel}
-					sessionId={session.session_id}
+					sessionId={session.conversation_id}
 				/>{/key}
 		{/if}
 		{#if retryableDecision && !checkpointId}
@@ -1870,6 +1785,13 @@
 				<span>{notice}</span>
 			</div>
 		{/if}
+		{#if responseSnapshot?.status === 'interrupted'}
+			<div class="status" role="status">
+				<button type="button" disabled={recoveryLoading} on:click={resumeInterruptedTask}>
+					{$t('researchAgent.revision.resume')}
+				</button>
+			</div>
+		{/if}
 		<MessageTimeline
 			{workspaceId}
 			sessionId={activeSessionId}
@@ -1882,6 +1804,7 @@
 					(running || sending || pendingApproval || retryableDecision || recoveringCallId)
 				)}
 			onRevise={reviseMessage}
+			onFork={forkFromMessage}
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
 			onFeedback={saveFeedback}

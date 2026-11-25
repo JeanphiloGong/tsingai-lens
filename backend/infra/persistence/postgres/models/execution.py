@@ -27,7 +27,7 @@ _JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
 
 
 class AnalysisJobORM(Base):
-    """Versioned scheduling envelope shared by analysis workers."""
+    """Historical scheduling envelope retained for migration inspection."""
 
     __tablename__ = "analysis_jobs"
     __table_args__ = (

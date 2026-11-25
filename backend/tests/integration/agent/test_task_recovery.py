@@ -9,6 +9,7 @@ from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpe
 from agent.application.task_execution import TaskExecution
 from agent.domain.models import Operation
 from agent.repositories.task_repository import TaskRepository
+from application.chat.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
 from infra.persistence.postgres.models.chat import AgentOperationORM, AgentTaskORM
 from infra.persistence.postgres.models.workspace import WorkspaceORM
@@ -32,14 +33,14 @@ class InterruptingTaskRepository(TaskRepository):
 
     async def write_checkpoint_bundle(self, **kwargs):
         revision = await super().write_checkpoint_bundle(**kwargs)
-        if self.interrupt_after_first_bundle:
+        if self.interrupt_after_first_bundle and (kwargs['operation'] or {}).get('status') == 'succeeded':
             self.interrupt_after_first_bundle = False
             raise ExecutionInterrupted()
         return revision
 
 
 async def test_recovery_reuses_committed_operation(
-    postgres_session_factory, identity_subjects
+    postgres_session_factory, identity_subjects, monkeypatch
 ):
     owner = await identity_subjects.create_subject(email="agent-v3-owner@example.test")
     now = datetime.now(UTC)
@@ -139,12 +140,16 @@ async def test_recovery_reuses_committed_operation(
             ),
         )
     )
+    async def respond(self, context, operations):
+        assert operations[0].result["data"] == {"hold_time_minutes": 30}
+        return ModelTurn(content="The inspected Source reports a 30-minute hold."), "fixture"
+
+    monkeypatch.setattr(TaskExecution, "respond", respond)
     first = TaskExecution(repository, registry)
     with pytest.raises(ExecutionInterrupted):
         await first.run_task(
             task_id="agent-v3-task",
             user_id=owner["user_id"],
-            request="inspect Source",
         )
     assert attempts == 1
 
@@ -153,7 +158,6 @@ async def test_recovery_reuses_committed_operation(
         await second.run_task(
             task_id="agent-v3-task",
             user_id=owner["user_id"],
-            request="inspect Source",
         )
         == "completed"
     )

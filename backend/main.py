@@ -44,7 +44,6 @@ from infra.persistence import database
 from infra.persistence.file import workspace_files, object_store
 
 from config import DATA_DIR
-from controllers import feedback_case_routes as feedback_cases
 from controllers.models import catalog_routes as model_connections
 from controllers.core import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
@@ -56,7 +55,6 @@ from controllers.exception_router import (
     project_exception_handler,
     request_validation_handler,
 )
-from controllers.feedback import feedback_dataset_routes as task_datasets
 from controllers.goal import experiment_plan_routes as experiment_plans
 from controllers.goal import goal_routes as goals
 from controllers.source import workspace_routes as workspaces
@@ -314,10 +312,6 @@ def register_routes(app: FastAPI) -> None:
     from controllers.models.admin_connection_routes import admin_model_router
     app.include_router(admin_model_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(admin_assignment_router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(
-        task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX
-    )
     app.include_router(pipeline_runs.pipeline_run_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.document_router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(

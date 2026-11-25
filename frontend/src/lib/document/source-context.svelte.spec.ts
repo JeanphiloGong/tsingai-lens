@@ -4,7 +4,7 @@ import {
 	storePendingChatSourceContexts,
 	type ChatSourceContext
 } from '$lib/document/source-context';
-import type { ChatMessage } from '$lib/conversation/api';
+import type { ConversationMessage } from '$lib/conversation/api';
 
 const source: ChatSourceContext = {
 	resource_ref: { resource_type: 'source', resource_id: 'doc_1:results', href: null },
@@ -18,9 +18,9 @@ const source: ChatSourceContext = {
 	heading_path: 'Results',
 	quote_truncated: false
 };
-const question: ChatMessage = {
+const question: ConversationMessage = {
 	message_id: 'old_question',
-	session_id: 'chat_1',
+	conversation_id: 'chat_1',
 	role: 'user',
 	content: 'Explain this grain-size result',
 	created_at: '2026-09-09T08:00:00Z',
@@ -29,7 +29,7 @@ const question: ChatMessage = {
 	tool_result: null,
 	source_contexts: [source]
 };
-const answer: ChatMessage = {
+const answer: ConversationMessage = {
 	...question,
 	message_id: 'old_answer',
 	role: 'assistant',
@@ -49,7 +49,7 @@ describe('pending Source recovery', () => {
 			resource_ref: { ...source.resource_ref, resource_id: 'doc_1:methods' }
 		};
 		storePendingChatSourceContexts('user_1', 'col_123', [source, methods], {
-			session_id: 'chat_1',
+			conversation_id: 'chat_1',
 			content: question.content,
 			after_message_id: null
 		});
@@ -69,7 +69,7 @@ describe('pending Source recovery', () => {
 
 	it('retains a deliberately reselected Source even if the same source and question were previously sent', () => {
 		storePendingChatSourceContexts('user_1', 'col_123', [source], {
-			session_id: 'chat_1',
+			conversation_id: 'chat_1',
 			content: question.content,
 			after_message_id: null
 		});
@@ -84,7 +84,7 @@ describe('pending Source recovery', () => {
 
 	it('only consumes the current submission after its preceding message, including after reload', () => {
 		storePendingChatSourceContexts('user_1', 'col_123', [source], {
-			session_id: 'chat_1',
+			conversation_id: 'chat_1',
 			content: question.content,
 			after_message_id: answer.message_id
 		});
@@ -105,14 +105,14 @@ describe('pending Source recovery', () => {
 
 	it('keeps submitted Sources recoverable only in their original conversation', () => {
 		storePendingChatSourceContexts('user_1', 'col_123', [source], {
-			session_id: 'chat_1',
+			conversation_id: 'chat_1',
 			content: question.content,
 			after_message_id: null
 		});
 		expect(
 			readPendingChatSourceContexts('user_1', 'col_123', {
 				sessionId: 'chat_2',
-				messages: [{ ...question, session_id: 'chat_2' }]
+				messages: [{ ...question, conversation_id: 'chat_2' }]
 			})
 		).toEqual([]);
 		expect(readPendingChatSourceContexts('user_1', 'col_123')).toEqual([]);

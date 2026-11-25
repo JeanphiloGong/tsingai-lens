@@ -2,14 +2,14 @@ import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { language } from '../../../_shared/i18n';
-import type { ChatMessage } from '$lib/conversation/api';
+import type { ConversationMessage } from '$lib/conversation/api';
 import type { ChatPresentationItem } from '$lib/research/conversationPresentation';
 import ResearchActivity from './ResearchActivity.svelte';
 
 function activity(papers: Record<string, unknown>[], extra: Record<string, unknown> = {}) {
-	const resultMessage: ChatMessage = {
+	const resultMessage: ConversationMessage = {
 		message_id: 'result',
-		session_id: 'session',
+		conversation_id: 'session',
 		role: 'tool',
 		content: '',
 		created_at: '2026-10-09T10:00:00Z',

@@ -18,17 +18,17 @@
 	} from '@lucide/svelte';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
-	import type { ChatTree, ChatTreeNode } from '$lib/conversation/api';
+	import type { ConversationTreeData, ConversationTreeNode } from '$lib/conversation/api';
 	import MessageContent from './MessageContent.svelte';
 
-	export let tree: ChatTree | null = null;
+	export let tree: ConversationTreeData | null = null;
 	export let loading = false;
 	export let error = '';
 	export let disabled = false;
 	export let onClose: () => void;
 	export let onRefresh: () => void;
-	export let onSelect: (node: ChatTreeNode) => void;
-	export let onRevise: (node: ChatTreeNode, content: string) => Promise<boolean>;
+	export let onSelect: (node: ConversationTreeNode) => void;
+	export let onRevise: (node: ConversationTreeNode, content: string) => Promise<boolean>;
 	let dialog: HTMLDialogElement;
 	let selectedId = '';
 	let mobilePreview = false;
@@ -51,8 +51,8 @@
 	$: selected = nodes.find((node) => node.message.message_id === selectedId);
 	$: children = groupChildren(nodes);
 
-	function groupChildren(items: ChatTreeNode[]) {
-		const children = new SvelteMap<string | null, ChatTreeNode[]>();
+	function groupChildren(items: ConversationTreeNode[]) {
+		const children = new SvelteMap<string | null, ConversationTreeNode[]>();
 		for (const node of items) {
 			const siblings = children.get(node.parent_message_id) ?? [];
 			siblings.push(node);
@@ -74,7 +74,7 @@
 			opener?.focus();
 		};
 	});
-	function select(node: ChatTreeNode) {
+	function select(node: ConversationTreeNode) {
 		selectedId = node.message.message_id;
 		mobilePreview = true;
 		editing = false;

@@ -90,6 +90,7 @@ class Operation:
     result: dict[str, object] | None = None
     error_code: str | None = None
     error_message: str | None = None
+    assistant_message_id: str | None = None
 
     def decide(self, decision: Decision, arguments_digest: str) -> Operation:
         if self.status != "approval_required":

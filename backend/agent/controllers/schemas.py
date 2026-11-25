@@ -33,6 +33,7 @@ class TaskResponse(BaseModel):
     final_message_id: str | None
     status: TaskStatus
     checkpoint_revision: int
+    error_code: str | None = None
     active_operation_id: str | None
     active_operation: dict[str, object] | None = None
     started_at: datetime

@@ -3,10 +3,10 @@ import {
 	appendChatProgress,
 	formatChatElapsed,
 	getChatProgressActions,
-	streamChatMessage,
-	streamChatUpdates,
+	readTaskUpdates,
 	type ChatProgress
 } from '$lib/agent/api';
+import { sendConversationMessage } from '$lib/conversation/api';
 import { fetchModelConnections } from '$lib/agent/model-connections';
 
 describe('direct Task API lifecycle', () => {
@@ -22,40 +22,40 @@ describe('direct Task API lifecycle', () => {
 			)
 		);
 		try {
-			await expect(streamChatMessage('chat_1', 'Compare the papers', () => {})).resolves.toMatchObject({
-				status: 'completed'
+			await expect(sendConversationMessage('chat_1', 'Compare the papers', 'msg_0', [], 'lab-b')).resolves.toMatchObject({
+				status: 'accepted', task_id: 'task_1'
 			});
 			expect(fetch).toHaveBeenCalledWith(
 				'/api/v1/conversations/chat_1/messages',
 				expect.objectContaining({ method: 'POST' })
 			);
 			expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toMatchObject({
-				message: 'Compare the papers'
+				message: 'Compare the papers', parent_message_id: 'msg_0'
 			});
 		} finally {
 			fetch.mockRestore();
 		}
 	});
 
-	it('reads task snapshots through the task event endpoint', async () => {
+	it('reads the same Task and saved answer after the requested SSE revision', async () => {
 		const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-			if (String(input).includes('/tasks/task_1/events')) {
-				return new Response(
-					'event: task.snapshot\ndata: {"task_id":"task_1","revision":2,"status":"running"}\n\n'
-				);
+			const path = String(input);
+			if (path.endsWith('/events?after_revision=1')) {
+				return new Response('event: task.snapshot\ndata: {"task_id":"task_1","revision":2,"status":"completed"}\n\n', {
+					headers: { 'Content-Type': 'text/event-stream' }
+				});
 			}
-			return new Response(
-				JSON.stringify({ code: 200, message: 'success', data: { items: [], active_tasks: [] }, meta: null })
-			);
+			const data = path.endsWith('/tasks/task_1')
+				? { task_id: 'task_1', status: 'completed', checkpoint_revision: 2, final_message_id: 'msg_2' }
+				: { conversation: { current_task_id: 'task_1' }, items: [{ message_id: 'msg_2', role: 'assistant', content: 'Methods report 30 minutes.' }] };
+			return Response.json({ code: 200, message: 'success', data, meta: null });
 		});
 		try {
-			const snapshot = vi.fn();
-			const trajectory = vi.fn();
-			await streamChatUpdates('chat_1', 'task_1', snapshot, trajectory);
-			expect(snapshot).toHaveBeenCalledWith(expect.objectContaining({ response_id: 'task_1' }));
-			expect(trajectory).toHaveBeenCalledOnce();
+			const state = await readTaskUpdates('chat_1', 'task_1', 1);
+			expect(state.response).toMatchObject({ task_id: 'task_1', status: 'completed', checkpoint_revision: 2 });
+			expect(state.items.at(-1)).toMatchObject({ message_id: 'msg_2', content: 'Methods report 30 minutes.' });
 			expect(String(fetch.mock.calls[0][0])).toBe(
-				'/api/v1/conversations/chat_1/tasks/task_1/events?after_revision=0'
+				'/api/v1/conversations/chat_1/tasks/task_1/events?after_revision=1'
 			);
 		} finally {
 			fetch.mockRestore();
@@ -139,7 +139,7 @@ describe('chat progress presentation helpers', () => {
 });
 
 describe('model connection selection', () => {
-	it('keeps model selection outside the durable Task request', async () => {
+	it('passes the selected model connection with the Conversation request', async () => {
 		const fetch = vi
 			.spyOn(globalThis, 'fetch')
 			.mockResolvedValue(
@@ -153,18 +153,7 @@ describe('model connection selection', () => {
 				)
 			);
 		try {
-			await streamChatMessage(
-				'chat_1',
-				'Compare papers',
-				() => {},
-				[],
-				undefined,
-				undefined,
-				false,
-				undefined,
-				undefined,
-				'lab-b'
-			);
+			await sendConversationMessage('chat_1', 'Compare papers', null, [], 'lab-b');
 			expect(String(fetch.mock.calls[0][0])).toBe('/api/v1/conversations/chat_1/messages');
 			expect(JSON.parse(String(fetch.mock.calls[0][1]?.body)).model_connection_id).toBe('lab-b');
 		} finally {

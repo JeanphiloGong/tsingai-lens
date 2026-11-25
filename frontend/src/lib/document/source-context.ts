@@ -1,4 +1,4 @@
-import type { ChatMessage } from '$lib/conversation/api';
+import type { ConversationMessage } from '$lib/conversation/api';
 
 export type ChatResourceRef = {
 	resource_type: string;
@@ -30,7 +30,7 @@ export function storePendingChatSourceContexts(
 	userId: string,
 	workspaceId: string,
 	contexts: ChatSourceContext[],
-	submission?: { session_id: string; content: string; after_message_id: string | null }
+	submission?: { conversation_id: string; content: string; after_message_id: string | null }
 ) {
 	if (typeof window === 'undefined') return;
 	if (!contexts.length) {
@@ -46,7 +46,7 @@ export function storePendingChatSourceContexts(
 export function readPendingChatSourceContexts(
 	userId: string,
 	workspaceId: string,
-	persisted?: { sessionId: string; messages: ChatMessage[] }
+	persisted?: { sessionId: string; messages: ConversationMessage[] }
 ): ChatSourceContext[] {
 	if (typeof window === 'undefined') return [];
 	try {
@@ -73,8 +73,8 @@ export function readPendingChatSourceContexts(
 			return [];
 		}
 		const submission = value?.submission as Record<string, unknown> | undefined;
-		if (submission && (!persisted || submission.session_id !== persisted.sessionId)) return [];
-		if (persisted && submission?.session_id === persisted.sessionId) {
+		if (submission && (!persisted || submission.conversation_id !== persisted.sessionId)) return [];
+		if (persisted && submission?.conversation_id === persisted.sessionId) {
 			const afterIndex =
 				submission.after_message_id === null
 					? -1

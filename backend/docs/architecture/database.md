@@ -130,8 +130,8 @@ Repositories import their mapped classes directly from the owning module.
 | `finding.py` | Findings, selection/group links, expert feedback and curation |
 | `execution.py` | Worker analysis-job envelopes and pipeline execution history |
 | `chat.py` | Sessions, messages, capability calls and model-call records |
-| `feedback.py` | Answer feedback analysis, cases, annotation and review |
-| `feedback_dataset.py` | Dataset membership, sample revisions and export records |
+| `feedback.py` | Historical answer-feedback analysis, case, annotation and review mappings used by migration inspection |
+| `feedback_dataset.py` | Historical dataset membership, sample revision and export mappings used by migration inspection |
 | `evaluation.py` | Gold sets, prediction snapshots and evaluation runs |
 | `model_connection.py` | Shared model connection configuration and its administrative audit when available |
 

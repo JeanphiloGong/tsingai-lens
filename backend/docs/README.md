@@ -23,6 +23,7 @@ not in a parallel plan-doc tree.
   [data model](specs/model-connections/data-model.md).
 - Conversation and Agent: [contract index](specs/conversation-agent/README.md),
   including API, durable Task, tree, Feedback, and persistence contracts.
+- Document V2: [contract index](specs/document/README.md), including storage, API, and preparation boundaries.
 
 ## Code-Owned Neighbors
 

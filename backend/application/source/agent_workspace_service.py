@@ -20,10 +20,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.tools.registry import (
-    ToolExecutionContext,
-    ToolSpec,
-)
 from agent.application.context_builder import ChatContextBuilder
 from domain.chat import ChatResourceRef, ChatToolResult
 
@@ -38,31 +34,23 @@ class GetWorkspaceContextToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class GetWorkspaceContextCapability:
-    @property
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name="get_workspace_context",
-            description=(
-                "Read a bounded overview of the current literature workspace and its "
-                "Research Objective candidates. Use this before making workspace-specific "
-                "claims or proposing new Objective drafts."
-            ),
-            handler=self.execute,
-            input_model=GetWorkspaceContextToolRequest,
-        )
+class GetWorkspaceContextService:
 
     async def execute(
         self,
-        context: ToolExecutionContext,
+        *,
+        user_id: str,
+        workspace_id: str,
+        tool_call_id: str | None,
+        max_result_tokens: int,
         _arguments: GetWorkspaceContextToolRequest,
     ) -> ChatToolResult:
         workspace = await workspace_service.get_workspace_for_user(
-            context.workspace_id,
-            context.user_id,
+            workspace_id,
+            user_id,
         )
         objectives = await ObjectiveRepo.list_objectives(
-            context.workspace_id
+            workspace_id
         )
         visible = objectives[:_OBJECTIVE_LIMIT]
         objective_records = [self._objective_summary(item) for item in visible]
@@ -73,7 +61,7 @@ class GetWorkspaceContextCapability:
             else ()
         )
         return ChatToolResult(
-            tool_call_id=context.tool_call_id,
+            tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "workspace": {
@@ -93,15 +81,15 @@ class GetWorkspaceContextCapability:
             resource_refs=(
                 ChatResourceRef(
                     resource_type="workspace",
-                    resource_id=context.workspace_id,
-                    href=f"/workspaces/{context.workspace_id}",
+                    resource_id=workspace_id,
+                    href=f"/workspaces/{workspace_id}",
                 ),
                 *(
                     ChatResourceRef(
                         resource_type="research_objective",
                         resource_id=item.objective_id,
                         href=(
-                            f"/workspaces/{context.workspace_id}/objectives/"
+                            f"/workspaces/{workspace_id}/objectives/"
                             f"{item.objective_id}"
                         ),
                     )
@@ -146,53 +134,31 @@ class BrowseWorkspacePapersToolRequest(BaseModel):
         return normalized or None
 
 
-class BrowseWorkspacePapersCapability:
+class BrowseWorkspacePapersService:
     """Screen paper identities and high-level map signals before Source reading."""
 
-    @property
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name="browse_workspace_papers",
-            description=(
-                "Browse a bounded page of papers in the current workspace by visible "
-                "filename or title. The optional query is a literal identity filter, not "
-                "semantic topic search. Use it to locate named materials or titles, or omit it "
-                "for a context-sized survey. Read promising papers without first exhausting the "
-                "whole catalog. Returns preparation state, document type, bounded "
-                "Paper Map materials, processes, variables, outcomes, and an abstract "
-                "excerpt when an explicitly labelled abstract Source is available. "
-                "Profile, Paper Map and abstract availability are optional navigation "
-                "signals: inspect available document Sources directly when they are missing. "
-                "source_status reports prepared content availability, not a completed read. "
-                "Follow next_offset for later papers; an empty filename query match does "
-                "not establish scientific absence. Missing map or abstract metadata does "
-                "not establish an unreadable or irrelevant paper. When Source content is "
-                "ready, use inspect_document_sources to inspect its outline and relevant "
-                "body directly; a Paper Map is optional navigation. "
-                "These are screening signals only, not Evidence, and this capability "
-                "does not change the formal analysis scope."
-            ),
-            handler=self.execute,
-            input_model=BrowseWorkspacePapersToolRequest,
-        )
 
     async def execute(
         self,
-        context: ToolExecutionContext,
+        *,
+        user_id: str,
+        workspace_id: str,
+        tool_call_id: str | None,
+        max_result_tokens: int,
         arguments: BrowseWorkspacePapersToolRequest,
     ) -> ChatToolResult:
         workspace = await workspace_service.get_workspace_for_user(
-            context.workspace_id,
-            context.user_id,
+            workspace_id,
+            user_id,
         )
         document_records = workspace.documents
         document_ids = tuple(item.document.document_id for item in document_records)
         profiles = await DocumentProfileRepo.list_workspace(
-            context.workspace_id,
+            workspace_id,
             document_ids=document_ids or None,
         )
         paper_maps = await PaperMapRepo.list_workspace(
-            context.workspace_id,
+            workspace_id,
             document_ids=document_ids or None,
         )
         profiles_by_id = {profile.document_id: profile for profile in profiles}
@@ -218,7 +184,7 @@ class BrowseWorkspacePapersCapability:
             source_document = None
             try:
                 source_document = await SourceArtifactRepo.read_document(
-                    context.workspace_id,
+                    workspace_id,
                     document_id,
                 )
             except Exception:
@@ -270,7 +236,7 @@ class BrowseWorkspacePapersCapability:
             for paper in paper_records
         )
         result = ChatToolResult(
-            tool_call_id=context.tool_call_id,
+            tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
@@ -287,15 +253,15 @@ class BrowseWorkspacePapersCapability:
             resource_refs=(
                 ChatResourceRef(
                     resource_type="workspace",
-                    resource_id=context.workspace_id,
-                    href=f"/workspaces/{context.workspace_id}",
+                    resource_id=workspace_id,
+                    href=f"/workspaces/{workspace_id}",
                 ),
                 *(
                     ChatResourceRef(
                         resource_type="document",
                         resource_id=str(item.get("document_id") or ""),
                         href=(
-                            f"/workspaces/{context.workspace_id}/documents/"
+                            f"/workspaces/{workspace_id}/documents/"
                             f"{item.get('document_id')}"
                         ),
                     )
@@ -313,7 +279,7 @@ class BrowseWorkspacePapersCapability:
         )
         while len(paper_records) > 1 and ChatContextBuilder.estimate_tokens(
             ChatContextBuilder.tool_result_message(result)
-        ) > context.max_result_tokens:
+        ) > max_result_tokens:
             paper_records.pop()
             visible_ids = {paper["document_id"] for paper in paper_records}
             failed_source_count = sum(
@@ -458,7 +424,36 @@ class BrowseWorkspacePapersCapability:
 
 __all__ = [
     "BrowseWorkspacePapersToolRequest",
-    "BrowseWorkspacePapersCapability",
+    "BrowseWorkspacePapersService",
     "GetWorkspaceContextToolRequest",
-    "GetWorkspaceContextCapability",
+    "GetWorkspaceContextService",
+    "browse_workspace_papers",
+    "get_workspace_context",
 ]
+
+
+async def get_workspace_context(
+    *, user_id: str, workspace_id: str, tool_call_id: str | None,
+    task_id: str = "", operation_id: str = "", max_result_tokens: int = 12_000,
+) -> ChatToolResult:
+    return await GetWorkspaceContextService().execute(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        tool_call_id=tool_call_id,
+        max_result_tokens=max_result_tokens,
+        _arguments=GetWorkspaceContextToolRequest(),
+    )
+
+
+async def browse_workspace_papers(
+    *, user_id: str, workspace_id: str, query: str | None, offset: int,
+    limit: int, tool_call_id: str | None, task_id: str = "", operation_id: str = "",
+    max_result_tokens: int = 12_000,
+) -> ChatToolResult:
+    return await BrowseWorkspacePapersService().execute(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        tool_call_id=tool_call_id,
+        max_result_tokens=max_result_tokens,
+        arguments=BrowseWorkspacePapersToolRequest(query=query, offset=offset, limit=limit),
+    )

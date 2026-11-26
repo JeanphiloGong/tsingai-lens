@@ -1,5 +1,5 @@
-from agent.capabilities import document_sources
-from agent.capabilities import workspace_context
+from application.source import agent_source_service as document_sources
+from application.source import agent_workspace_service as workspace_context
 from infra.persistence import database
 from copy import deepcopy
 from tests.support.source_artifacts import build_source_documents
@@ -12,13 +12,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.capabilities.workspace_context import (
-    BrowseWorkspacePapersCapability,
+from application.source.agent_workspace_service import (
+    BrowseWorkspacePapersService,
     BrowseWorkspacePapersToolRequest,
 )
 from agent.tools.registry import ToolExecutionContext
-from agent.capabilities.document_sources import (
-    InspectDocumentSourcesCapability,
+from application.source.agent_source_service import (
+    InspectDocumentSourcesService,
     InspectDocumentSourcesToolRequest,
 )
 from domain.source.artifacts import SourceBlock, SourceDocument
@@ -63,7 +63,7 @@ def document(text, heading="Paper title"):
 
 @pytest.mark.parametrize("label", ["Abstract:", "ABSTRACT :", "Abstract —", "Abstract–", "摘要："])
 def test_inline_abstract_is_read_without_an_abstract_heading(label):
-    assert BrowseWorkspacePapersCapability._abstract_excerpt(
+    assert BrowseWorkspacePapersService._abstract_excerpt(
         document(f"{label}\nPreheating changes residual stress.")
     ) == ("Preheating changes residual stress.", "found")
 
@@ -74,7 +74,7 @@ def test_labelled_section_takes_precedence_over_inline_label():
         block_id="block-2", document_id="paper-1", block_type="paragraph",
         text="Section abstract.", block_order=1, heading_path="Abstract",
     ),)
-    assert BrowseWorkspacePapersCapability._abstract_excerpt(source) == (
+    assert BrowseWorkspacePapersService._abstract_excerpt(source) == (
         "Section abstract.", "found",
     )
 
@@ -89,13 +89,13 @@ def test_labelled_section_takes_precedence_over_inline_label():
     ("Keywords: titanium, preheating", "Paper title"),
 ])
 def test_missing_or_incidental_abstract_is_not_invented(text, heading):
-    assert BrowseWorkspacePapersCapability._abstract_excerpt(document(text, heading)) == (
+    assert BrowseWorkspacePapersService._abstract_excerpt(document(text, heading)) == (
         None, "not_found",
     )
 
 
 def test_unprepared_source_remains_unprepared():
-    assert BrowseWorkspacePapersCapability._abstract_excerpt(None) == (None, "source_not_ready")
+    assert BrowseWorkspacePapersService._abstract_excerpt(None) == (None, "source_not_ready")
 
 
 @pytest.mark.parametrize("text,expected_status", [
@@ -111,10 +111,11 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
             SimpleNamespace(document_id="paper-1", map_status="sufficient", studies=(), map_limitations=()),
         ]))
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(text)))
-    capability = BrowseWorkspacePapersCapability()
+    capability = BrowseWorkspacePapersService()
     result = asyncio.run(capability.execute(
-        ToolExecutionContext(operation_id="operation", task_id="session-1", user_id="user-1", workspace_id="workspace-1", tool_call_id="call-1"),
-        BrowseWorkspacePapersToolRequest(),
+        user_id="user-1", workspace_id="workspace-1",
+        tool_call_id="call-1", max_result_tokens=12_000,
+        arguments=BrowseWorkspacePapersToolRequest(),
     ))
     paper = result.data["papers"][0]
     assert paper["abstract_status"] == expected_status
@@ -150,10 +151,11 @@ def test_optional_screening_information_does_not_require_researcher_intervention
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(
             "Preheating temperature was varied." if missing == "abstract" else "Abstract: LPBF preheating study."
         )))
-    capability = BrowseWorkspacePapersCapability()
+    capability = BrowseWorkspacePapersService()
     result = asyncio.run(capability.execute(
-        ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t"),
-        BrowseWorkspacePapersToolRequest(),
+        user_id="u", workspace_id="c",
+        tool_call_id="t", max_result_tokens=12_000,
+        arguments=BrowseWorkspacePapersToolRequest(),
     ))
     assert result.status == "succeeded"
     assert result.warnings == ()
@@ -181,9 +183,9 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
-    capability = BrowseWorkspacePapersCapability()
+    capability = BrowseWorkspacePapersService()
     context = ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t")
-    result = asyncio.run(capability.execute(context, BrowseWorkspacePapersToolRequest(limit=6)))
+    result = asyncio.run(capability.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= BrowseWorkspacePapersToolRequest(limit=6)))
     assert [paper["source_status"] for paper in result.data["papers"]] == [
         "available", "preparing", "not_prepared", "preparation_failed", "unavailable", "read_failed"
     ]
@@ -209,7 +211,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     })
     assert "paper-6" in caplog.text
 
-    miss = asyncio.run(capability.execute(context, BrowseWorkspacePapersToolRequest(query="not-a-filename")))
+    miss = asyncio.run(capability.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= BrowseWorkspacePapersToolRequest(query="not-a-filename")))
     assert miss.data["papers"] == []
     assert miss.warnings == ()
 
@@ -219,10 +221,11 @@ def test_normal_pagination_is_not_a_warning():
     workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
-    capability = BrowseWorkspacePapersCapability()
+    capability = BrowseWorkspacePapersService()
     result = asyncio.run(capability.execute(
-        ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t"),
-        BrowseWorkspacePapersToolRequest(limit=8),
+        user_id="u", workspace_id="c",
+        tool_call_id="t", max_result_tokens=12_000,
+        arguments=BrowseWorkspacePapersToolRequest(limit=8),
     ))
     assert result.warnings == ()
     assert result.data["next_offset"] == 8
@@ -263,10 +266,10 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     workspace_context.DocumentProfileRepo = DocumentProfileRepository()
     workspace_context.PaperMapRepo = PaperMapRepository()
     workspace_context.SourceArtifactRepo = sources
-    browse = BrowseWorkspacePapersCapability()
+    browse = BrowseWorkspacePapersService()
     document_sources.workspace_service = workspace_service
     document_sources.SourceArtifactRepo = sources
-    inspect = InspectDocumentSourcesCapability()
+    inspect = InspectDocumentSourcesService()
     context = ToolExecutionContext(
         operation_id="operation",
         task_id="s", user_id="u", workspace_id="c", tool_call_id="browse"
@@ -275,21 +278,21 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     async def scenario():
         await seed_workspace(database.AsyncSessionLocal, 'c', document_ids=(source_document.document_id,))
         await sources.replace_document("c", source_document)
-        survey = await browse.execute(context, BrowseWorkspacePapersToolRequest())
+        survey = await browse.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= BrowseWorkspacePapersToolRequest())
         assert [paper["source_status"] for paper in survey.data["papers"]] == ["available", "unavailable"]
         assert len(survey.warnings) == 1
-        selected = await browse.execute(context, BrowseWorkspacePapersToolRequest(query="P002"))
+        selected = await browse.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= BrowseWorkspacePapersToolRequest(query="P002"))
         assert selected.warnings == ()
         paper = selected.data["papers"][0]
         assert paper["abstract_status"] == "not_found"
         assert paper["map_status"] == "not_available"
 
-        outline = await inspect.execute(context, InspectDocumentSourcesToolRequest(
+        outline = await inspect.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= InspectDocumentSourcesToolRequest(
             document_id=paper["document_id"], limit=1,
         ))
         heading = next(section["heading_path"] for section in outline.data["document_outline"]
                        if section["heading_path"] == "Experimental Procedures")
-        read = await inspect.execute(context, InspectDocumentSourcesToolRequest(
+        read = await inspect.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= InspectDocumentSourcesToolRequest(
             document_id=paper["document_id"], heading_path=heading,
         ))
         assert read.status == "succeeded"
@@ -298,7 +301,7 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         assert read.data["sources"][0]["content_truncated"] is False
         assert read.data["sources"][0]["source_digest"]
         assert any(ref.resource_type == "source" for ref in read.resource_refs)
-        missing = await inspect.execute(context, InspectDocumentSourcesToolRequest(document_id="paper-2"))
+        missing = await inspect.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= InspectDocumentSourcesToolRequest(document_id="paper-2"))
         assert missing.status == "failed"
         assert missing.error_code == "document_sources_not_ready"
 

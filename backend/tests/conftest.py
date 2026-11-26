@@ -182,11 +182,9 @@ def workspace_service(postgres_session_factory):
 @pytest.fixture(autouse=True)
 def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
-    from agent.capabilities import (
-        workspace_context,
-        research_scope,
-        document_sources,
-    )
+    from application.source import agent_workspace_service as workspace_context
+    from application.source import agent_source_service as document_sources
+    from agent.capabilities import research_scope
     import application.core.objectives.analysis.analysis_record_source as _test_analysis_record_source
     import application.core.document_profiles.service as _test_document_profile_service
     import application.core.objectives.analysis.experiment_analysis_writer as _test_experiment_analysis_writer

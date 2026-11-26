@@ -1,10 +1,10 @@
 """Business tools registered for the research Task runner."""
 
-from agent.capabilities.workspace_context import (
+from agent.tools.workspace import (
     BrowseWorkspacePapersCapability,
     GetWorkspaceContextCapability,
 )
-from agent.capabilities.document_sources import (
+from agent.tools.document import (
     InspectDocumentSourcesCapability,
     InspectTableCapability,
     ReadSourceCapability,

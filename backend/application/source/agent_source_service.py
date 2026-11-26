@@ -11,10 +11,6 @@ from dataclasses import asdict, replace
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-from agent.tools.registry import (
-    ToolExecutionContext,
-    ToolSpec,
-)
 from agent.application.context_builder import ChatContextBuilder
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus
 from domain.source import (
@@ -37,18 +33,21 @@ SourceType = Literal["text", "table", "figure"]
 ReadableSourceKind = Literal["text_window", "table", "figure"]
 
 
+
 async def _unavailable_document_sources(
-    context: ToolExecutionContext,
+    *,
+    workspace_id: str,
+    tool_call_id: str | None,
     document_ids: list[str],
 ) -> ChatToolResult:
     missing = []
     for document_id in document_ids:
         try:
-            await workspace_service.get_document(context.workspace_id, document_id)
+            await workspace_service.get_document(workspace_id, document_id)
         except ResourceNotFoundException:
             missing.append(document_id)
     return ChatToolResult(
-        tool_call_id=context.tool_call_id,
+        tool_call_id=tool_call_id,
         status=ToolResultStatus.FAILED,
         error_code="document_not_found" if missing else "document_sources_not_ready",
         error_message=(
@@ -162,47 +161,35 @@ class ReadSourceToolRequest(BaseModel):
     )
 
 
-class ReadSourceCapability:
-    @property
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name="read_source",
-            description=(
-                "Read one exact canonical paper Source by document, Source kind, and "
-                "Source reference. The returned content is the complete Source when it "
-                "fits the bounded result, with its stable authoring source_label (S001, "
-                "S002, ...) and source_ref, a stable digest, and continuation offset "
-                "for oversized text. Use the source_label, not source_ref, when citing "
-                "PaperExperiment evidence. This is the source-reading step for Evidence; "
-                "it does not itself create Evidence or a Finding. Use inspect_table for "
-                "row-aware inspection of an oversized table."
-            ),
-            handler=self.execute,
-            input_model=ReadSourceToolRequest,
-        )
+class ReadSourceService:
 
     async def execute(
         self,
-        context: ToolExecutionContext,
+        *,
+        user_id: str,
+        workspace_id: str,
+        tool_call_id: str | None,
+        max_result_tokens: int,
         arguments: ReadSourceToolRequest,
     ) -> ChatToolResult:
         await workspace_service.get_workspace_for_user(
-            context.workspace_id,
-            context.user_id,
+            workspace_id,
+            user_id,
         )
         document = await SourceArtifactRepo.read_document(
-            context.workspace_id,
+            workspace_id,
             arguments.document_id,
         )
         if document is None:
             return await _unavailable_document_sources(
-                context, [arguments.document_id]
+                workspace_id=workspace_id, tool_call_id=tool_call_id,
+                document_ids=[arguments.document_id],
             )
 
         source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         if arguments.source_version is not None and arguments.source_version != source_version:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                 error_code="source_version_changed",
                 error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
                 data={"document_id": document.document_id, "source_version": source_version},
@@ -211,13 +198,13 @@ class ReadSourceCapability:
         source = self._source_record(document, arguments)
         if source is None:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id,
+                tool_call_id=tool_call_id,
                 status=ToolResultStatus.FAILED,
                 error_code="source_not_found",
                 error_message="The requested canonical Source was not found in this paper.",
             )
         source["source_label"] = (
-            InspectDocumentSourcesCapability._source_label_for_document(
+            InspectDocumentSourcesService._source_label_for_document(
                 document, source["source_ref"]
             )
         )
@@ -225,14 +212,14 @@ class ReadSourceCapability:
         canonical_content = source.pop("_canonical_content")
         digest = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
         canonical_length = len(canonical_content)
-        source_ref = InspectDocumentSourcesCapability._source_ref(
-            context.workspace_id,
+        source_ref = InspectDocumentSourcesService._source_ref(
+            workspace_id,
             document.document_id,
             source,
         )
         if arguments.offset > 0 and arguments.offset >= canonical_length:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id,
+                tool_call_id=tool_call_id,
                 status=ToolResultStatus.FAILED,
                 data={
                     **source,
@@ -263,7 +250,7 @@ class ReadSourceCapability:
                 "remaining canonical content before drafting Evidence."
             )
         result = ChatToolResult(
-            tool_call_id=context.tool_call_id,
+            tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 **source,
@@ -285,8 +272,8 @@ class ReadSourceCapability:
             warnings=tuple(warnings),
         )
         if (
-            InspectDocumentSourcesCapability._result_tokens(result)
-            > context.max_result_tokens
+            InspectDocumentSourcesService._result_tokens(result)
+            > max_result_tokens
         ):
             low, high = start, end
             while low < high:
@@ -307,15 +294,15 @@ class ReadSourceCapability:
                     ),
                 )
                 if (
-                    InspectDocumentSourcesCapability._result_tokens(candidate)
-                    <= context.max_result_tokens
+                    InspectDocumentSourcesService._result_tokens(candidate)
+                    <= max_result_tokens
                 ):
                     low = candidate_end
                 else:
                     high = candidate_end - 1
             if low == start:
                 return ChatToolResult(
-                    tool_call_id=context.tool_call_id,
+                    tool_call_id=tool_call_id,
                     status=ToolResultStatus.FAILED,
                     error_code="source_batch_too_large",
                     error_message="Read this Source individually to leave room for its content and locator.",
@@ -405,41 +392,31 @@ class ReadSourceCapability:
         }
 
 
-class SearchSourcesCapability:
-    @property
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name="search_sources",
-            description=(
-                "Search the current workspace for paper content; omit document_ids for the whole workspace. "
-                "Use match_mode to match any terms, all terms across a paper, or an exact phrase. "
-                "Returns ranked papers and passages around actual hits with exact reading arguments. "
-                "Results are bounded, paginated navigation candidates with "
-                "canonical Source digests. A match is not Evidence and does not prove "
-                "relevance; inspect the exact Source before making a scientific judgment."
-            ),
-            handler=self.execute,
-            input_model=SearchSourcesToolRequest,
-        )
+class SearchSourcesService:
 
     async def execute(
         self,
-        context: ToolExecutionContext,
+        *,
+        user_id: str,
+        workspace_id: str,
+        tool_call_id: str | None,
+        max_result_tokens: int,
         arguments: SearchSourcesToolRequest,
     ) -> ChatToolResult:
         await workspace_service.get_workspace_for_user(
-            context.workspace_id,
-            context.user_id,
+            workspace_id,
+            user_id,
         )
         try:
             documents = (
-                await SourceArtifactRepo.read_workspace_documents(context.workspace_id)
+                await SourceArtifactRepo.read_workspace_documents(workspace_id)
                 if arguments.document_ids is None else
-                await SourceArtifactRepo.read_documents(context.workspace_id, tuple(arguments.document_ids))
+                await SourceArtifactRepo.read_documents(workspace_id, tuple(arguments.document_ids))
             )
         except FileNotFoundError:
             return await _unavailable_document_sources(
-                context, arguments.document_ids or []
+                workspace_id=workspace_id, tool_call_id=tool_call_id,
+                document_ids=arguments.document_ids or [],
             )
         documents_by_id = {document.document_id: document for document in documents}
         missing = [
@@ -449,7 +426,8 @@ class SearchSourcesCapability:
         ]
         if missing:
             return await _unavailable_document_sources(
-                context, missing
+                workspace_id=workspace_id, tool_call_id=tool_call_id,
+                document_ids=missing,
             )
 
         selected_types = set(arguments.source_types)
@@ -467,7 +445,7 @@ class SearchSourcesCapability:
             paper_start = len(matches)
             candidates = (
                 *(
-                    (InspectDocumentSourcesCapability._text_source(block), block.text)
+                    (InspectDocumentSourcesService._text_source(block), block.text)
                     for block in sorted(
                         document.blocks, key=lambda item: item.block_order
                     )
@@ -475,7 +453,7 @@ class SearchSourcesCapability:
                 ),
                 *(
                     (
-                        InspectDocumentSourcesCapability._table_source(table),
+                        InspectDocumentSourcesService._table_source(table),
                         (source_table_payload(table)["table_markdown"] or "").strip(),
                     )
                     for table in sorted(
@@ -484,7 +462,7 @@ class SearchSourcesCapability:
                 ),
                 *(
                     (
-                        InspectDocumentSourcesCapability._figure_source(figure),
+                        InspectDocumentSourcesService._figure_source(figure),
                         (figure.caption_text or ""),
                     )
                     for figure in sorted(
@@ -551,7 +529,7 @@ class SearchSourcesCapability:
                 "remain on later pages."
             )
         result = ChatToolResult(
-            tool_call_id=context.tool_call_id,
+            tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
@@ -569,8 +547,8 @@ class SearchSourcesCapability:
                 "support_is_evidence": False,
             },
             resource_refs=tuple(
-                InspectDocumentSourcesCapability._source_ref(
-                    context.workspace_id,
+                InspectDocumentSourcesService._source_ref(
+                    workspace_id,
                     item["document_id"],
                     item,
                 )
@@ -579,59 +557,51 @@ class SearchSourcesCapability:
             warnings=tuple(warnings),
         )
 
-        while InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+        while InspectDocumentSourcesService._result_tokens(result) > max_result_tokens:
             if len(visible) > 1:
                 visible.pop()
             elif result.data["papers"]:
                 result = replace(result, data={**result.data, "papers": result.data["papers"][:-1]})
             else:
-                return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                return ChatToolResult(tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                                       error_code="source_batch_too_large",
                                       error_message="Narrow the search scope to fit one Source preview.")
             next_offset = arguments.offset + len(visible)
             result = replace(result, data={**result.data, "matches": list(visible),
                                           "next_offset": next_offset if next_offset < len(matches) else None},
-                             resource_refs=tuple(InspectDocumentSourcesCapability._source_ref(
-                                 context.workspace_id, item["document_id"], item) for item in visible))
+                             resource_refs=tuple(InspectDocumentSourcesService._source_ref(
+                                 workspace_id, item["document_id"], item) for item in visible))
         return result
 
 
-class InspectTableCapability:
-    @property
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name="inspect_table",
-            description=(
-                "Read one exact canonical paper table as Markdown. Lens returns the whole "
-                "table when it fits the bounded result; only oversized tables are split "
-                "into header-preserving row windows. The complete-table digest remains "
-                "stable across windows. A table read is Source inspection, not Evidence."
-            ),
-            handler=self.execute,
-            input_model=InspectTableToolRequest,
-        )
+class InspectTableService:
 
     async def execute(
         self,
-        context: ToolExecutionContext,
+        *,
+        user_id: str,
+        workspace_id: str,
+        tool_call_id: str | None,
+        max_result_tokens: int,
         arguments: InspectTableToolRequest,
     ) -> ChatToolResult:
         await workspace_service.get_workspace_for_user(
-            context.workspace_id,
-            context.user_id,
+            workspace_id,
+            user_id,
         )
         document = await SourceArtifactRepo.read_document(
-            context.workspace_id,
+            workspace_id,
             arguments.document_id,
         )
         if document is None:
             return await _unavailable_document_sources(
-                context, [arguments.document_id]
+                workspace_id=workspace_id, tool_call_id=tool_call_id,
+                document_ids=[arguments.document_id],
             )
         source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         if arguments.source_version is not None and arguments.source_version != source_version:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                 error_code="source_version_changed",
                 error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
                 data={"document_id": document.document_id, "source_version": source_version},
@@ -643,7 +613,7 @@ class InspectTableCapability:
         )
         if table is None:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id,
+                tool_call_id=tool_call_id,
                 status=ToolResultStatus.FAILED,
                 error_code="table_source_not_found",
                 error_message="The requested table Source was not found in this paper.",
@@ -655,7 +625,7 @@ class InspectTableCapability:
         data_rows = table.table_matrix[table.header_row_count :]
         if arguments.row_offset > 0 and arguments.row_offset >= len(data_rows):
             return ChatToolResult(
-                tool_call_id=context.tool_call_id,
+                tool_call_id=tool_call_id,
                 status=ToolResultStatus.FAILED,
                 data={
                     "document_id": document.document_id,
@@ -669,8 +639,8 @@ class InspectTableCapability:
                     "support_is_evidence": False,
                 },
                 resource_refs=(
-                    InspectDocumentSourcesCapability._source_ref(
-                        context.workspace_id,
+                    InspectDocumentSourcesService._source_ref(
+                        workspace_id,
                         document.document_id,
                         {"source_ref": table.table_id, "page": table.page},
                     ),
@@ -753,7 +723,7 @@ class InspectTableCapability:
                 next_row_offset = None
 
         result = ChatToolResult(
-            tool_call_id=context.tool_call_id,
+            tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "document_id": document.document_id,
@@ -778,8 +748,8 @@ class InspectTableCapability:
                 "support_is_evidence": False,
             },
             resource_refs=(
-                InspectDocumentSourcesCapability._source_ref(
-                    context.workspace_id,
+                InspectDocumentSourcesService._source_ref(
+                    workspace_id,
                     document.document_id,
                     {
                         "source_ref": table.table_id,
@@ -798,11 +768,11 @@ class InspectTableCapability:
             ),
         )
 
-        while InspectDocumentSourcesCapability._result_tokens(result) > context.max_result_tokens:
+        while InspectDocumentSourcesService._result_tokens(result) > max_result_tokens:
             count = result.data["returned_row_count"]
             if count <= 1:
                 return ChatToolResult(
-                    tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                    tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                     error_code="table_row_exceeds_budget",
                     error_message="A complete table row and its headers do not fit. Read the canonical table with read_source.",
                     data={"read_arguments": {"document_id": document.document_id, "source_kind": "table",
@@ -835,46 +805,35 @@ class InspectTableCapability:
         return encoded[:limit].decode("utf-8", errors="ignore"), True
 
 
-class InspectDocumentSourcesCapability:
-    @property
-    def spec(self) -> ToolSpec:
-        return ToolSpec(
-            name="inspect_document_sources",
-            description=(
-                "Read a context-sized batch of complete paper passages, tables and captions, with a section outline and length estimates. "
-                "Each returned Source includes its stable authoring label (S001, S002, ...); "
-                "copy that source_label exactly into PaperExperiment source_labels and binding "
-                "fields, never combine it with source_ref. The response also includes a "
-                "source_label_to_ref map for the returned batch. Select a heading or page and omit "
-                "limit for automatic batching; continue with next_offset, and use read_source "
-                "for any oversized truncated Source."
-            ),
-            handler=self.execute,
-            input_model=InspectDocumentSourcesToolRequest,
-        )
+class InspectDocumentSourcesService:
 
     async def execute(
         self,
-        context: ToolExecutionContext,
+        *,
+        user_id: str,
+        workspace_id: str,
+        tool_call_id: str | None,
+        max_result_tokens: int,
         arguments: InspectDocumentSourcesToolRequest,
     ) -> ChatToolResult:
         await workspace_service.get_workspace_for_user(
-            context.workspace_id,
-            context.user_id,
+            workspace_id,
+            user_id,
         )
         document = await SourceArtifactRepo.read_document(
-            context.workspace_id,
+            workspace_id,
             arguments.document_id,
         )
         if document is None:
             return await _unavailable_document_sources(
-                context, [arguments.document_id]
+                workspace_id=workspace_id, tool_call_id=tool_call_id,
+                document_ids=[arguments.document_id],
             )
 
         source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         if arguments.source_version is not None and arguments.source_version != source_version:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                 error_code="source_version_changed",
                 error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
                 data={"document_id": document.document_id, "source_version": source_version},
@@ -931,7 +890,7 @@ class InspectDocumentSourcesCapability:
             if source["source_type"] not in section["source_types"]:
                 section["source_types"].append(source["source_type"])
         tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables,
-                                          figures=document.figures, workspace_id=context.workspace_id)
+                                          figures=document.figures, workspace_id=workspace_id)
         section_nodes = {node.node_id: node for node in tree.nodes.values()
                          if node.node_type in {"section", "references_section"}}
         for heading, section in sections.items():
@@ -941,7 +900,7 @@ class InspectDocumentSourcesCapability:
         if arguments.section_id is not None:
             if arguments.section_id not in section_nodes:
                 return ChatToolResult(
-                    tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                    tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                     error_code="section_not_found", error_message="Copy an exact section_id from the current outline.",
                     data={"document_id": document.document_id, "source_version": source_version,
                           "document_outline": list(sections.values())[:80]},
@@ -988,13 +947,13 @@ class InspectDocumentSourcesCapability:
         if next_offset >= len(matches):
             next_offset = None
 
-        refs = [self._document_ref(context.workspace_id, document.document_id)]
+        refs = [self._document_ref(workspace_id, document.document_id)]
         refs.extend(
-            self._source_ref(context.workspace_id, document.document_id, item)
+            self._source_ref(workspace_id, document.document_id, item)
             for item in visible
         )
         result = ChatToolResult(
-            tool_call_id=context.tool_call_id,
+            tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
                 "document": {
@@ -1037,7 +996,7 @@ class InspectDocumentSourcesCapability:
                 "source_label_to_ref": {
                     source["source_label"]: source["source_ref"] for source in visible
                 },
-                "batch_token_budget": context.max_result_tokens,
+                "batch_token_budget": max_result_tokens,
                 "returned_source_count": len(visible),
                 "support_is_evidence": False,
             },
@@ -1053,7 +1012,7 @@ class InspectDocumentSourcesCapability:
                 *(["An oversized Source is listed without its content; read it separately."]
                   if any(source["content_truncated"] for source in visible) else []),
             ]))
-            if self._result_tokens(result) <= context.max_result_tokens:
+            if self._result_tokens(result) <= max_result_tokens:
                 return result
             if len(visible) > 1:
                 visible.pop()
@@ -1068,7 +1027,7 @@ class InspectDocumentSourcesCapability:
                 }
             else:
                 return ChatToolResult(
-                    tool_call_id=context.tool_call_id,
+                    tool_call_id=tool_call_id,
                     status=ToolResultStatus.FAILED,
                     error_code="source_batch_too_large",
                     error_message="Request this paper individually with an exact Source or narrower section.",
@@ -1090,10 +1049,10 @@ class InspectDocumentSourcesCapability:
                     "continuation": {**continuation_args, "offset": next_offset} if next_offset < len(matches) else None,
                 },
                 resource_refs=(
-                    self._document_ref(context.workspace_id, document.document_id),
+                    self._document_ref(workspace_id, document.document_id),
                     *(
                         self._source_ref(
-                            context.workspace_id, document.document_id, source
+                            workspace_id, document.document_id, source
                         )
                         for source in visible
                     ),
@@ -1128,7 +1087,7 @@ class InspectDocumentSourcesCapability:
 
     @staticmethod
     def _text_source(block: SourceBlock) -> dict[str, Any]:
-        content, truncated = InspectDocumentSourcesCapability._bounded(block.text)
+        content, truncated = InspectDocumentSourcesService._bounded(block.text)
         return {
             "source_type": "text",
             # `source_kind` is the stable Evidence locator kind. Keep the
@@ -1151,7 +1110,7 @@ class InspectDocumentSourcesCapability:
         # canonical content representation stable instead of letting the
         # digest path call ``encode`` on ``None``.
         canonical_markdown = (record["table_markdown"] or "").strip()
-        content, truncated = InspectDocumentSourcesCapability._bounded(
+        content, truncated = InspectDocumentSourcesService._bounded(
             canonical_markdown
         )
         return {
@@ -1173,7 +1132,7 @@ class InspectDocumentSourcesCapability:
 
     @staticmethod
     def _figure_source(figure: SourceFigure) -> dict[str, Any]:
-        content, truncated = InspectDocumentSourcesCapability._bounded(
+        content, truncated = InspectDocumentSourcesService._bounded(
             figure.caption_text
         )
         return {
@@ -1245,11 +1204,129 @@ class InspectDocumentSourcesCapability:
 
 __all__ = [
     "InspectDocumentSourcesToolRequest",
-    "InspectDocumentSourcesCapability",
+    "InspectDocumentSourcesService",
     "InspectTableToolRequest",
-    "InspectTableCapability",
+    "InspectTableService",
     "ReadSourceToolRequest",
-    "ReadSourceCapability",
+    "ReadSourceService",
     "SearchSourcesToolRequest",
-    "SearchSourcesCapability",
+    "SearchSourcesService",
+    "inspect_document_sources",
+    "inspect_table",
+    "read_source",
+    "search_sources",
 ]
+
+
+async def read_source(
+    *,
+    user_id: str,
+    workspace_id: str,
+    document_id: str,
+    source_kind: str,
+    source_ref: str,
+    source_version: str | None,
+    offset: int,
+    limit: int,
+    tool_call_id: str | None,
+    max_result_tokens: int = _READ_SOURCE_CONTENT_LIMIT,
+) -> ChatToolResult:
+    return await ReadSourceService().execute(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        tool_call_id=tool_call_id,
+        max_result_tokens=max_result_tokens,
+        arguments=ReadSourceToolRequest(
+            document_id=document_id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            source_version=source_version,
+            offset=offset,
+            limit=limit,
+        ),
+    )
+
+
+async def search_sources(
+    *,
+    user_id: str,
+    workspace_id: str,
+    document_ids: list[str] | None,
+    match_mode: str,
+    query: str,
+    source_types: list[str],
+    offset: int,
+    limit: int,
+    tool_call_id: str | None,
+    max_result_tokens: int = _SOURCE_CONTENT_LIMIT,
+) -> ChatToolResult:
+    return await SearchSourcesService().execute(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        tool_call_id=tool_call_id,
+        max_result_tokens=max_result_tokens,
+        arguments=SearchSourcesToolRequest(
+            document_ids=document_ids,
+            match_mode=match_mode,
+            query=query,
+            source_types=source_types,
+            offset=offset,
+            limit=limit,
+        ),
+    )
+
+
+async def inspect_document_sources(
+    *,
+    user_id: str,
+    workspace_id: str,
+    document_id: str,
+    query: str | None,
+    source_ref: str | None,
+    section_id: str | None,
+    source_version: str | None,
+    heading_path: str | None,
+    source_types: list[str],
+    page: int | None,
+    offset: int,
+    limit: int,
+    tool_call_id: str | None,
+    max_result_tokens: int = _SOURCE_CONTENT_LIMIT,
+) -> ChatToolResult:
+    return await InspectDocumentSourcesService().execute(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        tool_call_id=tool_call_id,
+        max_result_tokens=max_result_tokens,
+        arguments=InspectDocumentSourcesToolRequest(
+            document_id=document_id, query=query, source_ref=source_ref,
+            section_id=section_id, source_version=source_version,
+            heading_path=heading_path, source_types=source_types, page=page,
+            offset=offset, limit=limit,
+        ),
+    )
+
+
+async def inspect_table(
+    *,
+    user_id: str,
+    workspace_id: str,
+    document_id: str,
+    table_ref: str,
+    source_version: str | None,
+    row_offset: int,
+    row_limit: int,
+    tool_call_id: str | None,
+    max_result_tokens: int = _TABLE_CONTENT_LIMIT,
+) -> ChatToolResult:
+    return await InspectTableService().execute(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        tool_call_id=tool_call_id,
+        max_result_tokens=max_result_tokens,
+        arguments=InspectTableToolRequest(
+            document_id=document_id, table_ref=table_ref,
+            source_version=source_version, row_offset=row_offset,
+            row_limit=row_limit,
+        ),
+    )

@@ -1,11 +1,11 @@
-from agent.capabilities import document_sources
+from application.source import agent_source_service as document_sources
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 from domain.source import SourceDocument, SourceBlock
 from agent.tools.registry import ToolExecutionContext
-from agent.capabilities.document_sources import (
-    InspectDocumentSourcesCapability,
+from application.source.agent_source_service import (
+    InspectDocumentSourcesService,
     InspectDocumentSourcesToolRequest,
 )
 
@@ -59,7 +59,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         "SourceArtifactRepo",
         SimpleNamespace(read_document=AsyncMock(return_value=doc)),
     )
-    cap = InspectDocumentSourcesCapability()
+    cap = InspectDocumentSourcesService()
     context = ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation", max_result_tokens=8000)
     seen = []
     offset = 0
@@ -68,8 +68,11 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         pages += 1
         assert pages <= 20
         result = await cap.execute(
-            context,
-            InspectDocumentSourcesToolRequest(
+            user_id=context.user_id,
+            workspace_id=context.workspace_id,
+            tool_call_id=context.tool_call_id,
+            max_result_tokens=context.max_result_tokens,
+            arguments=InspectDocumentSourcesToolRequest(
                 document_id="paper", heading_path="Methods", offset=offset, limit=200
             ),
         )
@@ -99,12 +102,13 @@ async def test_permission_failure_stops_before_loading_sources(monkeypatch):
         AsyncMock(side_effect=PermissionError()),
     )
     monkeypatch.setattr(document_sources, "SourceArtifactRepo", repo)
-    cap = InspectDocumentSourcesCapability()
+    cap = InspectDocumentSourcesService()
     with pytest.raises(PermissionError):
         await cap.execute(
-            ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation"),
-            InspectDocumentSourcesToolRequest(document_id="paper"),
-        )
+        user_id="user", workspace_id="col",
+        tool_call_id="call", max_result_tokens=12_000,
+        arguments=InspectDocumentSourcesToolRequest(document_id="paper"),
+    )
     repo.read_document.assert_not_called()
 
 
@@ -137,10 +141,11 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
         "SourceArtifactRepo",
         SimpleNamespace(read_document=AsyncMock(return_value=document)),
     )
-    capability = InspectDocumentSourcesCapability()
+    capability = InspectDocumentSourcesService()
     result = await capability.execute(
-        ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation", max_result_tokens=2000),
-        InspectDocumentSourcesToolRequest(document_id="paper", heading_path="Methods"),
+        user_id="user", workspace_id="col",
+        tool_call_id="call", max_result_tokens=2000,
+        arguments=InspectDocumentSourcesToolRequest(document_id="paper", heading_path="Methods"),
     )
     assert result.status == "succeeded"
     assert result.data["returned_source_count"] == 5
@@ -164,14 +169,15 @@ async def test_parent_section_reads_its_subsections_without_unrelated_sections(m
     monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
         read_document=AsyncMock(return_value=document),
     ))
-    capability = InspectDocumentSourcesCapability()
+    capability = InspectDocumentSourcesService()
     seen = []
     offset = 0
     while True:
         result = await capability.execute(
-            ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation"),
-            InspectDocumentSourcesToolRequest(document_id="paper", heading_path="2 Methods", offset=offset, limit=2),
-        )
+        user_id="user", workspace_id="col",
+        tool_call_id="call", max_result_tokens=12_000,
+        arguments=InspectDocumentSourcesToolRequest(document_id="paper", heading_path="2 Methods", offset=offset, limit=2),
+    )
         seen.extend(source["source_ref"] for source in result.data["sources"])
         offset = result.data["next_offset"]
         if offset is None:

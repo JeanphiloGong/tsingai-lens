@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.capabilities import workspace_context
-from agent.capabilities.workspace_context import (
-    BrowseWorkspacePapersCapability,
+from application.source import agent_workspace_service as workspace_context
+from application.source.agent_workspace_service import (
+    BrowseWorkspacePapersService,
     BrowseWorkspacePapersToolRequest,
 )
 from agent.tools.registry import ToolExecutionContext
@@ -64,16 +64,17 @@ async def test_default_browse_fits_many_identities_and_keeps_exact_continuation(
     monkeypatch.setattr(workspace_context.SourceArtifactRepo, "read_document", AsyncMock(
         return_value=SimpleNamespace(blocks=()),
     ))
-    capability = BrowseWorkspacePapersCapability()
+    capability = BrowseWorkspacePapersService()
     seen = []
     offset = 0
     pages = 0
     while True:
         pages += 1
         result = await capability.execute(
-            ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="browse", operation_id="operation", max_result_tokens=12000),
-            BrowseWorkspacePapersToolRequest(offset=offset),
-        )
+        user_id="user", workspace_id="col",
+        tool_call_id="browse", max_result_tokens=12000,
+        arguments=BrowseWorkspacePapersToolRequest(offset=offset),
+    )
         message = ChatContextBuilder.tool_result_message(result)
         assert ChatContextBuilder.estimate_tokens(message) <= 12000
         seen.extend(paper["document_id"] for paper in result.data["papers"])

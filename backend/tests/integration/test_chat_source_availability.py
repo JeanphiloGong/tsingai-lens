@@ -1,20 +1,20 @@
 """Source tools use the real workspace lookup to distinguish unavailable papers."""
 
-from agent.capabilities import document_sources
+from application.source import agent_source_service as document_sources
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.exc import OperationalError
 
 from agent.tools.registry import ToolExecutionContext
-from agent.capabilities.document_sources import (
-    InspectDocumentSourcesCapability,
+from application.source.agent_source_service import (
+    InspectDocumentSourcesService,
     InspectDocumentSourcesToolRequest,
-    InspectTableCapability,
+    InspectTableService,
     InspectTableToolRequest,
-    ReadSourceCapability,
+    ReadSourceService,
     ReadSourceToolRequest,
-    SearchSourcesCapability,
+    SearchSourcesService,
     SearchSourcesToolRequest,
 )
 from domain.source import Document
@@ -27,12 +27,12 @@ pytestmark = pytest.mark.anyio
 
 @pytest.mark.parametrize("state", ["missing", "unprepared", "database_failure"])
 @pytest.mark.parametrize("capability,arguments", [
-    (ReadSourceCapability, ReadSourceToolRequest(
+    (ReadSourceService, ReadSourceToolRequest(
         document_id="paper", source_kind="text_window", source_ref="methods",
     )),
-    (InspectDocumentSourcesCapability, InspectDocumentSourcesToolRequest(document_id="paper")),
-    (InspectTableCapability, InspectTableToolRequest(document_id="paper", table_ref="table")),
-    (SearchSourcesCapability, SearchSourcesToolRequest(document_ids=["paper"], query="HIP")),
+    (InspectDocumentSourcesService, InspectDocumentSourcesToolRequest(document_id="paper")),
+    (InspectTableService, InspectTableToolRequest(document_id="paper", table_ref="table")),
+    (SearchSourcesService, SearchSourcesToolRequest(document_ids=["paper"], query="HIP")),
 ])
 async def test_source_availability_uses_real_workspace_lookup(
     state,
@@ -74,10 +74,18 @@ async def test_source_availability_uses_real_workspace_lookup(
     handler = capability()
     if state == "database_failure":
         with pytest.raises(OperationalError) as raised:
-            await handler.execute(context, arguments)
+            await handler.execute(
+                user_id=context.user_id, workspace_id=context.workspace_id,
+                tool_call_id=context.tool_call_id, max_result_tokens=12_000,
+                arguments=arguments,
+            )
         assert raised.value is failure
     else:
-        result = await handler.execute(context, arguments)
+        result = await handler.execute(
+                user_id=context.user_id, workspace_id=context.workspace_id,
+                tool_call_id=context.tool_call_id, max_result_tokens=12_000,
+                arguments=arguments,
+            )
         assert result.error_code == (
             "document_not_found" if state == "missing" else "document_sources_not_ready"
         )

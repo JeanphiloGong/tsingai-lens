@@ -21,6 +21,8 @@ not in a parallel plan-doc tree.
 
 - Model connections: [HTTP API](specs/model-connections/api.md) and
   [data model](specs/model-connections/data-model.md).
+- Research: [Objective HTTP API](specs/research/objective-api.md) and
+  [data model](specs/research/data-model.md).
 - Conversation and Agent: [contract index](specs/conversation-agent/README.md),
   including API, durable Task, tree, Feedback, and persistence contracts.
 - Document V2: [contract index](specs/document/README.md), including storage, API, and preparation boundaries.

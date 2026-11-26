@@ -17,6 +17,10 @@ flow-oriented table and repository map. The HTTP shapes remain owned by
 The current ORM metadata contains 55 application tables and 674 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
+The Research-specific field and ownership contract is maintained in
+[`specs/research/data-model.md`](../specs/research/data-model.md). This catalog remains the
+cross-module schema map and does not duplicate the Objective column contract.
+
 ## End-to-End Data Flow
 
 The database supports one concrete research cycle: a researcher frames a

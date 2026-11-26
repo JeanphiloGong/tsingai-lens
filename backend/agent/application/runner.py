@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from agent.capabilities.registry import CapabilityRegistry, ToolExecutionContext
+from agent.tools.registry import CapabilityRegistry, ToolExecutionContext
 from agent.domain.models import AgentTask, Operation, TaskStep, digest_arguments
 from agent.application.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus

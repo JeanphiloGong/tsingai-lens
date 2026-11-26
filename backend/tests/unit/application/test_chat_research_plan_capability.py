@@ -9,7 +9,7 @@ from agent.capabilities.research_planning import (
     ProposeResearchPlanCapability,
     ReviseResearchPlanCapability,
 )
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.research_planning import (
     ProposeResearchPlanToolRequest,
 )

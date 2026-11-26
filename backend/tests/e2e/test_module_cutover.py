@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from agent.application.task_execution import task_execution
-from agent.capabilities import CapabilityRegistry, ToolSpec
+from agent.tools.registry import CapabilityRegistry, ToolSpec
 from domain.chat import ChatToolResult, ToolResultStatus
 from infra.identity.client import SESSION_COOKIE_NAME
 from infra.persistence.postgres.models.chat import (
@@ -69,9 +69,9 @@ async def test_module_cutover_uses_one_task_and_final_tables(
         )
 
     monkeypatch.setattr(task_execution, "registry", CapabilityRegistry((
-        ToolSpec("read_source", "Read a paper Source.", ReadSource, read_source, "document"),
+        ToolSpec("read_source", "Read a paper Source.", ReadSource, read_source),
         ToolSpec(
-            "review_source", "Save a Source review.", ReadSource, read_source, "research",
+            "review_source", "Save a Source review.", ReadSource, read_source,
             requires_approval=True,
         ),
     )))

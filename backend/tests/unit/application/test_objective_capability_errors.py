@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.objective_analysis import (
     ConfirmObjectiveCapability,
     ConfirmObjectiveToolRequest,

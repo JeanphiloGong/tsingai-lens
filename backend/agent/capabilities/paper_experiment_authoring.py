@@ -10,7 +10,7 @@ from hashlib import sha256
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from agent.capabilities.registry import ToolExecutionContext, ToolSpec
+from agent.tools.registry import ToolExecutionContext, ToolSpec
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringError,
 )
@@ -650,7 +650,6 @@ class ProposePaperExperimentDraftCapability:
                 "the scientific payload. The draft does not write a PaperExperiment or "
                 "an Objective Selection."
             ),
-            source="research",
             handler=self.execute,
             input_model=PaperExperimentDraftToolRequest,
         )
@@ -793,7 +792,6 @@ class CreatePaperExperimentRevisionCapability:
                 "does not start or publish Objective analysis, create a Selection, or create "
                 "a Finding."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=PaperExperimentRevisionToolRequest,

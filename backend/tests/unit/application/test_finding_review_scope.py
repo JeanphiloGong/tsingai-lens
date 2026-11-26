@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.published_findings import (
     InspectPublishedFindingCapability,
 )

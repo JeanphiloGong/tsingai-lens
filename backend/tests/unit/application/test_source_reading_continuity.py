@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent.capabilities import document_sources
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.document_sources import InspectDocumentSourcesCapability, InspectDocumentSourcesToolRequest
 from domain.chat import ChatToolCall, ToolRisk, ToolResultStatus
 from domain.source import SourceBlock, SourceDocument

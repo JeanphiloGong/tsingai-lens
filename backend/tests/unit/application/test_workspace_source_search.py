@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from agent.capabilities import document_sources
 from agent.capabilities.document_sources import SearchSourcesCapability,SearchSourcesToolRequest
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from domain.source import SourceDocument,SourceBlock
 
 @pytest.fixture

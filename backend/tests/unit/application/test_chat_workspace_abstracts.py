@@ -16,7 +16,7 @@ from agent.capabilities.workspace_context import (
     BrowseWorkspacePapersCapability,
     BrowseWorkspacePapersToolRequest,
 )
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,

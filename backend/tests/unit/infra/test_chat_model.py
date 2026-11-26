@@ -11,7 +11,7 @@ from openai import AsyncOpenAI
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from agent.capabilities.registry import ToolSpec
+from agent.tools.registry import ToolSpec
 from agent.application.model import (
     AGENT_MISSION,
     ModelUsage,
@@ -188,7 +188,7 @@ async def test_context_compaction_rejects_executable_tools():
     with pytest.raises(ValueError, match="cannot expose"):
         await OpenAIChatModel(client=client).respond(
             context=ChatModelContext((), compacting=True),
-            tool_specs=(ToolSpec(name="write", description="Write", handler=None, source="test", input_model=_NoArguments),),
+            tool_specs=(ToolSpec(name="write", description="Write", handler=None, input_model=_NoArguments),),
         )
     assert completions.calls == []
 
@@ -358,7 +358,7 @@ async def test_required_research_action_sets_provider_tool_choice(required):
     )]))
     await OpenAIChatModel(client=client, model="test-model").respond(
         context=ChatModelContext((_message(),), require_tool_call=required),
-        tool_specs=(ToolSpec(name="read_source", description="Read a Source.", handler=None, source="test", input_model=_NoArguments),),
+        tool_specs=(ToolSpec(name="read_source", description="Read a Source.", handler=None, input_model=_NoArguments),),
     )
     assert completions.calls[0]["tool_choice"] == ("required" if required else "auto")
 
@@ -535,7 +535,7 @@ async def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     spec = ToolSpec(
         name="get_workspace_context",
         description="Read bounded workspace context.",
-        handler=None, source="test",
+        handler=None,
         input_model=_NoArguments,
     )
 

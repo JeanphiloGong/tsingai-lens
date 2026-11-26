@@ -5,7 +5,7 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpec
+from agent.tools.registry import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from agent.application.task_execution import TaskExecution
 from agent.domain.models import Operation
 from agent.repositories.task_repository import TaskRepository
@@ -135,7 +135,6 @@ async def test_recovery_reuses_committed_operation(
                 description="Read one Source.",
                 input_model=ReadSourceArguments,
                 handler=read_source,
-                source="document",
             ),
         )
     )

@@ -11,7 +11,7 @@ import json
 from dataclasses import replace
 from typing import Annotated, Any, Mapping
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -66,7 +66,6 @@ class QueryPublishedFindingsCapability:
                 "Evidence explicitly reports whether it is eligible for new Finding "
                 "authorship."
             ),
-            source="research",
             handler=self.execute,
             input_model=QueryPublishedFindingsToolRequest,
         )
@@ -279,7 +278,6 @@ class InspectPublishedFindingCapability:
                 "ancestor versions have no reviews; inspect a known ancestor explicitly "
                 "or report historical review coverage as unknown."
             ),
-            source="research",
             handler=self.execute,
             input_model=InspectPublishedFindingToolRequest,
         )

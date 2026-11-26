@@ -20,7 +20,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -48,8 +48,6 @@ class GetWorkspaceContextCapability:
                 "Research Objective candidates. Use this before making workspace-specific "
                 "claims or proposing new Objective drafts."
             ),
-            initially_available=True,
-            source="workspace",
             handler=self.execute,
             input_model=GetWorkspaceContextToolRequest,
         )
@@ -174,8 +172,6 @@ class BrowseWorkspacePapersCapability:
                 "These are screening signals only, not Evidence, and this capability "
                 "does not change the formal analysis scope."
             ),
-            initially_available=True,
-            source="workspace",
             handler=self.execute,
             input_model=BrowseWorkspacePapersToolRequest,
         )

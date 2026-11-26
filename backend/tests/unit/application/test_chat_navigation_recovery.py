@@ -10,7 +10,7 @@ from agent.capabilities.workspace_context import (
     BrowseWorkspacePapersCapability,
     BrowseWorkspacePapersToolRequest,
 )
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.application.context_builder import ChatContextBuilder
 from agent.application.model import ResearchWorkingNotesModelOutput
 from domain.chat import ChatMessage, ChatMessageRole, ChatResourceRef, ChatToolResult

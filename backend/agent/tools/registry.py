@@ -1,4 +1,4 @@
-"""The Agent-owned registry for typed business capabilities."""
+"""Agent-owned tool registration and typed execution."""
 
 from __future__ import annotations
 
@@ -30,15 +30,12 @@ ToolHandler = Callable[
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """Static model-facing metadata and the business handler for one tool."""
+    """Model-facing metadata and the handler for one registered tool."""
 
     name: str
     description: str
     input_model: type[BaseModel]
     handler: ToolHandler
-    source: str
-    parallel_safe: bool = False
-    initially_available: bool = False
     requires_approval: bool = False
 
     def model_schema(self) -> dict[str, Any]:
@@ -53,7 +50,7 @@ class ToolSpec:
 
 
 class CapabilityRegistry:
-    """Register trusted tools and resolve them by their stable name."""
+    """Register trusted tools and resolve them by stable name."""
 
     def __init__(self, specs: tuple[ToolSpec, ...] = ()) -> None:
         self._specs: dict[str, ToolSpec] = {}
@@ -83,7 +80,8 @@ class CapabilityRegistry:
         spec = self.get(name)
         if spec is None:
             raise LookupError("unknown_tool")
-        return await spec.handler(context, spec.input_model.model_validate(arguments))
+        parsed = spec.input_model.model_validate(arguments)
+        return await spec.handler(context, parsed)
 
     @property
     def specs(self) -> tuple[ToolSpec, ...]:

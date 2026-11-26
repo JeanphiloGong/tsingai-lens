@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -60,7 +60,6 @@ class ConfirmObjectiveCapability:
                 "its scope have been reviewed, before either automatic or Agent-authored "
                 "analysis."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=ConfirmObjectiveToolRequest,
@@ -117,7 +116,6 @@ class StartObjectiveAnalysisCapability:
                 "user approval. It uses the same analysis service and state as the "
                 "workspace workspace and returns immediately after scheduling."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=StartObjectiveAnalysisToolRequest,
@@ -197,7 +195,6 @@ class InspectObjectiveAnalysisCapability:
                 "paper progress, terminal failure, and whether a published result exists. "
                 "This read does not start or retry analysis."
             ),
-            source="research",
             handler=self.execute,
             input_model=InspectObjectiveAnalysisToolRequest,
         )
@@ -242,7 +239,6 @@ class AssessObjectiveQualityCapability:
                 "locations for the next inspection. This read does not create Evidence, "
                 "a Finding, or a new quality judgment."
             ),
-            source="research",
             handler=self.execute,
             input_model=AssessObjectiveQualityToolRequest,
         )

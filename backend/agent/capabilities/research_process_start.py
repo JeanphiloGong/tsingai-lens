@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -36,7 +36,6 @@ class StartResearchProcessCapability:
                 "extraction, or publish a Finding. Use inspect_research_process afterward "
                 "to read progress."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=StartResearchProcessToolRequest,

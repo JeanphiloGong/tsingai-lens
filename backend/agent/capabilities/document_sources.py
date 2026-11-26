@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -177,11 +177,8 @@ class ReadSourceCapability:
                 "it does not itself create Evidence or a Finding. Use inspect_table for "
                 "row-aware inspection of an oversized table."
             ),
-            initially_available=True,
-            source="document",
             handler=self.execute,
             input_model=ReadSourceToolRequest,
-            parallel_safe=True,
         )
 
     async def execute(
@@ -421,11 +418,8 @@ class SearchSourcesCapability:
                 "canonical Source digests. A match is not Evidence and does not prove "
                 "relevance; inspect the exact Source before making a scientific judgment."
             ),
-            initially_available=True,
-            source="document",
             handler=self.execute,
             input_model=SearchSourcesToolRequest,
-            parallel_safe=True,
         )
 
     async def execute(
@@ -613,11 +607,8 @@ class InspectTableCapability:
                 "into header-preserving row windows. The complete-table digest remains "
                 "stable across windows. A table read is Source inspection, not Evidence."
             ),
-            initially_available=True,
-            source="document",
             handler=self.execute,
             input_model=InspectTableToolRequest,
-            parallel_safe=True,
         )
 
     async def execute(
@@ -858,11 +849,8 @@ class InspectDocumentSourcesCapability:
                 "limit for automatic batching; continue with next_offset, and use read_source "
                 "for any oversized truncated Source."
             ),
-            initially_available=True,
-            source="document",
             handler=self.execute,
             input_model=InspectDocumentSourcesToolRequest,
-            parallel_safe=True,
         )
 
     async def execute(

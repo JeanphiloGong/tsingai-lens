@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 from domain.source import SourceDocument, SourceBlock
-from agent.capabilities import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,

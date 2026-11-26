@@ -56,7 +56,7 @@ from agent.capabilities.research_planning import (
 from agent.capabilities.research_scope import (
     PreviewResearchScopeCapability,
 )
-from agent.capabilities.registry import CapabilityRegistry
+from agent.tools.registry import CapabilityRegistry
 
 
 registry = CapabilityRegistry(tuple(

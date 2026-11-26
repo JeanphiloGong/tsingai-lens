@@ -14,7 +14,7 @@ from typing import Any, Callable, Mapping
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 
-from agent.capabilities.registry import ToolSpec
+from agent.tools.registry import ToolSpec
 from agent.application.context_builder import ChatContextBuilder, ChatModelContext
 from agent.application.model import (
     RESEARCH_AGENT_PROMPT_VERSION,

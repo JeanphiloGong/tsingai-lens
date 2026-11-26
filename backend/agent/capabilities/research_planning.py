@@ -12,7 +12,7 @@ from hashlib import sha256
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -127,7 +127,6 @@ class InspectResearchPlansCapability:
                 "or one exact historical revision by ID. The result includes structured "
                 "design, provenance, status, and version lineage."
             ),
-            source="research",
             handler=self.execute,
             input_model=InspectResearchPlansToolRequest,
         )
@@ -253,7 +252,6 @@ class ProposeResearchPlanCapability:
                 "structured draft when requested, rather than stopping at prose. This "
                 "call does not persist or authorize the plan."
             ),
-            source="research",
             handler=self.execute,
             input_model=ProposeResearchPlanToolRequest,
         )
@@ -495,7 +493,6 @@ class CreateResearchPlanCapability:
                 "current Finding/Evidence fingerprints require explicit user approval. "
                 "Changed or stale sources fail without writing a plan."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=CreateResearchPlanToolRequest,
@@ -555,7 +552,6 @@ class ReviseResearchPlanCapability:
                 "parent revision, structured design, and current Finding/Evidence snapshots "
                 "require explicit user approval."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=ReviseResearchPlanToolRequest,

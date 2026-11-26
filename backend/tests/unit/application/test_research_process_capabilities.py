@@ -5,7 +5,7 @@ from dataclasses import replace
 
 import pytest
 
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.research_process import (
     InspectResearchProcessCapability,
     InspectResearchProcessToolRequest,

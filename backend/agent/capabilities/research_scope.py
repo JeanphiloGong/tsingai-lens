@@ -7,7 +7,7 @@ from repositories.paper_map_repository import PaperMapRepo
 
 from domain.chat import ToolResultStatus
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -40,7 +40,6 @@ class PreviewResearchScopeCapability:
                 "use the paper survey and available Sources to inspect candidate scope; "
                 "map construction is not a prerequisite for original-content reading."
             ),
-            source="research",
             handler=self.execute,
             input_model=PreviewResearchScopeToolRequest,
         )

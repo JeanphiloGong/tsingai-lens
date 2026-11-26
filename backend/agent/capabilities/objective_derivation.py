@@ -11,7 +11,7 @@ from hashlib import sha256
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -57,7 +57,6 @@ class DeriveObjectiveCapability:
                 "contribution. Technical extraction failures cannot serve as scientific "
                 "basis. This does not persist or confirm an Objective."
             ),
-            source="research",
             handler=self.execute,
             input_model=DeriveObjectiveToolRequest,
         )

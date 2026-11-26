@@ -2,7 +2,7 @@ import pytest
 from pydantic import BaseModel
 
 from agent.application.runner import DurableRunner, RunnerState
-from agent.capabilities import CapabilityRegistry, ToolExecutionContext, ToolSpec
+from agent.tools.registry import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from agent.domain.models import AgentTask, Operation
 from agent.application.model import ModelTurn
 from domain.chat import ChatToolResult, ToolResultStatus
@@ -48,7 +48,6 @@ async def test_runner_reuses_committed_operation_after_checkpoint_interrupt():
                 description="Read one Source.",
                 input_model=ReadSourceArguments,
                 handler=read_source,
-                source="document",
             ),
         )
     )
@@ -129,7 +128,6 @@ async def test_runner_records_unknown_tool_without_calling_a_handler():
                 description="Read one Source.",
                 input_model=EmptyArguments,
                 handler=unexpected_handler,
-                source="document",
             ),
         )
     )

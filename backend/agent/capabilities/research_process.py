@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -37,7 +37,6 @@ class InspectResearchProcessCapability:
                 "observable stage of active work. This does not reveal private model "
                 "reasoning and does not imply that Objective discovery or analysis ran."
             ),
-            source="research",
             handler=self.execute,
             input_model=InspectResearchProcessToolRequest,
         )

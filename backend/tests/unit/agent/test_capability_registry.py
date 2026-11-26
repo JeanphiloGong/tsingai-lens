@@ -5,11 +5,7 @@ from dataclasses import replace
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from agent.capabilities import (
-    CapabilityRegistry,
-    ToolExecutionContext,
-    ToolSpec,
-)
+from agent.tools.registry import CapabilityRegistry, ToolExecutionContext, ToolSpec
 from domain.chat import ChatToolResult, ToolResultStatus
 
 
@@ -44,8 +40,6 @@ def make_spec() -> ToolSpec:
         description="Read one canonical Source.",
         input_model=ReadArguments,
         handler=read_source,
-        source="document",
-        parallel_safe=True,
     )
 
 
@@ -64,10 +58,10 @@ def test_registry_exports_schema_and_resolves_registered_tool() -> None:
 
 def test_registry_rejects_empty_trimmed_or_duplicate_names() -> None:
     with pytest.raises(ValueError, match="cannot be empty"):
-        CapabilityRegistry((ToolSpec("", "", ReadArguments, read_source, "document"),))
+        CapabilityRegistry((ToolSpec("", "", ReadArguments, read_source),))
 
     with pytest.raises(ValueError, match="must be trimmed"):
-        CapabilityRegistry((ToolSpec(" read_source", "", ReadArguments, read_source, "document"),))
+        CapabilityRegistry((ToolSpec(" read_source", "", ReadArguments, read_source),))
 
     spec = make_spec()
     with pytest.raises(ValueError, match="duplicate tool: read_source"):

@@ -6,7 +6,7 @@ from application.core.objectives import finding_authoring_service
 
 from dataclasses import asdict
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -60,7 +60,6 @@ class CreateFindingDraftCapability:
                 "the unsupported claim rather than inventing a supporting selection. "
                 "Draft success does not publish a Finding; saving is a separate write."
             ),
-            source="research",
             handler=self.execute,
             input_model=CreateFindingDraftToolRequest,
         )
@@ -151,7 +150,6 @@ class CreateFindingVersionCapability:
                 "optional ComparisonGroup IDs in the published analysis. This write "
                 "requires explicit approval and never accepts Evidence IDs or a hand-written conclusion."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=CreateFindingVersionToolRequest,

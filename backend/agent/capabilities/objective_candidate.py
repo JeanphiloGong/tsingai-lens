@@ -9,7 +9,7 @@ from exceptions import RequestInvalidException, ResourceConflictException, Resou
 
 from pydantic import ConfigDict, Field, field_validator
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -57,7 +57,6 @@ class CreateObjectiveCandidateCapability:
                 "is a follow-up question, preserve the exact parent Objective, published "
                 "analysis version, and derivation basis returned by `derive_objective`."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=CreateObjectiveCandidateToolRequest,

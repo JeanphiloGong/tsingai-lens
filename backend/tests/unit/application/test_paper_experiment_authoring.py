@@ -11,7 +11,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.paper_experiment_authoring import (
     CreatePaperExperimentRevisionCapability,
     PaperExperimentDraftToolRequest,

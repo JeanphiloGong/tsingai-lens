@@ -8,7 +8,7 @@ from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 
 import pytest
-from agent.capabilities.registry import ToolExecutionContext
+from agent.tools.registry import ToolExecutionContext
 from agent.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,

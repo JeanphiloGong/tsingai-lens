@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.capabilities.registry import ToolSpec
+from agent.tools.registry import ToolSpec
 from agent.application.context_builder import ChatModelContext
 
 RESEARCH_COMPACTION_SYSTEM_PROMPT = """You maintain a researcher's working notes while older tool operations leave the active context.

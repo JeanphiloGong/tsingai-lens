@@ -10,7 +10,7 @@ import json
 from uuid import uuid4
 
 from agent.application.runner import DurableRunner, RunnerState
-from agent.capabilities.registry import CapabilityRegistry
+from agent.tools.registry import CapabilityRegistry
 from agent.capabilities.research_tools import registry
 from agent.domain.models import AgentTask, Operation, TaskStep
 from agent.repositories.task_repository import TaskExecutionContext, TaskRepository

@@ -14,7 +14,7 @@ from typing import Any, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -94,7 +94,6 @@ class ProposeObjectiveDraftsCapability:
                 "separately for each question when maps are available. Missing mapped "
                 "support leaves a draft unverified, not scientifically disproven."
             ),
-            source="research",
             handler=self.execute,
             input_model=ProposeObjectiveDraftsToolRequest,
         )

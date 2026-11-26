@@ -7,7 +7,7 @@ from application.evaluation import finding_feedback_service
 
 from typing import Any, Literal
 
-from agent.capabilities.registry import (
+from agent.tools.registry import (
     ToolExecutionContext,
     ToolSpec,
 )
@@ -108,7 +108,6 @@ class RecordFindingFeedbackCapability:
                 "requires explicit user approval and does not mutate the Finding, Evidence, "
                 "or Sources."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=RecordFindingFeedbackToolRequest,
@@ -185,7 +184,6 @@ class CurateFindingCapability:
                 "This write requires explicit user approval. It preserves the published "
                 "Finding, identity, paper coverage, Evidence IDs, Sources, and lineage."
             ),
-            source="research",
             handler=self.execute,
             requires_approval=True,
             input_model=CurateFindingToolRequest,

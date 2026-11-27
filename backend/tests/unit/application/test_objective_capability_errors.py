@@ -8,7 +8,7 @@ from agent.capabilities.objective_analysis import (
     ConfirmObjectiveCapability,
     ConfirmObjectiveToolRequest,
 )
-from agent.capabilities.objective_candidate import (
+from agent.tools.objective import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )

@@ -224,8 +224,8 @@ def _isolate_application_module_dependencies(monkeypatch):
         reference_routes,
     )
 
+    from agent.tools import objective as objective_candidate
     from agent.capabilities import (
-        objective_candidate,
         objective_proposal,
         objective_analysis,
         objective_derivation,

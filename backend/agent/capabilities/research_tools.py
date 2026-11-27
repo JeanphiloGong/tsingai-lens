@@ -25,7 +25,7 @@ from agent.capabilities.paper_experiment_authoring import (
 from agent.capabilities.objective_proposal import (
     ProposeObjectiveDraftsCapability,
 )
-from agent.capabilities.objective_candidate import (
+from agent.tools.objective import (
     CreateObjectiveCandidateCapability,
 )
 from agent.capabilities.objective_derivation import (

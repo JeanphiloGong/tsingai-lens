@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent.capabilities import objective_candidate
+from agent.tools import objective as objective_candidate
 
 from application.core.objectives.analysis import analysis_record_source
 
@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from agent.tools.registry import ToolExecutionContext
-from agent.capabilities.objective_candidate import (
+from agent.tools.objective import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )

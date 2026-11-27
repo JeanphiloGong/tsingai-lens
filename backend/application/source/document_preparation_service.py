@@ -44,6 +44,9 @@ from repositories.workspace_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.object_store import ObjectStore
+from document.application.preparation import DocumentPreparation
+from document.repositories.document_repository import DocumentRepo
+from document.repositories.profile_repository import ProfileRepo
 from repositories.pipeline_run_repository import (
     PipelineLeaseLostError,
     PipelineRun,
@@ -285,6 +288,11 @@ async def execute_document_preparation_job(
     stage = "source_parsing"
     warnings: list[str] = []
     connection_id = job.run.context.get("model_connection_id")
+    preparation = DocumentPreparation(
+        repository=DocumentRepo,
+        artifacts=SourceRepo,
+        profiles=ProfileRepo,
+    )
     try:
         async with AsyncSessionLocal() as db, db.begin():
             record = await _check_preparation_input(db, job)
@@ -332,14 +340,17 @@ async def execute_document_preparation_job(
             )
             async with AsyncSessionLocal() as db, db.begin():
                 await _check_preparation_input(db, job)
-                await SourceRepo.replace_document(
-                    workspace_id, source_document, db=db
+                source_result = await preparation.parse_source(
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    parsed=source_document,
+                    db=db,
                 )
                 await workspace_service.update_document_preparation(
                     workspace_id,
                     document_id,
                     status="processing",
-                    source_fingerprint=source_identity,
+                    source_fingerprint=source_result.source_fingerprint,
                     parser_version=SOURCE_PARSER_VERSION,
                     db=db,
                 )

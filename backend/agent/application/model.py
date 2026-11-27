@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Awaitable, Callable, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -637,7 +637,7 @@ class ChatModel(Protocol):
         *,
         context: ChatModelContext,
         tool_specs: tuple[ToolSpec, ...],
-        text_delta_callback: Callable[[str], None] | None = None,
+        text_delta_callback: Callable[[str], Awaitable[None] | None] | None = None,
         timeout_seconds: float | None = None,
         max_output_tokens: int = 16_384,
     ) -> ModelTurn: ...

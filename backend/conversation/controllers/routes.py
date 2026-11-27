@@ -1,9 +1,6 @@
 import logging
 from typing import Annotated
-from urllib.parse import quote, urlencode
 
-from agent.application.task_execution import task_execution
-from conversation.domain import AnswerCitation
 from controllers.dependencies.auth import get_current_user_id
 from conversation.controllers.errors import ConversationInputError
 from conversation.feedback.repository import FeedbackTargetInvalid
@@ -12,8 +9,7 @@ from conversation.feedback.schemas import MessageFeedbackResponse
 from conversation.repositories.scope import ConversationNotFound
 from conversation.controllers.schemas import (
     ActivePathRequest,
-    AnswerCitationResponse,
-    CitationSourceResponse,
+    citation_response,
     ActiveTaskResponse,
     ConversationListResponse,
     ConversationMessagesResponse,
@@ -49,32 +45,6 @@ repository = conversation_service.repository
 service = conversation_service
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
 logger = logging.getLogger(__name__)
-
-
-def _citation_response(
-    citation: AnswerCitation, *, workspace_id: str
-) -> AnswerCitationResponse:
-    query = {"view": "parsed-paper", "source_ref": citation.source_ref}
-    if citation.page is not None:
-        query["page"] = str(citation.page)
-    href = (
-        f"/workspaces/{quote(workspace_id, safe='')}/documents/"
-        f"{quote(citation.document_id, safe='')}?{urlencode(query)}"
-    )
-    return AnswerCitationResponse(
-        offset=citation.offset,
-        source=CitationSourceResponse(
-            document_id=citation.document_id,
-            source_ref=citation.source_ref,
-            source_kind=citation.source_kind,
-            document_title=citation.document_title,
-            page=citation.page,
-            heading_path=citation.heading_path,
-            caption=citation.caption,
-            figure_label=citation.figure_label,
-            href=href,
-        ),
-    )
 
 
 async def conversation_error_handler(
@@ -187,7 +157,7 @@ async def get_messages(
                     created_at=item.created_at,
                     source_contexts=item.source_contexts,
                     citations=[
-                        _citation_response(
+                        citation_response(
                             citation,
                             workspace_id=result.conversation.workspace_id,
                         )
@@ -264,7 +234,6 @@ async def edit_message(
             else None
         ),
     )
-    await task_execution.run_task(task_id=accepted.task_id, user_id=user_id)
     return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
 
 
@@ -284,7 +253,6 @@ async def regenerate_message(
         message_id=message_id,
         user_id=user_id,
     )
-    await task_execution.run_task(task_id=accepted.task_id, user_id=user_id)
     return ApiResponse(data=TaskAcceptedResponse.model_validate(accepted))
 
 

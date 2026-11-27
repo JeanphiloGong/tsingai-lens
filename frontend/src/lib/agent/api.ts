@@ -80,6 +80,17 @@ export type TaskState = {
 	response?: TaskSnapshot | null;
 };
 
+export type TaskExecutionEvent = {
+	event: string;
+	task_id: string;
+	sequence?: number;
+	message_id?: string;
+	text?: string;
+	checkpoint_revision?: number;
+	status?: string;
+	[key: string]: unknown;
+};
+
 export type TaskSnapshot = {
 	model_connection_id?: string | null;
 	model_connection_name?: string | null;
@@ -252,7 +263,11 @@ export async function resumeTask(
 }
 
 export async function readTaskUpdates(
-	conversationId: string, taskId: string, afterRevision: number, signal?: AbortSignal
+	conversationId: string,
+	taskId: string,
+	afterRevision: number,
+	signal?: AbortSignal,
+	onEvent?: (event: TaskExecutionEvent) => void
 ): Promise<TaskState> {
 	const response = await fetch(
 		buildApiUrl(`${taskPath(conversationId, taskId)}/events?after_revision=${afterRevision}`),
@@ -261,7 +276,32 @@ export async function readTaskUpdates(
 	if (!response.ok || !response.headers.get('Content-Type')?.includes('text/event-stream')) {
 		await throwApiError(response);
 	}
-	await response.text();
+	const reader = response.body?.getReader();
+	if (!reader) throw new Error('Task event stream has no readable body.');
+	const decoder = new TextDecoder();
+	let buffer = '';
+	while (true) {
+		const { value, done } = await reader.read();
+		buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+		const frames = buffer.split('\n\n');
+		buffer = frames.pop() ?? '';
+		for (const frame of frames) {
+			let data = '';
+			let frameEventName = '';
+			for (const line of frame.split('\n')) {
+				if (line.startsWith('event:')) frameEventName = line.slice(6).trim();
+				if (line.startsWith('data:')) data += line.slice(5).trim();
+			}
+			if (!data) continue;
+			try {
+				const payload = JSON.parse(data) as Record<string, unknown>;
+				onEvent?.({ ...payload, event: frameEventName || String(payload.event || 'task.event') } as TaskExecutionEvent);
+			} catch {
+				// The final Task state remains authoritative when an event frame is malformed.
+			}
+		}
+		if (done) break;
+	}
 	return fetchTaskState(conversationId, signal, taskId);
 }
 

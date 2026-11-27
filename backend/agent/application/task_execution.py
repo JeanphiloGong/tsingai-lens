@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import datetime
 from hashlib import sha256
+from collections.abc import Awaitable, Callable
 from typing import Any
 import json
 from uuid import uuid4
@@ -108,6 +109,8 @@ class TaskExecution:
             context = await self.repository.load_for_execution(
                 task_id=task_id, user_id=user_id
             )
+            if emit is not None and context.status not in {"accepted", "running"}:
+                return context.status
             task = AgentTask(
                 context.task_id,
                 context.conversation_id,
@@ -127,6 +130,8 @@ class TaskExecution:
             expected_revision = state.task.checkpoint_revision
             previous_state = state
             sequence = 0
+            turn_message_id = ""
+            streamed = False
 
             async def publish(event: str, **data: object) -> None:
                 nonlocal sequence
@@ -165,10 +170,13 @@ class TaskExecution:
                     )
                     message = {
                         **message,
-                        "message_id": message.get("message_id") or f"msg_{uuid4().hex}",
+                        "message_id": message.get("message_id") or turn_message_id or f"msg_{uuid4().hex}",
                         "conversation_id": context.conversation_id,
                         "parent_message_id": previous_message,
                     }
+                checkpoint_messages = list(next_state.messages)
+                if message is not None:
+                    checkpoint_messages[-1] = message
                 step = {
                     "step_id": f"step_{task_id}_{expected_revision}",
                     "task_id": task_id,
@@ -199,7 +207,7 @@ class TaskExecution:
                             asdict(item) for item in next_state.operations
                         ],
                         "steps": [asdict(item) for item in steps],
-                        "messages": list(next_state.messages),
+                        "messages": checkpoint_messages,
                     },
                     status=next_state.task.status,
                 )
@@ -236,7 +244,7 @@ class TaskExecution:
                             )
                 if message is not None and message.get("role") == "assistant":
                     content = str(message.get("content") or "")
-                    if content:
+                    if content and not streamed:
                         await publish(
                             "message.delta",
                             message_id=message["message_id"],
@@ -262,11 +270,26 @@ class TaskExecution:
                             status=next_state.task.status,
                         )
                 expected_revision += 1
-                previous_state = replace(next_state, steps=tuple(steps))
+                previous_state = replace(
+                    next_state,
+                    steps=tuple(steps),
+                    messages=tuple(checkpoint_messages),
+                )
 
             async def respond(operations: tuple[Operation, ...]) -> ModelTurn:
-                nonlocal context
-                turn, connection_id = await self.respond(context, operations)
+                nonlocal context, turn_message_id, streamed
+                turn_message_id = f"msg_{uuid4().hex}"
+                streamed = False
+
+                async def delta(text: str) -> None:
+                    nonlocal streamed
+                    streamed = True
+                    await publish("message.delta", message_id=turn_message_id, text=text)
+
+                if emit is None:
+                    turn, connection_id = await self.respond(context, operations)
+                else:
+                    turn, connection_id = await self.respond(context, operations, text_delta_callback=delta)
                 context = replace(context, model_connection_id=connection_id)
                 return turn
 
@@ -281,7 +304,8 @@ class TaskExecution:
             return final.task.status
 
     async def respond(
-        self, context: TaskExecutionContext, operations: tuple[Operation, ...]
+        self, context: TaskExecutionContext, operations: tuple[Operation, ...],
+        *, text_delta_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> tuple[ModelTurn, str]:
         connection_id = context.model_connection_id
         if connection_id is None:
@@ -358,6 +382,7 @@ class TaskExecution:
                     ),
                     operation_messages=tuple(operation_messages),
                 ),
+                text_delta_callback=text_delta_callback,
                 tool_specs=self.registry.specs,
                 max_output_tokens=connection.max_output_tokens or 16_384,
                 system_prompt=(

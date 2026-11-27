@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from domain.chat.source_context import ChatSourceContext
-from agent.application.task_execution import task_execution
 from agent.repositories.task_repository import TaskRepository
 from conversation.application.conversation_service import AcceptedTask, ConversationService
 from conversation.repositories.conversation_repository import ConversationRepository
@@ -25,7 +24,7 @@ class SendConversationMessage:
         source_contexts: tuple[ChatSourceContext, ...],
         model_connection_id: str | None = None,
     ) -> AcceptedTask:
-        accepted = await self.service.accept_message(
+        return await self.service.accept_message(
             conversation_id=conversation_id,
             user_id=user_id,
             parent_message_id=parent_message_id,
@@ -33,8 +32,6 @@ class SendConversationMessage:
             source_contexts=source_contexts,
             model_connection_id=model_connection_id,
         )
-        await task_execution.run_task(task_id=accepted.task_id, user_id=user_id)
-        return accepted
 
 
 conversation_service = ConversationService(

@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Literal, Self
+from urllib.parse import quote, urlencode
 from uuid import UUID
 
 from conversation.application.source_context import InvalidSourceContext
@@ -7,6 +8,7 @@ from conversation.controllers.errors import ConversationInputError
 from domain.chat.resource_ref import ChatResourceRef
 from domain.chat.source_context import ChatSourceContext
 from conversation.feedback.schemas import MessageFeedbackResponse
+from conversation.domain import AnswerCitation
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -55,6 +57,32 @@ class CitationSourceResponse(BaseModel):
 class AnswerCitationResponse(BaseModel):
     offset: int
     source: CitationSourceResponse
+
+
+def citation_response(
+    citation: AnswerCitation, *, workspace_id: str
+) -> AnswerCitationResponse:
+    query = {"view": "parsed-paper", "source_ref": citation.source_ref}
+    if citation.page is not None:
+        query["page"] = str(citation.page)
+    href = (
+        f"/workspaces/{quote(workspace_id, safe='')}/documents/"
+        f"{quote(citation.document_id, safe='')}?{urlencode(query)}"
+    )
+    return AnswerCitationResponse(
+        offset=citation.offset,
+        source=CitationSourceResponse(
+            document_id=citation.document_id,
+            source_ref=citation.source_ref,
+            source_kind=citation.source_kind,
+            document_title=citation.document_title,
+            page=citation.page,
+            heading_path=citation.heading_path,
+            caption=citation.caption,
+            figure_label=citation.figure_label,
+            href=href,
+        ),
+    )
 
 
 class MessageResponse(BaseModel):

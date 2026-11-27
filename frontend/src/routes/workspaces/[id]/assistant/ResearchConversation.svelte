@@ -47,6 +47,7 @@
 		type ChatProgress,
 		type TaskSnapshot,
 		type TaskState,
+		type TaskExecutionEvent,
 		type Operation,
 		type AgentTurn
 	} from '$lib/agent/api';
@@ -873,6 +874,12 @@
 		if (!running) void refreshSessionTitle();
 	}
 
+	function acceptTaskEvent(event: TaskExecutionEvent) {
+		if (event.event === 'message.delta' && typeof event.text === 'string') {
+			streamingText += event.text;
+		}
+	}
+
 	async function resumeResponse() {
 		if (!session || !responseSnapshot || updatesController || destroyed) return;
 		const controller = new AbortController();
@@ -886,7 +893,7 @@
 		try {
 			const trajectory = await readTaskUpdates(
 				session.conversation_id, responseSnapshot.task_id,
-				responseSnapshot.checkpoint_revision, controller.signal
+				responseSnapshot.checkpoint_revision, controller.signal, acceptTaskEvent
 			);
 			if (!current()) return;
 			acceptTrajectory(trajectory);
@@ -1226,7 +1233,8 @@
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return false;
 			const branch = await fetchConversation(message.conversation_id, sessionController?.signal);
 			const trajectory = await readTaskUpdates(
-				branch.conversation_id, accepted.task_id, 0, sessionController?.signal
+				branch.conversation_id, accepted.task_id, 0, sessionController?.signal,
+				acceptTaskEvent
 			);
 			if (!isCurrentSession(generation, ownerWorkspaceId)) return false;
 			clearTimeout(recoveryTimer);
@@ -1357,7 +1365,13 @@
 			);
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
 			acknowledgeSubmission();
-			const trajectory = await readTaskUpdates(activeSession.conversation_id, accepted.task_id, 0, signal);
+			const trajectory = await readTaskUpdates(
+				activeSession.conversation_id,
+				accepted.task_id,
+				0,
+				signal,
+				acceptTaskEvent
+			);
 			if (!isCurrentSession(generation, activeWorkspaceId)) return;
 			returnToLatest();
 			acceptTrajectory(trajectory);

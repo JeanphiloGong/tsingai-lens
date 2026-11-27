@@ -303,7 +303,7 @@ class TaskRepository:
             task.updated_at = _now()
 
     async def read_task(
-        self, *, conversation_id: str, task_id: str, user_id: str
+        self, *, conversation_id: str, task_id: str, user_id: str, include_operations: bool = False
     ) -> dict[str, object]:
         async with AsyncSessionLocal() as db:
             task = await db.scalar(
@@ -342,6 +342,7 @@ class TaskRepository:
                 "status": task.status,
                 "error_code": task.checkpoint.get("error_code"),
                 "checkpoint_revision": task.checkpoint_revision,
+                **({"operations": task.checkpoint.get("operations", [])} if include_operations else {}),
                 "active_operation_id": (
                     operation_id.operation_id if operation_id is not None else None
                 ),

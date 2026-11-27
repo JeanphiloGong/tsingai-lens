@@ -917,7 +917,7 @@ def test_table_repair_validates_json_text_response():
 
 def test_domain_model_extractors_record_provider_reported_usage() -> None:
     document_client = _FakeOpenAIClient(
-        '{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}'
+        '{"doc_type":"experimental","description":"Experimental study."}'
     )
     facts_client = _FakeOpenAIClient(
         '{"repaired_table_matrix":[]}'
@@ -944,7 +944,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
         ModelUsage("fake-model", 3, TokenUsage(300, 60, 360)),
     )
     assert usage.prompt_versions == {
-        "document_profile": "document_profile.v1",
+        "document_profile": "document_profile.v2",
         "paper_fact_table_matrix_repair": "paper_fact_table_matrix_repair.v7",
         "research_axis_canonicalization": "research_axis_canonicalization.v7",
     }
@@ -953,7 +953,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
 def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning():
     client = _FakeOpenAIClient(
         'The draft was {"doc_type": experimental,}\n'
-        'Final answer:\n{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}'
+        'Final answer:\n{"doc_type":"experimental","description":"Experimental study."}'
     )
     extractor = _document_profile_extractor(client)
 
@@ -967,13 +967,13 @@ def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning()
     )
 
     assert result.doc_type == "experimental"
-    assert result.confidence == 0.9
+    assert result.description == "Experimental study."
 
 
-@pytest.mark.parametrize("confidence", [None, "0.6", True, -0.1, 1.1])
-def test_document_profile_rejects_invalid_confidence_with_bounded_attempts(confidence):
+@pytest.mark.parametrize("description", [None, "", 1, True])
+def test_document_profile_rejects_invalid_description_with_bounded_attempts(description):
     client = _FakeOpenAIClient(
-        json.dumps({"doc_type": "experimental", "confidence": confidence})
+        json.dumps({"doc_type": "experimental", "description": description})
     )
     extractor = _document_profile_extractor(client)
 
@@ -989,22 +989,18 @@ def test_document_profile_rejects_invalid_confidence_with_bounded_attempts(confi
     assert extractor.consume_last_trace()["trace_status"] == "failed"
 
 
-def test_document_profile_omitted_confidence_uses_contract_default():
+def test_document_profile_requires_description():
     client = _FakeOpenAIClient('{"doc_type":"uncertain"}')
-    result = _document_profile_extractor(client).extract_document_profile(
-        {"title": "LPBF paper"}
-    )
-
-    assert result.confidence == 0.0
-    assert result.profile_warnings == []
-    assert len(client.chat.completions.calls) == 1
+    with pytest.raises(DocumentProfileExtractionError):
+        extractor = _document_profile_extractor(client)
+        extractor.extract_document_profile({"title": "LPBF paper"})
 
 
 def test_document_profile_retry_includes_the_invalid_output_it_must_correct():
     client = _FakeOpenAIClient(
         [
             "The document appears to be an experimental paper.",
-            '{"doc_type":"experimental","confidence":0.9,"profile_warnings":[]}',
+            '{"doc_type":"experimental","description":"Experimental study."}',
         ]
     )
     extractor = _document_profile_extractor(client)
@@ -3898,7 +3894,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient(
-        '{"doc_type":"experimental","profile_warnings":[],"confidence":0.91}'
+        '{"doc_type":"experimental","description":"Experimental study."}'
     )
     extractor = DocumentProfileExtractor(client=client, model="fake-model")
 
@@ -3911,8 +3907,7 @@ def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_js
 
     assert profile == DocumentProfileModelOutput(
         doc_type="experimental",
-        profile_warnings=[],
-        confidence=0.91,
+        description="Experimental study.",
     )
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]

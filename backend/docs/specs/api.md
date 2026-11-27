@@ -795,12 +795,12 @@ navigation. A Finding Evidence link names the owning document, stable
 `source_ref`, and page when available. Internal Source IDs are audit/navigation
 parameters, not visible paper titles.
 
-The document-profile list accepts `offset`, `limit`, and optional `query`,
-`doc_type`, and `has_warnings` filters. `query` performs case-insensitive
-matching against the profile title. `doc_type` accepts
-`experimental`, `review`, `mixed`, or `uncertain`; `has_warnings` filters by
-whether profile-classification warnings are present. Profile items contain
-`document_id`, `title`, `doc_type`, `profile_warnings`, and `confidence`;
+The document-profile list accepts `offset`, `limit`, and optional `query` and
+`doc_type` filters. `query` performs case-insensitive matching against the
+profile description. `doc_type` accepts
+`experimental`, `review`, `mixed`, or `uncertain`. Profile items contain
+`document_id`, `doc_type`, `description`, `source_fingerprint`,
+`profile_fingerprint`, `profile_version`, and `generated_at`;
 workspace ownership and filenames remain on the workspace's Document records.
 All active criteria are combined before
 pagination. `total` is the number of matching profiles, `count` is the current

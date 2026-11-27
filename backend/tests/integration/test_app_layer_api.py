@@ -10,10 +10,10 @@ from hashlib import sha256
 import pytest
 from tests.support.identity import subjects as auth_service
 from application.pipeline import pipeline_run_service
-from domain.core import DocumentProfile
+from document.domain import DocumentProfile
 from document.domain.source import SourceDocument
 from fastapi.testclient import TestClient
-from repositories.document_profile_repository import DocumentProfileRepository
+from document.repositories.profile_repository import ProfileRepository
 from repositories.pipeline_run_repository import PipelineRun, PipelineRunRepository
 from document.repositories.source_repository import SourceRepository
 
@@ -72,17 +72,16 @@ class _ImmediateDocumentPreparationService:
                 metadata={"source_fingerprint": fingerprint},
             ),
         )
-        await DocumentProfileRepository().replace(
+        await ProfileRepository().replace(
             workspace_id,
             DocumentProfile(
                 document_id=document_id,
-                title=document.document.filename,
+                description=document.document.filename,
                 doc_type="experimental",
-                profile_warnings=(),
-                confidence=1.0,
                 source_fingerprint=fingerprint,
                 profile_version="test-analysis",
                 profile_fingerprint=fingerprint,
+                generated_at="2026-01-01T00:00:00Z",
             ),
         )
         await self.workspace_service.update_document_preparation(

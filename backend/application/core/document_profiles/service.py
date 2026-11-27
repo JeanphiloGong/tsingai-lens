@@ -4,24 +4,18 @@ from repositories.workspace_repository import StoredWorkspace
 
 import asyncio
 
-import json
 import logging
 from asyncio import to_thread
-from dataclasses import replace
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileExtractionError, DocumentProfileExtractor
+from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileModelOutput, DocumentProfileExtractor
 from application.source import workspace_service
-from domain.core.document_profile import (
-    PROFILE_STATUS_COMPLETED,
-    PROFILE_STATUS_EXTRACTION_FAILED,
+from document.domain.profile import (
     DocumentProfile,
     summarize_document_profile_workspace,
-)
-from domain.shared.enums import (
-    DOC_TYPE_UNCERTAIN,
 )
 from document.domain.source import SourceBlock, SourceDocument
 from exceptions import ResourceConflictException, ResourceNotFoundException
@@ -98,7 +92,7 @@ class DocumentNotFoundError(ResourceNotFoundException):
         )
 
 
-from repositories.document_profile_repository import DocumentProfileRepo
+from document.repositories.profile_repository import ProfileRepo
 from document.repositories.source_repository import SourceRepo
 
 async def list_document_profiles(
@@ -107,12 +101,11 @@ async def list_document_profiles(
     limit: int = 51,
     query: str | None = None,
     doc_type: str | None = None,
-    has_warnings: bool | None = None,
     *,
     user_id: str,
 ) -> dict[str, Any]:
     await workspace_service.get_workspace_for_user(workspace_id, user_id)
-    profiles = await DocumentProfileRepo.list_workspace(workspace_id)
+    profiles = await ProfileRepo.list_workspace(workspace_id)
     if not profiles:
         raise DocumentProfilesNotReadyError(workspace_id)
     summary = summarize_document_profiles(profiles)
@@ -124,24 +117,12 @@ async def list_document_profiles(
         if (
             not normalized_query
             or normalized_query
-            in " ".join(value for value in (profile.title,) if value).casefold()
+            in profile.description.casefold()
         )
         and (not normalized_doc_type or profile.doc_type == normalized_doc_type)
-        and (has_warnings is None or bool(profile.profile_warnings) is has_warnings)
     )
     items = [
-        {
-            "document_id": profile.document_id,
-            "title": profile.title,
-            "doc_type": profile.doc_type,
-            "profile_warnings": list(profile.profile_warnings),
-            "confidence": round(profile.confidence, 2),
-            "profile_status": profile.profile_status,
-            "source_fingerprint": profile.source_fingerprint,
-            "profile_version": profile.profile_version,
-            "profile_fingerprint": profile.profile_fingerprint,
-            "generated_at": profile.generated_at,
-        }
+        asdict(profile)
         for profile in matched_profiles[offset : offset + limit]
     ]
     return {
@@ -165,21 +146,10 @@ async def get_document_profile(
     user_id: str,
 ) -> dict[str, Any]:
     await workspace_service.get_workspace_for_user(workspace_id, user_id)
-    profile = await DocumentProfileRepo.read(workspace_id, document_id)
+    profile = await ProfileRepo.read(workspace_id, document_id)
     if profile is not None:
-        return {
-            "document_id": profile.document_id,
-            "title": profile.title,
-            "doc_type": profile.doc_type,
-            "profile_warnings": list(profile.profile_warnings),
-            "confidence": round(profile.confidence, 2),
-            "profile_status": profile.profile_status,
-            "source_fingerprint": profile.source_fingerprint,
-            "profile_version": profile.profile_version,
-            "profile_fingerprint": profile.profile_fingerprint,
-            "generated_at": profile.generated_at,
-        }
-    if not await DocumentProfileRepo.list_workspace(workspace_id):
+        return asdict(profile)
+    if not await ProfileRepo.list_workspace(workspace_id):
         raise DocumentProfilesNotReadyError(workspace_id)
     raise DocumentNotFoundError(workspace_id, document_id)
 
@@ -202,7 +172,6 @@ async def get_document_content(
             raise DocumentContentNotReadyError(workspace_id)
         raise DocumentNotFoundError(workspace_id, document_id)
 
-    profile = await DocumentProfileRepo.read(workspace_id, document_id)
     file_lookup = _build_workspace_file_lookup(workspace)
 
     full_text = _document_text(document)
@@ -215,10 +184,8 @@ async def get_document_content(
             block["text"] for block in block_payload if block["text"].strip()
         ).strip()
 
-    title = profile.title if profile else None
     source_filename = _resolve_source_filename(document, file_lookup)
-    if title is None:
-        title = _resolve_document_title(document, source_filename, file_lookup)
+    title = _resolve_document_title(document, source_filename, file_lookup)
 
     warnings: list[str] = []
     if not full_text:
@@ -243,7 +210,7 @@ async def read_document_profiles(
 ) -> tuple[DocumentProfile, ...]:
     await workspace_service.get_workspace(workspace_id)
 
-    profiles = await DocumentProfileRepo.list_workspace(
+    profiles = await ProfileRepo.list_workspace(
         workspace_id,
         document_ids,
     )
@@ -288,23 +255,24 @@ async def build_document_profile(
         )
     )
     try:
-        profile = await asyncio.shield(profile_task)
+        output = await asyncio.shield(profile_task)
     except asyncio.CancelledError:
         await asyncio.gather(profile_task, return_exceptions=True)
         raise
-    profile = replace(
-        profile,
+    profile = DocumentProfile(
+        document_id=document_id,
+        doc_type=output.doc_type,
+        description=output.description,
         source_fingerprint=source_fingerprint,
         profile_version=DOCUMENT_PROFILE_PROMPT_VERSION,
         profile_fingerprint=profile_fingerprint,
         generated_at=datetime.now(timezone.utc).isoformat(),
     )
     logger.info(
-        "Document profile build finished workspace_id=%s document_id=%s doc_type=%s warning_count=%s",
+        "Document profile build finished workspace_id=%s document_id=%s doc_type=%s",
         workspace_id,
         document_id,
         profile.doc_type,
-        len(profile.profile_warnings),
     )
     return profile
 
@@ -322,8 +290,7 @@ def _profile_document(
     document: SourceDocument,
     file_lookup: dict[str, Any],
     extractor: DocumentProfileExtractor,
-) -> DocumentProfile:
-    document_id = document.document_id
+) -> DocumentProfileModelOutput:
     source_filename = _resolve_source_filename(document, file_lookup)
     title = _resolve_document_title(
         document=document,
@@ -337,66 +304,11 @@ def _profile_document(
         blocks=list(document.blocks),
     )
     if _document_profile_payload_is_insufficient(profile_payload):
-        return DocumentProfile(
-            document_id=document_id,
-            title=title,
-            doc_type=DOC_TYPE_UNCERTAIN,
-            profile_warnings=("insufficient_content",),
-            confidence=0.0,
-            profile_status=PROFILE_STATUS_COMPLETED,
+        return DocumentProfileModelOutput(
+            doc_type="uncertain",
+            description="The available Source has insufficient text to identify the paper’s purpose.",
         )
-
-    try:
-        extracted = extractor.extract_document_profile(profile_payload)
-    except DocumentProfileExtractionError:
-        trace = extractor.consume_last_trace() or {}
-        diagnostic = {
-            key: trace[key]
-            for key in (
-                "task_type",
-                "prompt_version",
-                "model",
-                "extraction_mode",
-                "trace_status",
-                "elapsed_s",
-                "error",
-                "attempts",
-            )
-            if key in trace
-        }
-        logger.warning(
-            "Document profile classification unavailable; preserving document "
-            "as uncertain workspace_id=%s document_id=%s trace=%s",
-            workspace_id,
-            document_id,
-            json.dumps(
-                diagnostic,
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ),
-        )
-        return DocumentProfile(
-            document_id=document_id,
-            title=title,
-            doc_type=DOC_TYPE_UNCERTAIN,
-            profile_warnings=("document_profile_extraction_failed",),
-            confidence=0.0,
-            profile_status=PROFILE_STATUS_EXTRACTION_FAILED,
-        )
-    profile_warnings = list(extracted.profile_warnings)
-    if (
-        extracted.doc_type == DOC_TYPE_UNCERTAIN
-        and "classification_uncertain" not in profile_warnings
-    ):
-        profile_warnings.append("classification_uncertain")
-    return DocumentProfile(
-        document_id=document_id,
-        title=title,
-        doc_type=extracted.doc_type,
-        profile_warnings=tuple(profile_warnings),
-        confidence=round(extracted.confidence, 2),
-        profile_status=PROFILE_STATUS_COMPLETED,
-    )
+    return extractor.extract_document_profile(profile_payload)
 
 
 def _build_document_profile_payload(

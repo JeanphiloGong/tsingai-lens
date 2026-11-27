@@ -200,7 +200,7 @@ def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
     document = bundle.to_documents()[0]
     document_profile_service.workspace_service = None
     document_profile_service.SourceRepo = None
-    document_profile_service.DocumentProfileRepo = None
+    document_profile_service.ProfileRepo = None
     content = document_profile_service._build_document_content_blocks(
         "", list(document.blocks)
     )

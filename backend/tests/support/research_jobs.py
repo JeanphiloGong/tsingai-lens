@@ -2,9 +2,9 @@
 
 from datetime import timedelta
 from infra.persistence import database
-from repositories.document_profile_repository import DocumentProfileRepo
+from document.repositories.profile_repository import ProfileRepo
 from application.source import workspace_service
-from domain.core.document_profile import DocumentProfile
+from document.domain.profile import DocumentProfile
 
 
 async def claim_analysis_fixture(
@@ -17,16 +17,16 @@ async def claim_analysis_fixture(
         return None
     assert job.analysis.key == (workspace_id, objective_id, analysis_version)
     for item in job.analysis.document_inputs:
-        await DocumentProfileRepo.replace(
+        await ProfileRepo.replace(
             workspace_id,
             DocumentProfile(
                 document_id=item.document_id,
-                title=item.document_id,
+                description=item.document_id,
                 doc_type="experimental",
-                profile_warnings=(),
-                confidence=0.9,
                 source_fingerprint=item.preparation_fingerprint,
                 profile_fingerprint=item.preparation_fingerprint,
+                profile_version="document_profile.v2",
+                generated_at="2026-01-01T00:00:00Z",
             ),
         )
         await workspace_service.update_document_preparation(

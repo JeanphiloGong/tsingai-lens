@@ -300,7 +300,6 @@ class FakeDomainModelExtractor:
             methods_hits + characterization_hits + procedural_hits + results_hits
         )
 
-        warnings: list[str] = []
         if review_hits and experimental_score >= 3:
             doc_type = "mixed"
         elif review_hits:
@@ -311,12 +310,16 @@ class FakeDomainModelExtractor:
             doc_type = "experimental"
         else:
             doc_type = "uncertain"
-            warnings.append("classification_uncertain")
 
         return DocumentProfileModelOutput(
             doc_type=doc_type,
-            profile_warnings=sorted(set(warnings)),
-            confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
+            description=(
+                "Experimental materials study."
+                if doc_type == "experimental"
+                else "Review of materials research."
+                if doc_type == "review"
+                else "Document type is uncertain."
+            ),
         )
 
     def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:

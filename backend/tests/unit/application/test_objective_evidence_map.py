@@ -5,8 +5,8 @@ from typing import Mapping
 
 import pytest
 from application.core.objectives.evidence_map import build_objective_evidence_map
+from document.domain import DocumentProfile
 from domain.core import (
-    DocumentProfile,
     Finding,
     ObjectiveEvidence,
     PaperContribution,
@@ -320,17 +320,21 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
         profiles=(
             DocumentProfile(
                 document_id="paper-1",
-                title="Heat treatment study A",
+                description="Heat treatment study A",
                 doc_type="experimental",
-                confidence=0.9,
-                profile_warnings=(),
+                source_fingerprint="source-a",
+                profile_fingerprint="profile-a",
+                profile_version="document_profile.v2",
+                generated_at="2026-01-01T00:00:00Z",
             ),
             DocumentProfile(
                 document_id="paper-2",
-                title="Heat treatment study B",
+                description="Heat treatment study B",
                 doc_type="experimental",
-                confidence=0.9,
-                profile_warnings=(),
+                source_fingerprint="source-b",
+                profile_fingerprint="profile-b",
+                profile_version="document_profile.v2",
+                generated_at="2026-01-01T00:00:00Z",
             ),
         ),
     )

@@ -52,12 +52,12 @@ function jsonResponse(data: unknown, code = 200, message = 'success') {
 function profile(index: number) {
 	return {
 		document_id: `doc-${index}`,
-		title: `Paper ${index}`,
+		description: `Paper ${index}`,
 		doc_type: 'experimental',
-		profile_status: 'completed',
-		profile_warnings: [],
-		confidence: 0.9,
-		page_count: 10
+		source_fingerprint: `source-${index}`,
+		profile_fingerprint: `profile-${index}`,
+		profile_version: 'document_profile.v2',
+		generated_at: '2026-01-01T00:00:00Z'
 	};
 }
 
@@ -93,18 +93,13 @@ describe('workspaces/[id]/documents/+page.svelte', () => {
 					{
 						...profile(1),
 						document_id: 'doc_1',
-						title: 'Paper A',
-						confidence: 0.91,
-						page_count: 12
+						description: 'Paper A'
 					},
 					{
 						...profile(2),
 						document_id: 'abcdef1234567890abcdef1234567890',
-						title: null,
+						description: 'Review needing inspection',
 						doc_type: 'review',
-						profile_warnings: ['Missing publication year'],
-						confidence: 0.7,
-						page_count: 8
 					}
 				]
 			})
@@ -118,7 +113,7 @@ describe('workspaces/[id]/documents/+page.svelte', () => {
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
 		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
-		await expect.element(browserPage.getByText('Paper 2')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Review needing inspection')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link').first())
 			.toHaveAttribute('href', '/workspaces/col_123/documents/doc_1');
@@ -234,7 +229,7 @@ describe('workspaces/[id]/documents/+page.svelte', () => {
 					by_doc_type: {},
 					warnings: []
 				},
-				items: query ? [{ ...profile(88), title: 'Laser porosity study' }] : [profile(1)]
+			items: query ? [{ ...profile(88), description: 'Laser porosity study' }] : [profile(1)]
 			});
 		});
 
@@ -273,9 +268,8 @@ describe('workspaces/[id]/documents/+page.svelte', () => {
 					? [
 							{
 								...profile(91),
-								title: 'Review needing inspection',
+								description: 'Review needing inspection',
 								doc_type: 'review',
-								profile_warnings: ['insufficient_content']
 							}
 						]
 					: [profile(1)]
@@ -318,9 +312,9 @@ describe('workspaces/[id]/documents/+page.svelte', () => {
 				},
 				items: Array.from({ length: 25 }, (_, index) => ({
 					...profile(offset + index + 1),
-					title: isFiltered
+					description: isFiltered
 						? `Filtered paper ${offset + index + 1}`
-						: profile(offset + index + 1).title
+						: profile(offset + index + 1).description
 				}))
 			});
 		});

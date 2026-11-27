@@ -1,16 +1,15 @@
 import { buildApiUrl, requestJson } from './api';
 
 export type DocumentType = 'experimental' | 'review' | 'mixed' | 'uncertain';
-export type ProfileStatus = 'completed' | 'extraction_failed';
 
 export type DocumentProfile = {
 	document_id: string;
-	title: string | null;
 	doc_type: DocumentType;
-	profile_status: ProfileStatus;
-	profile_warnings: string[];
-	confidence: number | null;
-	page_count?: number | null;
+	description: string;
+	source_fingerprint: string;
+	profile_fingerprint: string;
+	profile_version: string;
+	generated_at: string;
 };
 
 export type DocumentProfilesResponse = {
@@ -232,7 +231,6 @@ export type DocumentProfileListOptions = {
 	limit?: number;
 	query?: string;
 	docType?: DocumentType;
-	hasWarnings?: boolean;
 };
 
 export async function fetchDocumentProfiles(
@@ -245,9 +243,6 @@ export async function fetchDocumentProfiles(
 	const query = options.query?.trim();
 	if (query) search.set('query', query);
 	if (options.docType) search.set('doc_type', options.docType);
-	if (options.hasWarnings !== undefined) {
-		search.set('has_warnings', String(options.hasWarnings));
-	}
 	const queryString = search.toString();
 	const data = (await requestJson(
 		`/workspaces/${encodeURIComponent(workspaceId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,

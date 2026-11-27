@@ -322,7 +322,7 @@ async def test_projection_builds_the_existing_evidence_map_contract() -> None:
         outcomes=("elongation",),
     )
     analysis = SimpleNamespace(analysis_version=1)
-    profile = SimpleNamespace(document_id="paper-1", title="Preheat paper")
+    profile = SimpleNamespace(document_id="paper-1", description="Preheat paper")
 
     payload = await service.build_evidence_map(
         objective=objective,

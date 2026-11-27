@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from domain.core import DocumentProfile
+from document.domain import DocumentProfile
 from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.research_objective import ObjectiveEvidence
 from domain.core.scientific_fact import ScientificContext
-from repositories.document_profile_repository import DocumentProfileRepository
+from document.repositories.profile_repository import ProfileRepository
 from document.repositories.source_repository import SourceRepository
 
 
@@ -142,15 +142,17 @@ async def test_export_prediction_bundle_uses_current_published_results(tmp_path,
     )[0]
     await seed_workspace(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
-    profile_repository = DocumentProfileRepository()
+    profile_repository = ProfileRepository()
     await profile_repository.replace(
         "col-test",
         DocumentProfile(
             document_id="paper-1",
-            title="Prediction Paper",
+            description="Prediction Paper",
             doc_type="experimental",
-            profile_warnings=(),
-            confidence=0.9,
+            source_fingerprint="source-test",
+            profile_fingerprint="profile-test",
+            profile_version="document_profile.v2",
+            generated_at="2026-01-01T00:00:00Z",
         )
     )
     monkeypatch.setattr(
@@ -166,7 +168,7 @@ async def test_export_prediction_bundle_uses_current_published_results(tmp_path,
     )
     monkeypatch.setattr(
         exporter,
-        "DocumentProfileRepository",
+        "ProfileRepository",
         lambda: profile_repository,
     )
     monkeypatch.setattr(
@@ -351,8 +353,8 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_pat
     )
     monkeypatch.setattr(
         exporter,
-        "DocumentProfileRepository",
-        lambda: DocumentProfileRepository(),
+        "ProfileRepository",
+        lambda: ProfileRepository(),
     )
     monkeypatch.setattr(
         exporter,

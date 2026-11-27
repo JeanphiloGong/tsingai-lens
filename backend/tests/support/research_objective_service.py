@@ -14,8 +14,9 @@ from application.core.objectives import (
 from application.core.objectives import (
     objective_input_service as objective_input_module,
 )
-from application.core.objectives import paper_research_map_service
-from domain.core import DocumentProfile, PreparedDocumentInput
+from research.discovery.application import paper_map_service as paper_research_map_service
+from document.domain import DocumentProfile
+from domain.core import PreparedDocumentInput
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -25,9 +26,9 @@ from domain.core.research_objective import (
 from research.domain.objective import ResearchObjective
 from document.domain.document import Document
 from repositories.workspace_repository import StoredDocument
-from repositories.document_profile_repository import DocumentProfileRepository
+from document.repositories.profile_repository import ProfileRepository
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
-from repositories.paper_map_repository import PaperMapRepository
+from research.discovery.repositories.paper_map_repository import PaperMapRepository
 from document.repositories.source_repository import SourceRepository
 
 
@@ -106,7 +107,7 @@ def build_research_objective_service(
         )
     document_profile_repository = kwargs.pop(
         "document_profile_repository",
-        DocumentProfileRepository(),
+        ProfileRepository(),
     )
     paper_map_repository = kwargs.pop(
         "paper_map_repository",
@@ -121,7 +122,7 @@ def build_research_objective_service(
     )
     document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceRepo = source_repository
-    document_profile_service.DocumentProfileRepo = document_profile_repository
+    document_profile_service.ProfileRepo = document_profile_repository
     objective_input_service = kwargs.pop(
         "objective_input_service",
         objective_input_module,
@@ -189,14 +190,16 @@ async def seed_document_profiles(
         profiles.append(
             DocumentProfile(
                 document_id=document.document_id,
-                title=title,
+                description=title,
                 doc_type="review" if "Review" in title else "experimental",
-                profile_warnings=(),
-                confidence=0.9,
+                source_fingerprint="source-test",
+                profile_fingerprint="profile-test",
+                profile_version="document_profile.v2",
+                generated_at="2026-01-01T00:00:00Z",
             )
         )
     for profile in profiles:
-        await service.objective_input_service.document_profile_service.DocumentProfileRepo.replace(
+        await service.objective_input_service.document_profile_service.ProfileRepo.replace(
             workspace_id, profile
         )
 

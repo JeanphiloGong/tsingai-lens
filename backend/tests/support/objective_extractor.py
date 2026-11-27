@@ -76,8 +76,7 @@ class FakeObjectiveExtractor:
         title = str(payload.get("title") or "")
         return DocumentProfileModelOutput(
             doc_type="review" if "Review" in title else "experimental",
-            profile_warnings=[],
-            confidence=0.9,
+            description="Review of materials research." if "Review" in title else "Experimental materials study.",
         )
 
     def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:

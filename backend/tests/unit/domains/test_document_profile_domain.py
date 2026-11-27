@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from repositories.document_profile_repository import DocumentProfileRepository
+from document.repositories.profile_repository import ProfileRepository
 from infra.persistence.postgres.models.workspace import (
     DocumentPreparationORM,
 )
-from domain.core.document_profile import (
+from document.domain.profile import (
     DocumentProfile,
     summarize_document_profile_workspace,
 )
@@ -27,8 +27,8 @@ def profile_repository(monkeypatch):
     manager.__aenter__ = AsyncMock(return_value=session)
     manager.__aexit__ = AsyncMock(return_value=None)
     factory = MagicMock(return_value=manager)
-    monkeypatch.setattr("repositories.document_profile_repository.AsyncSessionLocal", factory)
-    return DocumentProfileRepository(), session
+    monkeypatch.setattr("document.repositories.profile_repository.AsyncSessionLocal", factory)
+    return ProfileRepository(), session
 
 
 def test_stored_document_profile_reads_canonical_fields(profile_repository) -> None:
@@ -37,11 +37,8 @@ def test_stored_document_profile_reads_canonical_fields(profile_repository) -> N
         document_id="doc-exp",
         profile_json={
             "document_id": "doc-exp",
-            "title": "Composite Processing Study",
+            "description": "Composite processing study.",
             "doc_type": "experimental",
-            "profile_warnings": [],
-            "confidence": 0.91,
-            "profile_status": "completed",
             "source_fingerprint": "source-v1",
             "profile_version": "document_profile.v1",
             "profile_fingerprint": "profile-v1",
@@ -52,11 +49,8 @@ def test_stored_document_profile_reads_canonical_fields(profile_repository) -> N
 
     assert profile == DocumentProfile(
         document_id="doc-exp",
-        title="Composite Processing Study",
+        description="Composite processing study.",
         doc_type=DOC_TYPE_EXPERIMENTAL,
-        profile_warnings=(),
-        confidence=0.91,
-        profile_status="completed",
         source_fingerprint="source-v1",
         profile_version="document_profile.v1",
         profile_fingerprint="profile-v1",
@@ -70,21 +64,23 @@ def test_profile_read_requires_current_storage_contract(profile_repository) -> N
         document_id="doc",
         profile_json={
             "document_id": "doc",
-            "title": None,
+            "description": "",
             "doc_type": "uncertain",
-            "profile_warnings": [],
-            "confidence": 0.0,
         },
     )
 
-    with pytest.raises(KeyError, match="profile_status"):
+    with pytest.raises((KeyError, ValueError)):
         asyncio.run(repository.read("workspace", "doc"))
 
 
 def test_summarize_document_profile_workspace_emits_workspace_warnings() -> None:
-    review_profile = DocumentProfile("doc-review", None, DOC_TYPE_REVIEW, (), 0.8)
+    review_profile = DocumentProfile(
+        "doc-review", DOC_TYPE_REVIEW, "Review of materials research.",
+        "source-review", "profile-review", "document_profile.v2", "2026-01-01T00:00:00Z",
+    )
     uncertain_profile = DocumentProfile(
-        "doc-uncertain", None, DOC_TYPE_UNCERTAIN, (), 0.0
+        "doc-uncertain", DOC_TYPE_UNCERTAIN, "Uncertain document.",
+        "source-uncertain", "profile-uncertain", "document_profile.v2", "2026-01-01T00:00:00Z",
     )
 
     summary = summarize_document_profile_workspace([review_profile, uncertain_profile])
@@ -102,20 +98,12 @@ def test_summarize_document_profile_workspace_emits_workspace_warnings() -> None
     )
 
 
-def test_summarize_document_profile_workspace_separates_technical_failure() -> None:
+def test_summarize_document_profile_workspace_has_no_technical_failure_field() -> None:
     profile = DocumentProfile(
-        "doc-failed",
-        None,
-        DOC_TYPE_UNCERTAIN,
-        ("document_profile_extraction_failed",),
-        0.0,
-        profile_status="extraction_failed",
+        "doc-failed", DOC_TYPE_UNCERTAIN, "Uncertain document.",
+        "source-failed", "profile-failed", "document_profile.v2", "2026-01-01T00:00:00Z",
     )
 
     summary = summarize_document_profile_workspace([profile])
 
-    assert summary.technical_failure_count == 1
-    assert (
-        "Some document profiles failed technical extraction and need retry."
-        in summary.warnings
-    )
+    assert summary.technical_failure_count == 0

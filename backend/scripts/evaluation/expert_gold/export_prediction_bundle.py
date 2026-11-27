@@ -22,8 +22,8 @@ from infra.persistence.database import (  # noqa: E402
     build_database_engine,
     AsyncSessionLocal,
 )
-from repositories.document_profile_repository import (  # noqa: E402
-    DocumentProfileRepository,
+from document.repositories.profile_repository import (  # noqa: E402
+    ProfileRepository,
 )
 from repositories.objective_repository import (  # noqa: E402
     ObjectiveRepository,
@@ -170,7 +170,7 @@ async def _load_artifacts(
     AsyncSessionLocal.configure(bind=engine)
     try:
         documents = await SourceRepository().read_workspace_documents(workspace_id)
-        profiles = await DocumentProfileRepository().list_workspace(
+        profiles = await ProfileRepository().list_workspace(
             workspace_id
         )
         objective_repository = ObjectiveRepository()
@@ -540,11 +540,8 @@ async def _load_artifacts(
         "document_profiles": [
             {
                 "document_id": item.document_id,
-                "title": item.title,
                 "doc_type": item.doc_type,
-                "profile_warnings": list(item.profile_warnings),
-                "confidence": round(item.confidence, 2),
-                "profile_status": item.profile_status,
+                "description": item.description,
                 "source_fingerprint": item.source_fingerprint,
                 "profile_version": item.profile_version,
                 "profile_fingerprint": item.profile_fingerprint,
@@ -573,7 +570,7 @@ def _convert_papers(
         papers.append(
             {
                 "paper_id": document_id,
-                "title": profile.get("title") or document["title"],
+                "title": profile.get("description") or document["title"],
                 "doi": metadata.get("doi"),
                 "source_filename": metadata.get("source_filename"),
                 "document_type": profile.get("doc_type"),

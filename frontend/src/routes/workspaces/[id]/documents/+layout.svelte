@@ -112,7 +112,7 @@
 				{
 					documentId: id,
 					title:
-						$agent.papers.find((paper) => paper.document_id === id)?.title ||
+						$agent.papers.find((paper) => paper.document_id === id)?.description ||
 						$t('workbench.loading'),
 					search,
 					navigationVersion: 0

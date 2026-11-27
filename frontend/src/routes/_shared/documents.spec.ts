@@ -27,11 +27,12 @@ describe('documents shared helpers', () => {
 			items: [
 				{
 					document_id: 'doc_1',
-					title: 'Paper A',
+					description: 'Paper A',
 					doc_type: 'experimental',
-					profile_status: 'completed',
-					profile_warnings: [],
-					confidence: 0.9
+					source_fingerprint: 'source-1',
+					profile_fingerprint: 'profile-1',
+					profile_version: 'document_profile.v2',
+					generated_at: '2026-01-01T00:00:00Z'
 				}
 			]
 		});
@@ -42,7 +43,7 @@ describe('documents shared helpers', () => {
 		expect(response.items[0]).toMatchObject({
 			document_id: 'doc_1',
 			doc_type: 'experimental',
-			confidence: 0.9
+			description: 'Paper A'
 		});
 		expect(response.items[0]).not.toHaveProperty('workspace_id');
 		expect(response.items[0]).not.toHaveProperty('source_filename');
@@ -62,11 +63,10 @@ describe('documents shared helpers', () => {
 			limit: 25,
 			query: '  laser  ',
 			docType: 'review',
-			hasWarnings: true
 		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/workspaces/col_123/documents/profiles?offset=25&limit=25&query=laser&doc_type=review&has_warnings=true',
+			'/workspaces/col_123/documents/profiles?offset=25&limit=25&query=laser&doc_type=review',
 			{ method: 'GET' }
 		);
 	});

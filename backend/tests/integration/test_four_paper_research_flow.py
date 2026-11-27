@@ -306,8 +306,11 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         title = str(payload.get("title") or payload.get("source_filename") or "")
         return DocumentProfileModelOutput(
             doc_type="review" if "review" in title.casefold() else "experimental",
-            profile_warnings=[],
-            confidence=0.95,
+            description=(
+                "Review literature."
+                if "review" in title.casefold()
+                else "Experimental materials study."
+            ),
         )
 
     def extract(

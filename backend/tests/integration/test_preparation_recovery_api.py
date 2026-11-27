@@ -47,7 +47,7 @@ def test_upload_classification_retry_content_and_research_readiness(
                     "controlled transient model failure"
                 )
             return DocumentProfileModelOutput(
-                doc_type="experimental", profile_warnings=[], confidence=0.9
+                doc_type="experimental", description="Experimental materials study."
             )
 
         def consume_last_trace(self):
@@ -141,7 +141,7 @@ def test_upload_classification_retry_content_and_research_readiness(
     current_profile = app_client.get(f"{document_path}/profile").json()["data"]
     assert current_profile["doc_type"] == "experimental"
     stored_profile = app_client.portal.call(
-        document_profile_service.DocumentProfileRepo.read,
+        document_profile_service.ProfileRepo.read,
         workspace_id,
         document_id,
     )

@@ -31,27 +31,19 @@ _TRACE_OUTPUT_PREVIEW_CHARS = 1000
 class DocumentProfileModelOutput(BaseModel):
     """Validated model output for coarse document triage."""
 
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
-    doc_type: Literal["experimental", "review", "mixed", "uncertain"] = "uncertain"
-    profile_warnings: list[
-        Literal["insufficient_content", "classification_uncertain"]
-    ] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    doc_type: Literal["experimental", "review", "mixed", "uncertain"]
+    description: str = Field(min_length=1, max_length=500)
 
 
-DOCUMENT_PROFILE_PROMPT_VERSION = "document_profile.v1"
+DOCUMENT_PROFILE_PROMPT_VERSION = "document_profile.v2"
 
 _DOCUMENT_PROFILE_SYSTEM_PROMPT = """
-You are doing document triage for a materials-literature backend.
-
-Non-negotiable rules:
-- This is coarse document classification, not knowledge extraction.
-- Return exactly one JSON object and nothing else.
-- Do not write natural-language summaries or explanations.
-- `doc_type` must be one of: experimental, review, mixed, uncertain.
-- `profile_warnings` may only use: insufficient_content, classification_uncertain.
-- If the input is weak or ambiguous, return `uncertain`.
+Classify the supplied paper for literature navigation. Return its doc_type and a
+short description of its topic and intended use grounded in the supplied title,
+lead text and headings. Use uncertain when the role is unclear. Avoid inferring
+experimental findings or evidence from navigation material.
 """.strip()
 
 

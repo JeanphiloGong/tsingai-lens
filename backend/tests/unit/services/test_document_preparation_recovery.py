@@ -12,7 +12,7 @@ from application.source import (
     document_preparation_service as preparation,
 )
 from application.core.document_profiles import service as profiles
-from domain.core.document_profile import DocumentProfile
+from document.domain.profile import DocumentProfile
 from document.domain.source import SourceDocument
 from repositories.pipeline_run_repository import PipelineRunRepo
 from repositories.model_connection_repository import ModelConnectionRepo
@@ -67,13 +67,17 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
         side_effect=[
             DocumentProfile(
                 "paper-a",
-                "LPBF",
                 "uncertain",
-                ("document_profile_extraction_failed",),
-                0,
-                profile_status="extraction_failed",
+                "Uncertain document.",
+                "source-test",
+                "profile-test",
+                "document_profile.v2",
+                "2026-01-01T00:00:00Z",
             ),
-            DocumentProfile("paper-a", "LPBF", "experimental", (), 0.9),
+            DocumentProfile(
+                "paper-a", "experimental", "LPBF", "source-test", "profile-test",
+                "document_profile.v2", "2026-01-01T00:00:00Z",
+            ),
         ]
     )
 
@@ -184,7 +188,7 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     from datetime import datetime, timezone
     from sqlalchemy import update
     from infra.persistence.postgres.models.execution import PipelineRunORM
-    from repositories.document_profile_repository import DocumentProfileRepo
+    from document.repositories.profile_repository import ProfileRepo
     from repositories.pipeline_run_repository import PipelineLeaseLostError
 
     ctx = prepared_inputs
@@ -223,12 +227,12 @@ async def test_preparation_takeover_rejects_late_stage_publication(
             await take_over()
         return DocumentProfile(
             document_id,
-            "LPBF",
             "experimental",
-            (),
-            0.9,
+            "LPBF",
             source_fingerprint=source_fingerprint,
             profile_fingerprint=profile_fingerprint,
+            profile_version="document_profile.v2",
+            generated_at="2026-01-01T00:00:00Z",
         )
 
     ctx.parse.side_effect = parse
@@ -241,7 +245,7 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     )
     with pytest.raises(PipelineLeaseLostError):
         await preparation.execute_document_preparation_job(original, **resources)
-    assert await DocumentProfileRepo.read("prepare-papers", "paper-a") is None
+    assert await ProfileRepo.read("prepare-papers", "paper-a") is None
     source = await SourceRepo.read_document("prepare-papers", "paper-a")
     assert (source is not None) == (stage == "profile")
     async with database.AsyncSessionLocal() as db, db.begin():

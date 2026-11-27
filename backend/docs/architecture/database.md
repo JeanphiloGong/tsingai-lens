@@ -679,7 +679,7 @@ conclusion.
 | `parser_version` | `VARCHAR(128)` | Yes | — | Parser version that produced the current Source representation. |
 | `source_fingerprint` | `VARCHAR(64)` | Yes | — | Identity of the serialized Source artifact used for invalidation. |
 | `artifact_json` | `JSONB` | Yes | — | Complete Source aggregate: `document`, `text_units`, `blocks`, `tables`, `table_rows`, `table_cells`, `figures`, and `references`. |
-| `profile_json` | `JSONB` | Yes | — | Current Profile result: title, type, warnings, confidence, profile version/fingerprint, and generation time. |
+| `profile_json` | `JSONB` | Yes | — | Current Profile result: document type, description, source/profile fingerprints, profile version, and generation time. |
 | `paper_map_payload` | `JSONB` | Yes | — | Optional navigation-only Paper Map and its input fingerprint/version metadata. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | First creation timestamp for this current preparation row. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Timestamp of the latest Source, Profile, or Paper Map replacement. |

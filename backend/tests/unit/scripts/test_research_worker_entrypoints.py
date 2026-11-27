@@ -77,7 +77,7 @@ async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
     """Client shutdown must wait until a running model thread returns."""
     import threading
     from application.core.document_profiles import service
-    from domain.core.document_profile import DocumentProfile
+    from document.domain.profile import DocumentProfile
     from document.domain.source import SourceDocument
 
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
@@ -86,7 +86,10 @@ async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
         started.set()
         try:
             assert release.wait(timeout=2)
-            return DocumentProfile("paper", "LPBF", "experimental", (), 0.9)
+            return DocumentProfile(
+                "paper", "experimental", "LPBF", "source-test", "profile-test",
+                "document_profile.v2", "2026-01-01T00:00:00Z",
+            )
         finally:
             finished.set()
 

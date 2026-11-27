@@ -3686,14 +3686,12 @@ function documentProfile() {
 	return {
 		document_id: documentId,
 		workspace_id: workspaceId,
-		title: 'Paper A',
-		source_filename: 'paper-a.txt',
+		description: 'Paper A',
 		doc_type: 'experimental',
-		profile_warnings: [],
-		confidence: 0.9,
-		page_count: 3,
-		updated_at: now(),
-		processing_status: 'completed'
+		source_fingerprint: 'source-1',
+		profile_fingerprint: 'profile-1',
+		profile_version: 'document_profile.v2',
+		generated_at: now()
 	};
 }
 

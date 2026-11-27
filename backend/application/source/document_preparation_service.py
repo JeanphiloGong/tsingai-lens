@@ -26,7 +26,6 @@ from application.source import workspace_service
 from application.source import (
     reference_extraction_service as source_reference_extraction_service,
 )
-from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from document.domain.source import SourceDocument
 from document.domain.document import Document
 from exceptions import ServiceUnavailableException
@@ -41,7 +40,6 @@ from infra.source.config.source_parser_config import (
     StorageConfig,
 )
 from repositories.workspace_repository import StoredDocument
-from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.object_store import ObjectStore
 from document.application.preparation import DocumentPreparation
@@ -150,16 +148,16 @@ async def _can_reuse_document_preparation(
         or record.source_fingerprint != source_identity
     ):
         return False
-    profile = await DocumentProfileRepo.read(
+    profile = await ProfileRepo.read(
         workspace_id,
-        document.document_id,
+        record.document.document_id,
     )
-    if profile is None or profile.profile_status != PROFILE_STATUS_COMPLETED:
+    if profile is None or profile.profile_fingerprint != profile_identity:
         return False
     return (
         await SourceRepo.read_document(
             workspace_id,
-            document.document_id,
+            record.document.document_id,
         )
         is not None
     )
@@ -381,11 +379,12 @@ async def execute_document_preparation_job(
             await pipeline_run_service.update_run(
                 run_id, job=job, db=db, current_node=stage, progress_percent=45
             )
-        profile = await DocumentProfileRepo.read(workspace_id, document_id)
+        profile = (await ProfileRepo.read(workspace_id, document_id)
+                   if record.profile_fingerprint == profile_identity else None)
         if (
             profile is None
             or record.profile_fingerprint != profile_identity
-            or profile.profile_status != PROFILE_STATUS_COMPLETED
+            or profile.source_fingerprint != source_identity
         ):
             with ExitStack() as clients:
                 if profile_extractor is None:
@@ -411,21 +410,10 @@ async def execute_document_preparation_job(
                 )
         async with AsyncSessionLocal() as db, db.begin():
             await _check_preparation_input(db, job)
-            await DocumentProfileRepo.replace(workspace_id, profile, db=db)
-            if profile.profile_status != PROFILE_STATUS_COMPLETED:
-                message = document_preparation_error_message(stage)
-                await workspace_service.update_document_preparation(
-                    workspace_id, document_id, status="stored", db=db
-                )
-                return await pipeline_run_service.finish_run(
-                    run_id,
-                    job=job,
-                    db=db,
-                    status="partial_success",
-                    current_node=stage,
-                    warnings=[*warnings, message],
-                    errors=[message],
-                )
+            await preparation.save_profile(
+                workspace_id=workspace_id, document_id=document_id, source_version=source_identity,
+                profile=profile, db=db,
+            )
             await workspace_service.update_document_preparation(
                 workspace_id,
                 document_id,
@@ -454,13 +442,14 @@ async def execute_document_preparation_job(
         async with AsyncSessionLocal() as db, db.begin():
             await PipelineRunRepo.lock_job(db, job)
             await workspace_service.update_document_preparation(
-                workspace_id, document_id, status="failed", db=db
+                workspace_id, document_id, status="stored" if stage == "document_profile" else "failed", db=db
             )
             return await pipeline_run_service.finish_run(
                 run_id,
                 job=job,
                 db=db,
-                status="failed",
+                status="partial_success" if stage == "document_profile" else "failed",
+                warnings=[*warnings, document_preparation_error_message(stage)] if stage == "document_profile" else warnings,
                 current_node=stage,
                 errors=[document_preparation_error_message(stage)],
             )

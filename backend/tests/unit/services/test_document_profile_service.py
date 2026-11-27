@@ -12,11 +12,11 @@ from application.core.document_profiles.extraction import (
     DocumentProfileModelOutput,
 )
 from application.core.document_profiles.service import DocumentProfilesNotReadyError
-from domain.core.document_profile import DocumentProfile
+from document.domain.profile import DocumentProfile
 from document.domain.source import SourceDocument
 from infra.persistence import database
 from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
-from repositories.document_profile_repository import DocumentProfileRepository
+from document.repositories.profile_repository import ProfileRepository
 from document.repositories.source_repository import SourceRepository
 from tests.support.postgres import seed_workspace
 from tests.support.source_artifacts import build_source_documents
@@ -32,7 +32,7 @@ def anyio_backend() -> str:
 def _build_profile_service(tmp_path, *, postgres_session_factory):
     document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceRepo = SourceRepository()
-    document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
+    document_profile_service.ProfileRepo = ProfileRepository()
     return workspace_service, document_profile_service
 
 
@@ -84,7 +84,7 @@ async def _build_profiles(
         ]
     )
     for profile in result:
-        await profile_service.DocumentProfileRepo.replace(workspace_id, profile)
+        await profile_service.ProfileRepo.replace(workspace_id, profile)
     return result
 
 
@@ -172,7 +172,7 @@ async def test_document_profile_service_builds_profiles_and_summary(
         "mixed": 1,
         "review": 1,
     }
-    stored = await profile_service.DocumentProfileRepo.list_workspace(workspace_id)
+    stored = await profile_service.ProfileRepo.list_workspace(workspace_id)
     assert len(stored) == 3
 
 
@@ -274,14 +274,16 @@ async def test_document_profile_service_combines_filters_before_paginating(
         await seed_workspace(
             postgres_session_factory, workspace_id, document_ids=(row["document_id"],)
         )
-        await profile_service.DocumentProfileRepo.replace(
+        await profile_service.ProfileRepo.replace(
             workspace_id,
             DocumentProfile(
-                confidence=0.9,
                 document_id=row["document_id"],
-                title=row["title"],
+                description=row["title"],
                 doc_type=row["doc_type"],
-                profile_warnings=tuple(row["profile_warnings"]),
+                source_fingerprint="source-test",
+                profile_fingerprint=f"profile-{row['document_id']}",
+                profile_version="document_profile.v2",
+                generated_at="2026-01-01T00:00:00Z",
             ),
         )
 
@@ -291,7 +293,6 @@ async def test_document_profile_service_combines_filters_before_paginating(
         offset=0,
         limit=1,
         doc_type="review",
-        has_warnings=True,
         user_id="local-user",
     )
 
@@ -313,7 +314,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(
 
     document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceRepo = SourceRepository()
-    document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
+    document_profile_service.ProfileRepo = ProfileRepository()
     profile_service = document_profile_service
     workspace = await workspace_service.create_workspace(
         "Sparse Profiles"
@@ -392,7 +393,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
 
     document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceRepo = SourceRepository()
-    document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
+    document_profile_service.ProfileRepo = ProfileRepository()
     profile_service = document_profile_service
     workspace = await workspace_service.create_workspace(
         "Partial Profiles"
@@ -550,14 +551,16 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
         await seed_workspace(
             database.AsyncSessionLocal, workspace_id, document_ids=(f"doc_{index}",)
         )
-        await service.DocumentProfileRepo.replace(
+        await service.ProfileRepo.replace(
             workspace_id,
             DocumentProfile(
                 document_id=f"doc_{index}",
-                title=f"Paper {index}",
+                description=f"Paper {index}",
                 doc_type="experimental",
-                confidence=0.9,
-                profile_warnings=(),
+                source_fingerprint="source-test",
+                profile_fingerprint=f"profile-{index}",
+                profile_version="document_profile.v2",
+                generated_at="2026-01-01T00:00:00Z",
             ),
         )
 
@@ -570,7 +573,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
         reject_workspace_read,
     )
     monkeypatch.setattr(
-        service.DocumentProfileRepo, "list_workspace", reject_workspace_read
+        service.ProfileRepo, "list_workspace", reject_workspace_read
     )
     content = await service.get_document_content(
         workspace_id, "doc_7", user_id="local-user"

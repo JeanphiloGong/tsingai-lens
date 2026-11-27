@@ -24,9 +24,9 @@ except ImportError:  # pragma: no cover
 from application.core.document_profiles import service as document_profile_service
 from application.source import document_markdown_service, source_archive_service
 from controllers.core import document_routes as documents_controller
-from domain.core import DocumentProfile
+from document.domain import DocumentProfile
 from document.domain.document import Document
-from repositories.document_profile_repository import DocumentProfileRepository
+from document.repositories.profile_repository import ProfileRepository
 from document.repositories.source_repository import SourceRepository
 
 pytestmark = pytest.mark.anyio
@@ -48,19 +48,16 @@ async def _store_document_profiles(
             workspace_id,
             document_ids=(row["document_id"],),
         )
-        await document_profile_service.DocumentProfileRepo.replace(
+        await document_profile_service.ProfileRepo.replace(
             workspace_id,
             DocumentProfile(
                 document_id=row["document_id"],
-                title=row.get("title"),
+                description=row.get("description") or row.get("title") or "Document profile.",
                 doc_type=row.get("doc_type", "uncertain"),
-                profile_warnings=tuple(row.get("profile_warnings", ())),
-                confidence=row.get("confidence", 0.0),
-                profile_status=row.get("profile_status", "completed"),
-                source_fingerprint=row.get("source_fingerprint"),
-                profile_version=row.get("profile_version"),
-                profile_fingerprint=row.get("profile_fingerprint"),
-                generated_at=row.get("generated_at"),
+                source_fingerprint=row.get("source_fingerprint") or "source-test",
+                profile_version=row.get("profile_version") or "document_profile.v2",
+                profile_fingerprint=row.get("profile_fingerprint") or "profile-test",
+                generated_at=row.get("generated_at") or "2026-01-01T00:00:00Z",
             ),
         )
 
@@ -80,7 +77,7 @@ def document_services(tmp_path, *, postgres_session_factory):
     source_repository = SourceRepository()
     document_profile_service.workspace_service = workspace_service
     document_profile_service.SourceRepo = source_repository
-    document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
+    document_profile_service.ProfileRepo = ProfileRepository()
     document_markdown_service.workspace_service = workspace_service
     document_markdown_service.SourceRepo = source_repository
 

@@ -115,7 +115,7 @@
 			documentTitles =
 				profiles.status === 'fulfilled'
 					? Object.fromEntries(
-							profiles.value.items.map((item) => [item.document_id, item.title || ''])
+							profiles.value.items.map((item) => [item.document_id, item.description || ''])
 						)
 					: {};
 			view = analysis.published_analysis ? 'results' : 'scope';

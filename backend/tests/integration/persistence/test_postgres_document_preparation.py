@@ -5,7 +5,8 @@ from dataclasses import replace
 import pytest
 from application.pipeline import pipeline_run_service
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
-from domain.core import DocumentProfile, PaperResearchMap
+from document.domain import DocumentProfile
+from domain.core import PaperResearchMap
 from infra.persistence import database
 
 
@@ -15,10 +16,10 @@ from infra.persistence.postgres.models.workspace import (
 from repositories.workspace_repository import (
     WorkspaceRepository,
 )
-from repositories.document_profile_repository import (
-    DocumentProfileRepository,
+from document.repositories.profile_repository import (
+    ProfileRepository,
 )
-from repositories.paper_map_repository import PaperMapRepository
+from research.discovery.repositories.paper_map_repository import PaperMapRepository
 from repositories.pipeline_run_repository import (
     PipelineRunRepository,
 )
@@ -36,10 +37,12 @@ pytestmark = pytest.mark.anyio
 def _profile(document_id: str, title: str) -> DocumentProfile:
     return DocumentProfile(
         document_id=document_id,
-        title=title,
+        description=title or "Experimental materials study.",
         doc_type="experimental",
-        profile_warnings=(),
-        confidence=0.9,
+        source_fingerprint="source-test",
+        profile_fingerprint="profile-test",
+        profile_version="document_profile.v2",
+        generated_at="2026-01-01T00:00:00Z",
     )
 
 
@@ -62,7 +65,7 @@ def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
 async def test_profiles_and_paper_maps_are_current_per_document(
     source_repository,
 ) -> None:
-    profiles = DocumentProfileRepository()
+    profiles = ProfileRepository()
     paper_maps = PaperMapRepository()
     first_profile = _profile("doc_a", "Paper A")
     second_profile = _profile("doc_b", "Paper B")
@@ -105,7 +108,7 @@ async def test_profiles_and_paper_maps_are_current_per_document(
 async def test_profile_replacement_does_not_relabel_current_source(
     source_repository,
 ) -> None:
-    profiles = DocumentProfileRepository()
+    profiles = ProfileRepository()
     source = _source("doc_a", title="Current source")
     await seed_workspace(
         database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,)
@@ -135,7 +138,7 @@ async def test_profile_replacement_does_not_relabel_current_source(
 
 
 async def test_profile_only_preparation_is_not_a_source(source_repository) -> None:
-    profiles = DocumentProfileRepository()
+    profiles = ProfileRepository()
     await profiles.replace(COLLECTION_ID, _profile("doc_a", "Imported profile"))
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") is None
     assert await source_repository.read_workspace_documents(COLLECTION_ID) == ()

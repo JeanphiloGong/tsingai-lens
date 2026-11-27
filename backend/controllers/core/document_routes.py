@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from utils.response import ApiResponse, make_api_response
 
 DocumentType = Literal["experimental", "review", "mixed", "uncertain"]
-ProfileStatus = Literal["completed", "extraction_failed"]
 
 
 class DocumentProfileSummaryResponse(BaseModel):
@@ -29,11 +28,13 @@ class DocumentProfileItemResponse(BaseModel):
     """Single document profile item."""
 
     document_id: str
-    title: str | None = None
     doc_type: DocumentType
-    profile_status: ProfileStatus = "completed"
-    profile_warnings: list[str] = Field(default_factory=list)
-    confidence: float
+    description: str
+    source_fingerprint: str
+    profile_fingerprint: str
+    profile_version: str
+    generated_at: str
+
 
 
 class DocumentProfileListResponse(BaseModel):
@@ -116,17 +117,14 @@ async def list_workspace_document_profiles(
         str,
         Query(
             max_length=200,
-            description="Case-insensitive profile-title search",
+            description="Case-insensitive description search",
         ),
     ] = "",
     doc_type: Annotated[
         DocumentType | None,
         Query(description="Optional document-role classification filter"),
     ] = None,
-    has_warnings: Annotated[
-        bool | None,
-        Query(description="Optional profile-warning presence filter"),
-    ] = None,
+
 ) -> Response:
     payload = await document_profile_service.list_document_profiles(
         workspace_id,
@@ -134,7 +132,6 @@ async def list_workspace_document_profiles(
         limit=limit,
         query=query,
         doc_type=doc_type,
-        has_warnings=has_warnings,
         user_id=user_id,
     )
     return make_api_response(data=DocumentProfileListResponse(**payload))

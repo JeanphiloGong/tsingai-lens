@@ -196,12 +196,12 @@ async def test_source_existence_does_not_load_artifact_json(
 
 
 async def test_profile_only_row_is_not_a_prepared_source(source_repository):
-    from domain.core import DocumentProfile
-    from repositories.document_profile_repository import (
-        DocumentProfileRepository,
+    from document.domain import DocumentProfile
+    from document.repositories.profile_repository import (
+        ProfileRepository,
     )
 
-    profiles = DocumentProfileRepository()
+    profiles = ProfileRepository()
     await profiles.replace(
         COLLECTION_ID,
         DocumentProfile(

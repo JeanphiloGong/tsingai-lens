@@ -86,7 +86,7 @@
 	}
 
 	function displayTitle(profile: DocumentProfile, index: number) {
-		return profile.title?.trim() || $t('research.documents.untitledPaper', { number: index + 1 });
+		return profile.description?.trim() || $t('research.documents.untitledPaper', { number: index + 1 });
 	}
 
 	function documentTypeLabel(profile: DocumentProfile) {
@@ -200,20 +200,10 @@
 					</div>
 
 					<div class="paper-row__status">
-						<span
-							>{$t(
-								profile.profile_status === 'completed'
-									? 'research.documents.parsingComplete'
-									: 'research.documents.parsingFailed'
-							)}</span
-						>
+						<span>{$t('research.documents.parsingComplete')}</span>
 					</div>
 					<div class="paper-row__pages">
-						<span
-							>{profile.page_count
-								? $t('research.documents.pageCount', { count: profile.page_count })
-								: '-'}</span
-						>
+						<span>-</span>
 					</div>
 				</a>
 			{/each}

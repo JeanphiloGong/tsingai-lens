@@ -81,7 +81,7 @@
 	} from '@lucide/svelte';
 
 	export let embedded = false;
-	export let selectedPapers: Pick<DocumentProfile, 'document_id' | 'title'>[] = [];
+	export let selectedPapers: Pick<DocumentProfile, 'document_id' | 'description'>[] = [];
 	export let onRemovePaper: (id: string) => void = () => {};
 	export let sourceContextVersion = 0;
 	export let onSourcesChanged: () => void = () => {};
@@ -1286,7 +1286,7 @@
 			return;
 		const isRevision = revisionSources !== undefined;
 		const paperLinks = (isRevision ? [] : selectedPapers).map((paper) => {
-			const title = (paper.title || $t('workspace.unknownName')).replace(/[\\[\]`*_\n\r]/g, ' ');
+			const title = (paper.description || $t('workspace.unknownName')).replace(/[\\[\]`*_\n\r]/g, ' ');
 			return `- [${title}](/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(paper.document_id)})`;
 		});
 		let text = paperLinks.length
@@ -1968,10 +1968,10 @@
 											id: workspaceId,
 											document_id: paper.document_id
 										})}
-										title={paper.title ?? ''}>{paper.title}</a
+										title={paper.description ?? ''}>{paper.description}</a
 									>
 									<IconButton
-										label={$t('researchAgent.paperScope.remove', { title: paper.title ?? '' })}
+										label={$t('researchAgent.paperScope.remove', { title: paper.description ?? '' })}
 										disabled={sending || deciding}
 										onClick={() => onRemovePaper(paper.document_id)}><X size={14} /></IconButton
 									>

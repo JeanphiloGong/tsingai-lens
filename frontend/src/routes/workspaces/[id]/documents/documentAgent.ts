@@ -5,7 +5,7 @@ export const DOCUMENT_AGENT = Symbol('document-agent');
 
 export type DocumentAgentState = {
 	open: boolean;
-	papers: Pick<DocumentProfile, 'document_id' | 'title'>[];
+	papers: Pick<DocumentProfile, 'document_id' | 'description'>[];
 	sourceVersion: number;
 	busy: boolean;
 };

@@ -33,8 +33,8 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisArtifacts,
     _used_draft_source_labels,
 )
+from document.domain import DocumentProfile
 from domain.core import (
-    DocumentProfile,
     Finding,
     ObjectiveEvidence,
     PaperContribution,
@@ -732,10 +732,12 @@ class FakeObjectiveInputService:
             return (
                 DocumentProfile(
                     document_id="paper-1",
-                    title="Heat treatment paper",
+                    description="Heat treatment paper",
                     doc_type="experimental",
-                    confidence=0.9,
-                    profile_warnings=(),
+                    source_fingerprint="source-test",
+                    profile_fingerprint="profile-test",
+                    profile_version="document_profile.v2",
+                    generated_at="2026-01-01T00:00:00Z",
                 ),
             )
 

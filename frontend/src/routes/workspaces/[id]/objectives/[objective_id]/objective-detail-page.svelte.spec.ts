@@ -289,8 +289,11 @@ function installPublishedResponses(
 						title: 'Annealing response of LPBF 316L',
 						source_filename: 'annealing-316l.pdf',
 						doc_type: 'experimental',
-						profile_status: 'completed',
-						profile_warnings: [],
+						description: 'Paper A',
+						source_fingerprint: 'source-1',
+						profile_fingerprint: 'profile-1',
+						profile_version: 'document_profile.v2',
+						generated_at: '2026-01-01T00:00:00Z',
 						confidence: 0.95
 					}
 				],

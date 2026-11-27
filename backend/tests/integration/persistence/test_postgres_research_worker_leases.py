@@ -11,10 +11,10 @@ from sqlalchemy import update
 from application.pipeline import pipeline_run_service
 from application.source import workspace_service
 from domain.core import PreparedDocumentInput
-from domain.core.document_profile import DocumentProfile
+from document.domain.profile import DocumentProfile
 from infra.persistence.postgres.models.execution import PipelineRunORM
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
-from repositories.document_profile_repository import DocumentProfileRepo
+from document.repositories.profile_repository import ProfileRepo
 from repositories.objective_repository import ObjectiveRepo, AnalysisLeaseLostError
 from repositories.pipeline_run_repository import PipelineRunRepo, PipelineLeaseLostError
 from tests.support.postgres import seed_workspace, seed_objective
@@ -85,16 +85,16 @@ async def test_two_pipeline_workers_claim_once_and_expired_worker_cannot_write(
 async def _queue_analysis(factory):
     await seed_workspace(factory, "worker-papers", document_ids=("paper-a",))
     await seed_objective(factory, "worker-papers", "power-porosity")
-    await DocumentProfileRepo.replace(
+    await ProfileRepo.replace(
         "worker-papers",
         DocumentProfile(
             document_id="paper-a",
-            title="Ti-6Al-4V LPBF",
+            description="Ti-6Al-4V LPBF",
             doc_type="experimental",
-            profile_warnings=(),
-            confidence=0.9,
             source_fingerprint="source-a",
             profile_fingerprint="prepared-a",
+            profile_version="document_profile.v2",
+            generated_at="2026-01-01T00:00:00Z",
         ),
     )
     await workspace_service.update_document_preparation(
@@ -195,15 +195,16 @@ async def test_changed_prepared_input_cannot_publish_analysis(postgres_session_f
     job = await ObjectiveRepo.claim_next_objective_analysis_job(
         worker_id="worker-a", lease_duration=timedelta(seconds=60)
     )
-    await DocumentProfileRepo.replace(
+    await ProfileRepo.replace(
         "worker-papers",
         DocumentProfile(
             document_id="paper-a",
-            title="Changed",
+            description="Changed",
             doc_type="experimental",
-            profile_warnings=(),
-            confidence=0.9,
+            source_fingerprint="source-a",
             profile_fingerprint="prepared-new",
+            profile_version="document_profile.v2",
+            generated_at="2026-01-01T00:00:00Z",
         ),
     )
     with pytest.raises(ValueError, match="input changed"):

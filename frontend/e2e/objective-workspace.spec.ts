@@ -427,12 +427,12 @@ async function mockApis(page: Page) {
 						{
 							document_id: documentId,
 							workspace_id: workspaceId,
-							title: 'LPBF 316L tensile study',
-							source_filename: 'paper-1.pdf',
+							description: 'LPBF 316L tensile study',
 							doc_type: 'experimental',
-							profile_status: 'completed',
-							profile_warnings: [],
-							confidence: 0.95
+							source_fingerprint: 'source-1',
+							profile_fingerprint: 'profile-1',
+							profile_version: 'document_profile.v2',
+							generated_at: '2026-01-01T00:00:00Z'
 						}
 					],
 					total: 1,

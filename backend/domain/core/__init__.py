@@ -1,15 +1,6 @@
 """Core domain models and judgment rules."""
 
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
-from domain.core.document_profile import (
-    PROFILE_EXTRACTION_FAILED_WARNING,
-    PROFILE_STATUS_COMPLETED,
-    PROFILE_STATUS_EXTRACTION_FAILED,
-    DocumentProfile,
-    DocumentProfileSummary,
-    ProfileStatus,
-    summarize_document_profile_workspace,
-)
 from domain.core.finding import (
     FINDING_ASSERTION_STRENGTHS,
     FINDING_ORIGINS,
@@ -86,12 +77,6 @@ from domain.core.scientific_fact import (
 )
 
 __all__ = [
-    "DocumentProfile",
-    "DocumentProfileSummary",
-    "PROFILE_EXTRACTION_FAILED_WARNING",
-    "PROFILE_STATUS_COMPLETED",
-    "PROFILE_STATUS_EXTRACTION_FAILED",
-    "ProfileStatus",
     "EVIDENCE_ORIGINS",
     "EVIDENCE_ATTRIBUTION_SCOPES",
     "EVIDENCE_ROLE_VALUES",
@@ -161,5 +146,4 @@ __all__ = [
     "build_research_objective_id",
     "is_question_shaped_objective",
     "normalize_objective_terms",
-    "summarize_document_profile_workspace",
 ]

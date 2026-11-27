@@ -11,7 +11,7 @@ from openai import LengthFinishReasonError
 from pydantic import BaseModel, ValidationError
 
 from application.core.structured_extraction.json_support import StructuredOutputError
-from application.core.document_profiles.extraction import (
+from document.application.profile_extraction import (
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
     DocumentProfileModelOutput,

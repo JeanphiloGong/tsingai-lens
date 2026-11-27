@@ -7,7 +7,7 @@ from dataclasses import asdict, replace
 from time import perf_counter
 from typing import Any, Callable
 
-from application.core.document_profiles import service as document_profile_service
+from document.application import profile_service as document_profile_service
 from application.core.objectives import (
     objective_analysis_service as experiment_analysis_service,
 )

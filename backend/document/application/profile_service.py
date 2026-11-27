@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileModelOutput, DocumentProfileExtractor
+from document.application.profile_extraction import DOCUMENT_PROFILE_PROMPT_VERSION, DocumentProfileModelOutput, DocumentProfileExtractor
 from application.source import workspace_service
 from document.domain.profile import (
     DocumentProfile,

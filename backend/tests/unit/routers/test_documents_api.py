@@ -21,7 +21,7 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.core.document_profiles import service as document_profile_service
+from document.application import profile_service as document_profile_service
 from application.source import document_markdown_service, source_archive_service
 from controllers.core import document_routes as documents_controller
 from document.domain import DocumentProfile

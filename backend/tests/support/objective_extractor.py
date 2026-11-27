@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.core.document_profiles.extraction import DocumentProfileModelOutput
+from document.application.profile_extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,

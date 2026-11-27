@@ -11,16 +11,16 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, TypedDict
 
-from application.core.document_profiles import service as document_profile_service
-from application.core.document_profiles.service import DocumentProfilesNotReadyError
-from application.core.objectives import paper_research_map_service
+from document.application import profile_service as document_profile_service
+from document.application.profile_service import DocumentProfilesNotReadyError
+from research.discovery.application import paper_map_service as paper_research_map_service
 from application.core.objectives.discovery.paper_understanding.workflow import (
     PAPER_RESEARCH_MAP_PROMPT_VERSION,
     PaperResearchMapExtractor,
 )
 from application.source import workspace_service
 from domain.core import PaperResearchMap, PreparedDocumentInput
-from domain.core.document_profile import DocumentProfile
+from document.domain.profile import DocumentProfile
 from document.domain.source import (
     SourceBlock,
     SourceDocument,
@@ -82,7 +82,7 @@ class ResearchObjectivesNotReadyError(ResourceConflictException):
         )
 
 
-from repositories.paper_map_repository import PaperMapRepo
+from research.discovery.repositories.paper_map_repository import PaperMapRepo
 from document.repositories.source_repository import SourceRepo
 
 async def resolve_prepared_document_inputs(

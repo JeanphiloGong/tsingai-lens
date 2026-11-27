@@ -123,7 +123,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
     *,
     postgres_session_factory,
 ) -> None:
-    from application.core.document_profiles import service as document_profile_service
+    from document.application import profile_service as document_profile_service
     from application.core.objectives import analysis_service, objective_analysis_service
     from application.goal import brief_service
     from application.pipeline import pipeline_run_service

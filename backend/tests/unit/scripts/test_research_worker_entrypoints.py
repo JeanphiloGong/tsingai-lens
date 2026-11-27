@@ -76,7 +76,7 @@ async def test_worker_reclaims_its_operation_and_heartbeat(
 async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
     """Client shutdown must wait until a running model thread returns."""
     import threading
-    from application.core.document_profiles import service
+    from document.application import profile_service
     from document.domain.profile import DocumentProfile
     from document.domain.source import SourceDocument
 

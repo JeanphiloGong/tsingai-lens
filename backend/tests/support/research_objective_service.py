@@ -7,7 +7,7 @@ from hashlib import sha256
 from types import ModuleType
 from typing import Any
 
-from application.core.document_profiles import service as document_profile_module
+from document.application import profile_service as document_profile_module
 from application.core.objectives import (
     objective_analysis_service as experiment_analysis_service,
 )

@@ -1,5 +1,5 @@
 import pytest
-from application.core.document_profiles.extraction import (
+from document.application.profile_extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
 )
 from application.source import (

@@ -175,7 +175,7 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
     ],
 )
 def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
-    from application.core.document_profiles import service as document_profile_service
+    from document.application import profile_service as document_profile_service
 
     bundle = SourceArtifactBundle(
         documents=pd.DataFrame([{"id": "doc_1"}]),

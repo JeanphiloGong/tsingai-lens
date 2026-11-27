@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from agent.application import model as chat_model
-from application.core.document_profiles.extraction import DocumentProfileExtractor
+from document.application.profile_extraction import DocumentProfileExtractor
 from application.core.objectives import finding_summary
 from application.core.objectives.analysis.source_extraction import (
     DirectEvidenceExtractionModelOutput,
@@ -43,7 +43,7 @@ from application.core.paper_facts.extraction import (
 
 def test_model_clients_are_owned_by_their_domains() -> None:
     assert DocumentProfileExtractor.__module__ == (
-        "application.core.document_profiles.extraction"
+        "document.application.profile_extraction"
     )
     assert PaperFactsExtractor.__module__ == "application.core.paper_facts.extraction"
     assert StructuredResponseClient.__module__ == (

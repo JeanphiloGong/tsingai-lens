@@ -4,7 +4,7 @@ import mimetypes
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from application.core.document_profiles import service as document_profile_service
+from document.application import profile_service as document_profile_service
 from application.source import document_markdown_service, source_archive_service
 from controllers.dependencies.auth import get_current_user_id
 from fastapi import APIRouter, Depends, Query

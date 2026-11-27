@@ -118,10 +118,10 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "document.repositories.source_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "repositories.paper_map_repository.AsyncSessionLocal", factory
+            "research.discovery.repositories.paper_map_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "repositories.document_profile_repository.AsyncSessionLocal", factory
+            "document.repositories.profile_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
             "repositories.workspace_repository.AsyncSessionLocal", factory
@@ -134,7 +134,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _patch_domain_model_extractors(monkeypatch):
-    from application.core.document_profiles import extraction
+    from document.application import profile_extraction as extraction
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
@@ -186,7 +186,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     from application.source import agent_source_service as document_sources
     from agent.capabilities import research_scope
     import application.core.objectives.analysis.analysis_record_source as _test_analysis_record_source
-    import application.core.document_profiles.service as _test_document_profile_service
+    import document.application.profile_service as _test_document_profile_service
     import application.core.objectives.analysis.experiment_analysis_writer as _test_experiment_analysis_writer
     import application.core.objectives.analysis.experiment_projection as _test_experiment_projection
     import application.core.objectives.analysis.experiment_finding_synthesis as _test_experiment_finding_synthesis_service
@@ -281,7 +281,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "workspace_service",
                 "ObjectiveRepo",
-                "DocumentProfileRepo",
+                "ProfileRepo",
                 "PaperMapRepo",
                 "SourceRepo",
             ],
@@ -291,7 +291,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_document_profile_service,
             [
-                "DocumentProfileRepo",
+                "ProfileRepo",
                 "SourceRepo",
                 "workspace_service",
             ],
@@ -404,7 +404,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (
             _test_document_preparation_service,
             [
-                "DocumentProfileRepo",
+                "ProfileRepo",
                 "SourceRepo",
                 "workspace_service",
                 "document_profile_service",

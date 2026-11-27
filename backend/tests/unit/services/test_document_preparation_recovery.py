@@ -11,7 +11,7 @@ from application.source import (
     workspace_service,
     document_preparation_service as preparation,
 )
-from application.core.document_profiles import service as profiles
+from document.application import profile_service as profiles
 from document.domain.profile import DocumentProfile
 from document.domain.source import SourceDocument
 from repositories.pipeline_run_repository import PipelineRunRepo

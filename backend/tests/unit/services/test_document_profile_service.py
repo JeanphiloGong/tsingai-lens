@@ -5,13 +5,13 @@ from types import ModuleType
 
 import pandas as pd
 import pytest
-from application.core.document_profiles import extraction as profile_extraction
-from application.core.document_profiles import service as document_profile_service
-from application.core.document_profiles.extraction import (
+from document.application import profile_extraction as profile_extraction
+from document.application import profile_service as document_profile_service
+from document.application.profile_extraction import (
     DocumentProfileExtractionError,
     DocumentProfileModelOutput,
 )
-from application.core.document_profiles.service import DocumentProfilesNotReadyError
+from document.application.profile_service import DocumentProfilesNotReadyError
 from document.domain.profile import DocumentProfile
 from document.domain.source import SourceDocument
 from infra.persistence import database
@@ -595,7 +595,7 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
     postgres_session_factory,
     workspace_files,
 ):
-    from application.core.document_profiles.service import (
+    from document.application.profile_service import (
         DocumentContentNotReadyError,
         DocumentNotFoundError,
     )

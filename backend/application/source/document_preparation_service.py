@@ -15,8 +15,8 @@ from typing import Awaitable, Callable
 import httpx
 import pandas as pd
 from openai import OpenAI
-from application.core.document_profiles import service as document_profile_service
-from application.core.document_profiles.extraction import (
+from document.application import profile_service as document_profile_service
+from document.application.profile_extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
     DocumentProfileExtractor,
 )

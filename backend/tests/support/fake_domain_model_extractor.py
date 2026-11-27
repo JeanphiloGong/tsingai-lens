@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 from types import SimpleNamespace
 
-from application.core.document_profiles.extraction import DocumentProfileModelOutput
+from document.application.profile_extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.source_extraction import (
 	DirectEvidenceExtractionsModelOutput,
 	EvidenceExtractionModelOutput,

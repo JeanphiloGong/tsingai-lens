@@ -10,7 +10,7 @@ from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 
-from application.core.document_profiles.extraction import DocumentProfileModelOutput
+from document.application.profile_extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.paper_experiment_extraction import (
     PaperExperimentDraftEnvelope,
 )

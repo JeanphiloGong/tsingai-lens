@@ -4,8 +4,8 @@ from infra.persistence.file import object_store as store_module
 
 
 import pytest
-from application.core.document_profiles import service as document_profile_service
-from application.core.document_profiles.extraction import (
+from document.application import profile_service as document_profile_service
+from document.application.profile_extraction import (
     DocumentProfileExtractionError,
     DocumentProfileModelOutput,
 )

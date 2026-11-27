@@ -83,7 +83,7 @@ class ResearchObjectivesNotReadyError(ResourceConflictException):
 
 
 from repositories.paper_map_repository import PaperMapRepo
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 async def resolve_prepared_document_inputs(
     workspace_id: str,
@@ -153,7 +153,7 @@ async def load_source_inputs(
         raise ResearchObjectivesNotReadyError(workspace_id) from exc
 
     document_ids = tuple(document.document_id for document in documents)
-    references = await SourceArtifactRepo.read_workspace_references(
+    references = await SourceRepo.read_workspace_references(
         workspace_id,
         document_ids,
     )
@@ -294,7 +294,7 @@ async def _load_source_documents(
     document_inputs: tuple[PreparedDocumentInput, ...],
 ) -> tuple[SourceDocument, ...]:
     document_ids = tuple(item.document_id for item in document_inputs)
-    documents = await SourceArtifactRepo.read_documents(
+    documents = await SourceRepo.read_documents(
         workspace_id,
         document_ids,
     )

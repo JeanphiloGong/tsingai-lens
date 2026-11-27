@@ -99,9 +99,9 @@ class _ResolvedSource:
 class SourceReadingService:
     def __init__(self, repository: DocumentSourceRepository | None = None) -> None:
         if repository is None:
-            from repositories.source_artifact_repository import SourceArtifactRepo
+            from document.repositories.document_repository import DocumentRepo
 
-            repository = SourceArtifactRepo
+            repository = DocumentRepo
         self.repository = repository
 
     async def _read_current(

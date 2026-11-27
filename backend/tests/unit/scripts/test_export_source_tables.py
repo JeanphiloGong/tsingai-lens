@@ -19,7 +19,7 @@ from document.domain.document import Document
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from repositories.workspace_repository import WorkspaceRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
@@ -136,7 +136,7 @@ async def test_existing_source_table_export_keeps_table_rows(
             ),
         ),
     )
-    repository = SourceArtifactRepository()
+    repository = SourceRepository()
     await seed_workspace(postgres_session_factory, "col_demo", document_ids=("paper-1",))
     await repository.replace_document("col_demo", document)
     monkeypatch.setattr(
@@ -146,7 +146,7 @@ async def test_existing_source_table_export_keeps_table_rows(
     )
     monkeypatch.setattr(export_script.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
-        export_script, "SourceArtifactRepository", lambda: repository
+        export_script, "SourceRepository", lambda: repository
     )
 
     frames = await export_script._load_existing_artifacts(

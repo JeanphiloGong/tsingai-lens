@@ -20,7 +20,7 @@ from application.source import reference_workflow_service
 from controllers.source import reference_routes as references_controller
 from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -42,8 +42,8 @@ async def _store_source_documents(repository, workspace_id, documents) -> None:
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory):
-    repository = SourceArtifactRepository()
-    reference_workflow_service.SourceArtifactRepo = repository
+    repository = SourceRepository()
+    reference_workflow_service.SourceRepo = repository
     workflow_service = reference_workflow_service
     reference_workflow_service.workspace_service = workspace_service
     references_controller.reference_workflow_service = workflow_service

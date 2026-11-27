@@ -253,8 +253,8 @@ async def main_async() -> int:
         build_database_engine,
         AsyncSessionLocal,
     )
-    from repositories.source_artifact_repository import (  # noqa: PLC0415
-        SourceArtifactRepository,
+    from document.repositories.source_repository import (  # noqa: PLC0415
+        SourceRepository,
     )
     from exceptions import ProjectException
     from infra.llm.model_credentials import provider_options
@@ -264,7 +264,7 @@ async def main_async() -> int:
     engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=engine)
     try:
-        repository = SourceArtifactRepository()
+        repository = SourceRepository()
         text_units = await repository.list_text_units(args.workspace_id)
         blocks = await repository.list_blocks(args.workspace_id)
         connection = await ModelConnectionRepo.read_assigned_connection("embedding")

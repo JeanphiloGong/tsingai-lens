@@ -50,7 +50,7 @@ from repositories.pipeline_run_repository import (
     PipelineRunJobSnapshot,
     PipelineRunRepo,
 )
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,7 @@ async def _can_reuse_document_preparation(
     if profile is None or profile.profile_status != PROFILE_STATUS_COMPLETED:
         return False
     return (
-        await SourceArtifactRepo.read_document(
+        await SourceRepo.read_document(
             workspace_id,
             document.document_id,
         )
@@ -300,7 +300,7 @@ async def execute_document_preparation_job(
                 current_node=stage,
                 progress_percent=5,
             )
-        source_document = await SourceArtifactRepo.read_document(
+        source_document = await SourceRepo.read_document(
             workspace_id, document_id
         )
         if (
@@ -332,7 +332,7 @@ async def execute_document_preparation_job(
             )
             async with AsyncSessionLocal() as db, db.begin():
                 await _check_preparation_input(db, job)
-                await SourceArtifactRepo.replace_document(
+                await SourceRepo.replace_document(
                     workspace_id, source_document, db=db
                 )
                 await workspace_service.update_document_preparation(
@@ -351,7 +351,7 @@ async def execute_document_preparation_job(
                 )
                 async with AsyncSessionLocal() as db, db.begin():
                     await _check_preparation_input(db, job)
-                    await SourceArtifactRepo.replace_document_references(
+                    await SourceRepo.replace_document_references(
                         document_id, references, db=db
                     )
             except PipelineLeaseLostError:

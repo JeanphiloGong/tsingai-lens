@@ -8,7 +8,7 @@ from application.source import reference_workflow_service
 from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence import database
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
@@ -32,7 +32,7 @@ async def _store_source_documents(repository, workspace_id, documents) -> None:
 async def test_source_reference_workflow_builds_and_persists_refs(
     tmp_path, *, postgres_session_factory
 ):
-    repository = SourceArtifactRepository()
+    repository = SourceRepository()
     artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
@@ -71,7 +71,7 @@ async def test_source_reference_workflow_builds_and_persists_refs(
         "doc-1",
         source_reference_extraction_service.extract_source_references(artifacts),
     )
-    reference_workflow_service.SourceArtifactRepo = repository
+    reference_workflow_service.SourceRepo = repository
     service = reference_workflow_service
 
     result = await service.get_workspace_references("col_refs", user_id="user-1")
@@ -92,8 +92,8 @@ async def test_source_reference_workflow_builds_and_persists_refs(
 async def test_source_reference_workflow_requires_source_artifacts(
     tmp_path, *, postgres_session_factory
 ):
-    repository = SourceArtifactRepository()
-    reference_workflow_service.SourceArtifactRepo = repository
+    repository = SourceRepository()
+    reference_workflow_service.SourceRepo = repository
     service = reference_workflow_service
 
     await seed_workspace(database.AsyncSessionLocal, "empty_workspace")

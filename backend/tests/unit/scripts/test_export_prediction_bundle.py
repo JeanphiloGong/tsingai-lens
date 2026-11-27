@@ -18,7 +18,7 @@ from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.research_objective import ObjectiveEvidence
 from domain.core.scientific_fact import ScientificContext
 from repositories.document_profile_repository import DocumentProfileRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 
 @pytest.fixture
@@ -126,7 +126,7 @@ class _PublishedObjectiveRepository:
 @pytest.mark.anyio
 async def test_export_prediction_bundle_uses_current_published_results(tmp_path, monkeypatch, *, postgres_session_factory):
     exporter = _load_exporter_module()
-    source_repository = SourceArtifactRepository()
+    source_repository = SourceRepository()
     source_document = build_source_documents(
         documents=[
             {
@@ -161,7 +161,7 @@ async def test_export_prediction_bundle_uses_current_published_results(tmp_path,
     monkeypatch.setattr(exporter.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         exporter,
-        "SourceArtifactRepository",
+        "SourceRepository",
         lambda: source_repository,
     )
     monkeypatch.setattr(
@@ -346,8 +346,8 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_pat
     monkeypatch.setattr(exporter.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         exporter,
-        "SourceArtifactRepository",
-        lambda: SourceArtifactRepository(),
+        "SourceRepository",
+        lambda: SourceRepository(),
     )
     monkeypatch.setattr(
         exporter,

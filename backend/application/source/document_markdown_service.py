@@ -100,7 +100,7 @@ class SourceFigureImageUnavailableError(ResourceConflictException):
         )
 
 
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 
 async def get_document_markdown(
@@ -115,7 +115,7 @@ async def get_document_markdown(
     )
     documents = await _load_source_documents(workspace_id)
     document = _find_document(documents, workspace_id, document_id)
-    document_tree = await SourceArtifactRepo.read_document_tree(
+    document_tree = await SourceRepo.read_document_tree(
         workspace_id,
         document_id,
     )
@@ -167,7 +167,7 @@ async def resolve_figure_image_file(
     figure = next(
         (
             item
-            for item in await SourceArtifactRepo.list_figures(
+            for item in await SourceRepo.list_figures(
                 workspace_id,
                 document_key,
             )
@@ -227,7 +227,7 @@ def _figure_image_payload(
 
 
 async def _load_source_documents(workspace_id: str) -> tuple[SourceDocument, ...]:
-    documents = await SourceArtifactRepo.read_workspace_documents(workspace_id)
+    documents = await SourceRepo.read_workspace_documents(workspace_id)
     if not documents:
         raise DocumentMarkdownNotReadyError(workspace_id)
     return documents

@@ -17,7 +17,7 @@ async def test_workspace_search_returns_ranked_papers_and_matching_window(monkey
         SourceBlock('result','in718','paragraph','x '*474+'elongation measured at 17%.',1),))
     monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
     repo=SimpleNamespace(read_workspace_documents=AsyncMock(return_value=(other,target)),read_documents=AsyncMock(return_value=(target,)))
-    monkeypatch.setattr(document_sources,'SourceArtifactRepo',repo)
+    monkeypatch.setattr(document_sources,'SourceRepo',repo)
     cap=SearchSourcesService();context=ToolExecutionContext(task_id='chat', user_id='user', workspace_id='col', tool_call_id='search', operation_id="operation")
     result=await cap.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments=SearchSourcesToolRequest(query='IN718 elongation',match_mode='all'))
     assert result.status=='succeeded'
@@ -42,7 +42,7 @@ async def test_search_surfaces_other_papers_before_repeating_one_papers_passages
                                  "IN718 elongation reported.", j) for j in range(20)),
     ) for i in range(3))
     monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
-    monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
+    monkeypatch.setattr(document_sources, "SourceRepo", SimpleNamespace(
         read_workspace_documents=AsyncMock(return_value=documents),
     ))
     capability = SearchSourcesService()
@@ -67,7 +67,7 @@ async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeyp
     table=SourceTable('table','paper',0,'Reported elongation; note: as-built',None,3,'Results',header,(header,*rows))
     doc=SourceDocument('paper',0,'IN718','',tables=(table,))
     monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
-    monkeypatch.setattr(document_sources,'SourceArtifactRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
+    monkeypatch.setattr(document_sources,'SourceRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
     cap=InspectTableService();arguments={'document_id':'paper','table_ref':'table'};seen=[]
     for _ in range(40):
         result=await cap.execute(

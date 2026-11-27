@@ -24,7 +24,7 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
     )
     doc = SourceDocument('paper', 0, 'IN718', '', blocks=blocks)
     repo = SimpleNamespace(read_document=AsyncMock(return_value=doc))
-    monkeypatch.setattr(document_sources, 'SourceArtifactRepo', repo)
+    monkeypatch.setattr(document_sources, 'SourceRepo', repo)
     monkeypatch.setattr(document_sources.workspace_service, 'get_workspace_for_user', AsyncMock())
     cap = InspectDocumentSourcesService()
     context = ToolExecutionContext(task_id='chat', user_id='user', workspace_id='col', tool_call_id='read', operation_id="operation", max_result_tokens=2000)
@@ -48,7 +48,7 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
 @pytest.mark.anyio
 async def test_full_document_read_exposes_exact_pending_arguments(monkeypatch):
     doc=SourceDocument('paper',0,'IN718','',blocks=tuple(SourceBlock(f'b{i}','paper','paragraph','Measured condition '*20,i) for i in range(10)))
-    monkeypatch.setattr(document_sources,'SourceArtifactRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
+    monkeypatch.setattr(document_sources,'SourceRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
     monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
     r=await InspectDocumentSourcesService().execute(
         user_id='user', workspace_id='col',
@@ -68,7 +68,7 @@ async def test_exact_read_budget_includes_version_and_continuation_arguments(mon
     document = SourceDocument("paper", 0, "IN718", "", blocks=(
         SourceBlock("results", "paper", "paragraph", text, 0),
     ))
-    monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
+    monkeypatch.setattr(document_sources, "SourceRepo", SimpleNamespace(
         read_document=AsyncMock(return_value=document),
     ))
     monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())

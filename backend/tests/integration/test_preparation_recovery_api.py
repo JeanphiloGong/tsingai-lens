@@ -146,7 +146,7 @@ def test_upload_classification_retry_content_and_research_readiness(
         document_id,
     )
     stored_source = app_client.portal.call(
-        document_profile_service.SourceArtifactRepo.read_document,
+        document_profile_service.SourceRepo.read_document,
         workspace_id,
         document_id,
     )

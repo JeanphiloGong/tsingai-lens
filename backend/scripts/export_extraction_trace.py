@@ -38,8 +38,8 @@ from repositories.objective_repository import (  # noqa: E402
 )
 
 from repositories.paper_map_repository import PaperMapRepository
-from repositories.source_artifact_repository import (  # noqa: E402
-    SourceArtifactRepository,
+from document.repositories.source_repository import (  # noqa: E402
+    SourceRepository,
 )
 from application.core.objectives.analysis.analysis_record_source import is_experiment_backed_analysis
 from application.core.objectives.analysis import experiment_projection
@@ -152,7 +152,7 @@ async def _load_artifacts(workspace_id: str) -> dict[str, pd.DataFrame]:
     engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await SourceArtifactRepository().read_workspace_documents(workspace_id)
+        documents = await SourceRepository().read_workspace_documents(workspace_id)
         profiles = await DocumentProfileRepository().list_workspace(
             workspace_id
         )

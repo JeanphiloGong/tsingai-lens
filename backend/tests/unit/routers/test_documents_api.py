@@ -27,7 +27,7 @@ from controllers.core import document_routes as documents_controller
 from domain.core import DocumentProfile
 from document.domain.document import Document
 from repositories.document_profile_repository import DocumentProfileRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -77,12 +77,12 @@ async def _store_source_documents(repository, workspace_id, documents) -> None:
 
 @pytest.fixture()
 def document_services(tmp_path, *, postgres_session_factory):
-    source_repository = SourceArtifactRepository()
+    source_repository = SourceRepository()
     document_profile_service.workspace_service = workspace_service
-    document_profile_service.SourceArtifactRepo = source_repository
+    document_profile_service.SourceRepo = source_repository
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     document_markdown_service.workspace_service = workspace_service
-    document_markdown_service.SourceArtifactRepo = source_repository
+    document_markdown_service.SourceRepo = source_repository
 
     return (
         workspace_service,
@@ -351,7 +351,7 @@ async def test_document_content_route_uses_stable_block_locator(
     )
     workspace_id = record.workspace.workspace_id
     await _store_source_documents(
-        document_profile_service.SourceArtifactRepo,
+        document_profile_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -436,7 +436,7 @@ async def test_document_markdown_route_returns_markdown_projection(
     )
     workspace_id = record.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -721,7 +721,7 @@ async def test_document_figure_image_route_streams_extracted_asset(
         object_store=object_store,
     )
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
@@ -770,7 +770,7 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
     )
     workspace_id = record.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -824,7 +824,7 @@ async def test_document_figure_image_route_rejects_path_outside_workspace(
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
@@ -879,7 +879,7 @@ async def test_document_figure_image_route_rejects_another_workspaces_object_key
         object_store=object_store,
     )
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         first.workspace.workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
@@ -942,7 +942,7 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
     else:
         (workspace_files.root_dir / storage_key).write_bytes(b"corrupt")
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],

@@ -12,7 +12,7 @@ from application.source.document_markdown_service import (
 )
 from infra.persistence import database
 from pypdf import PdfWriter
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 from tests.support.postgres import seed_workspace
 from tests.support.source_artifacts import build_source_documents
 
@@ -25,9 +25,9 @@ def anyio_backend() -> str:
 
 
 def _build_markdown_service(tmp_path, *, postgres_session_factory):
-    source_repository = SourceArtifactRepository()
+    source_repository = SourceRepository()
     document_markdown_service.workspace_service = workspace_service
-    document_markdown_service.SourceArtifactRepo = source_repository
+    document_markdown_service.SourceRepo = source_repository
     return workspace_service, document_markdown_service
 
 
@@ -54,7 +54,7 @@ async def test_document_markdown_service_projects_source_blocks_and_tables(
     workspace = await workspace_service.create_workspace("Markdown Workspace")
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -236,7 +236,7 @@ async def test_document_markdown_preserves_headerless_table_measurements(
     workspace = await workspace_service.create_workspace("Headerless measurements")
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Densification measurements"}],
@@ -293,7 +293,7 @@ async def test_document_markdown_service_projects_figure_images(
     )
     scratch_asset.unlink()
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -353,7 +353,7 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_file_is
     workspace_id = workspace.workspace.workspace_id
     missing_sha256 = sha256(b"missing").hexdigest()
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
@@ -399,7 +399,7 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_is_miss
     workspace = await workspace_service.create_workspace("Figure Caption Workspace")
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
@@ -441,7 +441,7 @@ async def test_document_markdown_service_falls_back_to_document_text(
     )
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -477,7 +477,7 @@ async def test_document_markdown_service_filters_pdf_glyph_garbage(
     )
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -552,7 +552,7 @@ async def test_document_markdown_service_keeps_readable_block_with_replacement_g
     workspace = await workspace_service.create_workspace("Readable Glyph Workspace")
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -629,7 +629,7 @@ async def test_document_markdown_service_uses_filename_for_display(
         user_id="local-user",
     )
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[
@@ -699,7 +699,7 @@ async def test_document_markdown_service_reports_missing_document(
     workspace = await workspace_service.create_workspace("Markdown Missing Document")
     workspace_id = workspace.workspace.workspace_id
     await _store_source_documents(
-        markdown_service.SourceArtifactRepo,
+        markdown_service.SourceRepo,
         workspace_id,
         build_source_documents(
             documents=[{"id": "paper-2", "title": "Other Paper", "text": "Text"}]

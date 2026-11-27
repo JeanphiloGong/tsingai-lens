@@ -39,8 +39,8 @@ from infra.source.parsers.docling_pdf import (
     build_pdf_converter,
 )
 from repositories.workspace_repository import WorkspaceRepository
-from repositories.source_artifact_repository import (
-    SourceArtifactRepository,
+from document.repositories.source_repository import (
+    SourceRepository,
 )
 from infra.source.artifact_bundle import (
     source_document_payload,
@@ -164,7 +164,7 @@ async def _load_existing_artifacts(
     engine = build_database_engine(DatabaseSettings())
     AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await SourceArtifactRepository().read_workspace_documents(workspace_id)
+        documents = await SourceRepository().read_workspace_documents(workspace_id)
     finally:
         await engine.dispose()
     if not documents:

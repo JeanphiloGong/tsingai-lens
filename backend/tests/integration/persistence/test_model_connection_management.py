@@ -24,7 +24,7 @@ from main import create_app
 from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.pipeline_run_repository import PipelineRunRepo
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 from scripts.benchmarks import source_text_unit_retrieval as benchmark
 from tests.support.postgres import seed_workspace
 
@@ -237,7 +237,7 @@ async def test_embedding_assignment_drives_benchmark_without_entering_chat_catal
     assert completion.model == "research"
 
     await seed_workspace(factory, "benchmark", document_ids=("paper",))
-    await SourceArtifactRepo.replace_document("benchmark", SourceDocument(
+    await SourceRepo.replace_document("benchmark", SourceDocument(
         "paper", 0, "LPBF", "Laser power affects porosity.",
         text_units=(SourceTextUnit("tu", 0, "Laser power affects porosity.", 5, ("paper",)),),
         blocks=(SourceBlock("block", "paper", "text", "Laser power affects porosity.", 0, ("tu",), 1),),

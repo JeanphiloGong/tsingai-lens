@@ -119,7 +119,7 @@ def _source_payloads(document: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(payloads)
 
 
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 
 async def prepare_paper_experiment_draft(
@@ -130,7 +130,7 @@ async def prepare_paper_experiment_draft(
     raw_draft: Mapping[str, Any],
 ) -> PreparedPaperExperimentDraft:
     await workspace_service.get_workspace_for_user(workspace_id, user_id)
-    document = await SourceArtifactRepo.read_document(workspace_id, document_id)
+    document = await SourceRepo.read_document(workspace_id, document_id)
     if document is None:
         raise FileNotFoundError(
             f"prepared Source document not found: {workspace_id}/{document_id}"
@@ -201,7 +201,7 @@ async def write_prepared_paper_experiments(
     document_record = await workspace_service.get_document(
         workspace_id, prepared.output.output.document_id
     )
-    document = await SourceArtifactRepo.read_document(
+    document = await SourceRepo.read_document(
         workspace_id, prepared.output.output.document_id
     )
     if document is None:

@@ -99,7 +99,7 @@ class DocumentNotFoundError(ResourceNotFoundException):
 
 
 from repositories.document_profile_repository import DocumentProfileRepo
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 async def list_document_profiles(
     workspace_id: str,
@@ -193,12 +193,12 @@ async def get_document_content(
     workspace = await workspace_service.get_workspace_for_user(
         workspace_id, user_id
     )
-    document = await SourceArtifactRepo.read_document(
+    document = await SourceRepo.read_document(
         workspace_id,
         document_id,
     )
     if document is None:
-        if not await SourceArtifactRepo.has_documents(workspace_id):
+        if not await SourceRepo.has_documents(workspace_id):
             raise DocumentContentNotReadyError(workspace_id)
         raise DocumentNotFoundError(workspace_id, document_id)
 
@@ -262,7 +262,7 @@ async def build_document_profile(
     extractor: DocumentProfileExtractor,
 ) -> DocumentProfile:
     workspace = await workspace_service.get_workspace(workspace_id)
-    document = await SourceArtifactRepo.read_document(
+    document = await SourceRepo.read_document(
         workspace_id,
         document_id,
     )

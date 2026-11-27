@@ -24,7 +24,7 @@ from application.source.agent_source_service import (
 from document.domain.source import SourceBlock, SourceDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.paper_map_repository import PaperMapRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 
 from workspace.domain.workspace import Workspace
@@ -111,7 +111,7 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", map_status="sufficient", studies=(), map_limitations=()),
         ]))
-    workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(text)))
+    workspace_context.SourceRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(text)))
     capability = BrowseWorkspacePapersService()
     result = asyncio.run(capability.execute(
         user_id="user-1", workspace_id="workspace-1",
@@ -125,7 +125,7 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
     assert bool(paper["screening_limitations"]) == (expected_status == "not_found")
     assert paper["support_is_evidence"] is False
     assert any(ref.resource_id == "paper-1" for ref in result.resource_refs)
-    workspace_context.SourceArtifactRepo.read_document.assert_awaited_once_with("workspace-1", "paper-1")
+    workspace_context.SourceRepo.read_document.assert_awaited_once_with("workspace-1", "paper-1")
 
 
 @pytest.mark.parametrize("missing,document_status", [
@@ -149,7 +149,7 @@ def test_optional_screening_information_does_not_require_researcher_intervention
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(
             return_value=[] if missing == "map" else [paper_map]
         ))
-    workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(
+    workspace_context.SourceRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(
             "Preheating temperature was varied." if missing == "abstract" else "Abstract: LPBF preheating study."
         )))
     capability = BrowseWorkspacePapersService()
@@ -183,7 +183,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace(records)))
     workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
-    workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
+    workspace_context.SourceRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
     capability = BrowseWorkspacePapersService()
     context = ToolExecutionContext(operation_id="operation", task_id="s", user_id="u", workspace_id="c", tool_call_id="t")
     result = asyncio.run(capability.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= BrowseWorkspacePapersToolRequest(limit=6)))
@@ -221,7 +221,7 @@ def test_normal_pagination_is_not_a_warning():
     workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)])))
     workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
-    workspace_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
+    workspace_context.SourceRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
     capability = BrowseWorkspacePapersService()
     result = asyncio.run(capability.execute(
         user_id="u", workspace_id="c",
@@ -262,14 +262,14 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         get_workspace_for_user=AsyncMock(return_value=stored_workspace(records)),
         get_document=AsyncMock(return_value=records[1]),
     )
-    sources = SourceArtifactRepository()
+    sources = SourceRepository()
     workspace_context.workspace_service = workspace_service
     workspace_context.DocumentProfileRepo = DocumentProfileRepository()
     workspace_context.PaperMapRepo = PaperMapRepository()
-    workspace_context.SourceArtifactRepo = sources
+    workspace_context.SourceRepo = sources
     browse = BrowseWorkspacePapersService()
     document_sources.workspace_service = workspace_service
-    document_sources.SourceArtifactRepo = sources
+    document_sources.SourceRepo = sources
     inspect = InspectDocumentSourcesService()
     context = ToolExecutionContext(
         operation_id="operation",

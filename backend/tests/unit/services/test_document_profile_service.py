@@ -17,7 +17,7 @@ from document.domain.source import SourceDocument
 from infra.persistence import database
 from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
 from repositories.document_profile_repository import DocumentProfileRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 from tests.support.postgres import seed_workspace
 from tests.support.source_artifacts import build_source_documents
 
@@ -31,7 +31,7 @@ def anyio_backend() -> str:
 
 def _build_profile_service(tmp_path, *, postgres_session_factory):
     document_profile_service.workspace_service = workspace_service
-    document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
+    document_profile_service.SourceRepo = SourceRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     return workspace_service, document_profile_service
 
@@ -54,7 +54,7 @@ async def _write_source_artifacts(
             workspace_id,
             document_ids=(document.document_id,),
         )
-        await profile_service.SourceArtifactRepo.replace_document(
+        await profile_service.SourceRepo.replace_document(
             workspace_id,
             document,
         )
@@ -68,7 +68,7 @@ async def _build_profiles(
 ) -> tuple[DocumentProfile, ...]:
     if extractor is None:
         extractor = profile_extraction.build_default_document_profile_extractor()
-    documents = await profile_service.SourceArtifactRepo.read_workspace_documents(
+    documents = await profile_service.SourceRepo.read_workspace_documents(
         workspace_id
     )
     result = tuple(
@@ -312,7 +312,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(
             raise AssertionError("extract_document_profile should not be called")
 
     document_profile_service.workspace_service = workspace_service
-    document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
+    document_profile_service.SourceRepo = SourceRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     profile_service = document_profile_service
     workspace = await workspace_service.create_workspace(
@@ -391,7 +391,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
             return trace
 
     document_profile_service.workspace_service = workspace_service
-    document_profile_service.SourceArtifactRepo = SourceArtifactRepository()
+    document_profile_service.SourceRepo = SourceRepository()
     document_profile_service.DocumentProfileRepo = DocumentProfileRepository()
     profile_service = document_profile_service
     workspace = await workspace_service.create_workspace(
@@ -538,7 +538,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
         await seed_workspace(
             database.AsyncSessionLocal, workspace_id, document_ids=(f"doc_{index}",)
         )
-        await service.SourceArtifactRepo.replace_document(
+        await service.SourceRepo.replace_document(
             workspace_id,
             SourceDocument(
                 document_id=f"doc_{index}",
@@ -565,7 +565,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(
         pytest.fail("A single-paper read must not load the workspace")
 
     monkeypatch.setattr(
-        service.SourceArtifactRepo,
+        service.SourceRepo,
         "read_workspace_documents",
         reject_workspace_read,
     )
@@ -605,7 +605,7 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
         await seed_workspace(
             database.AsyncSessionLocal, workspace_id, document_ids=("other",)
         )
-        await service.SourceArtifactRepo.replace_document(
+        await service.SourceRepo.replace_document(
             workspace_id,
             SourceDocument(
                 document_id="other", document_order=0, title=None, text="Other paper"
@@ -616,7 +616,7 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
         pytest.fail("Absence checks must not hydrate other papers")
 
     monkeypatch.setattr(
-        service.SourceArtifactRepo,
+        service.SourceRepo,
         "read_workspace_documents",
         reject_workspace_read,
     )
@@ -663,7 +663,7 @@ async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(
     await seed_workspace(
         database.AsyncSessionLocal, workspace_id, document_ids=("doc_a",)
     )
-    await service.SourceArtifactRepo.replace_document(
+    await service.SourceRepo.replace_document(
         workspace_id,
         SourceDocument(
             document_id="doc_a",

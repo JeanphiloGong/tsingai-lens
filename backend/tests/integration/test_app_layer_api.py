@@ -15,7 +15,7 @@ from document.domain.source import SourceDocument
 from fastapi.testclient import TestClient
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.pipeline_run_repository import PipelineRun, PipelineRunRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 API_V1_PREFIX = "/api/v1"
 
@@ -59,7 +59,7 @@ class _ImmediateDocumentPreparationService:
         job = await PipelineRunRepo.claim_next_document_preparation_job(
             worker_id="test-worker", lease_duration=timedelta(seconds=300)
         )
-        await SourceArtifactRepository().replace_document(
+        await SourceRepository().replace_document(
             workspace_id,
             SourceDocument(
                 document_id=document_id,

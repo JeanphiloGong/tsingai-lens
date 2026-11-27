@@ -61,7 +61,7 @@ async def test_default_browse_fits_many_identities_and_keeps_exact_continuation(
                         AsyncMock(return_value=SimpleNamespace(documents=records)))
     monkeypatch.setattr(workspace_context.DocumentProfileRepo, "list_workspace", AsyncMock(return_value=[]))
     monkeypatch.setattr(workspace_context.PaperMapRepo, "list_workspace", AsyncMock(return_value=[]))
-    monkeypatch.setattr(workspace_context.SourceArtifactRepo, "read_document", AsyncMock(
+    monkeypatch.setattr(workspace_context.SourceRepo, "read_document", AsyncMock(
         return_value=SimpleNamespace(blocks=()),
     ))
     capability = BrowseWorkspacePapersService()

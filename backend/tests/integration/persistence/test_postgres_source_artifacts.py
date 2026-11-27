@@ -27,8 +27,8 @@ from repositories.workspace_repository import (
     StoredWorkspace,
     StoredDocument,
 )
-from repositories.source_artifact_repository import (
-    SourceArtifactRepository,
+from document.repositories.source_repository import (
+    SourceRepository,
 )
 
 pytestmark = pytest.mark.anyio
@@ -58,7 +58,7 @@ async def source_repository(postgres_session_factory):
         (_document("doc_a"), _document("doc_b")),
         updated_at=NOW,
     )
-    return SourceArtifactRepository()
+    return SourceRepository()
 
 
 def _document(document_id: str) -> StoredDocument:

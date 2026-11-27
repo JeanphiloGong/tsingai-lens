@@ -7,7 +7,7 @@ from repositories.workspace_repository import StoredDocument
 from repositories.paper_map_repository import PaperMapRepo
 from repositories.objective_repository import ObjectiveRepo
 from repositories.document_profile_repository import DocumentProfileRepo
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 from domain.chat import ToolResultStatus
 
@@ -183,7 +183,7 @@ class BrowseWorkspacePapersService:
             paper_map = maps_by_id.get(document_id)
             source_document = None
             try:
-                source_document = await SourceArtifactRepo.read_document(
+                source_document = await SourceRepo.read_document(
                     workspace_id,
                     document_id,
                 )

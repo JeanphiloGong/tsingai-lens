@@ -19,7 +19,7 @@ from domain.core.research_objective import ObjectiveEvidence
 from domain.core.scientific_fact import ScientificContext
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.paper_map_repository import PaperMapRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 
 @pytest.fixture
@@ -112,7 +112,7 @@ class _ObjectiveRepository:
 @pytest.mark.anyio
 async def test_export_trace_writes_current_source_and_objective_views(tmp_path, monkeypatch, *, postgres_session_factory):
     trace = _load_trace_module()
-    source_repository = SourceArtifactRepository()
+    source_repository = SourceRepository()
     source_document = build_source_documents(
         documents=[
             {
@@ -154,7 +154,7 @@ async def test_export_trace_writes_current_source_and_objective_views(tmp_path, 
     monkeypatch.setattr(trace.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         trace,
-        "SourceArtifactRepository",
+        "SourceRepository",
         lambda: source_repository,
     )
     monkeypatch.setattr(

@@ -245,7 +245,7 @@ async def test_authoring_prepare_rejects_measurement_without_a_reported_result(
         objective_id="objective-1", document_id="paper-1", **draft
     )
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.SourceRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     with pytest.raises(PaperExperimentDraftValidationError, match="has no result"):
@@ -306,7 +306,7 @@ async def test_agent_request_parameters_survive_authoring_prepare() -> None:
         objective_id="objective-1", document_id="paper-1", **draft
     )
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.SourceRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     prepared = await service.prepare_paper_experiment_draft(
@@ -354,7 +354,7 @@ async def test_prepare_reports_comparison_outcome_validation_as_repairable_error
         }
     ]
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.SourceRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
 
@@ -384,7 +384,7 @@ class _WorkspaceService:
 
 async def test_review_digest_is_stable_without_objective_context():
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.SourceRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     first = await service.prepare_paper_experiment_draft(
@@ -434,7 +434,7 @@ class _Writer:
 async def test_review_digest_invalidated_by_content_or_scope_change(change):
     sources = _SourceRepository()
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = sources
+    paper_experiment_authoring_service.SourceRepo = sources
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     arguments = dict(
@@ -461,7 +461,7 @@ async def test_prepare_rejects_foreign_workspace_before_reading_sources():
             raise PermissionError("not the workspace owner")
 
     paper_experiment_authoring_service.workspace_service = DeniedWorkspace()
-    paper_experiment_authoring_service.SourceArtifactRepo = object()
+    paper_experiment_authoring_service.SourceRepo = object()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     with pytest.raises(PermissionError):
@@ -510,7 +510,7 @@ async def test_write_saves_paper_experiment_without_objective_analysis(
         transactions,
     )
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.SourceRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = writer
     service = paper_experiment_authoring_service
     prepared = await service.prepare_paper_experiment_draft(
@@ -536,7 +536,7 @@ async def test_write_saves_paper_experiment_without_objective_analysis(
 @pytest.mark.anyio
 async def test_prepare_reloads_source_context_and_rejects_formal_ids():
     paper_experiment_authoring_service.workspace_service = _WorkspaceService()
-    paper_experiment_authoring_service.SourceArtifactRepo = _SourceRepository()
+    paper_experiment_authoring_service.SourceRepo = _SourceRepository()
     paper_experiment_authoring_service.experiment_analysis_writer = object()
     service = paper_experiment_authoring_service
     prepared = await service.prepare_paper_experiment_draft(

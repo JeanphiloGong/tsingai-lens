@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from application.source import workspace_service
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 import hashlib
 import json
@@ -176,7 +176,7 @@ class ReadSourceService:
             workspace_id,
             user_id,
         )
-        document = await SourceArtifactRepo.read_document(
+        document = await SourceRepo.read_document(
             workspace_id,
             arguments.document_id,
         )
@@ -409,9 +409,9 @@ class SearchSourcesService:
         )
         try:
             documents = (
-                await SourceArtifactRepo.read_workspace_documents(workspace_id)
+                await SourceRepo.read_workspace_documents(workspace_id)
                 if arguments.document_ids is None else
-                await SourceArtifactRepo.read_documents(workspace_id, tuple(arguments.document_ids))
+                await SourceRepo.read_documents(workspace_id, tuple(arguments.document_ids))
             )
         except FileNotFoundError:
             return await _unavailable_document_sources(
@@ -589,7 +589,7 @@ class InspectTableService:
             workspace_id,
             user_id,
         )
-        document = await SourceArtifactRepo.read_document(
+        document = await SourceRepo.read_document(
             workspace_id,
             arguments.document_id,
         )
@@ -820,7 +820,7 @@ class InspectDocumentSourcesService:
             workspace_id,
             user_id,
         )
-        document = await SourceArtifactRepo.read_document(
+        document = await SourceRepo.read_document(
             workspace_id,
             arguments.document_id,
         )

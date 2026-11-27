@@ -56,7 +56,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
     )
     monkeypatch.setattr(
         document_sources,
-        "SourceArtifactRepo",
+        "SourceRepo",
         SimpleNamespace(read_document=AsyncMock(return_value=doc)),
     )
     cap = InspectDocumentSourcesService()
@@ -101,7 +101,7 @@ async def test_permission_failure_stops_before_loading_sources(monkeypatch):
         "get_workspace_for_user",
         AsyncMock(side_effect=PermissionError()),
     )
-    monkeypatch.setattr(document_sources, "SourceArtifactRepo", repo)
+    monkeypatch.setattr(document_sources, "SourceRepo", repo)
     cap = InspectDocumentSourcesService()
     with pytest.raises(PermissionError):
         await cap.execute(
@@ -138,7 +138,7 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
     )
     monkeypatch.setattr(
         document_sources,
-        "SourceArtifactRepo",
+        "SourceRepo",
         SimpleNamespace(read_document=AsyncMock(return_value=document)),
     )
     capability = InspectDocumentSourcesService()
@@ -166,7 +166,7 @@ async def test_parent_section_reads_its_subsections_without_unrelated_sections(m
         ) for i, heading in enumerate(headings)),
     )
     monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
-    monkeypatch.setattr(document_sources, "SourceArtifactRepo", SimpleNamespace(
+    monkeypatch.setattr(document_sources, "SourceRepo", SimpleNamespace(
         read_document=AsyncMock(return_value=document),
     ))
     capability = InspectDocumentSourcesService()

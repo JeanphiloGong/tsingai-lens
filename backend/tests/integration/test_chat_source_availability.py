@@ -19,7 +19,7 @@ from application.source.agent_source_service import (
 )
 from document.domain.document import Document
 from repositories.workspace_repository import StoredDocument
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 
 pytestmark = pytest.mark.anyio
@@ -70,7 +70,7 @@ async def test_source_availability_uses_real_workspace_lookup(
         task_id="chat", user_id="local-user", workspace_id=workspace_id, tool_call_id="read",
     )
     document_sources.workspace_service = workspace_service
-    document_sources.SourceArtifactRepo = SourceArtifactRepository()
+    document_sources.SourceRepo = SourceRepository()
     handler = capability()
     if state == "database_failure":
         with pytest.raises(OperationalError) as raised:

@@ -16,7 +16,7 @@ from domain.core.document_profile import DocumentProfile
 from document.domain.source import SourceDocument
 from repositories.pipeline_run_repository import PipelineRunRepo
 from repositories.model_connection_repository import ModelConnectionRepo
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 from tests.support.postgres import seed_workspace
 
 pytestmark = pytest.mark.anyio
@@ -106,7 +106,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
     )
     assert result.status == "partial_success"
     assert (
-        await SourceArtifactRepo.read_document("prepare-papers", "paper-a") is not None
+        await SourceRepo.read_document("prepare-papers", "paper-a") is not None
     )
     second = await preparation.queue_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
@@ -242,7 +242,7 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     with pytest.raises(PipelineLeaseLostError):
         await preparation.execute_document_preparation_job(original, **resources)
     assert await DocumentProfileRepo.read("prepare-papers", "paper-a") is None
-    source = await SourceArtifactRepo.read_document("prepare-papers", "paper-a")
+    source = await SourceRepo.read_document("prepare-papers", "paper-a")
     assert (source is not None) == (stage == "profile")
     async with database.AsyncSessionLocal() as db, db.begin():
         assert (await PipelineRunRepo.read_run(run.run_id, db=db)).status == "running"

@@ -12,14 +12,14 @@ from infra.source.artifact_bundle import (
     source_table_row_payload,
     source_text_unit_payload,
 )
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 SourceRecord = dict[str, Any]
 
 
 async def load_workspace_inputs(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[tuple[SourceRecord, ...], tuple[SourceRecord, ...] | None]:
     source_documents = await _load_source_documents(
         workspace_id, source_artifact_repository
@@ -37,7 +37,7 @@ async def load_workspace_inputs(
 
 async def load_blocks_artifact(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
         workspace_id, source_artifact_repository
@@ -51,7 +51,7 @@ async def load_blocks_artifact(
 
 async def load_table_rows_artifact(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
         workspace_id, source_artifact_repository
@@ -65,7 +65,7 @@ async def load_table_rows_artifact(
 
 async def load_table_cells_artifact(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
         workspace_id, source_artifact_repository
@@ -79,7 +79,7 @@ async def load_table_cells_artifact(
 
 async def load_figures_artifact(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[SourceRecord, ...]:
     return tuple(
         source_figure_payload(figure)
@@ -89,7 +89,7 @@ async def load_figures_artifact(
 
 async def load_tables_artifact(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[SourceRecord, ...]:
     source_documents = await _load_source_documents(
         workspace_id, source_artifact_repository
@@ -103,7 +103,7 @@ async def load_tables_artifact(
 
 async def _load_source_documents(
     workspace_id: str,
-    source_artifact_repository: SourceArtifactRepository,
+    source_artifact_repository: SourceRepository,
 ) -> tuple[SourceDocument, ...]:
     documents = await source_artifact_repository.read_workspace_documents(
         workspace_id

@@ -1882,14 +1882,14 @@ async def _load_source_index(
             DatabaseSettings,
             build_database_engine,
         )
-        from repositories.source_artifact_repository import (  # noqa: PLC0415
-            SourceArtifactRepository,
+        from document.repositories.source_repository import (  # noqa: PLC0415
+            SourceRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
         AsyncSessionLocal.configure(bind=engine)
         try:
-            documents = await SourceArtifactRepository().read_workspace_documents(
+            documents = await SourceRepository().read_workspace_documents(
                 workspace_id
             )
         finally:

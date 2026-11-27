@@ -23,12 +23,12 @@ from domain.core.research_objective import (
     normalize_objective_terms,
 )
 from research.domain.objective import ResearchObjective
-from domain.source import Document
+from document.domain.document import Document
 from repositories.workspace_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 from repositories.paper_map_repository import PaperMapRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
@@ -102,7 +102,7 @@ def build_research_objective_service(
                 "source_artifact_repository",
                 None,
             )
-            or SourceArtifactRepository()
+            or SourceRepository()
         )
     document_profile_repository = kwargs.pop(
         "document_profile_repository",
@@ -120,14 +120,14 @@ def build_research_objective_service(
         "document_profile_service", document_profile_module
     )
     document_profile_service.workspace_service = workspace_service
-    document_profile_service.SourceArtifactRepo = source_repository
+    document_profile_service.SourceRepo = source_repository
     document_profile_service.DocumentProfileRepo = document_profile_repository
     objective_input_service = kwargs.pop(
         "objective_input_service",
         objective_input_module,
     )
     objective_input_service.workspace_service = workspace_service
-    objective_input_service.SourceArtifactRepo = source_repository
+    objective_input_service.SourceRepo = source_repository
     objective_input_service.PaperMapRepo = paper_map_repository
     objective_input_service.document_profile_service = document_profile_service
     objective_input_service.paper_research_map_service = kwargs.pop(
@@ -146,7 +146,7 @@ async def seed_document_profiles(
     service: ModuleType,
     workspace_id: str,
 ) -> None:
-    documents = await service.objective_input_service.SourceArtifactRepo.read_workspace_documents(
+    documents = await service.objective_input_service.SourceRepo.read_workspace_documents(
         workspace_id
     )
     current_workspace = (

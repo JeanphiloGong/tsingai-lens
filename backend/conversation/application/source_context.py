@@ -7,12 +7,12 @@ import unicodedata
 from urllib.parse import urlencode
 
 from application.source import workspace_service
-from domain.source.artifacts import SourceDocument
+from document.domain.source import SourceDocument
 from domain.chat.resource_ref import ChatResourceRef
 from domain.chat.source_context import ChatSourceContext
 from exceptions import RequestInvalidException, ResourceNotFoundException
 from infra.source.artifact_bundle import source_table_payload
-from repositories.source_artifact_repository import SourceArtifactRepo
+from document.repositories.source_repository import SourceRepo
 
 
 class InvalidSourceContext(RequestInvalidException):
@@ -89,7 +89,7 @@ async def canonical_source_contexts(
             raise InvalidSourceContext(
                 "source context document does not belong to the Chat workspace"
             ) from exc
-        document = await SourceArtifactRepo.read_document(
+        document = await SourceRepo.read_document(
             workspace_id,
             item.document_id,
         )

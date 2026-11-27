@@ -94,7 +94,7 @@ async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
         service.workspace_service, "get_workspace", AsyncMock(return_value=object())
     )
     monkeypatch.setattr(
-        service.SourceArtifactRepo,
+        service.SourceRepo,
         "read_document",
         AsyncMock(
             return_value=SourceDocument(

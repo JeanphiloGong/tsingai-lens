@@ -39,7 +39,7 @@ from infra.persistence.postgres.models.workspace import (
 from sqlalchemy import select
 
 
-class SourceArtifactRepository:
+class SourceRepository:
     """Store the complete parsed artifact and its tree in one row."""
 
     backend_name = "postgres"
@@ -821,7 +821,7 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
-__all__ = ["SourceArtifactRepository"]
+__all__ = ["SourceRepository"]
 
 
-SourceArtifactRepo = SourceArtifactRepository()
+SourceRepo = SourceRepository()

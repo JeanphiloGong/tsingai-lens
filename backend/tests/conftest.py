@@ -115,7 +115,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "repositories.experiment_plan_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "repositories.source_artifact_repository.AsyncSessionLocal", factory
+            "document.repositories.source_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
             "repositories.paper_map_repository.AsyncSessionLocal", factory
@@ -275,7 +275,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             ],
         ),
         (objective_derivation, ["workspace_service", "objective_analysis_service"]),
-        (document_sources, ["workspace_service", "SourceArtifactRepo"]),
+        (document_sources, ["workspace_service", "SourceRepo"]),
         (
             workspace_context,
             [
@@ -283,7 +283,7 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "ObjectiveRepo",
                 "DocumentProfileRepo",
                 "PaperMapRepo",
-                "SourceArtifactRepo",
+                "SourceRepo",
             ],
         ),
         (research_scope, ["workspace_service", "PaperMapRepo"]),
@@ -292,7 +292,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_document_profile_service,
             [
                 "DocumentProfileRepo",
-                "SourceArtifactRepo",
+                "SourceRepo",
                 "workspace_service",
             ],
         ),
@@ -374,7 +374,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_objective_input_service,
             [
                 "PaperMapRepo",
-                "SourceArtifactRepo",
+                "SourceRepo",
                 "workspace_service",
                 "document_profile_service",
                 "paper_research_map_service",
@@ -382,7 +382,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         ),
         (
             _test_paper_experiment_authoring_service,
-            ["SourceArtifactRepo", "workspace_service", "experiment_analysis_writer"],
+            ["SourceRepo", "workspace_service", "experiment_analysis_writer"],
         ),
         (_test_finding_feedback_service, ["workspace_service", "FindingReviewRepo"]),
         (_test_finding_dataset_service, ["workspace_service", "ObjectiveRepo"]),
@@ -400,12 +400,12 @@ def _isolate_application_module_dependencies(monkeypatch):
             _test_workspace_service,
             ["WorkspaceRepo"],
         ),
-        (_test_document_markdown_service, ["SourceArtifactRepo", "workspace_service"]),
+        (_test_document_markdown_service, ["SourceRepo", "workspace_service"]),
         (
             _test_document_preparation_service,
             [
                 "DocumentProfileRepo",
-                "SourceArtifactRepo",
+                "SourceRepo",
                 "workspace_service",
                 "document_profile_service",
                 "pipeline_run_service",
@@ -414,7 +414,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (_test_source_reference_extraction_service, []),
         (
             _test_reference_workflow_service,
-            ["SourceArtifactRepo", "workspace_service"],
+            ["SourceRepo", "workspace_service"],
         ),
         (_test_source_import_service, ["WorkspaceRepo"]),
         (

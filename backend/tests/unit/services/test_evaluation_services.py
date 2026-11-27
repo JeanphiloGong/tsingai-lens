@@ -67,7 +67,7 @@ from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM
 from repositories.evaluation_repository import EvaluationRepository
 from repositories.finding_review_repository import FindingReviewRepository
 from repositories.objective_repository import ObjectiveRepository
-from repositories.source_artifact_repository import SourceArtifactRepository
+from document.repositories.source_repository import SourceRepository
 from sqlalchemy import select
 
 pytestmark = pytest.mark.anyio
@@ -1981,7 +1981,7 @@ async def research_records(postgres_session_factory, anyio_backend):
 
     await seed_workspace(postgres_session_factory, "col-gold", document_ids=("doc-1",))
     text = "At 500 C, tensile strength increased to 620 MPa."
-    await SourceArtifactRepository().replace_document(
+    await SourceRepository().replace_document(
         "col-gold",
         SourceDocument(
             document_id="doc-1",

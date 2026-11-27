@@ -56,7 +56,7 @@ from repositories.objective_repository import (
     ObjectiveAnalysisJobSnapshot,
 )
 from repositories.paper_experiment_repository import StoredPaperExperimentRevision
-from repositories.paper_map_repository import PaperMapRepo
+from research.discovery.repositories.paper_map_repository import PaperMapRepo
 
 logger = logging.getLogger(__name__)
 
@@ -437,7 +437,7 @@ class ObjectiveScopeNotReadyError(ResourceConflictException):
 
 from repositories.objective_repository import ObjectiveRepo
 from repositories.paper_experiment_repository import PaperExperimentRepo
-from repositories.paper_map_repository import PaperMapRepo
+from research.discovery.repositories.paper_map_repository import PaperMapRepo
 
 
 async def preview_objective_scope(

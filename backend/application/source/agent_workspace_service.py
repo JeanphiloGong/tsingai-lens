@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from application.source import workspace_service
 from repositories.workspace_repository import StoredDocument
-from repositories.paper_map_repository import PaperMapRepo
+from research.discovery.repositories.paper_map_repository import PaperMapRepo
 from repositories.objective_repository import ObjectiveRepo
 from repositories.document_profile_repository import DocumentProfileRepo
 from document.repositories.source_repository import SourceRepo

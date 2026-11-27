@@ -8,7 +8,7 @@ import json
 from typing import Any
 
 from application.core.objectives import property_matching
-from domain.core import PaperResearchMap, PaperResearchSignal
+from research.discovery.domain.paper_map import PaperResearchMap, PaperResearchSignal
 from document.domain.source import SourceDocumentTree
 
 _PAPER_MAP_INITIAL_SOURCE_LIMIT = 16
@@ -580,8 +580,7 @@ def _build_window_payload(
         "document_profile": (
             {
                 "doc_type": profile.doc_type,
-                "profile_warnings": list(profile.profile_warnings)[:2],
-                "confidence": profile.confidence,
+                "description": profile.description,
             }
             if profile
             else {}

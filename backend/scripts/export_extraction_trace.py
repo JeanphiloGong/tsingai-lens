@@ -37,7 +37,7 @@ from repositories.objective_repository import (  # noqa: E402
     ObjectiveRepository,
 )
 
-from repositories.paper_map_repository import PaperMapRepository
+from research.discovery.repositories.paper_map_repository import PaperMapRepository
 from document.repositories.source_repository import (  # noqa: E402
     SourceRepository,
 )

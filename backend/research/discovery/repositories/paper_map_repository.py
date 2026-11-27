@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import json
 
-from domain.core.research_objective import (
+from research.discovery.domain.paper_map import (
     PaperResearchMap,
     PaperResearchRelationship,
     PaperResearchScope,
@@ -15,12 +15,11 @@ from domain.core.research_objective import (
     PaperResearchSourceRef,
     PaperSourceUnitCoverage,
     PaperSourceUnitCoverageStatus,
-    ReviewKnowledgeItem,
-    ReviewSynthesisMap,
     build_paper_research_relationship,
     build_paper_research_scope_id,
     build_paper_research_signal,
 )
+from research.discovery.domain.review_map import ReviewKnowledgeItem, ReviewSynthesisMap
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.workspace import (
     DocumentORM,

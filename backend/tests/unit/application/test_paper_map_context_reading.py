@@ -15,11 +15,11 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
-from application.core.objectives import paper_map_extraction
-from application.core.objectives.paper_map_extraction import (
+from research.discovery.application import paper_map_extraction
+from research.discovery.application.paper_map_extraction import (
     PaperMapExtractionBudget,
 )
-from application.core.objectives import paper_map_extraction
+from research.discovery.application import paper_map_extraction
 from infra.llm.usage import capture_llm_usage
 from tests.unit.application.test_paper_research_map_service import (
     _artifacts,

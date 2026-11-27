@@ -35,7 +35,7 @@ from application.source import workspace_service
 from domain.core import PreparedDocumentInput
 from infra.persistence.database import AsyncSessionLocal
 from repositories.objective_repository import ObjectiveRepo
-from repositories.paper_map_repository import PaperMapRepo
+from research.discovery.repositories.paper_map_repository import PaperMapRepo
 from repositories.pipeline_run_repository import (
     PipelineLeaseLostError,
     PipelineRun,

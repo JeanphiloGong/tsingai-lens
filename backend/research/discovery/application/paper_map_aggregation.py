@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from domain.core.research_objective import build_paper_research_scope
+from research.discovery.domain.paper_map import build_paper_research_scope
 
 
 from collections.abc import Callable, Iterable
@@ -11,11 +11,11 @@ import logging
 from typing import Any
 
 from application.core.objectives import property_matching
-from domain.core import PaperResearchMap, PaperResearchScope, PaperResearchSignal
-from domain.core import (
+from research.discovery.domain.paper_map import PaperResearchMap, PaperResearchScope, PaperResearchSignal
+from research.discovery.domain.review_map import ReviewKnowledgeItem, ReviewSynthesisMap
+
+from research.discovery.domain.paper_map import (
     PaperResearchRelationship,
-    ReviewKnowledgeItem,
-    ReviewSynthesisMap,
 )
 
 logger = logging.getLogger(__name__)

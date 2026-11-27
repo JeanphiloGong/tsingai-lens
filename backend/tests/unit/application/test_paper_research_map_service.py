@@ -7,15 +7,15 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from application.core.objectives import paper_research_map_service
+from research.discovery.application import paper_map_service as paper_research_map_service
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
-from application.core.objectives import paper_map_aggregation
-from application.core.objectives import paper_map_extraction
+from research.discovery.application import paper_map_aggregation
+from research.discovery.application import paper_map_extraction
 from domain.core import PaperResearchMap, PaperResearchScope
 from domain.core.research_objective import (
     PaperResearchRelationship,

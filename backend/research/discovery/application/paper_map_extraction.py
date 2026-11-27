@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    PaperResearchRelationship, PaperResearchSourceRef, ReviewKnowledgeItem,
+from research.discovery.domain.paper_map import (
+    PaperResearchRelationship, PaperResearchSourceRef,
     build_paper_research_relationship, build_paper_research_scope, build_paper_research_signal,
 )
 
@@ -38,15 +38,15 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
 )
-from application.core.objectives import paper_map_sources
+from research.discovery.application import paper_map_sources
+from research.discovery.domain.review_map import ReviewKnowledgeItem, ReviewSynthesisMap
 from document.domain.source import SourceDocumentTree
-from domain.core import (
+from research.discovery.domain.paper_map import (
     PaperResearchMap,
     PaperResearchScope,
     PaperResearchSignal,
     PaperSourceUnitCoverage,
     PaperSourceUnitCoverageStatus,
-    ReviewSynthesisMap,
 )
 
 logger = logging.getLogger(__name__)

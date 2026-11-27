@@ -10,14 +10,14 @@ from typing import Any
 from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
-from application.core.objectives.paper_map_aggregation import (
+from research.discovery.application.paper_map_aggregation import (
     notify_progress,
 )
-from application.core.objectives.paper_map_extraction import (
+from research.discovery.application.paper_map_extraction import (
     PaperMapExtractionBudget,
 )
-from application.core.objectives import paper_map_aggregation, paper_map_extraction, paper_map_sources
-from domain.core import (
+from research.discovery.application import paper_map_aggregation, paper_map_extraction, paper_map_sources
+from research.discovery.domain.paper_map import (
     PaperResearchMap,
     PaperResearchSignal,
 )

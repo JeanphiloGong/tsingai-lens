@@ -1,10 +1,9 @@
 # Research Objective HTTP API
 
-Status: target Research module contract for the module reconstruction. The current route
-implementation is under `backend/controllers/core/research_objective_routes.py`. It still
-serializes the full Objective in the list response and does not yet expose the dedicated detail
-route described below. The V1 implementation must bring the route schemas, frontend types, and
-tests to this contract.
+Status: Research module contract. The route implementation is under
+`backend/research/controllers/objective_routes.py`. The Objective list now returns the
+summary projection below, while the dedicated detail route returns the complete public Objective.
+The analysis response retains its existing full Objective projection for the analysis screen.
 
 ## Conventions
 
@@ -43,6 +42,7 @@ Objective.
 | `objectives[].variables` | string[] | Changed factors |
 | `objectives[].outcomes` | string[] | Observed outcomes |
 | `objectives[].requested_comparator` | string or null | Requested comparison |
+| `objectives[].seed_document_ids` | string[] | Documents that led to the question |
 | `objectives[].origin` | enum | `system_discovered` or `chat_assisted` |
 | `objectives[].confirmation_status` | enum | `candidate` or `confirmed` |
 | `objectives[].active_analysis_version` | integer or null | Current analysis version |

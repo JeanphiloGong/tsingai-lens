@@ -57,13 +57,54 @@ class ObjectiveSummaryResponse(BaseModel):
     created_by_tool_call_id: str | None = None
 
 
+class ObjectiveListSummaryResponse(BaseModel):
+    objective_id: str
+    rank: int = Field(..., ge=1)
+    question: str
+    material_scope: list[str] = Field(default_factory=list)
+    variables: list[str] = Field(default_factory=list)
+    outcomes: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
+    seed_document_ids: list[str] = Field(default_factory=list)
+    origin: ObjectiveOrigin = "system_discovered"
+    confirmation_status: ConfirmationStatus
+    active_analysis_version: int | None = None
+    published_analysis_version: int | None = None
+
+
+class ObjectiveDetailResponse(BaseModel):
+    workspace_id: str
+    objective_id: str
+    question: str
+    material_scope: list[str] = Field(default_factory=list)
+    variables: list[str] = Field(default_factory=list)
+    outcomes: list[str] = Field(default_factory=list)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
+    seed_document_ids: list[str] = Field(default_factory=list)
+    excluded_document_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    reason: str | None = None
+    source_relationship_ids: list[str] = Field(default_factory=list)
+    parent_objective_id: str | None = None
+    parent_analysis_version: int | None = Field(default=None, ge=1)
+    derivation_basis: list[dict[str, Any]] = Field(default_factory=list)
+    confirmation_status: ConfirmationStatus
+    active_analysis_version: int | None = None
+    published_analysis_version: int | None = None
+    origin: ObjectiveOrigin = "system_discovered"
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
     rank: int = Field(..., ge=1)
 
 
 class PaginatedObjectiveListResponse(BaseModel):
     workspace_id: str
-    objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
+    objectives: list[ObjectiveListSummaryResponse] = Field(default_factory=list)
     offset: int = Field(..., ge=0)
     limit: int | None = Field(default=None, ge=1)
     total: int = Field(..., ge=0)

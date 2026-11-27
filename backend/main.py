@@ -16,7 +16,7 @@ from controllers.models import catalog_routes as model_connections
 from controllers.core import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
 from controllers.core import paper_experiment_routes as paper_experiments
-from controllers.core import research_objective_routes as research_objectives
+from research.controllers import objective_routes as research_objectives
 from controllers.exception_router import (
     general_exception_handler,
     http_exception_handler,

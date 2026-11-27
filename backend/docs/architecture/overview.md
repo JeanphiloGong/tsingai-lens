@@ -14,9 +14,9 @@ Read this page first, then follow the first entry point that matches the task:
 | Upload a paper | `controllers/source/workspace_routes.py:upload_workspace_document` | upload bytes | No | Document and original bytes |
 | Prepare one paper | `application/source/document_preparation_service.py:queue_document_preparation` | current Document and source file | Profile stage only; Docling parses the PDF | Source, Profile, Pipeline Run |
 | Map selected papers | `application/core/objectives/paper_research_map_service.py:build_document_paper_map` | prepared Source, Profile, tree | Extraction and signal reconciliation | None directly; input service stores map |
-| Form candidate questions | `controllers/core/research_objective_routes.py:discover_workspace_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
+| Form candidate questions | `research/controllers/objective_routes.py:discover_workspace_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
 | Create or confirm a question | `application/core/objectives/objective_authoring_service.py:create_chat_assisted_candidate` or `confirm_objective` | exact candidate or approved arguments | No | Objective |
-| Analyze one confirmed question | `controllers/core/research_objective_routes.py:start_workspace_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
+| Analyze one confirmed question | `research/controllers/objective_routes.py:start_workspace_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
 | Conversation send | `conversation/application/send_message.py` | Message path and canonical Sources | Yes, through Agent Task execution | messages, Operations, approvals |
 
 The normal reading path is:

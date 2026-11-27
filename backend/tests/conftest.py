@@ -215,8 +215,8 @@ def _isolate_application_module_dependencies(monkeypatch):
         document_routes,
         finding_review_routes,
         paper_experiment_routes,
-        research_objective_routes,
     )
+    from research.controllers import objective_routes as research_objective_routes
     from controllers.goal import experiment_plan_routes, goal_routes
     from controllers.source import (
         workspace_routes,

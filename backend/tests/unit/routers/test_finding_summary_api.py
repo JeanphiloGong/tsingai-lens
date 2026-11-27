@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from application.core.objectives.finding_summary import FindingSummaryUnavailable
-from controllers.core import research_objective_routes
-from controllers.core.research_objective_routes import (
+from research.controllers import objective_routes as research_objective_routes
+from research.controllers.objective_routes import (
     research_objective_router as router,
 )
 from controllers.dependencies.auth import get_current_user_id

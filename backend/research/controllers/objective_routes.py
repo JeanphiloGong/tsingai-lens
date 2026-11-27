@@ -7,14 +7,16 @@ from application.core.objectives import analysis_service as objective_analysis_s
 from application.core.objectives import (
     objective_analysis_service as objective_scope_service,
 )
+from research.application.objectives import objective_query_service as objective_detail_service
 from application.core.objectives.analysis_service import list_objectives
 from application.core.objectives.objective_discovery_service import start_objective_discovery
-from controllers.core.research_objective_schemas import (
+from research.controllers.objective_schemas import (
     FindingDetailResponse,
     FindingListResponse,
     FindingSummaryResponse,
     ObjectiveAnalysisResponse,
     ObjectiveAnalysisStatusResponse,
+    ObjectiveDetailResponse,
     ObjectiveEvidenceListResponse,
     ObjectiveEvidenceMapResponse,
     ObjectiveScopeResponse,
@@ -85,19 +87,49 @@ async def list_workspace_objectives(
             workspace_id=workspace_id,
             objectives=[
                 {
-                    **asdict(item.objective),
-                    "created_at": (
-                        item.created_at.isoformat() if item.created_at else None
-                    ),
-                    "updated_at": (
-                        item.updated_at.isoformat() if item.updated_at else None
-                    ),
+                    "objective_id": item.objective.objective_id,
+                    "rank": item.objective.rank or 1,
+                    "question": item.objective.question,
+                    "material_scope": list(item.objective.material_scope),
+                    "variables": list(item.objective.variables),
+                    "outcomes": list(item.objective.outcomes),
+                    "requested_comparator": item.objective.requested_comparator,
+                    "seed_document_ids": list(item.objective.seed_document_ids),
+                    "origin": item.objective.origin,
+                    "confirmation_status": item.objective.confirmation_status,
+                    "active_analysis_version": item.objective.active_analysis_version,
+                    "published_analysis_version": item.objective.published_analysis_version,
                 }
                 for item in page
             ],
             offset=offset,
             limit=limit,
             total=len(ranked_objectives),
+        )
+    )
+
+
+@research_objective_router.get(
+    "/{workspace_id}/objectives/{objective_id}",
+    response_model=ApiResponse[ObjectiveDetailResponse],
+    summary="Read one research objective",
+)
+async def get_workspace_objective(
+    workspace_id: str,
+    objective_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> Response:
+    record = await objective_detail_service.read_objective_detail(
+        workspace_id,
+        objective_id,
+        user_id=user_id,
+    )
+    objective = record.objective
+    return make_api_response(
+        data=ObjectiveDetailResponse(
+            **asdict(objective),
+            created_at=record.created_at.isoformat() if record.created_at else None,
+            updated_at=record.updated_at.isoformat() if record.updated_at else None,
         )
     )
 

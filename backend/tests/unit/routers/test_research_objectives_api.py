@@ -16,8 +16,8 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopeDecision,
     ObjectiveScopePreview,
 )
-from controllers.core import research_objective_routes
-from controllers.core.research_objective_routes import (
+from research.controllers import objective_routes as research_objective_routes
+from research.controllers.objective_routes import (
     research_objective_router as router,
 )
 from controllers.dependencies.auth import get_current_user_id
@@ -1082,6 +1082,9 @@ def _client(
         )
     )
     research_objective_routes.objective_analysis_service = service or _Service()
+    research_objective_routes.objective_detail_service = SimpleNamespace(
+        read_objective_detail=AsyncMock(return_value=StoredObjective(_objective()))
+    )
     scope_and_discovery = discovery_service or _DiscoveryService()
     research_objective_routes.start_objective_discovery = (
         scope_and_discovery.start_objective_discovery
@@ -1183,6 +1186,8 @@ def test_objective_list_returns_every_ranked_candidate_when_limit_is_omitted() -
     assert [objective["rank"] for objective in payload["objectives"]] == list(
         range(1, 9)
     )
+    assert "mechanisms" not in payload["objectives"][0]
+    assert "created_by_tool_call_id" not in payload["objectives"][0]
 
 
 def test_objective_list_exposes_candidates_after_rank_six() -> None:
@@ -1343,11 +1348,16 @@ def test_objective_commands_accept_a_complete_scope_beyond_one_hundred_documents
 
 
 
-def test_duplicate_objective_detail_route_is_not_registered() -> None:
+def test_objective_detail_route_returns_the_complete_public_objective() -> None:
     response = _client().get("/workspaces/col-1/objectives/obj-1")
 
     assert response.status_code == 200
-    assert response.json()["code"] == 200201
+    payload = response.json()["data"]
+    assert payload["objective_id"] == "obj-1"
+    assert payload["mechanisms"] == []
+    assert payload["source_relationship_ids"] == ["relationship-1"]
+    assert "created_by_user_id" not in payload
+    assert "created_by_tool_call_id" not in payload
 
 
 def test_confirm_objective_route_is_not_registered() -> None:

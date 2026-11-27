@@ -44,6 +44,40 @@ class SourceArtifactRepository:
 
     backend_name = "postgres"
 
+    async def read(
+        self,
+        *,
+        workspace_id: str,
+        document_id: str,
+        source_version: str | None,
+    ) -> SourceDocument:
+        source = await self.read_document(workspace_id, document_id)
+        if source is None:
+            async with AsyncSessionLocal() as db:
+                document_exists = await db.scalar(
+                    select(DocumentORM.document_id).where(
+                        DocumentORM.workspace_id == workspace_id,
+                        DocumentORM.document_id == document_id,
+                    )
+                )
+            if document_exists is not None:
+                raise LookupError("document_sources_not_ready")
+            raise FileNotFoundError(document_id)
+        version = str(source.metadata.get("source_fingerprint") or "")
+        if not version:
+            raise LookupError("document_sources_not_ready")
+        if source_version is not None and source_version != version:
+            raise ValueError("source_version_changed")
+        return source
+
+    async def list(
+        self,
+        *,
+        workspace_id: str,
+        document_ids: tuple[str, ...] | None,
+    ) -> tuple[SourceDocument, ...]:
+        return await self._read_documents(workspace_id, document_ids)
+
     async def replace_document(
         self,
         workspace_id: str,
@@ -213,6 +247,21 @@ class SourceArtifactRepository:
         documents = await self._read_documents(workspace_id, (document_id,))
         return documents[0] if documents else None
 
+    async def read_document_in_session(
+        self,
+        workspace_id: str,
+        document_id: str,
+        *,
+        db: AsyncSession,
+    ) -> SourceDocument | None:
+        """Read one Source artifact using the caller's transaction session."""
+        documents = await self._read_documents(
+            workspace_id,
+            (document_id,),
+            db=db,
+        )
+        return documents[0] if documents else None
+
     async def read_workspace_documents(
         self,
         workspace_id: str,
@@ -259,32 +308,43 @@ class SourceArtifactRepository:
         self,
         workspace_id: str,
         document_ids: tuple[str, ...] | None = None,
+        *,
+        db: AsyncSession | None = None,
     ) -> tuple[SourceDocument, ...]:
-        async with AsyncSessionLocal() as db:
-            statement = (
-                select(DocumentPreparationORM)
-                .join(
-                    DocumentORM,
-                    DocumentORM.document_id == DocumentPreparationORM.document_id,
+        if db is None:
+            async with AsyncSessionLocal() as owned_db:
+                return await self._read_documents(
+                    workspace_id,
+                    document_ids,
+                    db=owned_db,
                 )
-                .where(
-                    DocumentORM.workspace_id == workspace_id,
-                )
-                .order_by(
-                    DocumentORM.document_order, DocumentPreparationORM.document_id
-                )
+
+        statement = (
+            select(DocumentPreparationORM)
+            .join(
+                DocumentORM,
+                DocumentORM.document_id == DocumentPreparationORM.document_id,
             )
-            if document_ids is not None:
-                statement = statement.where(
-                    DocumentPreparationORM.document_id.in_(document_ids)
-                )
-            rows = tuple(await db.scalars(statement))
+            .where(
+                DocumentORM.workspace_id == workspace_id,
+            )
+            .order_by(
+                DocumentORM.document_order, DocumentPreparationORM.document_id
+            )
+        )
+        if document_ids is not None:
+            statement = statement.where(
+                DocumentPreparationORM.document_id.in_(document_ids)
+            )
+        rows = tuple(await db.scalars(statement))
         documents = []
         for row in rows:
             if not row.artifact_json:
                 continue
             artifact = row.artifact_json
             document = artifact["document"]
+            metadata = dict(document.get("metadata", {}))
+            metadata.setdefault("source_fingerprint", row.source_fingerprint)
             documents.append(
                 SourceDocument(
                     document_id=document.get("document_id") or document.get("id") or "",
@@ -292,7 +352,7 @@ class SourceArtifactRepository:
                     title=document.get("title", ""),
                     text=document.get("text", ""),
                     creation_date=document.get("creation_date"),
-                    metadata=dict(document.get("metadata", {})),
+                    metadata=metadata,
                     text_units=tuple(
                         (
                             SourceTextUnit(

@@ -1,0 +1,1 @@
+"""Document application use cases."""

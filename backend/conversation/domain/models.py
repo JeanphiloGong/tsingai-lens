@@ -9,6 +9,19 @@ from typing import Literal
 Role = Literal["user", "assistant", "tool"]
 
 
+@dataclass(frozen=True)
+class AnswerCitation:
+    offset: int
+    document_id: str
+    source_ref: str
+    source_kind: str
+    document_title: str
+    page: int | str | None
+    heading_path: str | None
+    caption: str | None
+    figure_label: str | None
+
+
 # declares the domain type representing one conversation message
 @dataclass(frozen=True)
 class Message:
@@ -19,6 +32,7 @@ class Message:
     content: str
     produced_by_task_id: str | None = None
     copied_from_message_id: str | None = None
+    citations: tuple[AnswerCitation, ...] = ()
 
     # defines validation that the dataclass runs immediately after its generated initializer finishes
     def __post_init__(self) -> None:
@@ -61,4 +75,4 @@ def path_to(messages: dict[str, Message], tip_id: str | None) -> ConversationPat
     return ConversationPath(tuple(path), path[-1].message_id if path else None)
 
 
-__all__ = ["ConversationPath", "Message", "Role", "path_to"]
+__all__ = ["AnswerCitation", "ConversationPath", "Message", "Role", "path_to"]

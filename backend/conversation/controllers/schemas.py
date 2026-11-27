@@ -40,12 +40,30 @@ class TaskAcceptedResponse(BaseModel):
     status: Literal["accepted"]
 
 
+class CitationSourceResponse(BaseModel):
+    document_id: str
+    source_ref: str
+    source_kind: str
+    document_title: str
+    page: int | str | None
+    heading_path: str | None
+    caption: str | None
+    figure_label: str | None
+    href: str
+
+
+class AnswerCitationResponse(BaseModel):
+    offset: int
+    source: CitationSourceResponse
+
+
 class MessageResponse(BaseModel):
     message_id: str
     role: Literal["user", "assistant", "tool"]
     content: str
     created_at: datetime
     source_contexts: tuple[dict[str, Any], ...]
+    citations: list[AnswerCitationResponse] = Field(default_factory=list)
     my_feedback: MessageFeedbackResponse | None
     can_rate: bool
 

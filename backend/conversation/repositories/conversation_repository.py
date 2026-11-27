@@ -1,11 +1,11 @@
 """Persist conversations, selected message paths, and answer feedback."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import uuid4
 
-from conversation.domain import ConversationPath, Message, Role, path_to
+from conversation.domain import AnswerCitation, ConversationPath, Message, Role, path_to
 from conversation.feedback.repository import (
     CAN_RATE_MESSAGE,
     MessageFeedbackView,
@@ -17,7 +17,7 @@ from infra.persistence.postgres.models.chat import (
     AgentOperationORM,
     AgentTaskORM,
 )
-from infra.persistence.postgres.models.workspace import WorkspaceORM
+from infra.persistence.postgres.models.workspace import DocumentORM, WorkspaceORM
 from infra.persistence.postgres.models.conversation import (
     ConversationORM,
     MessageFeedbackORM,
@@ -475,11 +475,31 @@ class ConversationRepository:
         )
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(statement)).all()
-
-        if not rows:
-            raise ConversationNotFound("Conversation not found.")
-
-        tip_id, status, tasks, conversation, _, _, _ = rows[0]
+            if not rows:
+                raise ConversationNotFound("Conversation not found.")
+            tip_id, status, tasks, conversation, _, _, _ = rows[0]
+            citation_document_ids = {
+                citation["document_id"]
+                for _, _, _, _, row, _, _ in rows
+                if row is not None
+                for citation in row.citations
+            }
+            visible_citation_document_ids: set[str] = set()
+            if citation_document_ids:
+                visible_citation_document_ids = set(
+                    await db.scalars(
+                        select(DocumentORM.document_id)
+                        .join(
+                            WorkspaceORM,
+                            WorkspaceORM.workspace_id == DocumentORM.workspace_id,
+                        )
+                        .where(
+                            DocumentORM.workspace_id == conversation.workspace_id,
+                            DocumentORM.document_id.in_(citation_document_ids),
+                            WorkspaceORM.owner_user_id == user_id,
+                        )
+                    )
+                )
         items = {}
         for _, _, _, _, row, feedback, can_rate in rows:
             if row is None:
@@ -492,6 +512,11 @@ class ConversationRepository:
                 content=row.content,
                 produced_by_task_id=row.produced_by_task_id,
                 copied_from_message_id=row.copied_from_message_id,
+                citations=tuple(
+                    AnswerCitation(**citation)
+                    for citation in row.citations
+                    if citation["document_id"] in visible_citation_document_ids
+                ),
             )
             items[message.message_id] = ConversationMessageView(
                 message=message,
@@ -741,21 +766,21 @@ class ConversationRepository:
                     """
                     WITH RECURSIVE path AS (
                         SELECT message_id, conversation_id, parent_message_id,
-                               role, content, source_contexts, produced_by_task_id
+                               role, content, source_contexts, citations, produced_by_task_id
                         FROM chat_messages
                         WHERE conversation_id = :conversation_id
                           AND message_id = :message_id
                         UNION
                         SELECT parent.message_id, parent.conversation_id,
                                parent.parent_message_id, parent.role, parent.content,
-                               parent.source_contexts, parent.produced_by_task_id
+                               parent.source_contexts, parent.citations, parent.produced_by_task_id
                         FROM chat_messages AS parent
                         JOIN path AS child
                           ON child.parent_message_id = parent.message_id
                          AND child.conversation_id = parent.conversation_id
                     )
                     SELECT message_id, conversation_id, parent_message_id,
-                           role, content, source_contexts, produced_by_task_id
+                           role, content, source_contexts, citations, produced_by_task_id
                     FROM path
                     """
                 ),
@@ -770,6 +795,7 @@ class ConversationRepository:
                 role=cast(Role, row["role"]),
                 content=row["content"],
                 produced_by_task_id=row["produced_by_task_id"],
+                citations=tuple(AnswerCitation(**item) for item in row["citations"]),
             )
             for row in rows
         }
@@ -850,6 +876,7 @@ class ConversationRepository:
                         content=original.content,
                         copied_from_message_id=original.message_id,
                         source_contexts=source_contexts[original.message_id],
+                        citations=[asdict(item) for item in original.citations],
                         created_at=now,
                     )
                 )

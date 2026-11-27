@@ -54,9 +54,46 @@
 <script lang="ts">
 	import { t } from '../../../_shared/i18n';
 	import { sanitizeStreamingCitationText } from '$lib/research/conversationPresentation';
+	import type { AnswerCitation } from '$lib/conversation/api';
 	export let content = '';
+	export let citations: AnswerCitation[] = [];
 	export let streaming = false;
-	$: visibleContent = streaming ? sanitizeStreamingCitationText(content) : content;
+
+	function escapeCitationLabel(value: string) {
+		return value.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]');
+	}
+
+	function citationLabel(citation: AnswerCitation) {
+		const source = citation.source;
+		const locator =
+			source.caption?.trim() ||
+			source.figure_label?.trim() ||
+			source.heading_path?.trim() ||
+			(source.page !== null && source.page !== undefined ? `p. ${source.page}` : 'Source');
+		return [source.document_title.trim() || 'Supporting source', locator].join(' · ');
+	}
+
+	function insertCitationLinks(text: string, items: AnswerCitation[]) {
+		const ordered = [...items]
+			.filter((item) => item.source.href.startsWith('/workspaces/'))
+			.sort((left, right) => left.offset - right.offset);
+		if (!ordered.length) return text;
+
+		let cursor = 0;
+		let result = '';
+		for (const citation of ordered) {
+			const offset = Math.max(cursor, Math.min(text.length, citation.offset));
+			result += text.slice(cursor, offset);
+			const href = citation.source.href.replaceAll('\\', '\\\\').replaceAll(')', '\\)');
+			result += ` [${escapeCitationLabel(citationLabel(citation))}](${href})`;
+			cursor = offset;
+		}
+		return result + text.slice(cursor);
+	}
+
+	$: visibleContent = streaming
+		? sanitizeStreamingCitationText(content)
+		: insertCitationLinks(content, citations);
 	$: html = renderMessage(visibleContent, streaming, $t('researchAgent.responseTable'));
 </script>
 

@@ -36,7 +36,11 @@
 		{/if}
 		{#if !recovering}
 			<time>{formatTime(message.created_at)}</time>
-			<MessageContent content={streaming ? streamingText : message.content} {streaming} />
+			<MessageContent
+				content={streaming ? streamingText : message.content}
+				citations={streaming ? [] : message.citations ?? []}
+				{streaming}
+			/>
 		{/if}
 		<slot />
 		{#if !streaming && !incomplete && !message.message_id.startsWith('local-') && message.content.trim() && !message.tool_calls.length}

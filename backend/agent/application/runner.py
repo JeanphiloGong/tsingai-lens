@@ -75,7 +75,14 @@ class DurableRunner:
             turn = await self.respond(state.operations)
             if not turn.tool_calls:
                 return await self._save(
-                    state, status="completed", message={"role": "assistant", "content": turn.content, "produced_by_task_id": state.task.task_id}
+                    state,
+                    status="completed",
+                    message={
+                        "role": "assistant",
+                        "content": turn.content,
+                        "citations": [asdict(item) for item in turn.citations],
+                        "produced_by_task_id": state.task.task_id,
+                    },
                 )
             # Persist every requested operation before running any of them.
             for call in turn.tool_calls:

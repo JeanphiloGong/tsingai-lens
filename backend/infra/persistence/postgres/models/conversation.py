@@ -172,6 +172,12 @@ class MessageORM(Base):
         default=list,
         server_default="[]",
     )
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=False,
+        default=list,
+        server_default="[]",
+    )
     parent_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     produced_by_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     copied_from_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

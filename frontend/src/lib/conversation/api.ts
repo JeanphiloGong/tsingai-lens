@@ -2,6 +2,23 @@ import { requestJson } from '../../routes/_shared/api';
 import type { ChatToolRequest, ChatToolResult } from '$lib/agent/api';
 import type { ChatSourceContext } from '$lib/document/source-context';
 
+export type CitationSource = {
+	document_id: string;
+	source_ref: string;
+	source_kind: string;
+	document_title: string;
+	page: number | string | null;
+	heading_path: string | null;
+	caption: string | null;
+	figure_label: string | null;
+	href: string;
+};
+
+export type AnswerCitation = {
+	offset: number;
+	source: CitationSource;
+};
+
 export type ConversationMessage = {
 	can_rate?: boolean;
 	message_id: string;
@@ -13,6 +30,7 @@ export type ConversationMessage = {
 	tool_calls: ChatToolRequest[];
 	tool_result: ChatToolResult | null;
 	source_contexts: ChatSourceContext[];
+	citations?: AnswerCitation[];
 };
 
 export type Conversation = {

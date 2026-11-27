@@ -85,6 +85,7 @@ after creation.
 | `tool_call_id` | varchar(128) | yes | Model tool-call identity |
 | `operation_id` | varchar(128) | yes | Internal Operation identity when no model `tool_call_id` exists |
 | `source_contexts` | jsonb | no | Validated source attachments, default `[]` |
+| `citations` | jsonb | no | Structured Source citations on a final assistant Message, default `[]` |
 | `created_at` | timestamptz | no | Creation time |
 
 Ordinary user Messages have no `produced_by_task_id`. A Task reading historical
@@ -96,6 +97,16 @@ requested the tool. The Operation stores the tool name, arguments, and result.
 A model-produced tool Message uses `tool_call_id` to connect the assistant request
 and Operation. An internal Operation without a model tool call uses `operation_id`
 to connect its tool Message.
+
+Final assistant Messages store `citations` together with the answer content. The
+model writes `[[cite:<document_id>/<source_ref>]]` markers according to the Agent
+system prompt. Agent execution removes the markers and stores each verified
+citation's UTF-16 `offset` and Source metadata. It accepts only complete
+`read_source`, `inspect_table`, or `inspect_document_sources` results whose
+`resource_refs` identify the same Source. Search previews and truncated reads do
+not produce citations. Conversation reads check the Source Document's Workspace
+ownership and generate the user-specific reader URL at response time. The stored
+value does not contain a presentation label or URL.
 
 ## 5. `chat_message_feedback`
 

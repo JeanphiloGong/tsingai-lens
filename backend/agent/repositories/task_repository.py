@@ -689,6 +689,7 @@ class TaskRepository:
                 role=message["role"],
                 content=message.get("content", ""),
                 source_contexts=message.get("source_contexts", []),
+                citations=message.get("citations", []),
                 operation_id=message.get("operation_id"),
                 produced_by_task_id=task.task_id,
                 created_at=message.get("created_at", _now()),

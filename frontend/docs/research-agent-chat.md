@@ -483,13 +483,16 @@ matching paper and exact Source location in the reading area. The answer does
 not begin or end with a detached list of Source IDs, and users do not need to
 interpret backend locators to understand what supports a statement.
 
-The model's `[[cite:...]]` markers are converted to these labels only after the
-server verifies a complete exact Source read. Search results, headings, and
-truncated Source windows remain navigation previews and are never presented as
-supporting links. Internal `blk_doc_*`, `tbl_doc_*`, and `fig_doc_*` identities
-are retained only for audit and navigation; they are not visible in the label or
-ordinary answer prose. The same projection is applied when older trajectories
-are loaded, without rewriting their stored audit record.
+The model receives an explicit citation contract in the Agent system prompt and
+writes `[[cite:<document_id>/<source_ref>]]` markers after supported claims. Agent
+execution removes the markers only after verifying a complete exact Source read,
+then stores structured citation metadata with the final Message. Search results,
+headings, and truncated Source windows remain navigation previews and are never
+presented as supporting links. Conversation reads recheck the Document's current
+Workspace ownership and generate the reader URL. The frontend chooses the visible
+label from the returned title, caption, heading, and page metadata. Internal
+`blk_doc_*`, `tbl_doc_*`, and `fig_doc_*` identities do not appear in ordinary
+answer prose.
 
 While a response is streaming, an unfinished citation marker is hidden from the
 transient text so an internal locator cannot flash in the UI. The completed

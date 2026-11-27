@@ -196,7 +196,7 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.14"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.15"
     for section in (
         "AGENT MISSION",
         "FOUR-LAYER RESPONSIBILITY MODEL",
@@ -235,6 +235,8 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "complete only the experiment path" in prompt
     assert "Call the exposed tool schemas directly" in prompt
     assert "Backend permission mode, tool risk and canonical Source prerequisites remain authoritative" in prompt
+    assert "[[cite:<document_id>/<source_ref>]]" in prompt
+    assert "Never invent a Source ID" in prompt
     assert "create_paper_experiment_revision" not in RESEARCH_AGENT_SYSTEM_PROMPT
 
 

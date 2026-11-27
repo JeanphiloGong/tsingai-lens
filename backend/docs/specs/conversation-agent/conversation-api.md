@@ -257,6 +257,10 @@ Message includes `can_rate` and the authenticated user's `my_feedback`, and the
 response includes summaries of `accepted`, `running`, `approval_required`, and
 `interrupted` Tasks, each with `task_id`, `status`, and `checkpoint_revision`.
 `source_contexts` preserves saved source-location metadata.
+Final assistant Messages may also include `citations`. The model emits
+`[[cite:<document_id>/<source_ref>]]` markers, Agent execution validates them
+against complete Source reads, and the response exposes the resulting UTF-16
+`offset` with structured Source metadata and a Workspace-scoped `href`.
 
 ```json
 {
@@ -277,6 +281,22 @@ response includes summaries of `accepted`, `running`, `approval_required`, and
         "message_id":"msg_02",
         "role":"assistant",
         "content":"Both papers examine 316L.",
+        "citations":[
+          {
+            "offset":25,
+            "source":{
+              "document_id":"doc_a",
+              "source_ref":"table-3",
+              "source_kind":"table",
+              "document_title":"Paper A",
+              "page":8,
+              "heading_path":"Methods",
+              "caption":"Table 3. Heat treatment",
+              "figure_label":null,
+              "href":"/workspaces/ws_01/documents/doc_a?view=parsed-paper&source_ref=table-3&page=8"
+            }
+          }
+        ],
         "can_rate":true,
         "my_feedback":{
           "feedback_id":"feedback_01",
@@ -300,7 +320,9 @@ response includes summaries of `accepted`, `running`, `approval_required`, and
 as Task context preserves its existing ownership. The client uses `can_rate` to
 show the rating controls. An eligible Message has `my_feedback: null` until the
 authenticated user rates it. Ineligible Messages, including Fork copies, return
-`can_rate: false` and `my_feedback: null`. [Feedback API](feedback-api.md)
+`can_rate: false` and `my_feedback: null`. The API omits citations whose Document
+is no longer in the Conversation's Workspace. The frontend chooses the visible
+link label from the returned Source metadata. [Feedback API](feedback-api.md)
 
 ## 3. Save the Current Path
 

@@ -3,6 +3,33 @@ import { render } from 'vitest-browser-svelte';
 import MessageContent from './MessageContent.svelte';
 
 describe('research reply Markdown', () => {
+	it('renders persisted citations at their UTF-16 answer offsets', async () => {
+		const screen = render(MessageContent, {
+			content: '保温时间为 30 分钟。',
+			citations: [
+				{
+					offset: 12,
+					source: {
+						document_id: 'doc-a',
+						source_ref: 'table-3',
+						source_kind: 'table',
+						document_title: 'Paper A',
+						page: 8,
+						heading_path: 'Methods',
+						caption: 'Table 3. Heat treatment',
+						figure_label: null,
+						href: '/workspaces/ws-a/documents/doc-a?source_ref=table-3'
+					}
+				}
+			]
+		});
+
+		await expect
+			.element(screen.getByRole('link', { name: 'Paper A · Table 3. Heat treatment' }))
+			.toHaveAttribute('href', '/workspaces/ws-a/documents/doc-a?source_ref=table-3');
+		expect(screen.container.textContent).toContain('保温时间为 30 分钟。');
+	});
+
 	it('renders comparison cells, headings, ordered steps, links, and code without changing values', async () => {
 		const screen = render(MessageContent, {
 			content: [

@@ -91,8 +91,8 @@ async def _check_discovery_inputs(
             job.run.workspace_id, item.document_id, db=db
         )
         if (
-            record.document.status != "ready"
-            or record.document.preparation_fingerprint != item.preparation_fingerprint
+            record.status != "ready"
+            or record.preparation_fingerprint != item.preparation_fingerprint
         ):
             raise ValueError("discovery document input changed")
     if _objective_discovery_fingerprint(document_inputs) != job.run.input_fingerprint:

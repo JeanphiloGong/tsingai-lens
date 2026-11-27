@@ -6,16 +6,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Document:
     document_id: str
-    original_filename: str
+    filename: str
     sha256: str
     media_type: str | None
-    status: str
     size_bytes: int
-    parser_version: str | None = None
-    document_analysis_version: str | None = None
-    source_fingerprint: str | None = None
-    profile_fingerprint: str | None = None
-    preparation_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)

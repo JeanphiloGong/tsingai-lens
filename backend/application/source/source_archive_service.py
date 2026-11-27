@@ -223,11 +223,11 @@ def _write_source_archive(
                     {
                         "document_id": document_id,
                         "archive_path": archive_path,
-                        "original_filename": source["filename"],
+                        "filename": source["filename"],
                         "media_type": source.get("media_type"),
                         "size_bytes": len(content),
                         "sha256": record.document.sha256,
-                        "status": record.document.status,
+                        "status": record.status,
                         "created_at": record.created_at,
                     }
                 )
@@ -261,8 +261,7 @@ def _source_file_record_matches(
 ) -> bool:
     candidates = (
         record.document.document_id,
-        record.document.original_filename,
-        record.stored_filename,
+        record.document.filename,
         record.storage_key,
         Path(record.storage_key or "").name,
     )
@@ -296,10 +295,7 @@ def _build_source_file_payload(
     expected_sha256 = record.document.sha256
     if not storage_key or not expected_sha256:
         raise DocumentSourceUnavailableError(workspace_id, document_id)
-    stored_filename = record.stored_filename
-    if not stored_filename or storage_key != _input_storage_key(
-        workspace_id, stored_filename
-    ):
+    if not storage_key or not _valid_input_storage_key(workspace_id, storage_key):
         raise DocumentSourceUnavailableError(
             workspace_id,
             document_id,
@@ -325,7 +321,7 @@ def _build_source_file_payload(
             message="The stored source file failed its integrity check.",
         ) from exc
     filename = (
-        record.document.original_filename or stored_filename or Path(storage_key).name
+        record.document.filename or storage_key or Path(storage_key).name
     )
     return {
         "content": content,
@@ -335,8 +331,9 @@ def _build_source_file_payload(
     }
 
 
-def _input_storage_key(workspace_id: str, stored_filename: str) -> str:
-    return f"{workspace_id}/input/{stored_filename}"
+def _valid_input_storage_key(workspace_id: str, storage_key: str) -> bool:
+    parts = str(storage_key).split("/")
+    return len(parts) >= 3 and parts[0] == workspace_id and parts[1] == "input" and all(parts[2:])
 
 
 def _safe_archive_filename(value: str) -> str:

@@ -137,8 +137,8 @@ async def prepare_paper_experiment_draft(
         )
     document_record = await workspace_service.get_document(workspace_id, document_id)
     source_fingerprint = str(
-        document_record.document.preparation_fingerprint
-        or document_record.document.source_fingerprint
+        document_record.preparation_fingerprint
+        or document_record.source_fingerprint
         or document.metadata.get("source_fingerprint")
         or ""
     ).strip()
@@ -207,8 +207,8 @@ async def write_prepared_paper_experiments(
     if document is None:
         raise FileNotFoundError("prepared Source document is no longer available")
     current_fingerprint = str(
-        document_record.document.preparation_fingerprint
-        or document_record.document.source_fingerprint
+        document_record.preparation_fingerprint
+        or document_record.source_fingerprint
         or document.metadata.get("source_fingerprint")
         or ""
     ).strip()

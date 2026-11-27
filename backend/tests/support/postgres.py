@@ -88,13 +88,11 @@ async def seed_workspace(
         StoredDocument(
             document=Document(
                 document_id=document_id,
-                original_filename=f"{document_id}.txt",
+                filename=f"{document_id}.txt",
                 sha256=sha256(document_id.encode()).hexdigest(),
                 media_type="text/plain",
-                status="stored",
                 size_bytes=1,
             ),
-            stored_filename=f"{document_id}.txt",
             storage_key=f"{workspace_id}/input/{document_id}.txt",
             created_at=now,
         )

@@ -610,10 +610,10 @@
 									value={document.document_id}
 									bind:group={selectedArchiveDocumentIds}
 									disabled={archiveDownloading}
-									aria-label={`${$t('overview.currentModel.export.selectDocument')} ${document.original_filename}`}
+									aria-label={`${$t('overview.currentModel.export.selectDocument')} ${document.filename}`}
 								/>
 								<span>
-									<strong>{document.original_filename}</strong>
+									<strong>{document.filename}</strong>
 									<small>{documentStatus(document)}</small>
 								</span>
 							</label>
@@ -704,7 +704,7 @@
 				{#each attentionDocuments as document (document.document_id)}
 					<div class="attention-row">
 						<div>
-							<strong>{document.original_filename}</strong>
+							<strong>{document.filename}</strong>
 							<span>{documentStatus(document)}</span>
 							{#if runFor(document.document_id)?.errors[0]}
 								<small class="failure">{$t('overview.currentModel.preparationFailed')}</small>

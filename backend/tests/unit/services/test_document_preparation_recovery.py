@@ -125,7 +125,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
     assert result.status == "completed"
     assert (
         await workspace_service.get_document("prepare-papers", "paper-a")
-    ).document.status == "ready"
+    ).status == "ready"
     assert ctx.parse.await_count == 1
     reused = await preparation.queue_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
@@ -254,5 +254,5 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     assert result.status == "completed"
     assert (
         await workspace_service.get_document("prepare-papers", "paper-a")
-    ).document.status == "ready"
+    ).status == "ready"
     assert ctx.parse.await_count == (2 if stage == "source" else 1)

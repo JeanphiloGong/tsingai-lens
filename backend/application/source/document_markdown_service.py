@@ -578,8 +578,8 @@ def _source_map_entry(
 def _source_filename(document: SourceDocument) -> str | None:
     for key in (
         "source_filename",
-        "original_filename",
-        "stored_filename",
+        "filename",
+        "storage_key",
         "source_path",
     ):
         value = _metadata_text(document.metadata, key)
@@ -592,7 +592,7 @@ def _document_display_names(
     workspace: StoredWorkspace,
     document: SourceDocument,
 ) -> dict[str, str | None]:
-    stored_to_original = _stored_to_original_filenames(workspace)
+    stored_to_original = _stored_to_filenames(workspace)
     source_filename = _source_filename(document)
     display_source_filename = (
         stored_to_original.get(source_filename, source_filename)
@@ -611,11 +611,11 @@ def _document_display_names(
     }
 
 
-def _stored_to_original_filenames(workspace: StoredWorkspace) -> dict[str, str]:
+def _stored_to_filenames(workspace: StoredWorkspace) -> dict[str, str]:
     filenames: dict[str, str] = {}
     for record in workspace.documents:
-        original = normalize_display_text(record.document.original_filename)
-        stored = normalize_display_text(record.stored_filename)
+        original = normalize_display_text(record.document.filename)
+        stored = normalize_display_text(record.storage_key)
         if original and stored:
             filenames[Path(stored).name] = Path(original).name
     return filenames

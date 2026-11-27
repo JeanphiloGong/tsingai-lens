@@ -23,10 +23,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 @dataclass(frozen=True)
 class StoredDocument:
     document: DocumentAggregate
-    stored_filename: str
     storage_key: str
     created_at: str
     updated_at: str | None = None
+    status: str = "stored"
+    parser_version: str | None = None
+    document_analysis_version: str | None = None
+    source_fingerprint: str | None = None
+    profile_fingerprint: str | None = None
+    preparation_fingerprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,7 +45,7 @@ class StoredWorkspace:
 @dataclass(frozen=True)
 class WorkspaceDocumentSummary:
     document_id: str
-    original_filename: str
+    filename: str
     media_type: str | None
     status: str
     size_bytes: int
@@ -104,7 +109,7 @@ class WorkspaceRepository:
                 select(
                     DocumentORM.workspace_id,
                     DocumentORM.document_id,
-                    DocumentORM.original_filename,
+                    DocumentORM.filename,
                     DocumentORM.media_type,
                     DocumentORM.status,
                     DocumentORM.size_bytes,
@@ -118,7 +123,7 @@ class WorkspaceRepository:
                 documents_by_workspace[document.workspace_id].append(
                     WorkspaceDocumentSummary(
                         document_id=document.document_id,
-                        original_filename=document.original_filename,
+                        filename=document.filename,
                         media_type=document.media_type,
                         status=document.status,
                         size_bytes=document.size_bytes,
@@ -200,19 +205,18 @@ class WorkspaceRepository:
             return StoredDocument(
                 document=DocumentAggregate(
                     document_id=document.document_id,
-                    original_filename=document.original_filename,
+                    filename=document.filename,
                     sha256=document.sha256,
                     media_type=document.media_type,
-                    status=document.status,
                     size_bytes=document.size_bytes,
-                    parser_version=preparation.parser_version if preparation else None,
-                    document_analysis_version=profile.get("profile_version"),
-                    source_fingerprint=source_fingerprint,
-                    profile_fingerprint=profile_fingerprint,
-                    preparation_fingerprint=profile_fingerprint or source_fingerprint,
                 ),
-                stored_filename=document.stored_filename,
                 storage_key=document.storage_key,
+                status=document.status,
+                parser_version=preparation.parser_version if preparation else None,
+                document_analysis_version=profile.get("profile_version"),
+                source_fingerprint=source_fingerprint,
+                profile_fingerprint=profile_fingerprint,
+                preparation_fingerprint=profile_fingerprint or source_fingerprint,
                 created_at=_iso(document.created_at),
                 updated_at=_iso(document.updated_at),
             )
@@ -285,12 +289,11 @@ class WorkspaceRepository:
                 DocumentORM(
                     document_id=item.document.document_id,
                     workspace_id=workspace_id,
-                    original_filename=item.document.original_filename,
-                    stored_filename=item.stored_filename,
+                    filename=item.document.filename,
                     storage_key=item.storage_key,
                     sha256=item.document.sha256,
                     media_type=item.document.media_type,
-                    status=item.document.status,
+                    status=item.status,
                     size_bytes=item.document.size_bytes,
                     document_order=next_order + position,
                     created_at=_datetime(item.created_at),
@@ -309,12 +312,11 @@ class WorkspaceRepository:
             row = await db.get(DocumentORM, document.document_id)
             if row is None:
                 return False
-            row.original_filename = document.original_filename
-            row.stored_filename = record.stored_filename
+            row.filename = document.filename
             row.storage_key = record.storage_key
             row.sha256 = document.sha256
             row.media_type = document.media_type
-            row.status = document.status
+            row.status = record.status
             row.size_bytes = document.size_bytes
             row.updated_at = _datetime(record.updated_at or record.created_at)
             return True
@@ -351,20 +353,19 @@ async def load_workspace_documents(
             StoredDocument(
                 document=DocumentAggregate(
                     document_id=document.document_id,
-                    original_filename=document.original_filename,
+                    filename=document.filename,
                     sha256=document.sha256,
                     media_type=document.media_type,
-                    status=document.status,
                     size_bytes=document.size_bytes,
-                    parser_version=preparation.parser_version if preparation else None,
-                    document_analysis_version=profile.get("profile_version"),
-                    source_fingerprint=source_fingerprint,
-                    profile_fingerprint=profile_fingerprint,
-                    # The source identity remains usable until profiling completes.
-                    preparation_fingerprint=profile_fingerprint or source_fingerprint,
                 ),
-                stored_filename=document.stored_filename,
                 storage_key=document.storage_key,
+                status=document.status,
+                parser_version=preparation.parser_version if preparation else None,
+                document_analysis_version=profile.get("profile_version"),
+                source_fingerprint=source_fingerprint,
+                profile_fingerprint=profile_fingerprint,
+                # The source identity remains usable until profiling completes.
+                preparation_fingerprint=profile_fingerprint or source_fingerprint,
                 created_at=_iso(document.created_at),
                 updated_at=_iso(document.updated_at),
             )

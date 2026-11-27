@@ -50,8 +50,8 @@ async def _workspace_document_ids(workspace_id: str) -> set[str]:
     keys: set[str] = set()
     workspace = await workspace_service.get_workspace(workspace_id)
     for record in workspace.documents:
-        keys.update((record.document.document_id, record.document.original_filename,
-                     record.stored_filename, record.storage_key))
+        keys.update((record.document.document_id, record.document.filename,
+                     record.storage_key, record.storage_key))
     return keys
 
 

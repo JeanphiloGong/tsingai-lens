@@ -2,8 +2,7 @@ import { errorMessage, getApiErrorReason, requestJson } from './api';
 
 export type WorkspaceDocument = {
 	document_id: string;
-	original_filename: string;
-	stored_filename: string;
+	filename: string;
 	storage_key: string;
 	sha256: string;
 	media_type?: string | null;

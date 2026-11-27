@@ -48,23 +48,27 @@ async def add_document(
             str(exc), data={"code": "upload_invalid"}
         ) from exc
 
-    path = Path(filename)
-    stored_filename = f"{uuid4().hex}_{path.stem}{path.suffix.lower() or '.bin'}"
-    storage_key = f"{workspace_id}/input/{stored_filename}"
+    document_id = f"doc_{uuid4().hex[:12]}"
+    storage_key = f"{workspace_id}/input/{document_id}"
     digest = sha256(content).hexdigest()
+    now = _now_iso()
     record = StoredDocument(
         document=Document(
-            document_id=f"doc_{uuid4().hex[:12]}",
-            original_filename=filename,
+            document_id=document_id,
+            filename=filename,
             sha256=digest,
             media_type=media_type,
-            status="stored",
             size_bytes=len(content),
         ),
-        stored_filename=stored_filename,
         storage_key=storage_key,
-        created_at=_now_iso(),
-        updated_at=_now_iso(),
+        status="stored",
+        parser_version=None,
+        document_analysis_version=None,
+        source_fingerprint=None,
+        profile_fingerprint=None,
+        preparation_fingerprint=None,
+        created_at=now,
+        updated_at=now,
     )
     object_store.write(storage_key, content, digest)
     try:

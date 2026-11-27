@@ -37,12 +37,12 @@ class DocumentProfileRepository:
             "generated_at": profile.generated_at,
         }
         async with AsyncSessionLocal.begin() if db is None else nullcontext(db) as db:
-            document = await db.get(DocumentORM, profile.document_id)
+            document = await db.get(DocumentORM, profile.document_id, with_for_update=True)
             if document is None or document.workspace_id != workspace_id:
                 raise FileNotFoundError(
                     f"workspace document not found: {workspace_id}/{profile.document_id}"
                 )
-            row = await db.get(DocumentPreparationORM, profile.document_id)
+            row = await db.get(DocumentPreparationORM, profile.document_id, with_for_update=True)
             if row is None:
                 now = datetime.now(timezone.utc)
                 db.add(

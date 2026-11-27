@@ -40,8 +40,7 @@ class WorkspaceDocumentResponse(BaseModel):
     """A current source document in a workspace."""
 
     document_id: str = Field(..., description="Document ID")
-    original_filename: str = Field(..., description="Original filename")
-    stored_filename: str = Field(..., description="Stored filename")
+    filename: str = Field(..., description="Document filename")
     storage_key: str = Field(..., description="Storage key")
     sha256: str = Field(..., description="Document content hash")
     media_type: str | None = Field(default=None, description="Media type")
@@ -60,7 +59,7 @@ class WorkspaceDocumentSummaryResponse(BaseModel):
     """Browser-facing document fields needed in workspace listings."""
 
     document_id: str = Field(..., description="Document ID")
-    original_filename: str = Field(..., description="Original filename")
+    filename: str = Field(..., description="Document filename")
     media_type: str | None = Field(default=None, description="Media type")
     status: str = Field(..., description="Document preparation status")
     size_bytes: int = Field(default=0, description="Document size in bytes")
@@ -178,8 +177,13 @@ async def _read_upload_content(file: UploadFile) -> bytes:
 
 def document_response(record: StoredDocument) -> WorkspaceDocumentResponse:
     return WorkspaceDocumentResponse(
-        **asdict(record.document), stored_filename=record.stored_filename,
-        storage_key=record.storage_key, created_at=record.created_at,
+        **asdict(record.document), storage_key=record.storage_key,
+        status=record.status, parser_version=record.parser_version,
+        document_analysis_version=record.document_analysis_version,
+        source_fingerprint=record.source_fingerprint,
+        profile_fingerprint=record.profile_fingerprint,
+        preparation_fingerprint=record.preparation_fingerprint,
+        created_at=record.created_at,
         updated_at=record.updated_at or record.created_at,
     )
 

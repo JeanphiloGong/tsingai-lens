@@ -46,14 +46,12 @@ async def _repository_with_pdf(payload: bytes, *, postgres_session_factory) -> W
     document = StoredDocument(
         document=Document(
             document_id="doc_1",
-            original_filename="paper.pdf",
+            filename="paper.pdf",
             sha256=sha256(payload).hexdigest(),
             media_type="application/pdf",
-            status="stored",
             size_bytes=len(payload),
         ),
-        stored_filename="paper.pdf",
-        storage_key="col_demo/input/paper.pdf",
+        storage_key="col_demo/input/doc_1",
         created_at="2026-08-27T00:00:00+00:00",
     )
     await repository.add_workspace(workspace)

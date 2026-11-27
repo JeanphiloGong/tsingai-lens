@@ -66,14 +66,12 @@ def _document(document_id: str) -> StoredDocument:
     return StoredDocument(
         document=Document(
             document_id=document_id,
-            original_filename=f"{document_id}.pdf",
+            filename=f"{document_id}.pdf",
             sha256=digest,
             media_type="application/pdf",
-            status="stored",
             size_bytes=100,
         ),
-        stored_filename=f"stored-{document_id}.pdf",
-        storage_key=f"{COLLECTION_ID}/input/stored-{document_id}.pdf",
+        storage_key=f"{COLLECTION_ID}/input/{document_id}",
         created_at=NOW,
         updated_at=NOW,
     )

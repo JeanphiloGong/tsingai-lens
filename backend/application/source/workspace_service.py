@@ -162,34 +162,31 @@ async def update_document_preparation(
     updated = replace(
         current,
         updated_at=_now_iso(),
-        document=replace(
-            document,
-            status=str(status),
-            preparation_fingerprint=(
-                preparation_fingerprint
-                if preparation_fingerprint is not None
-                else document.preparation_fingerprint
-            ),
-            source_fingerprint=(
-                source_fingerprint
-                if source_fingerprint is not None
-                else document.source_fingerprint
-            ),
-            profile_fingerprint=(
-                profile_fingerprint
-                if profile_fingerprint is not None
-                else document.profile_fingerprint
-            ),
-            parser_version=(
-                parser_version
-                if parser_version is not None
-                else document.parser_version
-            ),
-            document_analysis_version=(
-                document_analysis_version
-                if document_analysis_version is not None
-                else document.document_analysis_version
-            ),
+        status=str(status),
+        preparation_fingerprint=(
+            preparation_fingerprint
+            if preparation_fingerprint is not None
+            else current.preparation_fingerprint
+        ),
+        source_fingerprint=(
+            source_fingerprint
+            if source_fingerprint is not None
+            else current.source_fingerprint
+        ),
+        profile_fingerprint=(
+            profile_fingerprint
+            if profile_fingerprint is not None
+            else current.profile_fingerprint
+        ),
+        parser_version=(
+            parser_version
+            if parser_version is not None
+            else current.parser_version
+        ),
+        document_analysis_version=(
+            document_analysis_version
+            if document_analysis_version is not None
+            else current.document_analysis_version
         ),
     )
     if not await WorkspaceRepo.update_document(updated, db=db):
@@ -253,11 +250,9 @@ async def delete_workspace(
 
     for record in workspace.documents:
         storage_key = record.storage_key
-        stored_filename = record.stored_filename
         if (
             not storage_key
-            or not stored_filename
-            or storage_key != _input_storage_key(workspace_id, stored_filename)
+            or not _valid_input_storage_key(workspace_id, storage_key)
         ):
             raise ValueError("invalid workspace object key")
     if not await WorkspaceRepo.delete_workspace(workspace_id):
@@ -280,8 +275,9 @@ async def delete_workspace_for_user(
     return await delete_workspace(workspace_id)
 
 
-def _input_storage_key(workspace_id: str, stored_filename: str) -> str:
-    return f"{workspace_id}/input/{stored_filename}"
+def _valid_input_storage_key(workspace_id: str, storage_key: str) -> bool:
+    parts = str(storage_key).split("/")
+    return len(parts) >= 3 and parts[0] == workspace_id and parts[1] == "input" and all(parts[2:])
 
 
 def _figure_storage_key(

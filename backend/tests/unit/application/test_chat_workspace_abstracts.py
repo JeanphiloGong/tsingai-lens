@@ -37,9 +37,9 @@ def stored_workspace(records):
         created_at="2026-11-01", updated_at="2026-11-01",
         documents=tuple(
             StoredDocument(
-                document=Document(item["document_id"], item.get("original_filename", item["document_id"]), "digest", None, item["status"], 0),
-                stored_filename=item.get("original_filename", item["document_id"]),
-                storage_key="input/" + item["document_id"], created_at="2026-11-01",
+                document=Document(document_id=item["document_id"], filename=item.get("filename", item["document_id"]), sha256="digest", media_type=None, size_bytes=0),
+                storage_key="workspace/input/" + item["document_id"], created_at="2026-11-01",
+                status=item.get("status", "stored"),
             )
             for item in records
         ),
@@ -103,7 +103,7 @@ def test_unprepared_source_remains_unprepared():
     ("No explicitly labelled abstract is available.", "not_found"),
 ])
 def test_browse_prepared_paper_reports_only_real_screening_limitations(text, expected_status):
-    workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": "paper-1", "original_filename": "Preheating.pdf", "status": "ready"}])))
+    workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": "paper-1", "filename": "Preheating.pdf", "status": "ready"}])))
     workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", title="Preheating", doc_type="experimental", confidence=0.9),
         ]))
@@ -141,7 +141,7 @@ def test_optional_screening_information_does_not_require_researcher_intervention
     if missing == "insufficient_map":
         paper_map.map_status = "insufficient_map"
         paper_map.map_limitations = ("Process scope is not mapped.",)
-    workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}])))
+    workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": "paper-1", "filename": "LPBF preheating.pdf", "status": document_status}])))
     workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(
             return_value=[] if missing == "profile" else [profile]
         ))
@@ -165,13 +165,13 @@ def test_optional_screening_information_does_not_require_researcher_intervention
 
 def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     records = [
-        {"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": "ready"},
-        {"document_id": "paper-2", "original_filename": "Processing.pdf", "status": "processing"},
-        {"document_id": "paper-3", "original_filename": "Stored.pdf", "status": "stored"},
-        {"document_id": "paper-4", "original_filename": "Preparation failed.pdf", "status": "failed"},
-        {"document_id": "paper-5", "original_filename": "Source unavailable.pdf", "status": "ready"},
-        {"document_id": "paper-6", "original_filename": "Read failed.pdf", "status": "ready"},
-        {"document_id": "paper-7", "original_filename": "Later paper.pdf", "status": "ready"},
+        {"document_id": "paper-1", "filename": "LPBF preheating.pdf", "status": "ready"},
+        {"document_id": "paper-2", "filename": "Processing.pdf", "status": "processing"},
+        {"document_id": "paper-3", "filename": "Stored.pdf", "status": "stored"},
+        {"document_id": "paper-4", "filename": "Preparation failed.pdf", "status": "failed"},
+        {"document_id": "paper-5", "filename": "Source unavailable.pdf", "status": "ready"},
+        {"document_id": "paper-6", "filename": "Read failed.pdf", "status": "ready"},
+        {"document_id": "paper-7", "filename": "Later paper.pdf", "status": "ready"},
     ]
 
     async def read_source(_workspace_id, document_id):
@@ -248,12 +248,12 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     records = [
         {
             "document_id": source_document.document_id,
-            "original_filename": "P002-preheating.pdf",
+            "filename": "P002-preheating.pdf",
             "status": "ready",
         },
         {
             "document_id": "paper-2",
-            "original_filename": "Missing.pdf",
+            "filename": "Missing.pdf",
             "status": "ready",
         },
     ]

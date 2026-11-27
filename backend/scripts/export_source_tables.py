@@ -309,12 +309,12 @@ async def _workspace_input_rows(
         storage_key = document.storage_key.strip()
         if not storage_key.lower().endswith(".pdf"):
             continue
-        if storage_key != f"{workspace_id}/input/{document.stored_filename}":
+        if storage_key != f"{workspace_id}/input/{document.storage_key}":
             raise ValueError("invalid workspace object key")
         rows.append(
             {
                 "id": document.document.document_id,
-                "title": document.document.original_filename or Path(storage_key).name,
+                "title": document.document.filename or Path(storage_key).name,
                 "creation_date": document.created_at,
                 "source_path": storage_key,
                 "storage_key": storage_key,

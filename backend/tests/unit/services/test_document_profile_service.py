@@ -199,7 +199,7 @@ async def test_document_profile_service_does_not_duplicate_source_filename(
         [
             {
                 "id": "doc-1",
-                "title": document_record.stored_filename,
+                "title": document_record.storage_key,
                 "text": "\n".join(
                     [
                         "Experimental Section",

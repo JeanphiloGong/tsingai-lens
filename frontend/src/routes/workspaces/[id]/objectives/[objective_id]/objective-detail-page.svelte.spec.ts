@@ -409,7 +409,7 @@ describe('workspaces/[id]/objectives/[objective_id]/+page.svelte', () => {
 					workspace_id: 'col_123',
 					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
-					items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }],
+					items: [{ document_id: 'paper-1', filename: 'annealing.pdf', status: 'ready' }],
 					count: 1
 				});
 			if (current.path.endsWith('/scope'))
@@ -576,7 +576,7 @@ describe('workspaces/[id]/objectives/[objective_id]/+page.svelte', () => {
 					workspace_id: 'col_123',
 					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
-					items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }],
+					items: [{ document_id: 'paper-1', filename: 'annealing.pdf', status: 'ready' }],
 					count: 1
 				});
 			if (current.path.endsWith('/scope'))
@@ -1097,7 +1097,7 @@ describe('workspaces/[id]/objectives/[objective_id]/+page.svelte', () => {
 					workspace_id: 'col_123',
 					objective_id: 'obj_1',
 					analysis_version: Number(new URLSearchParams(current.search).get('analysis_version')),
-					items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }],
+					items: [{ document_id: 'paper-1', filename: 'annealing.pdf', status: 'ready' }],
 					count: 1
 				});
 			if (current.path.endsWith('/scope'))

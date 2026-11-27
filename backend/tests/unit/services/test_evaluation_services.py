@@ -92,8 +92,8 @@ class FakeWorkspaceService:
             "col-gold": [
                 {
                     "document_id": "doc-1",
-                    "original_filename": "paper-1.pdf",
-                    "stored_filename": "paper-1.pdf",
+                    "filename": "paper-1.pdf",
+                    "storage_key": "paper-1.pdf",
                     "storage_key": "col-gold/input/paper-1.pdf",
                 }
             ]
@@ -107,8 +107,9 @@ class FakeWorkspaceService:
             created_at="2026-11-01", updated_at="2026-11-01",
             documents=tuple(
                 StoredDocument(
-                    document=Document(record["document_id"], record["original_filename"], "digest", None, "ready", 0),
-                    stored_filename=record["stored_filename"], storage_key=record["storage_key"],
+                    document=Document(document_id=record["document_id"], filename=record["filename"], sha256="digest", media_type=None, size_bytes=0),
+                    storage_key=record["storage_key"],
+                    status="ready",
                     created_at="2026-11-01",
                 )
                 for record in self.documents_by_workspace.get(workspace_id, [])

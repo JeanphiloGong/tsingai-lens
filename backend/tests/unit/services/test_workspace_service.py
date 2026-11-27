@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
+from pathlib import Path
 
 from zipfile import ZipFile
 
@@ -164,14 +165,14 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(
     )
     assert recovered == prepared
     input_dir = workspace_files.get_paths(workspace_id).input_dir
-    assert [path.name for path in input_dir.iterdir()] == [original.stored_filename]
+    assert [path.name for path in input_dir.iterdir()] == [Path(original.storage_key).name]
     with pytest.raises(
         ResourceConflictException, match="Document content already exists"
     ):
         await importer.add_document(
             workspace_id, "again.pdf", content, "application/pdf", user_id="local-user",
         )
-    assert [path.name for path in input_dir.iterdir()] == [original.stored_filename]
+    assert [path.name for path in input_dir.iterdir()] == [Path(original.storage_key).name]
     different = await importer.add_document(
         workspace_id,
         "study.pdf",
@@ -243,10 +244,10 @@ async def test_upload_registers_document_and_preserves_original_bytes(
     )
 
     assert document.document.document_id.startswith("doc_")
-    assert document.document.original_filename == "paper.TXT"
-    assert document.stored_filename.endswith("_paper.txt")
+    assert document.document.filename == "paper.TXT"
+    assert Path(document.storage_key).name == document.document.document_id
     assert document.document.media_type == "text/plain"
-    assert document.document.status == "stored"
+    assert document.status == "stored"
     assert document.document.size_bytes == len(content)
     assert document.document.sha256 == sha256(content).hexdigest()
 
@@ -445,13 +446,11 @@ async def test_source_resolution_rejects_invalid_storage_key(
     document = StoredDocument(
         document=Document(
             document_id="doc_unsafe",
-            original_filename="unsafe.pdf",
+            filename="unsafe.pdf",
             sha256="a" * 64,
             media_type="application/pdf",
-            status="stored",
             size_bytes=1,
         ),
-        stored_filename="unsafe.pdf",
         storage_key="other/input/unsafe.pdf",
         created_at=datetime.now(timezone.utc).isoformat(),
     )

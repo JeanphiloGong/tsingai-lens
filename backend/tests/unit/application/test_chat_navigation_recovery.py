@@ -54,8 +54,8 @@ def test_source_model_message_keeps_body_and_citations_without_duplicate_metadat
 @pytest.mark.anyio
 async def test_default_browse_fits_many_identities_and_keeps_exact_continuation(monkeypatch):
     records = tuple(SimpleNamespace(
-        document=SimpleNamespace(document_id=f"doc-{i}", original_filename=f"IN718 {i}.pdf", status="ready"),
-        stored_filename=f"IN718 {i}.pdf",
+        document=SimpleNamespace(document_id=f"doc-{i}", filename=f"IN718 {i}.pdf"),
+        storage_key=f"workspace/input/doc-{i}", status="ready",
     ) for i in range(100))
     monkeypatch.setattr(workspace_context.workspace_service, "get_workspace_for_user",
                         AsyncMock(return_value=SimpleNamespace(documents=records)))

@@ -1615,7 +1615,7 @@ def _tree_node_in_reference_branch(
 
 def _resolve_source_filename(document: Any) -> str | None:
     metadata = getattr(document, "metadata", {}) or {}
-    for key in ("source_filename", "original_filename", "stored_filename"):
+    for key in ("source_filename", "filename", "storage_key"):
         value = str(metadata.get(key) or "").strip()
         if value:
             return value

@@ -18,9 +18,8 @@ describe('workspace document API', () => {
 			items: [
 				{
 					document_id: 'doc_1',
-					original_filename: 'paper.pdf',
-					stored_filename: 'stored.pdf',
-					storage_key: 'col_1/input/stored.pdf',
+					filename: 'paper.pdf',
+					storage_key: 'col_1/input/doc_1',
 					sha256: 'a'.repeat(64),
 					media_type: 'application/pdf',
 					status: 'ready',
@@ -58,9 +57,8 @@ describe('workspace document API', () => {
 		request
 			.mockResolvedValueOnce({
 				document_id: 'doc_1',
-				original_filename: 'first.pdf',
-				stored_filename: 'first.pdf',
-				storage_key: 'col_1/input/first.pdf',
+				filename: 'first.pdf',
+				storage_key: 'col_1/input/doc_1',
 				sha256: 'a'.repeat(64),
 				status: 'stored',
 				size_bytes: 3,
@@ -70,9 +68,8 @@ describe('workspace document API', () => {
 			.mockRejectedValueOnce(new Error('Upload failed.'))
 			.mockResolvedValueOnce({
 				document_id: 'doc_2',
-				original_filename: 'last.pdf',
-				stored_filename: 'last.pdf',
-				storage_key: 'col_1/input/last.pdf',
+				filename: 'last.pdf',
+				storage_key: 'col_1/input/doc_2',
 				sha256: 'b'.repeat(64),
 				status: 'stored',
 				size_bytes: 3,
@@ -84,7 +81,7 @@ describe('workspace document API', () => {
 
 		expect(request).toHaveBeenCalledTimes(3);
 		expect(result.count).toBe(2);
-		expect(result.items.map((item) => item.original_filename)).toEqual(['first.pdf', 'last.pdf']);
+		expect(result.items.map((item) => item.filename)).toEqual(['first.pdf', 'last.pdf']);
 		expect(result.failures).toEqual([{ file: damaged, message: 'Upload failed.' }]);
 	});
 

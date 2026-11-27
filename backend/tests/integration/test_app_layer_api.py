@@ -64,7 +64,7 @@ class _ImmediateDocumentPreparationService:
             SourceDocument(
                 document_id=document_id,
                 document_order=0,
-                title=document.document.original_filename,
+                title=document.document.filename,
                 text=self.object_store.read(
                     document.storage_key,
                     document.document.sha256,
@@ -76,7 +76,7 @@ class _ImmediateDocumentPreparationService:
             workspace_id,
             DocumentProfile(
                 document_id=document_id,
-                title=document.document.original_filename,
+                title=document.document.filename,
                 doc_type="experimental",
                 profile_warnings=(),
                 confidence=1.0,
@@ -224,7 +224,7 @@ def test_workspace_list_returns_compact_document_rows(app_client) -> None:
     assert response.status_code == 200
     document = response.json()["data"]["items"][0]["documents"][0]
     assert document["document_id"] == uploaded["document_id"]
-    assert document["original_filename"] == "paper-a.txt"
+    assert document["filename"] == "paper-a.txt"
     assert document["status"] == "stored"
     assert "storage_key" not in document
     assert "sha256" not in document

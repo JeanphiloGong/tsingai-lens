@@ -13,7 +13,7 @@ export type Workspace = {
 	documents: Pick<
 		WorkspaceDocument,
 		| 'document_id'
-		| 'original_filename'
+		| 'filename'
 		| 'media_type'
 		| 'status'
 		| 'size_bytes'

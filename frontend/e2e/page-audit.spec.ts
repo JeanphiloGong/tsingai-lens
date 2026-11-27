@@ -3598,9 +3598,8 @@ function uploadedFile(auditState?: string | null) {
 	const ready = auditState !== 'uploaded';
 	return {
 		document_id: 'doc_1',
-		original_filename: 'paper-a.pdf',
-		stored_filename: 'paper-a.pdf',
-		storage_key: `${workspaceId}/input/paper-a.pdf`,
+		filename: 'paper-a.pdf',
+		storage_key: `${workspaceId}/input/doc_1`,
 		sha256: 'a'.repeat(64),
 		media_type: 'application/pdf',
 		status: ready ? 'ready' : 'stored',
@@ -3618,9 +3617,8 @@ function uploadedFile(auditState?: string | null) {
 function processingDocument() {
 	return {
 		document_id: 'doc_2',
-		original_filename: 'paper-b.pdf',
-		stored_filename: 'paper-b.pdf',
-		storage_key: `${workspaceId}/input/paper-b.pdf`,
+		filename: 'paper-b.pdf',
+		storage_key: `${workspaceId}/input/doc_2`,
 		sha256: 'b'.repeat(64),
 		media_type: 'application/pdf',
 		status: 'processing',

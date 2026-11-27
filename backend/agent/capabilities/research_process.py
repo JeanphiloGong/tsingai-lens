@@ -126,7 +126,7 @@ class InspectResearchProcessCapability:
     ) -> dict[str, Any]:
         document_id = str(document.document.document_id or "")
         run = latest_by_document.get(document_id)
-        document_status = str(document.document.status or "stored")
+        document_status = str(document.status or "stored")
         run_status = run.status if run is not None else ""
         interrupted = (
             run_status == "failed"
@@ -145,7 +145,7 @@ class InspectResearchProcessCapability:
         )
         return {
             "document_id": document_id,
-            "filename": str(document.document.original_filename or "")[:300],
+            "filename": str(document.document.filename or "")[:300],
             "status": status,
             "run_id": run.run_id if run is not None else None,
             "stage": run.current_node if run is not None else None,

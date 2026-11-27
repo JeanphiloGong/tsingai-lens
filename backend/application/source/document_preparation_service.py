@@ -139,12 +139,11 @@ async def queue_document_preparation(
 async def _can_reuse_document_preparation(
     workspace_id: str, record: StoredDocument, source_identity: str, profile_identity: str
 ) -> bool:
-    document = record.document
     if (
-        document.status != "ready"
-        or document.preparation_fingerprint != profile_identity
-        or document.profile_fingerprint != profile_identity
-        or document.source_fingerprint != source_identity
+        record.status != "ready"
+        or record.preparation_fingerprint != profile_identity
+        or record.profile_fingerprint != profile_identity
+        or record.source_fingerprint != source_identity
     ):
         return False
     profile = await DocumentProfileRepo.read(
@@ -181,9 +180,9 @@ async def _parse_document_sources(
                 [
                     {
                         "id": document.document_id,
-                        "source_path": record.stored_filename,
-                        "source_type": Path(record.stored_filename).suffix.lstrip("."),
-                        "title": document.original_filename,
+                        "source_path": record.storage_key,
+                        "source_type": Path(document.filename).suffix.lstrip("."),
+                        "title": document.filename,
                         "creation_date": record.created_at,
                         "text": None,
                     }
@@ -305,7 +304,7 @@ async def execute_document_preparation_job(
         )
         if (
             source_document is None
-            or record.document.source_fingerprint != source_identity
+            or record.source_fingerprint != source_identity
         ):
             temporary_root = (
                 workspace.get_paths(workspace_id).output_dir / "preparation"
@@ -373,7 +372,7 @@ async def execute_document_preparation_job(
         profile = await DocumentProfileRepo.read(workspace_id, document_id)
         if (
             profile is None
-            or record.document.profile_fingerprint != profile_identity
+            or record.profile_fingerprint != profile_identity
             or profile.profile_status != PROFILE_STATUS_COMPLETED
         ):
             with ExitStack() as clients:

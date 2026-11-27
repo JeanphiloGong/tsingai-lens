@@ -52,7 +52,7 @@ Workspace is the logical storage boundary. Module-owned keys use server-generate
 resource identities:
 
 ```text
-{workspace_id}/documents/{document_id}/input/{object_id}
+{workspace_id}/input/{document_id}
 {workspace_id}/documents/{document_id}/source/figures/{object_id}
 {workspace_id}/memory/{memory_id}
 {workspace_id}/integrations/obsidian/{object_id}
@@ -68,6 +68,6 @@ belong to a Workspace may use a user-owned namespace.
 
 ## Migration
 
-The next Alembic revision renames `original_filename` to `filename` and drops
-`stored_filename`. Historical migration files remain unchanged. No runtime code
-may keep a compatibility alias after the cutover.
+Alembic revision `20261127_0104` renames `original_filename` to `filename` and
+drops `stored_filename`. Historical migration files remain unchanged. No runtime
+code keeps a compatibility alias after the cutover.

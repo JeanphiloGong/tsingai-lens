@@ -595,8 +595,7 @@ Document is the paper identity in the current model, not a publicly queryable ve
 | :--- | :--- | :---: | :--- | :--- |
 | `document_id` | `VARCHAR(64)` | No | PK | Stable identifier of the current Document. |
 | `workspace_id` | `VARCHAR(64)` | No | FK -> `workspaces.workspace_id`; IDX; `ON DELETE CASCADE` | Identifier of the owning research workspace. |
-| `original_filename` | `TEXT` | No | — | Filename supplied by the user at upload time. |
-| `stored_filename` | `TEXT` | No | — | Sanitized filename used by object storage. |
+| `filename` | `TEXT` | No | — | User-visible filename supplied at upload time. |
 | `storage_key` | `TEXT` | No | UQ | Globally unique object-storage key for the immutable input bytes; the bytes are not stored in PostgreSQL. |
 | `sha256` | `VARCHAR(64)` | No | length 64; lowercase; per workspace UQ | SHA-256 digest of the input bytes, used for deduplication and preparation fingerprints. |
 | `media_type` | `VARCHAR(255)` | Yes | — | MIME type of the uploaded file, such as `application/pdf`. |

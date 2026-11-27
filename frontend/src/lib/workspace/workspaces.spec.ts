@@ -9,8 +9,7 @@ function workspace(
 		status,
 		documents: documentStatuses.map((documentStatus, index) => ({
 			document_id: `doc_${index}`,
-			original_filename: `paper-${index}.pdf`,
-			stored_filename: `paper-${index}.pdf`,
+			filename: `paper-${index}.pdf`,
 			storage_key: `workspace/paper-${index}.pdf`,
 			sha256: 'a'.repeat(64),
 			media_type: 'application/pdf',

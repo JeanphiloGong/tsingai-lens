@@ -106,13 +106,12 @@ async def resolve_prepared_document_inputs(
             workspace_id,
             document_id,
         )
-        document = record.document
-        if document.status != "ready" or not document.preparation_fingerprint:
+        if record.status != "ready" or not record.preparation_fingerprint:
             raise ResearchObjectivesNotReadyError(workspace_id)
         inputs.append(
             PreparedDocumentInput(
                 document_id=document_id,
-                preparation_fingerprint=document.preparation_fingerprint,
+                preparation_fingerprint=record.preparation_fingerprint,
             )
         )
     return tuple(inputs)

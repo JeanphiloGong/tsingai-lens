@@ -242,11 +242,11 @@ export function getCurrentReadings(messages: ConversationMessage[]): CurrentRead
 			: sectionSource;
 		const title =
 			(paperRecords
-				.map((item) => text(item.filename) || text(item.original_filename))
+				.map((item) => text(item.filename))
 				.find(Boolean) ||
 				paperRecords
 					.map(
-						(item) => text(item.document_title) || text(item.title) || text(item.original_filename)
+						(item) => text(item.document_title) || text(item.title) || text(item.filename)
 					)
 					.find(Boolean)) ??
 			'';

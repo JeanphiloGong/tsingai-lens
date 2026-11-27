@@ -45,14 +45,12 @@ def _document(workspace_id: str, suffix: str) -> StoredDocument:
     return StoredDocument(
         document=Document(
             document_id=f"doc_{suffix}",
-            original_filename=f"{suffix}.pdf",
+            filename=f"{suffix}.pdf",
             sha256=digest,
             media_type="application/pdf",
-            status="stored",
             size_bytes=len(suffix),
         ),
-        stored_filename=f"stored-{suffix}.pdf",
-        storage_key=f"{workspace_id}/input/stored-{suffix}.pdf",
+        storage_key=f"{workspace_id}/input/doc_{suffix}",
         created_at="2026-08-27T00:01:00+00:00",
         updated_at="2026-08-27T00:01:00+00:00",
     )
@@ -186,8 +184,7 @@ async def test_workspace_repository_rejects_duplicate_document_content(
     second = replace(
         first,
         document=replace(first.document, document_id="doc_other"),
-        stored_filename="other.pdf",
-        storage_key=f"{workspace.workspace.workspace_id}/input/other.pdf",
+        storage_key=f"{workspace.workspace.workspace_id}/input/doc_other",
     )
     await workspace_repository.add_workspace(workspace)
     await workspace_repository.add_documents(

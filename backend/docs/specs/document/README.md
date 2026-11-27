@@ -6,6 +6,7 @@ owned by the Document module and must be updated with the implementation.
 - [Data model](data-model.md)
 - [HTTP API](api.md)
 
-The current runtime still has migration work pending. `original_filename` and
-`stored_filename` remain historical baseline names until the V2 Alembic revision
-runs. The target contract uses `filename` and `storage_key`.
+The runtime contract uses `filename` for the user-visible name and
+`storage_key` for the server-owned object location. Historical migration files
+may still mention the former split filename fields, but runtime code and new
+schema revisions use only the target names.

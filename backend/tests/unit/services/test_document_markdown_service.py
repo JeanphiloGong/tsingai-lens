@@ -603,7 +603,7 @@ async def test_document_markdown_service_keeps_readable_block_with_replacement_g
     assert "blk-readable-conclusion" in source_map
 
 
-async def test_document_markdown_service_uses_original_filename_for_display(
+async def test_document_markdown_service_uses_filename_for_display(
     tmp_path,
     *,
     postgres_session_factory,
@@ -635,10 +635,10 @@ async def test_document_markdown_service_uses_original_filename_for_display(
             documents=[
                 {
                     "id": uploaded.document.document_id,
-                    "title": uploaded.stored_filename,
+                    "title": uploaded.storage_key,
                     "text": "ignored when block structure is available",
                     "metadata": {
-                        "source_path": uploaded.stored_filename,
+                        "source_path": uploaded.storage_key,
                         "source_parser": "docling",
                     },
                 }
@@ -663,7 +663,7 @@ async def test_document_markdown_service_uses_original_filename_for_display(
     assert payload["title"] == "P001-Readable Paper.pdf"
     assert payload["source_filename"] == "P001-Readable Paper.pdf"
     assert payload["markdown"].startswith("# P001-Readable Paper.pdf")
-    assert uploaded.stored_filename not in payload["markdown"]
+    assert uploaded.storage_key not in payload["markdown"]
 
 
 async def test_document_markdown_service_reports_not_ready(

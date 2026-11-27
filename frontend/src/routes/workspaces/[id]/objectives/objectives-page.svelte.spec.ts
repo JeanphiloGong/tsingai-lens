@@ -223,21 +223,21 @@ describe('workspaces/[id]/objectives/+page.svelte', () => {
 					items: [
 						{
 							document_id: 'paper-1',
-							original_filename: 'paper-1.pdf',
+							filename: 'paper-1.pdf',
 							status: 'ready',
 							size_bytes: 100,
 							created_at: '2026-08-27T00:00:00Z'
 						},
 						{
 							document_id: 'paper-2',
-							original_filename: 'paper-2.pdf',
+							filename: 'paper-2.pdf',
 							status: 'ready',
 							size_bytes: 100,
 							created_at: '2026-08-27T00:00:00Z'
 						},
 						{
 							document_id: 'paper-3',
-							original_filename: 'unrelated-paper.pdf',
+							filename: 'unrelated-paper.pdf',
 							status: 'ready',
 							size_bytes: 100,
 							created_at: '2026-08-27T00:00:00Z'
@@ -316,9 +316,9 @@ describe('workspaces/[id]/objectives/+page.svelte', () => {
 			if (current.path.endsWith('/documents') && current.method === 'GET') {
 				return jsonResponse({
 					items: [
-						{ document_id: 'paper-1', original_filename: 'strength.pdf', status: 'ready' },
-						{ document_id: 'paper-2', original_filename: 'ductility.pdf', status: 'ready' },
-						{ document_id: 'paper-3', original_filename: 'laser-review.pdf', status: 'ready' }
+						{ document_id: 'paper-1', filename: 'strength.pdf', status: 'ready' },
+						{ document_id: 'paper-2', filename: 'ductility.pdf', status: 'ready' },
+						{ document_id: 'paper-3', filename: 'laser-review.pdf', status: 'ready' }
 					]
 				});
 			}
@@ -381,8 +381,8 @@ describe('workspaces/[id]/objectives/+page.svelte', () => {
 			if (current.path.endsWith('/documents') && current.method === 'GET') {
 				return jsonResponse({
 					items: [
-						{ document_id: 'paper-1', original_filename: 'seed.pdf', status: 'ready' },
-						{ document_id: 'paper-3', original_filename: 'frozen.pdf', status: 'ready' }
+						{ document_id: 'paper-1', filename: 'seed.pdf', status: 'ready' },
+						{ document_id: 'paper-3', filename: 'frozen.pdf', status: 'ready' }
 					]
 				});
 			}
@@ -452,7 +452,7 @@ describe('workspaces/[id]/objectives/+page.svelte', () => {
 			const current = request(input, init);
 			if (current.path.endsWith('/documents') && current.method === 'GET') {
 				return jsonResponse({
-					items: [{ document_id: 'paper-1', original_filename: 'available.pdf', status: 'ready' }]
+					items: [{ document_id: 'paper-1', filename: 'available.pdf', status: 'ready' }]
 				});
 			}
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {

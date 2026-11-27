@@ -33,8 +33,9 @@ Workspace lists return only display and state fields.
 
 ## Document detail
 
-A detail response may add the opaque current `source_version` used for Source reads.
-It does not expose `storage_key`, `sha256`, `parser_version`, `profile_version`,
+A detail response includes the opaque server-owned `storage_key` used internally
+for file access and may add the current `source_version` used for Source reads.
+It does not expose `sha256`, `parser_version`, `profile_version`,
 `source_fingerprint`, or `profile_fingerprint`.
 
 ```json
@@ -44,6 +45,7 @@ It does not expose `storage_key`, `sha256`, `parser_version`, `profile_version`,
   "data": {
     "document_id": "doc_123",
     "filename": "paper.pdf",
+    "storage_key": "workspace-123/input/doc_123",
     "media_type": "application/pdf",
     "status": "ready",
     "size_bytes": 123456,

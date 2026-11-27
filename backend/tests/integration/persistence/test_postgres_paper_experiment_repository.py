@@ -58,14 +58,13 @@ async def paper_experiment_repository(postgres_session_factory):
             StoredDocument(
                 document=Document(
                     document_id="paper-experiment-doc",
-                    original_filename="paper.pdf",
+                    filename="paper.pdf",
                     sha256="a" * 64,
                     media_type="application/pdf",
                     status="ready",
                     size_bytes=10,
                 ),
-                stored_filename="paper.pdf",
-                storage_key="experiment-workspace/paper.pdf",
+                storage_key="experiment-workspace/input/paper-1",
                 created_at=NOW.isoformat(),
                 updated_at=NOW.isoformat(),
             ),

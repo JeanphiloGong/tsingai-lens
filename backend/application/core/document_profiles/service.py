@@ -38,7 +38,7 @@ _TITLE_FIELD_CANDIDATES = (
 
 _SOURCE_FILENAME_FIELD_CANDIDATES = (
     "source_filename",
-    "original_filename",
+    "filename",
 )
 
 _SOURCE_PATH_FIELD_CANDIDATES = (
@@ -555,8 +555,8 @@ def _build_workspace_file_lookup(
     stored_to_source: dict[str, str] = {}
     resolved_sources: list[str] = []
     for record in workspace.documents:
-        original = (record.document.original_filename or "").strip() or None
-        stored = (record.stored_filename or "").strip() or None
+        original = (record.document.filename or "").strip() or None
+        stored = (record.storage_key or "").strip() or None
         if original:
             resolved_sources.append(original)
         if original and stored:

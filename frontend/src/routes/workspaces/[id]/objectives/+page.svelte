@@ -87,7 +87,7 @@
 		? (selectedDocumentIdsByObjective[scopeObjective.objective_id] ?? [])
 		: [];
 	$: scopeMatches = readyDocuments.filter((document) =>
-		document.original_filename.toLocaleLowerCase().includes(scopeQuery.trim().toLocaleLowerCase())
+		document.filename.toLocaleLowerCase().includes(scopeQuery.trim().toLocaleLowerCase())
 	);
 	$: scopePageCount = Math.max(1, Math.ceil(scopeMatches.length / SCOPE_PAGE_SIZE));
 	$: if (scopePage >= scopePageCount) scopePage = scopePageCount - 1;
@@ -848,7 +848,7 @@
 								on:change={() => toggleDocument(scopeObjective.objective_id, document.document_id)}
 							/>
 							<span class="scope-option-copy">
-								<span>{document.original_filename}</span>
+								<span>{document.filename}</span>
 								<small>
 									{scopeDecisionLabel(document.document_id, $t)}{scopeDecision(document.document_id)
 										?.is_seed

@@ -31,8 +31,7 @@ function jsonResponse(data: unknown, code = 200, message = 'success') {
 
 const readyDocument = {
 	document_id: 'doc_ready',
-	original_filename: 'ready-paper.pdf',
-	stored_filename: 'ready.pdf',
+	filename: 'ready-paper.pdf',
 	storage_key: 'col_123/ready.pdf',
 	sha256: 'a'.repeat(64),
 	media_type: 'application/pdf',
@@ -50,7 +49,7 @@ const readyDocument = {
 const storedDocument = {
 	...readyDocument,
 	document_id: 'doc_stored',
-	original_filename: 'stored-paper.pdf',
+	filename: 'stored-paper.pdf',
 	status: 'stored',
 	source_fingerprint: null,
 	profile_fingerprint: null,

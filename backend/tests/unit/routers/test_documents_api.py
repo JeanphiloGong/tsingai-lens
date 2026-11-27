@@ -625,13 +625,11 @@ async def test_document_source_route_rejects_path_outside_workspace(
     unsafe_document = StoredDocument(
         document=Document(
             document_id="paper-1",
-            original_filename="paper-1.pdf",
+            filename="paper-1.pdf",
             sha256=sha256(b"outside").hexdigest(),
             media_type="application/pdf",
-            status="stored",
             size_bytes=len(b"outside"),
         ),
-        stored_filename="outside.pdf",
         storage_key="../outside.pdf",
         created_at=record.created_at,
     )
@@ -675,13 +673,11 @@ async def test_document_source_route_rejects_another_workspaces_storage_key(
     foreign_document = StoredDocument(
         document=Document(
             document_id="paper-1",
-            original_filename="paper-2.pdf",
+            filename="paper-2.pdf",
             sha256=digest,
             media_type="application/pdf",
-            status="stored",
             size_bytes=len(payload),
         ),
-        stored_filename="paper-2.pdf",
         storage_key=storage_key,
         created_at=first.created_at,
     )

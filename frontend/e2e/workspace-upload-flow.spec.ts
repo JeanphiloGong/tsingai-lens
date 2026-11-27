@@ -20,9 +20,8 @@ function document(documentId: string, status: string, filename: string) {
 	const ready = status === 'ready';
 	return {
 		document_id: documentId,
-		original_filename: filename,
-		stored_filename: filename,
-		storage_key: `${workspaceId}/input/${filename}`,
+		filename: filename,
+		storage_key: `${workspaceId}/input/${documentId}`,
 		sha256: documentId.padEnd(64, 'a').slice(0, 64),
 		media_type: 'application/pdf',
 		status,

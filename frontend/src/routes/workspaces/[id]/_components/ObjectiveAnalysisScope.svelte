@@ -31,7 +31,7 @@
 	let previousQuery = '';
 	$: processing = ['queued', 'running'].includes(analysis.active_analysis?.status ?? '');
 	$: matches = papers.filter((paper) =>
-		[paper.original_filename, documentTitles[paper.document_id]]
+		[paper.filename, documentTitles[paper.document_id]]
 			.join(' ')
 			.toLocaleLowerCase()
 			.includes(query.trim().toLocaleLowerCase())
@@ -126,7 +126,7 @@
 								disabled={saving || processing}
 								on:change={() => toggle(paper.document_id)}
 							/><span
-								><strong>{documentTitles[paper.document_id] || paper.original_filename}</strong
+								><strong>{documentTitles[paper.document_id] || paper.filename}</strong
 								><small title={decision?.reason}
 									>{$t(
 										`objectiveWorkspace.${decision?.classification === 'likely_relevant' ? 'recommended' : decision?.classification === 'confidently_out_of_scope' ? 'outside' : 'inspect'}`
@@ -138,7 +138,7 @@
 								id: workspaceId,
 								document_id: paper.document_id
 							})}
-							aria-label={`${$t('objectiveWorkspace.openPaper')}: ${paper.original_filename}`}
+							aria-label={`${$t('objectiveWorkspace.openPaper')}: ${paper.filename}`}
 							title={$t('objectiveWorkspace.openPaper')}><ExternalLink size={17} /></a
 						>
 					</div>

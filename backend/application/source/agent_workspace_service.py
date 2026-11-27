@@ -203,7 +203,7 @@ class BrowseWorkspacePapersService:
                         "stored": "not_prepared",
                         "uploaded": "not_prepared",
                         "failed": "preparation_failed",
-                    }.get(str(record.document.status or ""), "unavailable")
+                    }.get(str(record.status or ""), "unavailable")
             abstract_excerpt, abstract_status = self._abstract_excerpt(source_document)
             screening_limitations: list[str] = []
             if profile is None:
@@ -304,8 +304,8 @@ class BrowseWorkspacePapersService:
     @staticmethod
     def _matches_query(record: StoredDocument, profile: Any, query: str) -> bool:
         values = [
-            record.document.original_filename,
-            record.stored_filename,
+            record.document.filename,
+            record.storage_key,
             getattr(profile, "title", None),
         ]
         haystack = " ".join(str(value or "") for value in values).casefold()
@@ -349,15 +349,15 @@ class BrowseWorkspacePapersService:
         return {
             "document_id": document_id,
             "filename": str(
-                record.document.original_filename
-                or record.stored_filename
+                record.document.filename
+                or record.storage_key
                 or document_id
             )[:500],
             "title": (
                 str(getattr(profile, "title", None) or "")[:500]
                 or None
             ),
-            "status": str(record.document.status or "unknown"),
+            "status": str(record.status or "unknown"),
             "source_status": source_status,
             "document_type": str(getattr(profile, "doc_type", None) or "uncertain"),
             "profile_confidence": getattr(profile, "confidence", None),

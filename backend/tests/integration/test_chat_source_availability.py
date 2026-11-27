@@ -52,10 +52,10 @@ async def test_source_availability_uses_real_workspace_lookup(
             workspace_id,
             (StoredDocument(
                 document=Document(
-                    document_id="paper", original_filename="lpbf.pdf", sha256="a" * 64,
+                    document_id="paper", filename="lpbf.pdf", sha256="a" * 64,
                     media_type="application/pdf", status="uploaded", size_bytes=100,
                 ),
-                stored_filename="lpbf.pdf", storage_key="lpbf.pdf",
+                storage_key=f"{workspace_id}/input/paper",
                 created_at=workspace.created_at,
             ),),
             updated_at=workspace.updated_at,

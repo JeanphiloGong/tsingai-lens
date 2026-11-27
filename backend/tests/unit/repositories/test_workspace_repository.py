@@ -37,14 +37,12 @@ def _document(document_id: str = "doc_demo", sha256: str = "a" * 64) -> StoredDo
     return StoredDocument(
         document=Document(
             document_id=document_id,
-            original_filename="paper.pdf",
+            filename="paper.pdf",
             sha256=sha256,
             media_type="application/pdf",
-            status="stored",
             size_bytes=10,
         ),
-        stored_filename=f"{document_id}.pdf",
-        storage_key=f"col_demo/input/{document_id}.pdf",
+        storage_key=f"col_demo/input/{document_id}",
         created_at="2026-08-27T00:01:00+00:00",
         updated_at="2026-08-27T00:01:00+00:00",
     )

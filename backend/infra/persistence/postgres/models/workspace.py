@@ -82,8 +82,7 @@ class DocumentORM(Base):
         nullable=False,
         index=True,
     )
-    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
-    stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
     storage_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     media_type: Mapped[str | None] = mapped_column(String(255), nullable=True)

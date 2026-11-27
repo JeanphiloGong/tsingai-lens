@@ -7,9 +7,8 @@ const createdAt = '2026-10-30T00:00:00Z';
 const user = { user_id: 'researcher', email: 'researcher@example.test' };
 const document = {
 	document_id: 'paper',
-	original_filename: 'lpbf.txt',
-	stored_filename: 'lpbf.txt',
-	storage_key: 'lpbf.txt',
+	filename: 'lpbf.txt',
+	storage_key: `${workspaceId}/input/paper`,
 	sha256: 'a'.repeat(64),
 	media_type: 'text/plain',
 	status: 'ready',

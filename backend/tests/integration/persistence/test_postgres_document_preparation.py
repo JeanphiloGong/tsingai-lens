@@ -122,7 +122,7 @@ async def test_profile_replacement_does_not_relabel_current_source(
     workspace = await workspace_repository.read_workspace(COLLECTION_ID)
     document = workspace.documents[0]
     await workspace_repository.update_document(
-        replace(document, document=replace(document.document, status="processing"))
+        replace(document, status="processing")
     )
     async with database.AsyncSessionLocal() as session:
         row = await session.get(DocumentPreparationORM, "doc_a")

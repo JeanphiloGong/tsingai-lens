@@ -265,8 +265,7 @@ function installApi({
 function uploadedDocument(file: File, documentId = 'doc_upload_1') {
 	return {
 		document_id: documentId,
-		original_filename: file.name,
-		stored_filename: `${documentId}.pdf`,
+		filename: file.name,
 		storage_key: `col_123/input/${documentId}.pdf`,
 		sha256: 'a'.repeat(64),
 		media_type: file.type,

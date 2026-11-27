@@ -377,10 +377,8 @@ class _WorkspaceService:
 
     async def get_document(self, workspace_id, document_id):
         return SimpleNamespace(
-            document=SimpleNamespace(
-                preparation_fingerprint="prep-1",
-                source_fingerprint=None,
-            )
+            preparation_fingerprint="prep-1",
+            source_fingerprint=None,
         )
 
 

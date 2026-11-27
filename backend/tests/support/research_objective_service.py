@@ -161,7 +161,7 @@ async def seed_document_profiles(
         StoredDocument(
             document=Document(
                 document_id=document.document_id,
-                original_filename=str(
+                filename=str(
                     document.metadata.get("source_filename")
                     or f"{document.document_id}.pdf"
                 ),
@@ -169,15 +169,8 @@ async def seed_document_profiles(
                 media_type="application/pdf",
                 status="ready",
                 size_bytes=max(len(document.text.encode("utf-8")), 1),
-                parser_version="test-parser.v1",
-                document_analysis_version="test-analysis.v1",
-                preparation_fingerprint=f"fingerprint-{document.document_id}",
             ),
-            stored_filename=str(
-                document.metadata.get("source_filename")
-                or f"{document.document_id}.pdf"
-            ),
-            storage_key=f"{workspace_id}/input/{document.document_id}.pdf",
+            storage_key=f"{workspace_id}/input/{document.document_id}",
             created_at=now,
             updated_at=now,
         )

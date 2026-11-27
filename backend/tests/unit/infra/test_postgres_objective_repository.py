@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
-from domain.core import PreparedDocumentInput, ResearchObjective
-from domain.core.research_objective import ResearchObjective
+from domain.core import PreparedDocumentInput
+from research.domain.objective import ResearchObjective
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM, ObjectiveResearchORM
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 

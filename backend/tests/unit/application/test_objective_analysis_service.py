@@ -39,8 +39,8 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     Finding,
@@ -50,7 +50,6 @@ from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     ObjectiveEvidence,
     PaperContribution,
-    ResearchObjective,
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (

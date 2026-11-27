@@ -28,13 +28,13 @@ from domain.core import (
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
     PreparedDocumentInput,
-    ResearchObjective,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
     build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -42,7 +42,6 @@ from domain.core.research_objective import (
     ObjectiveEvidence,
     PaperContribution,
     PreparedDocumentInput,
-    ResearchObjective,
 )
 
 

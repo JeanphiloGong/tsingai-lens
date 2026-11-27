@@ -14,14 +14,13 @@ from domain.core import (
     ObjectiveFactSet,
     PaperContribution,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.finding import (
     PAPER_CONTRIBUTION_STATUSES,
 )
 from domain.core.research_objective import (
     PaperContribution,
-    ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
 )

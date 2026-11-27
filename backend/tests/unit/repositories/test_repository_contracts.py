@@ -38,7 +38,7 @@ def test_retired_central_repository_ports_are_not_forwarded():
 def test_objective_query_result_reuses_the_domain_model():
     from typing import get_type_hints
 
-    from domain.core import ResearchObjective
+    from research.domain.objective import ResearchObjective
     from repositories.objective_repository import ObjectiveRepository, StoredObjective
 
     assert get_type_hints(StoredObjective)["objective"] is ResearchObjective

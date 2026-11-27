@@ -33,8 +33,8 @@ from domain.core import (
     PaperResearchMap,
     PaperStudyDisposition,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     Finding,
@@ -48,7 +48,6 @@ from domain.core.research_objective import (
     PaperResearchSourceRef,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    ResearchObjective,
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (

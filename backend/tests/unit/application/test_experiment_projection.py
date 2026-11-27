@@ -436,7 +436,7 @@ async def test_partial_measurement_keeps_missing_context_in_read_view(monkeypatc
     assert item["reported_result"]["value"] == 72
     assert item["source_ref"] == "table-2"
 
-    from application.core.objectives import objective_authoring_service
+    from research.application.objectives import objective_authoring_service
     monkeypatch.setattr(objective_authoring_service, "experiment_projection", projection)
     monkeypatch.setattr(objective_authoring_service, "should_read_experiment_projection", AsyncMock(return_value=True))
     basis = await objective_authoring_service._canonicalize_derived_objective_basis(

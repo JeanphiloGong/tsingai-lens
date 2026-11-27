@@ -9,7 +9,8 @@ from application.core.objectives import objective_candidate_service
 from application.core.objectives.discovery.axis_equivalence import (
     AxisCanonicalizationPlanModelOutput,
 )
-from domain.core import PaperResearchMap, PreparedDocumentInput, ResearchObjective
+from domain.core import PaperResearchMap, PreparedDocumentInput
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import (
     PaperResearchRelationship,
     PaperResearchScope,

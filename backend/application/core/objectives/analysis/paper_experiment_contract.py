@@ -33,7 +33,7 @@ from domain.core.paper_experiment import (
     ReportedInterpretation,
     PaperExperimentRevision,
 )
-from domain.core.research_objective import ResearchObjective
+from research.domain.objective import ResearchObjective
 
 
 class PaperExperimentDraftValidationError(ValueError):

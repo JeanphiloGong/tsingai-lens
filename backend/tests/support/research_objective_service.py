@@ -15,14 +15,14 @@ from application.core.objectives import (
     objective_input_service as objective_input_module,
 )
 from application.core.objectives import paper_research_map_service
-from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
+from domain.core import DocumentProfile, PreparedDocumentInput
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
-    ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 from domain.source import Document
 from repositories.workspace_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepository

@@ -16,9 +16,9 @@ from domain.core.research_objective import (
     ObjectiveFactSet,
     PaperContribution,
     PreparedDocumentInput,
-    ResearchObjective,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 from exceptions import RequestInvalidException
 from infra.persistence import database
 from repositories.objective_repository import (

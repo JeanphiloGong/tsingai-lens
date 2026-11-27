@@ -13,7 +13,7 @@ from application.core.objectives.domain_knowledge.registry import (
     material_registry_version as _registry_version,
     material_text_mentions as _registry_material_text_mentions,
 )
-from domain.core import ResearchObjective
+from research.domain.objective import ResearchObjective
 
 
 # Materials-science outcome hints used to match broad Objectives to measurements.

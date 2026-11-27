@@ -21,7 +21,7 @@ from application.core.objectives.analysis.paper_experiment_contract import (
 from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
-from domain.core.research_objective import ResearchObjective
+from research.domain.objective import ResearchObjective
 from domain.source import (
     SourceBlock, SourceDocumentTree, SourceFigure, SourceTable, SourceTableCell,
 )

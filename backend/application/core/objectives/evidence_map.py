@@ -9,8 +9,8 @@ from domain.core import (
     Finding,
     ObjectiveEvidence,
     PaperContribution,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from repositories.objective_repository import ObjectiveAnalysis
 
 PROJECTION_VERSION = "objective-evidence-map.v1"

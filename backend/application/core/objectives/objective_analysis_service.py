@@ -46,8 +46,8 @@ from domain.core import (
     PaperContribution,
     PaperResearchMap,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.paper_experiment import PaperExperimentRevision
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.database import AsyncSessionLocal

@@ -17,9 +17,9 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
 from domain.core.research_objective import (
-    ResearchObjective,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 
 
 class FakeStructuredResponseClient:

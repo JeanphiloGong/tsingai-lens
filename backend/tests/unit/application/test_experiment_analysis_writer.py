@@ -28,9 +28,9 @@ from domain.core.research_objective import (
     ObjectiveFactSet,
     PaperContribution,
     PreparedDocumentInput,
-    ResearchObjective,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 from infra.persistence import database
 from repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,

@@ -12,7 +12,7 @@ from agent.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
-from application.core.objectives import objective_authoring_service
+from research.application.objectives import objective_authoring_service
 from domain.chat import ToolResultStatus
 from exceptions import RequestInvalidException, ResourceConflictException, ResourceNotFoundException
 

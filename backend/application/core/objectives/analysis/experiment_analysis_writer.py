@@ -27,7 +27,7 @@ from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import ExperimentComparison, PaperExperimentRevision
-from domain.core.research_objective import ResearchObjective
+from research.domain.objective import ResearchObjective
 from repositories.experiment_analysis_repository import ExperimentAnalysisWrite
 from repositories.objective_repository import ObjectiveAnalysis
 from repositories.paper_experiment_repository import (

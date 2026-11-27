@@ -13,7 +13,7 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     PaperExperimentSourceBundle,
 )
 from domain.core.paper_experiment import PaperExperimentRevision
-from domain.core.research_objective import ResearchObjective
+from research.domain.objective import ResearchObjective
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )

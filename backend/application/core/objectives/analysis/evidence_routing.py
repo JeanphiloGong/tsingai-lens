@@ -15,9 +15,7 @@ from application.core.objectives.analysis.source_screening import (
     FRAME_TABLE_ROW_LIMIT,
     PaperAnalysisFrame,
 )
-from domain.core import (
-    ResearchObjective,
-)
+from research.domain.objective import ResearchObjective
 from domain.source import SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceTable
 
 logger = logging.getLogger(__name__)

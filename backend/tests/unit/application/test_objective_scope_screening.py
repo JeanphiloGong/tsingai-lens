@@ -11,16 +11,16 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
 )
 from application.core.objectives.scope_screening import screen_objective_scope
-from domain.core import PaperResearchMap, ResearchObjective
+from domain.core import PaperResearchMap
 from domain.core.research_objective import (
     PaperResearchRelationship,
     PaperResearchScope,
     PaperResearchSourceRef,
-    ResearchObjective,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 
 pytestmark = pytest.mark.anyio
 

@@ -37,8 +37,8 @@ from domain.core import (
     PaperContribution,
     PaperStudyDisposition,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     Finding,
@@ -49,7 +49,6 @@ from domain.core.research_objective import (
     PaperContribution,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
 )

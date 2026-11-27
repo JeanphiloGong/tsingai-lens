@@ -58,9 +58,9 @@ from application.core.paper_facts.extraction import (
     build_default_paper_facts_extractor,
 )
 from domain.core import (
-    ResearchObjective,
     SourceObservation,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import ObjectiveEvidence, normalize_objective_terms
 from domain.core.research_process import build_source_observation_id
 from domain.core.scientific_fact import (

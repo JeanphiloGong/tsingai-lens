@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from domain.core import ResearchObjective
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import build_research_objective_id
 from repositories.objective_repository import ObjectiveRepository
 

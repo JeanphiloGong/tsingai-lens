@@ -13,8 +13,8 @@ from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.research_objective import (
     ObjectiveEvidence,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.scientific_fact import ScientificContext
 from repositories.objective_repository import ObjectiveAnalysis
 
@@ -306,7 +306,6 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 
     class ObjectiveRepository:
         async def read_objective(self, _workspace_id, _objective_id):
-            from domain.core.research_objective import ResearchObjective
 
             return ResearchObjective(
                 workspace_id="col-1",

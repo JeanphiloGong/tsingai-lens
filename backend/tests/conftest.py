@@ -194,7 +194,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.core.objectives.analysis_service as _test_objective_analysis_service
     import application.core.objectives.finding_authoring_service as _test_finding_authoring_service
     import application.core.objectives.objective_analysis_service as _test_experiment_analysis_service
-    import application.core.objectives.objective_authoring_service as _test_objective_authoring_service
+    import research.application.objectives.objective_authoring_service as _test_objective_authoring_service
     import application.core.objectives.objective_candidate_service as _test_objective_candidate_service
     import application.core.objectives.objective_discovery_service as _test_objective_discovery_service
     import application.core.objectives.objective_input_service as _test_objective_input_service

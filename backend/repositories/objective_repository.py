@@ -25,8 +25,8 @@ from domain.core.research_objective import (
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.scientific_fact import (
     ScientificAttribute,

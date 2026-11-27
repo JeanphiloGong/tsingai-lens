@@ -18,7 +18,7 @@ from domain.core.paper_experiment import (
     ExperimentTestCondition,
     PaperExperimentRevision,
 )
-from domain.core.research_objective import ResearchObjective
+from research.domain.objective import ResearchObjective
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 
 _ATTRIBUTION_RANK = {

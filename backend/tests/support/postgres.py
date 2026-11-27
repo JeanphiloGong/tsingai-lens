@@ -10,7 +10,7 @@ from repositories.workspace_repository import (
     StoredWorkspace,
     StoredDocument,
 )
-from domain.core import ResearchObjective
+from research.domain.objective import ResearchObjective
 from repositories.objective_repository import ObjectiveRepository
 
 

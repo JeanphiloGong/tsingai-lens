@@ -14,9 +14,9 @@ from application.core.objectives.analysis.paper_experiment_contract import (
     reconcile_model_output,
 )
 from domain.core.research_objective import (
-    ResearchObjective,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 
 
 def _output_payload() -> dict:

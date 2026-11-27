@@ -17,10 +17,8 @@ from agent.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
-from application.core.objectives import (
-    objective_authoring_service,
-    objective_candidate_service,
-)
+from research.application.objectives import objective_authoring_service
+from application.core.objectives import objective_candidate_service
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,

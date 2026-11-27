@@ -10,9 +10,7 @@ from typing import Any
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
-from domain.core import (
-    ResearchObjective,
-)
+from research.domain.objective import ResearchObjective
 
 # Source validation now distinguishes cited background from an unresolved
 # current-paper result; invalidate checkpoints from the prior contract.

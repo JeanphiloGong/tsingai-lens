@@ -3,15 +3,15 @@ from __future__ import annotations
 from infra.persistence import database
 
 from domain.core.research_objective import (
-    ResearchObjective,
     build_research_objective_id,
 )
+from research.domain.objective import ResearchObjective
 
 import asyncio
 
 import pytest
 
-from domain.core import ResearchObjective
+
 from domain.goal import (
     ExperimentPlanRecord,
 )

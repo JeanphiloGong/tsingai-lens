@@ -12,7 +12,8 @@ from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.structured_extraction.json_support import StructuredOutputError
-from domain.core import PaperResearchMap, ResearchObjective
+from domain.core import PaperResearchMap
+from research.domain.objective import ResearchObjective
 from domain.source import SourceDocumentTree, SourceTable
 from pydantic import (
     BaseModel,

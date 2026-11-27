@@ -13,17 +13,17 @@ from agent.capabilities.objective_candidate import (
     CreateObjectiveCandidateCapability,
     CreateObjectiveCandidateToolRequest,
 )
-from application.core.objectives import objective_authoring_service
-from domain.core import ResearchObjective
+from research.application.objectives import objective_authoring_service
+
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
     ObjectiveEvidence,
     PreparedDocumentInput,
-    ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.scientific_fact import ScientificContext, ScientificResult
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 from exceptions import RequestInvalidException, ResourceConflictException

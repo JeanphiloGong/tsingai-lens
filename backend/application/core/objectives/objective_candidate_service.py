@@ -32,8 +32,8 @@ from domain.core import (
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import (
     build_research_objective_id,
     normalize_objective_terms,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from application.source import workspace_service
-from application.core.objectives import objective_authoring_service
+from research.application.objectives import objective_authoring_service
 from application.core.objectives import analysis_service as objective_analysis_service
 from repositories.objective_repository import ObjectiveRepo
 

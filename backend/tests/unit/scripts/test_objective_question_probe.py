@@ -8,9 +8,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import pytest
-from domain.core.research_objective import (
-    ResearchObjective,
-)
+from research.domain.objective import ResearchObjective
 
 
 @pytest.fixture

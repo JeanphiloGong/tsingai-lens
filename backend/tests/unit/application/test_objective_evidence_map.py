@@ -11,8 +11,8 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
     PreparedDocumentInput,
-    ResearchObjective,
 )
+from research.domain.objective import ResearchObjective
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     PAPER_CONTRIBUTION_STATUSES,
@@ -23,7 +23,6 @@ from domain.core.research_objective import (
     EVIDENCE_ROLE_VALUES,
     ObjectiveEvidence,
     PaperContribution,
-    ResearchObjective,
 )
 
 

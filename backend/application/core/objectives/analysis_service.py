@@ -57,7 +57,7 @@ from application.core.objectives.objective_analysis_service import (
     ResearchObjectiveNotFoundError,
 )
 from application.source import workspace_service
-from domain.core import ResearchObjective
+from research.domain.objective import ResearchObjective
 from domain.core.finding import Finding
 from domain.core.research_objective import ObjectiveEvidence
 from exceptions import ResourceConflictException, ResourceNotFoundException, ServiceUnavailableException

@@ -10,7 +10,8 @@ from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
 from application.source import workspace_service
-from domain.core import ResearchObjective, is_question_shaped_objective
+from domain.core import is_question_shaped_objective
+from research.domain.objective import ResearchObjective
 from domain.core.research_objective import (
     ObjectiveEvidence,
     PaperContribution,

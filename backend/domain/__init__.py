@@ -1,5 +1,6 @@
-"""Domain layer exports."""
+"""Legacy shared domain package exports."""
 
-from domain.source import Workspace, Document
+from document.domain.document import Document
+from workspace.domain.workspace import Workspace
 
-__all__ = ["Workspace", "Document"]
+__all__ = ["Document", "Workspace"]

@@ -13,7 +13,7 @@ import pandas as pd
 from PIL import Image
 import pytest
 
-from domain.source import (
+from document.domain.source import (
     SourceLayoutBlock,
     resolve_heading_path_for_page,
 )

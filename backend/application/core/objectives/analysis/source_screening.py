@@ -14,7 +14,7 @@ from application.core.objectives.llm.structured_response import StructuredRespon
 from application.core.structured_extraction.json_support import StructuredOutputError
 from domain.core import PaperResearchMap
 from research.domain.objective import ResearchObjective
-from domain.source import SourceDocumentTree, SourceTable
+from document.domain.source import SourceDocumentTree, SourceTable
 from pydantic import (
     BaseModel,
     ConfigDict,

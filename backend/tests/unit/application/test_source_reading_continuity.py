@@ -8,7 +8,7 @@ from application.source import agent_source_service as document_sources
 from agent.tools.registry import ToolExecutionContext
 from application.source.agent_source_service import InspectDocumentSourcesService, InspectDocumentSourcesToolRequest
 from domain.chat import ChatToolCall, ToolRisk, ToolResultStatus
-from domain.source import SourceBlock, SourceDocument
+from document.domain.source import SourceBlock, SourceDocument
 
 @pytest.fixture
 def anyio_backend():

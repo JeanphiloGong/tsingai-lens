@@ -7,7 +7,7 @@ from typing import (
 
 import pandas as pd
 
-from domain.source import (
+from document.domain.source import (
     SourceLayoutBlock,
     SourceTable,
     SourceTableCell,

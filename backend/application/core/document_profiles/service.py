@@ -23,7 +23,7 @@ from domain.core.document_profile import (
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
-from domain.source import SourceBlock, SourceDocument
+from document.domain.source import SourceBlock, SourceDocument
 from exceptions import ResourceConflictException, ResourceNotFoundException
 
 logger = logging.getLogger(__name__)

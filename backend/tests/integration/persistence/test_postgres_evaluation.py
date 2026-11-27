@@ -13,7 +13,7 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
-from domain.source import Workspace
+from workspace.domain.workspace import Workspace
 from repositories.workspace_repository import (
     WorkspaceRepository,
     StoredWorkspace,

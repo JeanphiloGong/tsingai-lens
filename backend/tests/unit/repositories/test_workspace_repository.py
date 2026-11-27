@@ -4,7 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from domain.source import Workspace, Document
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from repositories.workspace_repository import (
     StoredWorkspace,
     StoredDocument,

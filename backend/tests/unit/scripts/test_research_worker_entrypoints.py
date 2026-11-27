@@ -78,7 +78,7 @@ async def test_profile_cancellation_drains_the_actual_sync_call(monkeypatch):
     import threading
     from application.core.document_profiles import service
     from domain.core.document_profile import DocumentProfile
-    from domain.source import SourceDocument
+    from document.domain.source import SourceDocument
 
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
 

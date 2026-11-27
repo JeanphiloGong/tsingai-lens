@@ -4,7 +4,7 @@ import pytest
 from application.source import agent_source_service as document_sources
 from application.source.agent_source_service import SearchSourcesService,SearchSourcesToolRequest
 from agent.tools.registry import ToolExecutionContext
-from domain.source import SourceDocument,SourceBlock
+from document.domain.source import SourceDocument, SourceBlock
 
 @pytest.fixture
 def anyio_backend():return 'asyncio'
@@ -61,7 +61,7 @@ async def test_search_surfaces_other_papers_before_repeating_one_papers_passages
 @pytest.mark.anyio
 async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeypatch):
     from application.source.agent_source_service import InspectTableService,InspectTableToolRequest
-    from domain.source import SourceTable
+    from document.domain.source import SourceTable
     header=('Condition','Elongation (%)')
     rows=tuple((f'condition-{i:02}',str(10+i/10)) for i in range(35))
     table=SourceTable('table','paper',0,'Reported elongation; note: as-built',None,3,'Results',header,(header,*rows))

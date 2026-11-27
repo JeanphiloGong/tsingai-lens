@@ -21,13 +21,14 @@ from application.source.agent_source_service import (
     InspectDocumentSourcesService,
     InspectDocumentSourcesToolRequest,
 )
-from domain.source.artifacts import SourceBlock, SourceDocument
+from document.domain.source import SourceBlock, SourceDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.paper_map_repository import PaperMapRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 
 
-from domain.source import Workspace, Document
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from repositories.workspace_repository import StoredWorkspace, StoredDocument
 
 

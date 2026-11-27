@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal, Protocol
 
-from domain.source import SourceDocument, render_markdown_table
+from document.domain.source import SourceDocument, render_markdown_table
 
 ReadableSourceKind = Literal["text_window", "table", "figure"]
 SourceType = Literal["text", "table", "figure"]

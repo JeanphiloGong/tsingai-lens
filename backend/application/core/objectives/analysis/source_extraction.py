@@ -70,7 +70,7 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from domain.source import (
+from document.domain.source import (
     SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceFigure,
     SourceTable, SourceTableCell, render_markdown_table,
 )

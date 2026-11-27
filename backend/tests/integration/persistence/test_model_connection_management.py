@@ -15,7 +15,7 @@ from application import model_connection_service as service
 from application.core.objectives.llm.structured_response import build_research_response_client
 from application.source import document_preparation_service as preparation
 from controllers.dependencies.auth import get_current_user_id
-from domain.source import SourceBlock, SourceDocument, SourceTextUnit
+from document.domain.source import SourceBlock, SourceDocument, SourceTextUnit
 from exceptions import ProjectException
 from infra.identity.client import IdentityUnavailableError, SessionNotFoundError
 from infra.llm.model_credentials import decrypt_api_key

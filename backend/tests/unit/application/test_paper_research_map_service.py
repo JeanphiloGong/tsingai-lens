@@ -24,7 +24,7 @@ from domain.core.research_objective import (
     build_paper_research_scope,
     build_paper_research_scope_id,
 )
-from domain.source import (
+from document.domain.source import (
     SourceDocument,
     build_source_document_tree,
 )

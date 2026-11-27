@@ -73,5 +73,5 @@ loggers and does not install its own handlers or logging namespace configuration
 Related authorities:
 
 - [`../../application/source/README.md`](../../application/source/README.md)
-- [`../../domain/source/README.md`](../../domain/source/README.md)
+- [`../../document/domain/README.md`](../../document/domain/README.md)
 - [`../../docs/architecture/persistence-model.md`](../../docs/architecture/persistence-model.md)

@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from domain.source import (
+from document.domain.source import (
     SourceFigure,
     SourceLayoutBlock,
     build_figure_caption_blocks,

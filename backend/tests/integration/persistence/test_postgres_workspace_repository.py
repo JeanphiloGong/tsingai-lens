@@ -7,7 +7,8 @@ from hashlib import sha256
 import pytest
 from sqlalchemy import event
 
-from domain.source import Workspace, Document
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from infra.persistence.postgres.models.workspace import (
     DocumentORM,
     DocumentPreparationORM,

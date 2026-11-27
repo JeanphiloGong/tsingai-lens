@@ -13,7 +13,7 @@ from application.core.document_profiles.extraction import (
 )
 from application.core.document_profiles.service import DocumentProfilesNotReadyError
 from domain.core.document_profile import DocumentProfile
-from domain.source import SourceDocument
+from document.domain.source import SourceDocument
 from infra.persistence import database
 from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
 from repositories.document_profile_repository import DocumentProfileRepository

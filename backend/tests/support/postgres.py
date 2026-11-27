@@ -4,7 +4,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 
-from domain.source import Workspace, Document
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from repositories.workspace_repository import (
     WorkspaceRepository,
     StoredWorkspace,

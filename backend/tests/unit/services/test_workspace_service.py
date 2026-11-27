@@ -18,7 +18,7 @@ from application.source.source_archive_service import (
     WorkspaceSourceArchiveError,
     DocumentSourceUnavailableError,
 )
-from domain.source import Document
+from document.domain.document import Document
 from exceptions import (
     RequestInvalidException,
     ResourceConflictException,

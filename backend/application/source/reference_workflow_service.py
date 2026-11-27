@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from application.source import workspace_service
-from domain.source import SourceReferenceSet
+from document.domain.source import SourceReferenceSet
 from exceptions import ResourceConflictException
 from repositories.source_artifact_repository import SourceArtifactRepo
 

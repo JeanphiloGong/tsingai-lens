@@ -10,7 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
-from domain.source import Document
+from document.domain.document import Document
 from exceptions import RequestInvalidException, ResourceConflictException
 from infra.source.ingestion.upload_validation import validate_upload
 from repositories.workspace_repository import (

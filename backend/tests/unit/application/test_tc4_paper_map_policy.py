@@ -16,7 +16,7 @@ from domain.core.research_objective import (
     build_paper_research_scope,
     build_paper_research_signal,
 )
-from domain.source import build_source_document_tree
+from document.domain.source import build_source_document_tree
 from tests.support.source_artifacts import build_source_documents
 
 FIXTURE_PATH = (

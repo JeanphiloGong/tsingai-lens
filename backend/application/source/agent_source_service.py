@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 
 from agent.application.context_builder import ChatContextBuilder
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceFigure,

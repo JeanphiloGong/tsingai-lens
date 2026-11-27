@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from infra.source.artifact_bundle import SourceArtifactBundle
-from domain.source import SourceDocument
+from document.domain.source import SourceDocument
 
 
 def build_source_documents(

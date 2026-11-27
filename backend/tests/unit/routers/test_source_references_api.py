@@ -18,7 +18,7 @@ from application.source import (
 )
 from application.source import reference_workflow_service
 from controllers.source import reference_routes as references_controller
-from domain.source import SourceBlock, SourceDocument, assemble_source_documents
+from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from repositories.source_artifact_repository import SourceArtifactRepository
 

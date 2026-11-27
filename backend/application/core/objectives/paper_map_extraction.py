@@ -39,7 +39,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
 )
 from application.core.objectives import paper_map_sources
-from domain.source import SourceDocumentTree
+from document.domain.source import SourceDocumentTree
 from domain.core import (
     PaperResearchMap,
     PaperResearchScope,

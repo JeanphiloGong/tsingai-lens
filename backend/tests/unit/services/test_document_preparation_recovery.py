@@ -13,7 +13,7 @@ from application.source import (
 )
 from application.core.document_profiles import service as profiles
 from domain.core.document_profile import DocumentProfile
-from domain.source import SourceDocument
+from document.domain.source import SourceDocument
 from repositories.pipeline_run_repository import PipelineRunRepo
 from repositories.model_connection_repository import ModelConnectionRepo
 from repositories.source_artifact_repository import SourceArtifactRepo

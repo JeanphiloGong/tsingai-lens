@@ -22,7 +22,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 from research.domain.objective import ResearchObjective
-from domain.source import (
+from document.domain.source import (
     SourceBlock, SourceDocumentTree, SourceFigure, SourceTable, SourceTableCell,
 )
 

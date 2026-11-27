@@ -3,7 +3,7 @@ from __future__ import annotations
 from application.source import (
     reference_extraction_service as source_reference_extraction_service,
 )
-from domain.source import SourceBlock, SourceDocument, assemble_source_documents
+from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 
 
 def test_source_reference_extraction_builds_entries_mentions_and_candidates():

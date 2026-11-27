@@ -1,6 +1,7 @@
 from dataclasses import fields
 
-from domain.source import Workspace, Document
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 
 
 def test_source_business_models_do_not_own_storage_records() -> None:

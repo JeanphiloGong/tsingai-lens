@@ -11,7 +11,7 @@ import pytest
 from tests.support.identity import subjects as auth_service
 from application.pipeline import pipeline_run_service
 from domain.core import DocumentProfile
-from domain.source import SourceDocument
+from document.domain.source import SourceDocument
 from fastapi.testclient import TestClient
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.pipeline_run_repository import PipelineRun, PipelineRunRepository

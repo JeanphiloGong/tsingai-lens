@@ -9,7 +9,7 @@ from typing import Any
 
 from application.core.objectives import property_matching
 from domain.core import PaperResearchMap, PaperResearchSignal
-from domain.source import SourceDocumentTree
+from document.domain.source import SourceDocumentTree
 
 _PAPER_MAP_INITIAL_SOURCE_LIMIT = 16
 _PAPER_MAP_VISUAL_SOURCE_LIMIT = 4

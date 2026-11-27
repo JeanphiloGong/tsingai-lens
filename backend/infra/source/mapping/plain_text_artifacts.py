@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceTableCell,
     SourceTableRow,

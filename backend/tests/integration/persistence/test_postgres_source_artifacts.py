@@ -8,9 +8,7 @@ from hashlib import sha256
 
 import pytest
 
-from domain.source import (
-    Workspace,
-    Document,
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceFigure,
@@ -22,6 +20,8 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
 )
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from repositories.workspace_repository import (
     WorkspaceRepository,
     StoredWorkspace,

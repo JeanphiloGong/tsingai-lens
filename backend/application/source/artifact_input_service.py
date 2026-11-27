@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.source import SourceDocument
+from document.domain.source import SourceDocument
 from infra.source.artifact_bundle import (
     source_block_payload,
     source_document_payload,

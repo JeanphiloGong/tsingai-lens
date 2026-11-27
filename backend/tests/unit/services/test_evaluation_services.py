@@ -58,7 +58,9 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import EvaluationGoldItem, FindingCuration, FindingFeedback
-from domain.source import SourceBlock, SourceDocument, Workspace, Document
+from document.domain.source import SourceBlock, SourceDocument
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from repositories.workspace_repository import StoredWorkspace, StoredDocument
 from exceptions import RequestInvalidException, ResourceConflictException
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisORM

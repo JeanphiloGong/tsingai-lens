@@ -21,7 +21,7 @@ from domain.core import (
     PaperResearchMap,
     PaperResearchSignal,
 )
-from domain.source import SourceDocument, SourceDocumentTree
+from document.domain.source import SourceDocument, SourceDocumentTree
 
 logger = logging.getLogger(__name__)
 

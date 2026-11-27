@@ -21,7 +21,7 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
 from application.source import workspace_service
 from domain.core import PaperResearchMap, PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,

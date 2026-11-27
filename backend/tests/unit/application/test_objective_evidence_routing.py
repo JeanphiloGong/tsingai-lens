@@ -32,7 +32,7 @@ from application.core.objectives.analysis.evidence_routing import (
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import PaperResearchMap
-from domain.source import SourceDocumentNode, SourceDocumentTree
+from document.domain.source import SourceDocumentNode, SourceDocumentTree
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
 )

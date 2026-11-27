@@ -10,7 +10,7 @@ from tests.support.source_artifacts import build_source_documents
 
 import pytest
 
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceFigure,

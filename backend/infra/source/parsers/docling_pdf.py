@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-from domain.source import SourceDocument, SourceTextUnit
+from document.domain.source import SourceDocument, SourceTextUnit
 from infra.source.artifact_bundle import (
     SourceArtifactBundle,
     source_document_payload,

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from uuid import uuid4
 
-from domain.source import Workspace
+from workspace.domain.workspace import Workspace
 from exceptions import ResourceNotFoundException
 from repositories.workspace_repository import (
     StoredWorkspace,

@@ -27,7 +27,8 @@ from application.source import (
     reference_extraction_service as source_reference_extraction_service,
 )
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
-from domain.source import Document, SourceDocument
+from document.domain.source import SourceDocument
+from document.domain.document import Document
 from exceptions import ServiceUnavailableException
 from infra.llm.model_credentials import provider_options
 from infra.persistence.database import AsyncSessionLocal

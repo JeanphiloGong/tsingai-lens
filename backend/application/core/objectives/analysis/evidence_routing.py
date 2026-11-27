@@ -16,7 +16,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
 )
 from research.domain.objective import ResearchObjective
-from domain.source import SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceTable
+from document.domain.source import SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceTable
 
 logger = logging.getLogger(__name__)
 

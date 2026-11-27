@@ -15,7 +15,7 @@ from application.core.objectives.analysis.evidence_routing import EvidenceCandid
 from application.core.objectives.analysis.source_text import NUMBER_PATTERN
 from application.core.objectives.analysis.source_validation import _objective_row_matches_headers
 from application.core.paper_facts.extraction import PaperFactsExtractor
-from domain.source import render_markdown_table
+from document.domain.source import render_markdown_table
 
 logger = logging.getLogger(__name__)
 

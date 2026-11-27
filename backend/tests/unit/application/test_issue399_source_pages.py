@@ -2,7 +2,7 @@ from application.source import agent_source_service as document_sources
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
-from domain.source import SourceDocument, SourceBlock
+from document.domain.source import SourceDocument, SourceBlock
 from agent.tools.registry import ToolExecutionContext
 from application.source.agent_source_service import (
     InspectDocumentSourcesService,

@@ -10,7 +10,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from application.source import workspace_service
-from domain.source import (
+from document.domain.source import (
     SourceDocument,
     SourceDocumentNode,
     SourceDocumentTree,

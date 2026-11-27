@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceTable,

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from domain.source import Workspace as WorkspaceAggregate
-from domain.source import Document as DocumentAggregate
+from workspace.domain.workspace import Workspace as WorkspaceAggregate
+from document.domain.document import Document as DocumentAggregate
 from infra.persistence.database import AsyncSessionLocal
 from infra.persistence.postgres.models.workspace import (
     WorkspaceORM,

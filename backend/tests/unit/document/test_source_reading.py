@@ -9,7 +9,7 @@ from document.application.source_reading import (
     SourceReadingError,
     SourceReadingService,
 )
-from domain.source import SourceBlock, SourceDocument, SourceTable
+from document.domain.source import SourceBlock, SourceDocument, SourceTable
 
 
 class FakeSourceRepository:

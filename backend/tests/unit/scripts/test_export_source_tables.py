@@ -10,12 +10,12 @@ from repositories.workspace_repository import (
     StoredDocument,
 )
 from scripts import export_source_tables as export_script
-from domain.source import (
-    Workspace,
-    Document,
+from document.domain.source import (
     SourceDocument,
     SourceTable,
 )
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from repositories.workspace_repository import WorkspaceRepository

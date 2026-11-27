@@ -17,7 +17,7 @@ from application.source.agent_source_service import (
     SearchSourcesService,
     SearchSourcesToolRequest,
 )
-from domain.source import Document
+from document.domain.document import Document
 from repositories.workspace_repository import StoredDocument
 from repositories.source_artifact_repository import SourceArtifactRepository
 

@@ -15,7 +15,8 @@ from domain.core.paper_experiment import (
     ReportedInterpretation,
     SourceReference,
 )
-from domain.source import Workspace, Document
+from workspace.domain.workspace import Workspace
+from document.domain.document import Document
 from infra.persistence import database
 from repositories.workspace_repository import (
     WorkspaceRepository,

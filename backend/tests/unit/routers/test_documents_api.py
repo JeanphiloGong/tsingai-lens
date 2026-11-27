@@ -25,9 +25,7 @@ from application.core.document_profiles import service as document_profile_servi
 from application.source import document_markdown_service, source_archive_service
 from controllers.core import document_routes as documents_controller
 from domain.core import DocumentProfile
-from domain.source import (
-    Document,
-)
+from document.domain.document import Document
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 

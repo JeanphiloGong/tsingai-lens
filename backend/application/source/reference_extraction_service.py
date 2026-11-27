@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from typing import Iterable
 
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceReferenceCandidate,

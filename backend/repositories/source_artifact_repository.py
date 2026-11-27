@@ -13,7 +13,7 @@ from typing import (
     Iterable,
 )
 
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,

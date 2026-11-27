@@ -56,6 +56,35 @@ function activity(papers: Record<string, unknown>[], extra: Record<string, unkno
 	} satisfies ChatPresentationItem;
 }
 
+function toolActivity(toolName: string, data: Record<string, unknown>) {
+	const resultMessage: ConversationMessage = {
+		message_id: 'result',
+		conversation_id: 'session',
+		role: 'tool',
+		content: '',
+		created_at: '2026-10-09T10:00:00Z',
+		tool_call_id: 'call-1',
+		tool_calls: [],
+		source_contexts: [],
+		tool_result: {
+			tool_call_id: 'call-1',
+			status: 'succeeded',
+			error_code: null,
+			error_message: null,
+			data,
+			warnings: [],
+			resource_refs: []
+		}
+	};
+	return {
+		kind: 'activity',
+		id: `activity-${toolName}`,
+		status: 'completed',
+		artifacts: [],
+		operations: [{ toolCallId: 'call-1', toolName, requestMessage: null, resultMessage }]
+	} satisfies ChatPresentationItem;
+}
+
 beforeEach(() => language.set('zh'));
 
 it('shows unavailable counts without inventing an empty search result', async () => {
@@ -63,6 +92,26 @@ it('shows unavailable counts without inventing an empty search result', async ()
 	render(ResearchActivity, { item });
 	await expect.element(page.getByText(/--/)).toBeInTheDocument();
 	await expect.element(page.getByText(/未找到|No papers matched/)).not.toBeInTheDocument();
+});
+
+it('renders read_source summaries from the returned Source metadata', async () => {
+	render(ResearchActivity, {
+		item: toolActivity('read_source', {
+			document_title: 'Paper A',
+			heading_path: 'Methods',
+			page: 8
+		})
+	});
+	document.querySelector<HTMLDetailsElement>('[data-testid="research-activity"] summary')?.click();
+	await expect.element(page.getByText('已读取Paper A · Methods · p. 8', { exact: true })).toBeVisible();
+});
+
+it('renders inspect_table summaries from returned shape counts', async () => {
+	render(ResearchActivity, {
+		item: toolActivity('inspect_table', { data_row_count: 4, column_count: 3 })
+	});
+	document.querySelector<HTMLDetailsElement>('[data-testid="research-activity"] summary')?.click();
+	await expect.element(page.getByText('4 行数据 · 3 列', { exact: true })).toBeVisible();
 });
 
 describe('paper browsing activity', () => {

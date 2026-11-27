@@ -16,6 +16,7 @@ from agent.domain.models import AgentTask, Operation, TaskStep
 from agent.repositories.task_repository import TaskExecutionContext, TaskRepository
 from agent.application.context_builder import ChatModelContext
 from agent.application.answer_citations import bind_answer_citations
+from agent.application.execution_events import EventSink, operation_activity
 from agent.application.model import (
     AGENT_MISSION,
     ANSWER_CITATION_INSTRUCTIONS,
@@ -96,6 +97,7 @@ class TaskExecution:
     async def run_task(
         self, *, task_id: str, user_id: str,
         conversation_id: str | None = None, resume_revision: int | None = None,
+        emit: EventSink | None = None,
     ) -> str:
         async with self.repository.execution_lock(task_id):
             if resume_revision is not None:
@@ -124,6 +126,19 @@ class TaskExecution:
             )
             expected_revision = state.task.checkpoint_revision
             previous_state = state
+            sequence = 0
+
+            async def publish(event: str, **data: object) -> None:
+                nonlocal sequence
+                if emit is None:
+                    return
+                sequence += 1
+                await emit({
+                    "event": event,
+                    "task_id": task_id,
+                    "sequence": sequence,
+                    **data,
+                })
 
             async def save(next_state: RunnerState) -> None:
                 nonlocal expected_revision, previous_state
@@ -188,6 +203,64 @@ class TaskExecution:
                     },
                     status=next_state.task.status,
                 )
+                if operation is not None:
+                    previous_operation = previous_operations.get(operation.operation_id)
+                    activity = operation_activity(operation)
+                    if previous_operation is None:
+                        await publish(
+                            "operation.requested",
+                            operation_id=operation.operation_id,
+                            name=operation.name,
+                            context=activity["context"],
+                        )
+                    elif previous_operation.status != operation.status:
+                        if operation.status == "running":
+                            await publish(
+                                "operation.started",
+                                operation_id=operation.operation_id,
+                                context=activity["context"],
+                            )
+                        elif operation.status == "failed":
+                            await publish(
+                                "operation.failed",
+                                operation_id=operation.operation_id,
+                                error_code=operation.error_code or "operation_failed",
+                                summary=activity["summary"],
+                            )
+                        elif operation.status == "succeeded":
+                            await publish(
+                                "operation.completed",
+                                operation_id=operation.operation_id,
+                                status=operation.status,
+                                **activity,
+                            )
+                if message is not None and message.get("role") == "assistant":
+                    content = str(message.get("content") or "")
+                    if content:
+                        await publish(
+                            "message.delta",
+                            message_id=message["message_id"],
+                            text=content,
+                        )
+                    if next_state.task.status == "completed":
+                        for citation in message.get("citations", []):
+                            if isinstance(citation, dict):
+                                await publish(
+                                    "message.citation",
+                                    message_id=message["message_id"],
+                                    offset=citation.get("offset", 0),
+                                    source={
+                                        key: value
+                                        for key, value in citation.items()
+                                        if key != "offset"
+                                    },
+                                )
+                        await publish(
+                            "message.completed",
+                            message_id=message["message_id"],
+                            checkpoint_revision=next_state.task.checkpoint_revision,
+                            status=next_state.task.status,
+                        )
                 expected_revision += 1
                 previous_state = replace(next_state, steps=tuple(steps))
 

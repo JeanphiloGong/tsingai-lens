@@ -22,8 +22,8 @@ from application.source.agent_source_service import (
     InspectDocumentSourcesToolRequest,
 )
 from document.domain.source import SourceBlock, SourceDocument
-from repositories.document_profile_repository import DocumentProfileRepository
-from repositories.paper_map_repository import PaperMapRepository
+from document.repositories.profile_repository import ProfileRepository
+from research.discovery.repositories.paper_map_repository import PaperMapRepository
 from document.repositories.source_repository import SourceRepository
 
 
@@ -105,7 +105,7 @@ def test_unprepared_source_remains_unprepared():
 ])
 def test_browse_prepared_paper_reports_only_real_screening_limitations(text, expected_status):
     workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": "paper-1", "filename": "Preheating.pdf", "status": "ready"}])))
-    workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[
+    workspace_context.ProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", title="Preheating", doc_type="experimental", confidence=0.9),
         ]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[
@@ -143,7 +143,7 @@ def test_optional_screening_information_does_not_require_researcher_intervention
         paper_map.map_status = "insufficient_map"
         paper_map.map_limitations = ("Process scope is not mapped.",)
     workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": "paper-1", "filename": "LPBF preheating.pdf", "status": document_status}])))
-    workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(
+    workspace_context.ProfileRepo = SimpleNamespace(list_workspace=AsyncMock(
             return_value=[] if missing == "profile" else [profile]
         ))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(
@@ -181,7 +181,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
         return document("Abstract: LPBF study.") if document_id == "paper-1" else None
 
     workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace(records)))
-    workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
+    workspace_context.ProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.SourceRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
     capability = BrowseWorkspacePapersService()
@@ -219,7 +219,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
 
 def test_normal_pagination_is_not_a_warning():
     workspace_context.workspace_service = SimpleNamespace(get_workspace_for_user=AsyncMock(return_value=stored_workspace([{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)])))
-    workspace_context.DocumentProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
+    workspace_context.ProfileRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.PaperMapRepo = SimpleNamespace(list_workspace=AsyncMock(return_value=[]))
     workspace_context.SourceRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
     capability = BrowseWorkspacePapersService()
@@ -264,7 +264,7 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     )
     sources = SourceRepository()
     workspace_context.workspace_service = workspace_service
-    workspace_context.DocumentProfileRepo = DocumentProfileRepository()
+    workspace_context.ProfileRepo = ProfileRepository()
     workspace_context.PaperMapRepo = PaperMapRepository()
     workspace_context.SourceRepo = sources
     browse = BrowseWorkspacePapersService()

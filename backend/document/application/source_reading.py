@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+from dataclasses import dataclass, replace
 from hashlib import sha256
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
-from document.domain.source import SourceTable, build_source_document_tree, SourceDocument, render_markdown_table
+from agent.application.context_builder import ChatContextBuilder
+from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus
+from document.domain.source import SourceBlock, SourceFigure, SourceTable, build_source_document_tree, SourceDocument, render_markdown_table
+from infra.source.artifact_bundle import source_table_payload
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from urllib.parse import urlencode
 
 ReadableSourceKind = Literal["text_window", "table", "figure"]
 SourceType = Literal["text", "table", "figure"]
+
+_SOURCE_CONTENT_LIMIT = 2_500
+_TABLE_CONTENT_LIMIT = 12_000
 
 
 class DocumentSourceRepository(Protocol):
@@ -404,8 +413,638 @@ class SourceReadingService:
         )
 
 
+class InspectDocumentSourcesToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    document_id: str = Field(min_length=1, max_length=240)
+    query: str | None = Field(default=None, max_length=240)
+    source_ref: str | None = Field(default=None, min_length=1, max_length=240)
+    section_id: str | None = Field(default=None, min_length=1, max_length=500, description="Copy the section_id from the outline; reads its complete subtree.")
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
+    heading_path: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Exact heading_path from the document outline. Reads that section and its subsections; omit to inspect the whole prepared document.",
+    )
+    source_types: list[SourceType] = Field(default_factory=list, max_length=3)
+    page: int | None = Field(default=None, ge=1)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(
+        default=200,
+        ge=1,
+        le=200,
+        description="Optional record cap. Omit to read a batch of complete passages fitted to the available context.",
+    )
+
+    @field_validator("query", "heading_path")
+    @classmethod
+    def _normalize_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.split())
+        return normalized or None
+
+    @field_validator("source_types")
+    @classmethod
+    def _unique_source_types(cls, values: list[SourceType]) -> list[SourceType]:
+        return list(dict.fromkeys(values))
+
+
+class SearchSourcesToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] | None = Field(default=None, min_length=1, description="Omit to search the current workspace; supply IDs to narrow it.")
+    match_mode: Literal["any", "all", "phrase"] = Field(default="any", description="Case-insensitive terms; all requires every term somewhere in the same paper, phrase requires an exact phrase.")
+    query: str = Field(min_length=1, max_length=240)
+    source_types: list[SourceType] = Field(default_factory=list, max_length=3)
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=8, ge=1, le=12)
+
+    @field_validator("document_ids")
+    @classmethod
+    def _unique_document_ids(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        normalized = [value.strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("document IDs cannot be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("document IDs must be unique")
+        return normalized
+
+    @field_validator("query")
+    @classmethod
+    def _normalize_query(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("source_types")
+    @classmethod
+    def _unique_source_types(cls, values: list[SourceType]) -> list[SourceType]:
+        return list(dict.fromkeys(values))
+
+
+class InspectTableToolRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    document_id: str = Field(min_length=1, max_length=240)
+    table_ref: str = Field(min_length=1, max_length=240)
+    source_version: str | None = Field(default=None, min_length=1, max_length=64)
+    row_offset: int = Field(default=0, ge=0)
+    row_limit: int = Field(default=20, ge=1, le=50)
+
+
+
+class InspectTableService:
+
+    def format_table(self, *, window: TableWindow, arguments: InspectTableToolRequest,
+                     workspace_id: str, tool_call_id: str | None,
+                     max_result_tokens: int) -> ChatToolResult:
+        table = window.table
+        source_version = window.source_version
+        record = source_table_payload(table)
+        canonical_markdown = (record["table_markdown"] or "").strip()
+        digest = window.source_digest
+        data_rows = table.table_matrix[table.header_row_count :]
+        if arguments.row_offset > 0 and arguments.row_offset >= len(data_rows):
+            return ChatToolResult(
+                tool_call_id=tool_call_id,
+                status=ToolResultStatus.FAILED,
+                data={
+                    "document_id": window.locator.document_id,
+                    "table_ref": table.table_id,
+                    "caption": table.caption_text,
+                    "page": table.page,
+                    "heading_path": table.heading_path,
+                    "data_row_count": len(data_rows),
+                    "row_offset": arguments.row_offset,
+                    "source_digest": digest,
+                    "support_is_evidence": False,
+                },
+                resource_refs=(
+                    InspectDocumentSourcesService._source_ref(
+                        workspace_id,
+                        window.locator.document_id,
+                        {"source_ref": table.table_id, "page": table.page},
+                    ),
+                ),
+                error_code="table_row_offset_out_of_range",
+                error_message=(
+                    "The requested table row offset is outside the data rows. "
+                    "Start at row 0 and follow next_row_offset values returned by "
+                    "inspect_table."
+                ),
+            )
+        complete_table = (
+            arguments.row_offset == 0
+            and len(canonical_markdown.encode("utf-8")) <= _TABLE_CONTENT_LIMIT
+        )
+        if complete_table:
+            markdown = canonical_markdown
+            returned_row_count = len(data_rows)
+            next_row_offset = None
+            content_truncated = False
+            oversized_row_offset = None
+        else:
+            headers = list(table.column_headers) or [
+                f"column_{index + 1}" for index in range(table.col_count)
+            ]
+            # Select complete rows only. Rendering a full window and truncating
+            # its string can hide the boundary inside a row while the old code
+            # advanced past every selected row, making later rows unreachable.
+            selected_rows: list[tuple[str, ...]] = []
+            oversized_row_offset: int | None = None
+            remaining_rows = window.rows
+            for relative_index, row in enumerate(remaining_rows[: arguments.row_limit]):
+                candidate = (
+                    render_markdown_table(
+                        [list(item) for item in (*selected_rows, row)],
+                        headers,
+                        header_row_count=0,
+                    )
+                    or ""
+                )
+                if len(candidate.encode("utf-8")) > _TABLE_CONTENT_LIMIT:
+                    oversized_row_offset = arguments.row_offset + relative_index
+                    break
+                selected_rows.append(row)
+
+            # A single pathological row cannot fit the bounded response. Return
+            # a preview but keep the continuation at that row; callers can use
+            # read_source's character pagination for the complete table content.
+            if not selected_rows and oversized_row_offset is not None:
+                oversized_markdown = (
+                    render_markdown_table(
+                        [list(remaining_rows[0])],
+                        headers,
+                        header_row_count=0,
+                    )
+                    or ""
+                )
+                markdown, _ = self._bounded_utf8(
+                    oversized_markdown,
+                    limit=_TABLE_CONTENT_LIMIT,
+                )
+                returned_row_count = 0
+                next_row_offset = oversized_row_offset
+                content_truncated = True
+            else:
+                markdown = (
+                    render_markdown_table(
+                        [list(row) for row in selected_rows],
+                        headers,
+                        header_row_count=0,
+                    )
+                    or ""
+                )
+                returned_row_count = len(selected_rows)
+                next_row_offset = arguments.row_offset + returned_row_count
+                content_truncated = (
+                    oversized_row_offset is not None or next_row_offset < len(data_rows)
+                )
+            if next_row_offset >= len(data_rows):
+                next_row_offset = None
+
+        result = ChatToolResult(
+            tool_call_id=tool_call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "document_id": window.locator.document_id,
+                "document_title": window.document_title,
+                "table_ref": table.table_id,
+                "source_version": source_version,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version, "row_offset": next_row_offset} if next_row_offset is not None else None,
+                "caption": table.caption_text,
+                "page": table.page,
+                "heading_path": table.heading_path,
+                "column_headers": list(table.column_headers),
+                "data_row_count": len(data_rows),
+                "column_count": table.col_count,
+                "row_offset": arguments.row_offset,
+                "returned_row_count": returned_row_count,
+                "next_row_offset": next_row_offset,
+                "complete_table": complete_table,
+                "content_truncated": content_truncated,
+                "oversized_row_offset": oversized_row_offset,
+                "table_markdown": markdown,
+                "source_digest": digest,
+                "support_is_evidence": False,
+            },
+            resource_refs=(
+                InspectDocumentSourcesService._source_ref(
+                    workspace_id,
+                    window.locator.document_id,
+                    {
+                        "source_ref": table.table_id,
+                        "page": table.page,
+                    },
+                ),
+            ),
+            warnings=(
+                (
+                    "The table window stopped before a row that exceeds the bounded "
+                    "response. Continue from next_row_offset; if that offset repeats, "
+                    "use read_source character pagination.",
+                )
+                if oversized_row_offset is not None
+                else ()
+            ),
+        )
+
+        while InspectDocumentSourcesService._result_tokens(result) > max_result_tokens:
+            count = result.data["returned_row_count"]
+            if count <= 1:
+                return ChatToolResult(
+                    tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
+                    error_code="table_row_exceeds_budget",
+                    error_message="A complete table row and its headers do not fit. Read the canonical table with read_source.",
+                    data={"read_arguments": {"document_id": window.locator.document_id, "source_kind": "table",
+                                             "source_ref": table.table_id, "source_version": source_version}},
+                )
+            count -= 1
+            next_row_offset = arguments.row_offset + count
+            headers = list(table.column_headers) or [f"column_{i+1}" for i in range(table.col_count)]
+            markdown = render_markdown_table(
+                [list(row) for row in data_rows[arguments.row_offset:next_row_offset]], headers, header_row_count=0,
+            ) or ""
+            result = replace(result, data={**result.data,
+                "returned_row_count": count, "table_markdown": markdown,
+                "next_row_offset": next_row_offset, "complete_table": False, "content_truncated": True,
+                "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version,
+                                 "row_offset": next_row_offset},
+            })
+        return result
+
+    @staticmethod
+    def _bounded_utf8(
+        value: str,
+        *,
+        limit: int,
+    ) -> tuple[str, bool]:
+        text = value
+        encoded = text.encode("utf-8")
+        if len(encoded) <= limit:
+            return text, False
+        return encoded[:limit].decode("utf-8", errors="ignore"), True
+
+
+class InspectDocumentSourcesService:
+
+    def format_outline(self, *, document: SourceDocument, source_version: str,
+                       sections_by_id: dict[str, str], selected_refs: set[str] | None,
+                       arguments: InspectDocumentSourcesToolRequest, workspace_id: str,
+                       tool_call_id: str | None, max_result_tokens: int) -> ChatToolResult:
+        sources = [
+            *(
+                self._text_source(block)
+                for block in sorted(document.blocks, key=lambda item: item.block_order)
+                if block.text.strip()
+            ),
+            *(
+                self._table_source(table)
+                for table in sorted(document.tables, key=lambda item: item.table_order)
+            ),
+            *(
+                self._figure_source(figure)
+                for figure in sorted(
+                    document.figures, key=lambda item: item.figure_order
+                )
+                if (figure.caption_text or "").strip()
+            ),
+        ]
+        for source in sources:
+            content = source.pop("_canonical_content")
+            source.update(
+                content=content,
+                content_truncated=False,
+                canonical_length=len(content),
+                estimated_tokens=ChatContextBuilder.estimate_tokens(content),
+            )
+        for index, source in enumerate(sources, start=1):
+            source["source_label"] = f"S{index:03d}"
+        sections: dict[str, dict[str, Any]] = {}
+        for source in sources:
+            heading = " ".join((source["heading_path"] or "").split())
+            section = sections.setdefault(
+                heading,
+                {
+                    "heading_path": heading,
+                    "pages": [],
+                    "source_count": 0,
+                    "source_types": [],
+                    "first_source_ref": source["source_ref"],
+                    "canonical_length": 0,
+                    "estimated_tokens": 0,
+                },
+            )
+            section["source_count"] += 1
+            section["canonical_length"] += source["canonical_length"]
+            section["estimated_tokens"] += source["estimated_tokens"]
+            if source["page"] is not None and source["page"] not in section["pages"]:
+                section["pages"].append(source["page"])
+            if source["source_type"] not in section["source_types"]:
+                section["source_types"].append(source["source_type"])
+        for heading, section in sections.items():
+            section["section_id"] = next(
+                (key for key, path in sections_by_id.items() if path == heading), None
+            )
+        selected_types = set(arguments.source_types)
+        matches = [
+            item
+            for item in sources
+            if (selected_refs is None or item["source_ref"] in selected_refs)
+            and (not selected_types or item["source_type"] in selected_types)
+            and (arguments.page is None or item["page"] == arguments.page)
+            and (
+                arguments.heading_path is None
+                or " ".join((item["heading_path"] or "").split())
+                == arguments.heading_path
+                or " ".join((item["heading_path"] or "").split()).startswith(arguments.heading_path + " > ")
+            )
+            and (
+                arguments.source_ref is None
+                or item["source_ref"] == arguments.source_ref
+            )
+            and self._matches_query(item, arguments.query)
+        ]
+        # Keep complete passages together. Reserve space for the outline,
+        # Size the complete tool envelope once, including locators and warnings.
+        outline = list(sections.values())[:80]
+        if arguments.heading_path is not None:
+            outline = [section for heading, section in sections.items()
+                       if heading == arguments.heading_path
+                       or heading.startswith(arguments.heading_path + " > ")][:80]
+        if arguments.section_id is not None:
+            outline = [section for section in outline if section["first_source_ref"] in selected_refs]
+        continuation_args = arguments.model_dump(exclude_none=True, exclude={"offset", "limit"})
+        continuation_args["source_version"] = source_version
+        visible = list(matches[arguments.offset : arguments.offset + arguments.limit])
+        next_offset = arguments.offset + len(visible)
+        if next_offset >= len(matches):
+            next_offset = None
+
+        refs = [self._document_ref(workspace_id, document.document_id)]
+        refs.extend(
+            self._source_ref(workspace_id, document.document_id, item)
+            for item in visible
+        )
+        result = ChatToolResult(
+            tool_call_id=tool_call_id,
+            status=ToolResultStatus.SUCCEEDED,
+            data={
+                "document": {
+                    "document_id": document.document_id,
+                    "title": document.title[:500],
+                },
+                "query": arguments.query,
+                "section_id": arguments.section_id,
+                "source_version": source_version,
+                "continuation": {**continuation_args, "offset": next_offset} if next_offset is not None else None,
+                "source_ref": arguments.source_ref,
+                "heading_path": arguments.heading_path,
+                "source_types": list(arguments.source_types),
+                "page": arguments.page,
+                "available_counts": {
+                    "text": len(document.blocks),
+                    "table": len(document.tables),
+                    "figure": len(document.figures),
+                },
+                "prepared_source_pages": sorted(
+                    {item["page"] for item in sources if item["page"] is not None},
+                    key=str,
+                ),
+                "document_outline": outline,
+                "outline_section_total": len(sections),
+                "outline_truncated": len(sections) > len(outline),
+                "coverage_note": (
+                    "This outline describes prepared Sources, not the original PDF's total pages "
+                    "or a completed scientific review. When outline_truncated is false, it lists "
+                    "all prepared sections: searching this document cannot retrieve unprepared body sections. "
+                    "No keyword matches does not mean no body text. "
+                    "Use heading_path and next_offset to inspect relevant sections; verify conditions, "
+                    "comparators, measurements and results before completing the requested review."
+                ),
+                "match_total": len(matches),
+                "offset": arguments.offset,
+                "limit": arguments.limit,
+                "next_offset": next_offset,
+                "sources": visible,
+                "source_label_to_ref": {
+                    source["source_label"]: source["source_ref"] for source in visible
+                },
+                "batch_token_budget": max_result_tokens,
+                "returned_source_count": len(visible),
+                "support_is_evidence": False,
+            },
+            resource_refs=tuple(refs),
+        )
+
+        while True:
+            result = replace(result, warnings=tuple([
+                *(["No prepared Source matched these filters; this is not evidence of scientific absence."]
+                  if not matches else []),
+                *(["Continue with next_offset for additional matching Sources."]
+                  if result.data["next_offset"] is not None else []),
+                *(["An oversized Source is listed without its content; read it separately."]
+                  if any(source["content_truncated"] for source in visible) else []),
+            ]))
+            if self._result_tokens(result) <= max_result_tokens:
+                return result
+            if len(visible) > 1:
+                visible.pop()
+            elif outline:
+                outline.pop()
+            elif visible and visible[0]["content"]:
+                visible[0] = {
+                    **visible[0],
+                    "content": "",
+                    "content_truncated": True,
+                    "reading_note": "Read this oversized Source with read_source or inspect_table.",
+                }
+            else:
+                return ChatToolResult(
+                    tool_call_id=tool_call_id,
+                    status=ToolResultStatus.FAILED,
+                    error_code="source_batch_too_large",
+                    error_message="Request this paper individually with an exact Source or narrower section.",
+                )
+            next_offset = arguments.offset + len(visible)
+            result = replace(
+                result,
+                data={
+                    **result.data,
+                    "sources": list(visible),
+                    "document_outline": list(outline),
+                    "source_label_to_ref": {
+                        source["source_label"]: source["source_ref"]
+                        for source in visible
+                    },
+                    "outline_truncated": len(sections) > len(outline),
+                    "returned_source_count": len(visible),
+                    "next_offset": next_offset if next_offset < len(matches) else None,
+                    "continuation": {**continuation_args, "offset": next_offset} if next_offset < len(matches) else None,
+                },
+                resource_refs=(
+                    self._document_ref(workspace_id, document.document_id),
+                    *(
+                        self._source_ref(
+                            workspace_id, document.document_id, source
+                        )
+                        for source in visible
+                    ),
+                ),
+            )
+    @staticmethod
+    def _result_tokens(result: ChatToolResult) -> int:
+        return ChatContextBuilder.estimate_tokens(
+            ChatContextBuilder.tool_result_message(result)
+        )
+
+    @staticmethod
+    def _source_label_for_document(document: SourceDocument, source_ref: str) -> str:
+        refs = [
+            block.block_id
+            for block in sorted(document.blocks, key=lambda item: item.block_order)
+            if block.text.strip()
+        ]
+        refs.extend(
+            table.table_id
+            for table in sorted(document.tables, key=lambda item: item.table_order)
+        )
+        refs.extend(
+            figure.figure_id
+            for figure in sorted(document.figures, key=lambda item: item.figure_order)
+            if (figure.caption_text or "").strip()
+        )
+        try:
+            return f"S{refs.index(source_ref) + 1:03d}"
+        except ValueError:
+            return ""
+
+    @staticmethod
+    def _text_source(block: SourceBlock) -> dict[str, Any]:
+        content, truncated = InspectDocumentSourcesService._bounded(block.text)
+        return {
+            "source_type": "text",
+            # `source_kind` is the stable Evidence locator kind. Keep the
+            # parser-specific block type as separate display metadata.
+            "source_kind": "text_window",
+            "block_type": block.block_type,
+            "source_ref": block.block_id,
+            "page": block.page,
+            "heading_path": block.heading_path,
+            "content": content,
+            "_canonical_content": block.text,
+            "content_truncated": truncated,
+            "source_digest": hashlib.sha256(block.text.encode("utf-8")).hexdigest(),
+        }
+
+    @staticmethod
+    def _table_source(table: SourceTable) -> dict[str, Any]:
+        record = source_table_payload(table)
+        # Empty parser tables are still valid navigation records. Keep their
+        # canonical content representation stable instead of letting the
+        # digest path call ``encode`` on ``None``.
+        canonical_markdown = (record["table_markdown"] or "").strip()
+        content, truncated = InspectDocumentSourcesService._bounded(
+            canonical_markdown
+        )
+        return {
+            "source_type": "table",
+            "source_kind": "table",
+            "source_ref": table.table_id,
+            "page": table.page,
+            "heading_path": table.heading_path,
+            "caption": table.caption_text,
+            "row_count": table.row_count,
+            "column_count": table.col_count,
+            "content": content,
+            "_canonical_content": canonical_markdown,
+            "content_truncated": truncated,
+            "source_digest": hashlib.sha256(
+                canonical_markdown.encode("utf-8")
+            ).hexdigest(),
+        }
+
+    @staticmethod
+    def _figure_source(figure: SourceFigure) -> dict[str, Any]:
+        content, truncated = InspectDocumentSourcesService._bounded(
+            figure.caption_text
+        )
+        return {
+            "source_type": "figure",
+            "source_kind": "figure",
+            "source_ref": figure.figure_id,
+            "page": figure.page,
+            "heading_path": figure.heading_path,
+            "figure_label": figure.figure_label,
+            "content": content,
+            "_canonical_content": (figure.caption_text or ""),
+            "content_truncated": truncated,
+            "source_digest": hashlib.sha256(
+                (figure.caption_text or "").encode("utf-8")
+            ).hexdigest(),
+        }
+
+    @staticmethod
+    def _bounded(
+        value: str | None,
+        *,
+        limit: int = _SOURCE_CONTENT_LIMIT,
+    ) -> tuple[str, bool]:
+        text = (value or "").strip()
+        return text[:limit], len(text) > limit
+
+    @staticmethod
+    def _matches_query(item: dict[str, Any], query: str | None) -> bool:
+        if not query:
+            return True
+        searchable = " ".join(
+            (item.get(key) or "")
+            for key in ("heading_path", "caption", "figure_label", "content")
+        ).casefold()
+        normalized = query.casefold()
+        return normalized in searchable or all(
+            term in searchable for term in normalized.split()
+        )
+
+    @staticmethod
+    def _document_ref(workspace_id: str, document_id: str) -> ChatResourceRef:
+        return ChatResourceRef(
+            resource_type="document",
+            resource_id=document_id,
+            href=f"/workspaces/{workspace_id}/documents/{document_id}",
+        )
+
+    @staticmethod
+    def _source_ref(
+        workspace_id: str,
+        document_id: str,
+        source: dict[str, Any],
+    ) -> ChatResourceRef:
+        query = {
+            "view": "parsed-paper",
+            "source_ref": source["source_ref"],
+        }
+        if source.get("page") is not None:
+            query["page"] = str(source["page"])
+        return ChatResourceRef(
+            resource_type="source",
+            resource_id=f"{document_id}:{source['source_ref']}",
+            href=(
+                f"/workspaces/{workspace_id}/documents/{document_id}?"
+                f"{urlencode(query)}"
+            ),
+        )
+
+
+
+
 __all__ = [
     "DocumentSourceRepository",
+    "InspectDocumentSourcesToolRequest",
+    "InspectDocumentSourcesService",
+    "InspectTableToolRequest",
+    "InspectTableService",
     "ReadableSourceKind",
     "SourceCandidate",
     "SourceLocator",

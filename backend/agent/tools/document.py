@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from application.source import workspace_service
-from application.source.agent_source_service import (
-    InspectDocumentSourcesService, InspectDocumentSourcesToolRequest,
-    InspectTableService, InspectTableToolRequest,
-)
 from typing import Literal
 
 from agent.tools.registry import ToolExecutionContext, ToolSpec
 from document.application.source_reading import (
     SourceReadingError,
+    InspectDocumentSourcesService,
+    InspectDocumentSourcesToolRequest,
+    InspectTableService,
+    InspectTableToolRequest,
     SourceReadingService,
     SourceSearchPage,
     SourceWindow,

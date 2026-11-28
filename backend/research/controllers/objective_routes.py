@@ -9,7 +9,7 @@ from application.core.objectives import (
 )
 from research.application.objectives import objective_query_service as objective_detail_service
 from application.core.objectives.analysis_service import list_objectives
-from application.core.objectives.objective_discovery_service import start_objective_discovery
+from research.discovery.application.discovery_service import start_objective_discovery
 from research.controllers.objective_schemas import (
     FindingDetailResponse,
     FindingListResponse,

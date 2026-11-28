@@ -23,7 +23,7 @@ Use the following entry points when modifying the Core workflow:
 | Task | Entry point | Result |
 |---|---|---|
 | Resolve selected ready papers | `objective_input_service.resolve_prepared_document_inputs()` | frozen input set; no parsing |
-| Discover candidates | `objective_discovery_service.start_objective_discovery()` | queued discovery run |
+| Discover candidates | `discovery_service.start_objective_discovery()` | queued discovery run |
 | Form candidates | `candidate_formation.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
 | Queue analysis | `analysis_service.start_objective_analysis()` | queued versioned analysis |
@@ -78,7 +78,7 @@ actor's user ID and authorize the Workspace before accessing scientific data.
 | Change | First owner | Focused test under `tests/unit/application/` |
 |---|---|---|
 | Which prepared papers may enter research | `objective_input_service.py` | `test_objective_discovery_service_ownership.py` |
-| Discovery admission or restart recovery | `objective_discovery_service.py` | `test_objective_discovery_service_ownership.py` |
+| Discovery admission or restart recovery | `research/discovery/application/discovery_service.py` | `test_objective_discovery_service_ownership.py` |
 | Candidate question formation | `research/discovery/application/candidate_formation.py` | `test_objective_candidate_service.py` |
 | Approved creation, confirmation, or derivation | `objective_authoring_service.py` | `test_objective_derivation_persistence.py` |
 | Initial or expanded Paper Map reading scope | `paper_map_sources.py` | `test_paper_research_map_service.py` |
@@ -379,7 +379,7 @@ revision referenced by each Selection.
 - `scope_screening.py`: workspace-wide deterministic scope for one Objective.
 - `objective_input_service.py`: selected prepared-paper inputs, Profiles, Source
   trees, and reusable Paper Maps.
-- `objective_discovery_service.py`: discovery run lifecycle and candidate
+- `research/discovery/application/discovery_service.py`: discovery run lifecycle and candidate
   formation.
 - `objective_authoring_service.py`: user-approved Objective creation,
   confirmation, and derivation.

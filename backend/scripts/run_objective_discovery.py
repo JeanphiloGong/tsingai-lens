@@ -28,7 +28,7 @@ from repositories.pipeline_run_repository import (
     PipelineRunJobSnapshot,
     PipelineLeaseLostError,
 )
-from application.core.objectives.objective_discovery_service import (
+from research.discovery.application.discovery_service import (
     execute_objective_discovery_job,
 )
 

@@ -61,7 +61,7 @@ inputs allowed to reconstruct experiment context or create Evidence.
 - `research/discovery/application/candidate_formation.py`: candidate formation from selected
   Paper Maps.
 - `objectives/objective_input_service.py`: selected prepared-paper input loading.
-- `objectives/objective_discovery_service.py`: candidate Objective discovery.
+- `research/discovery/application/discovery_service.py`: candidate Objective discovery.
 - `objectives/objective_authoring_service.py`: user-approved Objective writes.
 - `objectives/objective_analysis_service.py`: source-grounded Objective analysis.
 - `objectives/analysis_service.py`: version allocation, background dispatch,

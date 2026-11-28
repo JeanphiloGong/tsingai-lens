@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-from domain.source import (
+from document.domain.source import (
     SourceBlock,
     SourceDocument,
     SourceFigure,
@@ -380,7 +380,7 @@ def _legacy_tree(
     artifact: dict[str, Any],
     references: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    from domain.source import (
+    from document.domain.source import (
         SourceDocument,
         SourceReferenceCandidate,
         SourceReferenceEntry,

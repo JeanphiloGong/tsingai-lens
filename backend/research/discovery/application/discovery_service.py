@@ -30,7 +30,7 @@ from application.core.objectives.objective_input_service import (
 )
 from application.pipeline import pipeline_run_service
 from application.source import workspace_service
-from domain.core import PreparedDocumentInput
+from research.discovery.domain.paper_map import PreparedDocumentInput
 from infra.persistence.database import AsyncSessionLocal
 from repositories.objective_repository import ObjectiveRepo
 from research.discovery.repositories.paper_map_repository import PaperMapRepo
@@ -163,6 +163,11 @@ async def execute_objective_discovery_job(
                     "total": len(document_inputs),
                     "message": "Candidate research questions are ready for review.",
                     "objective_count": len(facts.research_objectives),
+                    "incomplete_coverage_document_ids": [
+                        paper_map.document_id
+                        for paper_map in paper_maps
+                        if not paper_map.coverage_complete
+                    ],
                 },
             )
     except PipelineLeaseLostError:

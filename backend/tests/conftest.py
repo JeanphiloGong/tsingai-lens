@@ -95,7 +95,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "application.source.document_preparation_service.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "application.core.objectives.objective_discovery_service.AsyncSessionLocal",
+            "research.discovery.application.discovery_service.AsyncSessionLocal",
             factory,
         )
 
@@ -196,7 +196,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.core.objectives.objective_analysis_service as _test_experiment_analysis_service
     import research.application.objectives.objective_authoring_service as _test_objective_authoring_service
     import research.discovery.application.candidate_formation as _test_candidate_formation
-    import application.core.objectives.objective_discovery_service as _test_objective_discovery_service
+    import research.discovery.application.discovery_service as _test_objective_discovery_service
     import application.core.objectives.objective_input_service as _test_objective_input_service
     import application.core.objectives.paper_experiment_authoring_service as _test_paper_experiment_authoring_service
     import application.evaluation.finding_feedback_service as _test_finding_feedback_service

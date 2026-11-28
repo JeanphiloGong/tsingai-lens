@@ -14,7 +14,7 @@ from application.core.objectives.objective_input_service import (
     ResearchObjectivesNotReadyError,
 )
 from application.source import workspace_service
-from application.source.document_preparation_service import (
+from pipeline.application.document_preparation_runner import (
     DOCUMENT_ANALYSIS_VERSION,
     SOURCE_PARSER_VERSION,
 )
@@ -54,16 +54,16 @@ def test_upload_classification_retry_content_and_research_readiness(
             return None
 
     classifier = Classifier()
-    from application.source import document_preparation_service as preparation
-    from controllers.source import pipeline_run_routes
+    from pipeline.application import document_preparation_runner as preparation
+    from pipeline.controllers import pipeline_run_routes
     from repositories.model_connection_repository import ModelConnectionRepo
     from repositories.pipeline_run_repository import PipelineRunRepo
     from datetime import timedelta
 
     monkeypatch.setattr(
         pipeline_run_routes,
-        "queue_document_preparation",
-        preparation.queue_document_preparation,
+        "accept_document_preparation",
+        preparation.accept_document_preparation,
     )
 
     async def assign_model():

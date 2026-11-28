@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Literal
 
-from application.pipeline.pipeline_run_service import document_preparation_error_message
+from pipeline.application.pipeline_run_service import document_preparation_error_message
 from repositories.pipeline_run_repository import PipelineRun, PipelineRunSummary
 
 from pydantic import BaseModel, Field

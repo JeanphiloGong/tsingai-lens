@@ -1,10 +1,10 @@
-# Application Pipeline Records
+# Pipeline Execution
 
 The maintained preparation workflow is owned directly by
-`application/source/document_preparation_service.py`, and Objective execution is
+`pipeline/application/document_preparation_runner.py`, and Objective execution is
 owned by `application/core/objectives/analysis_service.py`.
 
-`pipeline_run_service` owns admission, node transitions, progress, terminal failure,
+`pipeline/application/pipeline_run_service.py` owns admission, node transitions, progress, terminal failure,
 retry lineage, and restart recovery for those executions. It constructs execution
 records directly from the fixed node graphs defined in the service. Tests check
 the preparation and discovery dependencies; creating a run does not revalidate
@@ -18,7 +18,7 @@ their existing tool observations. Both output boundaries replace private
 preparation errors with safe stage messages without rewriting stored diagnostics.
 `PipelineRun` and
 `PipelineNodeRun` live beside their contract in
-[`../../repositories/pipeline_run_repository.py`](../../repositories/pipeline_run_repository.py)
+[`../repositories/pipeline_run_repository.py`](../repositories/pipeline_run_repository.py)
 and are persisted together in one `pipeline_runs` row. Reading them does not
 rerun graph validation or advance nodes. They do not define a
 workspace snapshot, select Source

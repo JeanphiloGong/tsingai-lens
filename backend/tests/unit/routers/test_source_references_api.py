@@ -13,11 +13,9 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from application.source import (
-    reference_extraction_service as source_reference_extraction_service,
-)
-from application.source import reference_workflow_service
-from controllers.source import reference_routes as references_controller
+from document.application import references as source_reference_extraction_service
+from document.application import reference_workflow as reference_workflow_service
+from document.controllers import reference_routes as references_controller
 from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from document.repositories.source_repository import SourceRepository

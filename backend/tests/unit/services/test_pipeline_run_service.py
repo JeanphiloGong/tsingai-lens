@@ -5,8 +5,8 @@ from infra.persistence import database
 from tests.support.research_jobs import pipeline_job_fixture
 
 import pytest
-from application.pipeline import pipeline_run_service
-from application.pipeline.pipeline_run_service import document_preparation_error_message
+from pipeline.application import pipeline_run_service
+from pipeline.application.pipeline_run_service import document_preparation_error_message
 from controllers.schemas.source.pipeline_run import pipeline_run_response
 from repositories.pipeline_run_repository import PipelineRunRepository
 from tests.support.postgres import seed_workspace

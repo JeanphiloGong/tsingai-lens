@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from application.pipeline import pipeline_run_service
+from pipeline.application import pipeline_run_service
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from document.domain import DocumentProfile
 from domain.core import PaperResearchMap

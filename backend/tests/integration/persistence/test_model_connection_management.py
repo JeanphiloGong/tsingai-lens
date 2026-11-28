@@ -13,7 +13,7 @@ from sqlalchemy import event, select, text
 from openai import AsyncOpenAI
 from application import model_connection_service as service
 from application.core.objectives.llm.structured_response import build_research_response_client
-from application.source import document_preparation_service as preparation
+from pipeline.application import document_preparation_runner as preparation
 from controllers.dependencies.auth import get_current_user_id
 from document.domain.source import SourceBlock, SourceDocument, SourceTextUnit
 from exceptions import ProjectException

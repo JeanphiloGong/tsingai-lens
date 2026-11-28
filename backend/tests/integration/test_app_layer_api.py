@@ -9,7 +9,7 @@ from hashlib import sha256
 
 import pytest
 from tests.support.identity import subjects as auth_service
-from application.pipeline import pipeline_run_service
+from pipeline.application import pipeline_run_service
 from document.domain import DocumentProfile
 from document.domain.source import SourceDocument
 from fastapi.testclient import TestClient
@@ -30,7 +30,7 @@ class _ImmediateDocumentPreparationService:
         self.pipeline_run_service = pipeline_run_service
         self.object_store = object_store
 
-    async def queue_document_preparation(
+    async def accept_document_preparation(
         self,
         workspace_id: str,
         document_id: str,
@@ -130,12 +130,12 @@ def app_client(
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     with TestClient(create_app()) as client:
         monkeypatch.setattr(
-            "controllers.source.pipeline_run_routes.queue_document_preparation",
+            "pipeline.controllers.pipeline_run_routes.accept_document_preparation",
             _ImmediateDocumentPreparationService(
                 workspace_service,
                 pipeline_run_service,
                 store_module.Store,
-            ).queue_document_preparation,
+            ).accept_document_preparation,
         )
         client.cookies.set("lens_session", "fixture:" + "admin@example.com")
 

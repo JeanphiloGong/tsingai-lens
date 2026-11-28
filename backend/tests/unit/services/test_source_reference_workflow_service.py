@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from application.source import (
-    reference_extraction_service as source_reference_extraction_service,
-)
-from application.source import reference_workflow_service
+from document.application import references as source_reference_extraction_service
+from document.application import reference_workflow as reference_workflow_service
 from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence import database

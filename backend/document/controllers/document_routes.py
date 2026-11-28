@@ -4,8 +4,8 @@ import mimetypes
 from typing import Annotated, Literal
 from urllib.parse import quote
 
+from document.application import archive, markdown
 from document.application import profile_service as document_profile_service
-from application.source import document_markdown_service, source_archive_service
 from controllers.dependencies.auth import get_current_user_id
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -179,7 +179,7 @@ async def get_workspace_document_markdown(
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    payload = await document_markdown_service.get_document_markdown(
+    payload = await markdown.get_document_markdown(
         workspace_id, document_id, user_id=user_id,
     )
     return make_api_response(data=DocumentMarkdownResponse(**payload))
@@ -206,7 +206,7 @@ async def get_workspace_document_source(
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    payload = await source_archive_service.resolve_document_source_file(
+    payload = await archive.resolve_document_source_file(
         workspace_id, document_id, source_filename=None, user_id=user_id,
     )
 
@@ -246,7 +246,7 @@ async def get_workspace_document_figure_image(
     figure_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    payload = await document_markdown_service.resolve_figure_image_file(
+    payload = await markdown.resolve_figure_image_file(
         workspace_id, document_id, figure_id, user_id=user_id,
     )
 

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from application.source import reference_workflow_service
-from application.source.reference_workflow_service import SourceReferenceWorkflowResult
+from document.application import reference_workflow as reference_workflow_service
+from document.application.reference_workflow import SourceReferenceWorkflowResult
 from controllers.dependencies.auth import get_current_user_id
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response

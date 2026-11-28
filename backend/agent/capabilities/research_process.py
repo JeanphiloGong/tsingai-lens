@@ -12,8 +12,8 @@ from agent.tools.registry import (
 )
 from application.source import workspace_service
 from repositories.workspace_repository import StoredDocument
-from application.pipeline import pipeline_run_service
-from application.pipeline.pipeline_run_service import document_preparation_error_message
+from pipeline.application import pipeline_run_service
+from pipeline.application.pipeline_run_service import document_preparation_error_message
 from repositories.pipeline_run_repository import PipelineRunSummary
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus
 from pydantic import BaseModel, ConfigDict

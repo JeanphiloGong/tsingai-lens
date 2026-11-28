@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from infra.persistence.file import object_store as store_module
-from application.source import workspace_service, source_import_service
+from application.source import workspace_service
+from document.application import import_service as source_import_service
 
 import json
 from hashlib import sha256
@@ -22,8 +23,9 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from document.application import profile_service as document_profile_service
-from application.source import document_markdown_service, source_archive_service
-from controllers.core import document_routes as documents_controller
+from document.application import markdown as document_markdown_service
+from document.application import archive as source_archive_service
+from document.controllers import document_routes as documents_controller
 from document.domain import DocumentProfile
 from document.domain.document import Document
 from document.repositories.profile_repository import ProfileRepository
@@ -100,9 +102,9 @@ def _document_request(
         document_profile_service,
         document_markdown_service,
     ) = document_services
-    documents_controller.source_archive_service = source_archive_service
+    documents_controller.archive = source_archive_service
     documents_controller.document_profile_service = document_profile_service
-    documents_controller.document_markdown_service = document_markdown_service
+    documents_controller.markdown = document_markdown_service
     return SimpleNamespace(
         state=SimpleNamespace(current_user={"user_id": "local-user"})
     )

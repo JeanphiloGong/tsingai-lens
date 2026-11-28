@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from application.pipeline import pipeline_run_service
-from application.source.document_preparation_service import queue_document_preparation
+from pipeline.application import pipeline_run_service
+from pipeline.application.document_preparation_runner import accept_document_preparation
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.source.pipeline_run import (
     pipeline_run_response,
@@ -29,7 +29,7 @@ async def prepare_workspace_document(
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    run = await queue_document_preparation(workspace_id, document_id, user_id=user_id)
+    run = await accept_document_preparation(workspace_id, document_id, user_id=user_id)
     return make_api_response(data=PipelineRunResponse(**pipeline_run_response(run)))
 
 

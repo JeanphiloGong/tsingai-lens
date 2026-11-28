@@ -13,7 +13,7 @@ from infra.persistence.file import workspace_files, object_store
 
 from config import DATA_DIR
 from controllers.models import catalog_routes as model_connections
-from controllers.core import document_routes as documents
+from document.controllers import document_routes as documents
 from controllers.core import finding_review_routes as finding_review
 from controllers.core import paper_experiment_routes as paper_experiments
 from research.controllers import objective_routes as research_objectives
@@ -26,8 +26,8 @@ from controllers.exception_router import (
 from controllers.goal import experiment_plan_routes as experiment_plans
 from controllers.goal import goal_routes as goals
 from controllers.source import workspace_routes as workspaces
-from controllers.source import pipeline_run_routes as pipeline_runs
-from controllers.source import reference_routes as references
+from pipeline.controllers import pipeline_run_routes as pipeline_runs
+from document.controllers import reference_routes as references
 from conversation.controllers.routes import conversation_error_handler, conversation_router
 from conversation.controllers.errors import ConversationInputError
 from conversation.feedback.repository import FeedbackTargetInvalid

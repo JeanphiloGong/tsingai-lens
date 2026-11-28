@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import update
 
-from application.pipeline import pipeline_run_service
+from pipeline.application import pipeline_run_service
 from application.source import workspace_service
 from domain.core import PreparedDocumentInput
 from document.domain.profile import DocumentProfile

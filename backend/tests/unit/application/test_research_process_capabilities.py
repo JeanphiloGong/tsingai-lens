@@ -14,7 +14,7 @@ from agent.capabilities.research_process_start import (
     StartResearchProcessCapability,
     StartResearchProcessToolRequest,
 )
-from application.pipeline import pipeline_run_service
+from pipeline.application import pipeline_run_service
 from controllers.schemas.source.pipeline_run import pipeline_run_response
 from domain.chat import ToolResultStatus
 from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage

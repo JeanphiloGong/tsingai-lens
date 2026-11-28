@@ -1,5 +1,6 @@
 from __future__ import annotations
-from application.source import workspace_service, source_import_service
+from application.source import workspace_service
+from document.application import import_service as source_import_service
 
 from types import ModuleType
 

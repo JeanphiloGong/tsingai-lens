@@ -4,8 +4,8 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from application.pipeline import pipeline_run_service
-from application.pipeline import pipeline_run_service as module
+from pipeline.application import pipeline_run_service
+from pipeline.application import pipeline_run_service as module
 from controllers.schemas.source.pipeline_run import pipeline_run_response
 from infra.execution_stats import ExecutionStats, ModelUsage, TokenUsage
 from repositories.pipeline_run_repository import (

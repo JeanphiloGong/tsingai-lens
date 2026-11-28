@@ -2,10 +2,8 @@ import pytest
 from document.application.profile_extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
 )
-from application.source import (
-    reference_extraction_service as source_reference_extraction_service,
-)
-from application.source.document_preparation_service import (
+from document.application import references as source_reference_extraction_service
+from pipeline.application.document_preparation_runner import (
     DOCUMENT_ANALYSIS_VERSION,
     profile_fingerprint,
     source_fingerprint,

@@ -20,12 +20,10 @@ from document.application.profile_extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
     DocumentProfileExtractor,
 )
-from application.pipeline import pipeline_run_service
-from application.pipeline.pipeline_run_service import document_preparation_error_message
+from pipeline.application import pipeline_run_service
+from pipeline.application.pipeline_run_service import document_preparation_error_message
 from application.source import workspace_service
-from application.source import (
-    reference_extraction_service as source_reference_extraction_service,
-)
+from document.application import references as source_reference_extraction_service
 from document.domain.source import SourceDocument
 from document.domain.document import Document
 from exceptions import ServiceUnavailableException
@@ -98,7 +96,7 @@ def profile_fingerprint(
     )
 
 
-async def queue_document_preparation(
+async def accept_document_preparation(
     workspace_id: str,
     document_id: str,
     *,

@@ -26,7 +26,7 @@ Inside it, business responsibilities are now grouped as:
 - [`source/README.md`](source/README.md)
   Workspace lifecycle, current Document membership, per-document preparation,
   and Source loading
-- [`pipeline/README.md`](pipeline/README.md)
+- [`../pipeline/README.md`](../pipeline/README.md)
   Pipeline Run admission, telemetry, persistence, and recovery; scientific
   workflow ordering stays in owning services
 - [`core/README.md`](core/README.md)

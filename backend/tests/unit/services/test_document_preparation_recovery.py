@@ -7,10 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from application.source import (
-    workspace_service,
-    document_preparation_service as preparation,
-)
+from application.source import workspace_service
+from pipeline.application import document_preparation_runner as preparation
 from document.application import profile_service as profiles
 from document.domain.profile import DocumentProfile
 from document.domain.source import SourceDocument
@@ -95,7 +93,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
         )
 
     monkeypatch.setattr(profiles, "build_document_profile", profile)
-    first = await preparation.queue_document_preparation(
+    first = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
     job = await PipelineRunRepo.claim_next_document_preparation_job(
@@ -112,7 +110,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
     assert (
         await SourceRepo.read_document("prepare-papers", "paper-a") is not None
     )
-    second = await preparation.queue_document_preparation(
+    second = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
     assert second.run_id != first.run_id
@@ -131,7 +129,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
         await workspace_service.get_document("prepare-papers", "paper-a")
     ).status == "ready"
     assert ctx.parse.await_count == 1
-    reused = await preparation.queue_document_preparation(
+    reused = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
     assert reused.run_id == second.run_id
@@ -146,7 +144,7 @@ async def test_profile_retry_preserves_sources_and_reuses_them(
 async def test_parser_failure_is_terminal_and_safe(prepared_inputs, monkeypatch):
     ctx = prepared_inputs
     ctx.parse.side_effect = OSError("private provider path /private/key")
-    run = await preparation.queue_document_preparation(
+    run = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
     job = await PipelineRunRepo.claim_next_document_preparation_job(
@@ -162,7 +160,7 @@ async def test_parser_failure_is_terminal_and_safe(prepared_inputs, monkeypatch)
     assert failed.status == "failed"
     assert "/private" not in str(failed)
     assert (
-        await preparation.queue_document_preparation(
+        await preparation.accept_document_preparation(
             "prepare-papers", "paper-a", user_id="user-1"
         )
     ).run_id != run.run_id
@@ -171,10 +169,10 @@ async def test_parser_failure_is_terminal_and_safe(prepared_inputs, monkeypatch)
 async def test_submission_does_not_execute_in_web(prepared_inputs, monkeypatch):
     execute = AsyncMock()
     monkeypatch.setattr(preparation, "execute_document_preparation_job", execute)
-    first = await preparation.queue_document_preparation(
+    first = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
-    again = await preparation.queue_document_preparation(
+    again = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
     assert first.status == "queued" and again.run_id == first.run_id
@@ -192,7 +190,7 @@ async def test_preparation_takeover_rejects_late_stage_publication(
     from repositories.pipeline_run_repository import PipelineLeaseLostError
 
     ctx = prepared_inputs
-    run = await preparation.queue_document_preparation(
+    run = await preparation.accept_document_preparation(
         "prepare-papers", "paper-a", user_id="user-1"
     )
     original = await PipelineRunRepo.claim_next_document_preparation_job(

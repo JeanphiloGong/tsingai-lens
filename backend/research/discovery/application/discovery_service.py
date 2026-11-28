@@ -28,7 +28,7 @@ from application.core.objectives.llm.structured_response import (
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
 )
-from application.pipeline import pipeline_run_service
+from pipeline.application import pipeline_run_service
 from application.source import workspace_service
 from research.discovery.domain.paper_map import PreparedDocumentInput
 from infra.persistence.database import AsyncSessionLocal

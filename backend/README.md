@@ -54,7 +54,7 @@ reuse revisions from one or more papers.
   discovery, PaperExperiment extraction, selection, and Finding synthesis.
 - `conversation/`: Workspace-owned conversation paths, forks, and answer ratings.
 - `agent/`: Task execution, registered tools, approvals, and ModelCall audit.
-- `application/pipeline/`: Technical execution creation and node transitions.
+- `pipeline/application/`: Technical execution creation and node transitions.
 - `domain/`: Business objects, invariants, and state transitions.
 - [`repositories/`](repositories/README.md): Concrete PostgreSQL
   queries, writes, mappings, and their dedicated query results.

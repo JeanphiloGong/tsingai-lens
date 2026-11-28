@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from application.source import (
-    reference_extraction_service as source_reference_extraction_service,
-)
+from document.application import references as source_reference_extraction_service
 from document.domain.source import SourceBlock, SourceDocument, assemble_source_documents
 
 

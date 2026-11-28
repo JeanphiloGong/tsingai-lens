@@ -89,10 +89,10 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "agent.repositories.task_repository.AsyncSessionLocal", factory,
         )
         monkeypatch.setattr(
-            "application.pipeline.pipeline_run_service.AsyncSessionLocal", factory
+            "pipeline.application.pipeline_run_service.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
-            "application.source.document_preparation_service.AsyncSessionLocal", factory
+            "pipeline.application.document_preparation_runner.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
             "research.discovery.application.discovery_service.AsyncSessionLocal",
@@ -204,25 +204,22 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.evaluation.finding_snapshot_service as _test_finding_snapshot_service
     import application.goal.brief_service as _test_goal_service
     import application.goal.experiment_plan_service as _test_experiment_plan_service
-    import application.pipeline.pipeline_run_service as _test_pipeline_run_service
+    import pipeline.application.pipeline_run_service as _test_pipeline_run_service
     import application.source.workspace_service as _test_workspace_service
-    import application.source.document_markdown_service as _test_document_markdown_service
-    import application.source.document_preparation_service as _test_document_preparation_service
-    import application.source.reference_extraction_service as _test_source_reference_extraction_service
-    import application.source.reference_workflow_service as _test_reference_workflow_service
-    import application.source.source_import_service as _test_source_import_service
+    import document.application.markdown as _test_document_markdown_service
+    import pipeline.application.document_preparation_runner as _test_document_preparation_service
+    import document.application.references as _test_source_reference_extraction_service
+    import document.application.reference_workflow as _test_reference_workflow_service
+    import document.application.import_service as _test_source_import_service
+    from document.controllers import document_routes, reference_routes
     from controllers.core import (
-        document_routes,
         finding_review_routes,
         paper_experiment_routes,
     )
     from research.controllers import objective_routes as research_objective_routes
     from controllers.goal import experiment_plan_routes, goal_routes
-    from controllers.source import (
-        workspace_routes,
-        pipeline_run_routes,
-        reference_routes,
-    )
+    from controllers.source import workspace_routes
+    from pipeline.controllers import pipeline_run_routes
 
     from agent.tools import objective as objective_candidate
     from agent.capabilities import (
@@ -421,8 +418,8 @@ def _isolate_application_module_dependencies(monkeypatch):
             document_routes,
             [
                 "document_profile_service",
-                "document_markdown_service",
-                "source_archive_service",
+                "markdown",
+                "archive",
             ],
         ),
         (

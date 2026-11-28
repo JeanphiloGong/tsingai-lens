@@ -9,12 +9,10 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
-from application.source import (
-    workspace_service,
-    source_archive_service,
-    source_import_service,
-)
-from application.source.source_archive_service import (
+from application.source import workspace_service
+from document.application import archive as source_archive_service
+from document.application import import_service as source_import_service
+from document.application.archive import (
     WorkspaceSourceArchiveError,
     DocumentSourceUnavailableError,
 )

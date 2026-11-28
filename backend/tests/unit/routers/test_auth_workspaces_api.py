@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock
 from zipfile import ZipFile
 
-import application.source.source_archive_service as source_archive_service_module
+import document.application.archive as source_archive_service_module
 import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
@@ -39,7 +39,7 @@ def _build_client(
     *,
     postgres_session_factory,
 ) -> Iterator[TestClient]:
-    from application.pipeline import pipeline_run_service
+    from pipeline.application import pipeline_run_service
     from repositories.pipeline_run_repository import PipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -126,11 +126,9 @@ def test_app_lifespan_uses_shared_module_dependencies(
     from document.application import profile_service as document_profile_service
     from application.core.objectives import analysis_service, objective_analysis_service
     from application.goal import brief_service
-    from application.pipeline import pipeline_run_service
-    from application.source import (
-        document_markdown_service,
-        document_preparation_service,
-    )
+    from pipeline.application import pipeline_run_service
+    from document.application import markdown as document_markdown_service
+    from pipeline.application import document_preparation_runner as document_preparation_service
     from repositories.pipeline_run_repository import PipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -201,8 +199,8 @@ def test_web_lifespan_does_not_claim_or_interrupt_worker_jobs(
     from application.core.objectives import (
         analysis_service as objective_analysis_service,
     )
-    from application.pipeline import pipeline_run_service
-    from application.source import document_preparation_service
+    from pipeline.application import pipeline_run_service
+    from pipeline.application import document_preparation_runner as document_preparation_service
     from main import create_app
     from repositories.pipeline_run_repository import PipelineRunRepository
 

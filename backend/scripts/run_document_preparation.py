@@ -28,7 +28,7 @@ from repositories.pipeline_run_repository import (
     PipelineRunJobSnapshot,
     PipelineLeaseLostError,
 )
-from application.source.document_preparation_service import (
+from pipeline.application.document_preparation_runner import (
     execute_document_preparation_job,
 )
 

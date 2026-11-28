@@ -7,11 +7,9 @@ from tempfile import SpooledTemporaryFile
 from typing import Annotated, BinaryIO
 from urllib.parse import quote
 
-from application.source import (
-    workspace_service,
-    source_archive_service,
-    source_import_service,
-)
+from application.source import workspace_service
+from document.application import archive as source_archive_service
+from document.application import import_service as source_import_service
 from controllers.dependencies.auth import get_current_user_id
 from exceptions import RequestInvalidException
 from fastapi import APIRouter, Depends, File, UploadFile

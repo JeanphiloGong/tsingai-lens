@@ -9,8 +9,8 @@ from agent.tools.registry import (
     ToolSpec,
 )
 from application.source import workspace_service
-from application.source.document_preparation_service import queue_document_preparation
-from application.pipeline.pipeline_run_service import document_preparation_error_message
+from pipeline.application.document_preparation_runner import accept_document_preparation
+from pipeline.application.pipeline_run_service import document_preparation_error_message
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -88,7 +88,7 @@ class StartResearchProcessCapability:
         queued_runs = []
         for document_id in selected_ids:
             queued_runs.append(
-                await queue_document_preparation(
+                await accept_document_preparation(
                     context.workspace_id,
                     document_id,
                     user_id=context.user_id,

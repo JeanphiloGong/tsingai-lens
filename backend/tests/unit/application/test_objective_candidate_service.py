@@ -5,7 +5,7 @@ from itertools import permutations
 from typing import Any
 
 import pytest
-from application.core.objectives import objective_candidate_service
+from research.discovery.application import candidate_formation
 from application.core.objectives.discovery.axis_equivalence import (
     AxisCanonicalizationPlanModelOutput,
 )
@@ -63,7 +63,7 @@ def test_relationship_groups_preserve_complete_study_relationship_records():
         process_context=("laser powder bed fusion",),
     )
 
-    groups = objective_candidate_service._build_relationship_groups(
+    groups = candidate_formation._build_relationship_groups(
         (skim,),
     )
 
@@ -108,7 +108,7 @@ def test_grouping_uses_existing_domain_objects_without_reparsing():
         for index in range(6)
     )
 
-    groups = objective_candidate_service._build_relationship_groups(maps)
+    groups = candidate_formation._build_relationship_groups(maps)
 
     assert len(groups) == 1
     assert [item["relationship"]["relationship_id"] for item in groups[0]] == [
@@ -134,7 +134,7 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
             material_scope=("Ti-6Al-4V",),
         ),
     )
-    service = objective_candidate_service
+    service = candidate_formation
 
     expected_groups: list[tuple[str, ...]] | None = None
     for ordering in permutations(skims):
@@ -154,7 +154,7 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
 
 
 def test_material_context_conflicts_are_strict_but_unknown_labels_remain_reviewable():
-    service = objective_candidate_service
+    service = candidate_formation
 
     assert (
         service._context_workspace_compatibility(
@@ -208,7 +208,7 @@ def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [("relationship-known", "relationship-missing")]
@@ -229,7 +229,7 @@ def test_broad_material_is_not_treated_as_missing_or_rewritten_to_one_grade():
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(paper_maps)
+        candidate_formation._build_relationship_groups(paper_maps)
     )
 
     assert groups == [("relationship-broad",), ("relationship-specific",)]
@@ -249,7 +249,7 @@ def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -281,7 +281,7 @@ def test_missing_material_does_not_inherit_an_ambiguous_multi_material_scope():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -311,7 +311,7 @@ def test_missing_confidence_does_not_erase_supported_objective_confidence():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -338,7 +338,7 @@ def test_all_missing_confidence_remains_zero_with_an_explicit_reason():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -366,7 +366,7 @@ def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -397,7 +397,7 @@ def test_microstructure_theme_group_is_rejected_until_an_observation_is_specific
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -426,7 +426,7 @@ def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -458,7 +458,7 @@ def test_material_grade_word_order_does_not_fragment_relationship_groups():
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -496,7 +496,7 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -525,7 +525,7 @@ def test_tial6v4_notation_keeps_different_intervention_sets_separate():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-ti64-notation",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -554,7 +554,7 @@ def test_two_relationships_with_missing_material_context_share_one_group():
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [("relationship-a", "relationship-b")]
@@ -577,7 +577,7 @@ def test_explicit_axis_synonyms_remain_in_one_compatible_group():
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -619,7 +619,7 @@ def test_study_context_differences_do_not_fragment_objective_membership(
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [("relationship-left", "relationship-right")]
@@ -640,7 +640,7 @@ def test_single_and_joint_factor_relationships_share_a_theme_without_axis_rewrit
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -702,7 +702,7 @@ def test_distinct_thermal_processing_interventions_create_distinct_objectives():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-ti64-thermal-processing",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -762,7 +762,7 @@ def test_shared_topic_preserves_different_joint_interventions():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-ti64-cooling",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -818,7 +818,7 @@ def test_hip_relations_keep_each_intervention_as_a_candidate():
         for position, factor in enumerate(paper_factors, start=1)
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-ti64-hip-topic",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -867,7 +867,7 @@ def test_laser_exposure_theme_does_not_rewrite_precise_axes():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-316l-topic-only",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -929,7 +929,7 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-316l-joint-factor",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1030,10 +1030,10 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
     )
     caplog.set_level(
         "INFO",
-        logger="application.core.objectives.objective_candidate_service",
+        logger="research.discovery.application.candidate_formation",
     )
 
-    objective_candidate_service.discover_candidate_facts(
+    candidate_formation.discover_candidate_facts(
         "workspace-accounting",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1101,7 +1101,7 @@ def test_shared_parent_theme_keeps_each_papers_complete_intervention():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-local-topic-bridges",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1180,7 +1180,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-orientation",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1238,7 +1238,7 @@ def test_topic_only_pairs_are_classified_once_without_affecting_objectives():
             outcome="ultimate tensile strength",
         ),
     )
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-confirm-topic",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1267,7 +1267,7 @@ def test_different_measured_outcomes_never_share_an_objective_group():
     )
 
     groups = _group_relationship_ids(
-        objective_candidate_service._build_relationship_groups(skims)
+        candidate_formation._build_relationship_groups(skims)
     )
 
     assert groups == [
@@ -1310,7 +1310,7 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-focused-outcome",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1360,7 +1360,7 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
     )
     classifier = MartensiteAliasClassifier()
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-outcome-alias",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1414,7 +1414,7 @@ def test_property_aliases_are_not_repeated_in_the_objective_outcomes():
             material_scope=("Ti-6Al-4V",),
         ),
     )
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-ductility-alias",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1447,7 +1447,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1484,7 +1484,7 @@ def test_multi_paper_workspace_does_not_promote_single_paper_relationships():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1513,7 +1513,7 @@ def test_candidate_build_derives_objective_identity_and_lineage_from_relationshi
         for index, document_id in enumerate(document_ids)
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1549,7 +1549,7 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1582,7 +1582,7 @@ def test_compatible_relationship_group_builds_one_cross_paper_objective():
         )
         for index in range(3)
     )
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1613,7 +1613,7 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
     )
     extractor = _GroupingExtractor()
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1636,7 +1636,7 @@ def test_uncertain_claim_scope_cannot_seed_a_precise_candidate():
         claim_scope="uncertain",
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1689,7 +1689,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1750,7 +1750,7 @@ def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
     )
     extractor = SemanticAxisExtractor()
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1802,7 +1802,7 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
     )
     extractor = MaterialAxisExtractor()
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=skims,
         document_inputs=_document_inputs(skims),
@@ -1841,7 +1841,7 @@ def test_objective_constraints_omit_the_relationship_axes():
         process_context=("LPBF", "heat treatment"),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -1873,7 +1873,7 @@ def test_verified_aliases_are_consistent_through_context_and_canonicalization():
             outcome="ultimate tensile strength",
         ),
     )
-    service = objective_candidate_service
+    service = candidate_formation
 
     assert _group_relationship_ids(service._build_relationship_groups(skims)) == [
         ("relationship-scan", "relationship-scanning")
@@ -1914,7 +1914,7 @@ def test_verified_aliases_are_consistent_through_context_and_canonicalization():
 
 
 def test_axis_pair_selection_keeps_every_eligible_pair_and_complete_link_is_order_stable():
-    service = objective_candidate_service
+    service = candidate_formation
     crowded_candidates = {
         "material": [],
         "variable": [f"scan speed variant {index:03d}" for index in range(40)],
@@ -2018,7 +2018,7 @@ def test_cross_paper_topic_candidates_require_a_focused_shared_signal():
             process_context=("LPBF",),
         ),
     )
-    service = objective_candidate_service
+    service = candidate_formation
 
     supported = service._supported_cross_paper_axis_pairs(
         service._relationship_inventory(skims)
@@ -2051,7 +2051,7 @@ def test_shared_variable_does_not_propose_unrelated_outcome_pairs():
             outcome="microstructure",
         ),
     )
-    service = objective_candidate_service
+    service = candidate_formation
 
     supported = service._supported_cross_paper_axis_pairs(
         service._relationship_inventory(skims)
@@ -2085,7 +2085,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
     )
     extractor = RecordingExtractor()
 
-    objective_candidate_service.discover_candidate_facts(
+    candidate_formation.discover_candidate_facts(
         "workspace-test",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -2149,7 +2149,7 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
         ),
     )
 
-    service = objective_candidate_service
+    service = candidate_formation
     assert _group_relationship_ids(service._build_relationship_groups(skims)) == [
         (
             "relationship-temperature-density-1",
@@ -2217,7 +2217,7 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
             outcome="outcome b",
         ),
     )
-    inventory = objective_candidate_service._relationship_inventory(skims)
+    inventory = candidate_formation._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
             workspace_id="workspace-test",
@@ -2257,7 +2257,7 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
         ),
     )
 
-    ranked = objective_candidate_service._rank_objectives(
+    ranked = candidate_formation._rank_objectives(
         objectives,
         relationship_inventory=inventory,
     )
@@ -2289,7 +2289,7 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
             relationship_id="relationship-block-b",
         ),
     )
-    inventory = objective_candidate_service._relationship_inventory(skims)
+    inventory = candidate_formation._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
             workspace_id="workspace-test",
@@ -2325,7 +2325,7 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
         ),
     )
 
-    ranked = objective_candidate_service._rank_objectives(
+    ranked = candidate_formation._rank_objectives(
         objectives,
         relationship_inventory=inventory,
     )
@@ -2373,7 +2373,7 @@ def test_ranking_prefers_structured_results_from_independent_papers():
             relationship_id="relationship-concentrated-b",
         ),
     )
-    inventory = objective_candidate_service._relationship_inventory(skims)
+    inventory = candidate_formation._relationship_inventory(skims)
     objectives = (
         ResearchObjective(
             workspace_id="workspace-test",
@@ -2417,7 +2417,7 @@ def test_ranking_prefers_structured_results_from_independent_papers():
         ),
     )
 
-    ranked = objective_candidate_service._rank_objectives(
+    ranked = candidate_formation._rank_objectives(
         objectives,
         relationship_inventory=inventory,
     )
@@ -2448,7 +2448,7 @@ def test_repeated_paper_relationships_share_one_candidate_lineage():
         ),
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-repeated",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -2470,7 +2470,7 @@ def test_relationship_with_same_variable_and_outcome_is_not_a_candidate():
         outcome="porosity",
     )
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-self-relation",
         paper_maps=(skim,),
         document_inputs=_document_inputs((skim,)),
@@ -2527,7 +2527,7 @@ def test_candidate_review_set_is_bounded_without_losing_relationship_accounting(
         )
     maps = tuple(paper_maps)
 
-    facts = objective_candidate_service.discover_candidate_facts(
+    facts = candidate_formation.discover_candidate_facts(
         "workspace-bounded-review",
         paper_maps=maps,
         document_inputs=_document_inputs(maps),

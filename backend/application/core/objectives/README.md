@@ -24,7 +24,7 @@ Use the following entry points when modifying the Core workflow:
 |---|---|---|
 | Resolve selected ready papers | `objective_input_service.resolve_prepared_document_inputs()` | frozen input set; no parsing |
 | Discover candidates | `objective_discovery_service.start_objective_discovery()` | queued discovery run |
-| Form candidates | `objective_candidate_service.discover_candidate_facts()` | candidate Objectives |
+| Form candidates | `candidate_formation.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
 | Queue analysis | `analysis_service.start_objective_analysis()` | queued versioned analysis |
 | Reconstruct experiments | `objective_analysis_service.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
@@ -79,7 +79,7 @@ actor's user ID and authorize the Workspace before accessing scientific data.
 |---|---|---|
 | Which prepared papers may enter research | `objective_input_service.py` | `test_objective_discovery_service_ownership.py` |
 | Discovery admission or restart recovery | `objective_discovery_service.py` | `test_objective_discovery_service_ownership.py` |
-| Candidate question formation | `objective_candidate_service.py` | `test_objective_candidate_service.py` |
+| Candidate question formation | `research/discovery/application/candidate_formation.py` | `test_objective_candidate_service.py` |
 | Approved creation, confirmation, or derivation | `objective_authoring_service.py` | `test_objective_derivation_persistence.py` |
 | Initial or expanded Paper Map reading scope | `paper_map_sources.py` | `test_paper_research_map_service.py` |
 | Map extraction and technical recovery | `paper_map_extraction.py` | `test_paper_research_map_service.py` |
@@ -375,7 +375,7 @@ revision referenced by each Selection.
 ## Main Owners
 
 - `paper_research_map_service.py`: one Document's lightweight Paper Map.
-- `objective_candidate_service.py`: candidate formation from selected maps.
+- `research/discovery/application/candidate_formation.py`: candidate formation from selected maps.
 - `scope_screening.py`: workspace-wide deterministic scope for one Objective.
 - `objective_input_service.py`: selected prepared-paper inputs, Profiles, Source
   trees, and reusable Paper Maps.

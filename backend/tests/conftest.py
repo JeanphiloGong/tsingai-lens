@@ -195,7 +195,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     import application.core.objectives.finding_authoring_service as _test_finding_authoring_service
     import application.core.objectives.objective_analysis_service as _test_experiment_analysis_service
     import research.application.objectives.objective_authoring_service as _test_objective_authoring_service
-    import application.core.objectives.objective_candidate_service as _test_objective_candidate_service
+    import research.discovery.application.candidate_formation as _test_candidate_formation
     import application.core.objectives.objective_discovery_service as _test_objective_discovery_service
     import application.core.objectives.objective_input_service as _test_objective_input_service
     import application.core.objectives.paper_experiment_authoring_service as _test_paper_experiment_authoring_service
@@ -359,13 +359,13 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "experiment_projection",
             ],
         ),
-        (_test_objective_candidate_service, []),
+        (_test_candidate_formation, []),
         (
             _test_objective_discovery_service,
             [
                 "workspace_service",
                 "ObjectiveRepo",
-                "objective_candidate_service",
+                "candidate_formation",
                 "objective_input_service",
                 "pipeline_run_service",
             ],

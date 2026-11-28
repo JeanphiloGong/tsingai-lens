@@ -25,12 +25,14 @@ from application.core.objectives.domain_knowledge.registry import MaterialMatchQ
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     ObjectiveFactSet,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
+)
+from research.discovery.domain.paper_map import (
     PaperResearchMap,
     PaperResearchRelationship,
     PaperResearchScope,
     PaperSourceUnitCoverageStatus,
-    PaperStudyDisposition,
-    PaperStudyDispositionStatus,
     PreparedDocumentInput,
 )
 from research.domain.objective import ResearchObjective

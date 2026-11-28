@@ -192,7 +192,7 @@ def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
         reason=None,
     )
     monkeypatch.setattr(
-        probe.objective_candidate_service,
+        probe.candidate_formation,
         "discover_candidate_facts",
         lambda *args, **kwargs: SimpleNamespace(research_objectives=(objective,)),
     )

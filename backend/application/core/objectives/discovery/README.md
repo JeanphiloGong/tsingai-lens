@@ -29,7 +29,7 @@ The implementation follows that reading sequence:
    expansion rounds and 24 new Sources. Identical or subset-only rereading is
    skipped because it adds no information. Reading can stop with uncertainty.
 4. `axis_equivalence.py` classifies backend-proposed terminology pairs.
-   `../objective_candidate_service.py` groups compatible paper relationships
+   `research/discovery/application/candidate_formation.py` groups compatible paper relationships
    into candidate questions. The researcher decides which question to pursue.
 
 Source selection remains bounded. A sufficient map supports navigation and
@@ -71,7 +71,7 @@ For model/result responsibilities, see
 
 ## Candidate Question Evaluation
 
-`objective_candidate_service.propose_candidate_questions()` is an explicitly
+`candidate_formation.propose_candidate_questions()` is an explicitly
 invoked, nonpersistent evaluation path. Default discovery still calls
 `discover_candidate_facts()` and its existing axis-equivalence grouping.
 Neither the HTTP workflow nor Agent tools call the evaluation method.

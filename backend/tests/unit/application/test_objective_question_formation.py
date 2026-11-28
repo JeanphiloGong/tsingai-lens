@@ -18,7 +18,7 @@ from agent.tools.objective import (
     CreateObjectiveCandidateToolRequest,
 )
 from research.application.objectives import objective_authoring_service
-from application.core.objectives import objective_candidate_service
+from research.discovery.application import candidate_formation
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,
@@ -146,7 +146,7 @@ def model_client(payload, *, finish_reason="stop"):
 
 def form(reading, client, **kwargs):
     maps, texts = reading
-    return objective_candidate_service.propose_candidate_questions(
+    return candidate_formation.propose_candidate_questions(
         "workspace",
         paper_maps=maps,
         source_texts=texts,

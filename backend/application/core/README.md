@@ -58,7 +58,7 @@ inputs allowed to reconstruct experiment context or create Evidence.
 
 - `document_profiles/`: document-level type and warning profile.
 - `objectives/paper_research_map_service.py`: lightweight Paper Map construction.
-- `objectives/objective_candidate_service.py`: candidate formation from selected
+- `research/discovery/application/candidate_formation.py`: candidate formation from selected
   Paper Maps.
 - `objectives/objective_input_service.py`: selected prepared-paper input loading.
 - `objectives/objective_discovery_service.py`: candidate Objective discovery.

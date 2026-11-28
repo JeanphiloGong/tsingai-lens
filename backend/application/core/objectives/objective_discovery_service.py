@@ -14,10 +14,8 @@ from hashlib import sha256
 from threading import Lock
 from typing import Any, Callable
 
-from application.core.objectives import (
-    objective_candidate_service,
-    objective_input_service,
-)
+from application.core.objectives import objective_input_service
+from research.discovery.application import candidate_formation
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
@@ -134,7 +132,7 @@ async def execute_objective_discovery_job(
                 await PaperMapRepo.replace(workspace_id, paper_map, db=db)
         candidate_task = asyncio.create_task(
             to_thread(
-                objective_candidate_service.discover_candidate_facts,
+                candidate_formation.discover_candidate_facts,
                 workspace_id,
                 paper_maps=paper_maps,
                 document_inputs=document_inputs,

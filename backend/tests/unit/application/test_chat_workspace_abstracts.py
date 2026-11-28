@@ -1,4 +1,5 @@
-from application.source import agent_source_service as document_sources
+from dataclasses import replace
+from agent.tools.document import InspectDocumentSourcesCapability
 from application.source import agent_workspace_service as workspace_context
 from infra.persistence import database
 from copy import deepcopy
@@ -18,7 +19,6 @@ from application.source.agent_workspace_service import (
 )
 from agent.tools.registry import ToolExecutionContext
 from application.source.agent_source_service import (
-    InspectDocumentSourcesService,
     InspectDocumentSourcesToolRequest,
 )
 from document.domain.source import SourceBlock, SourceDocument
@@ -233,7 +233,7 @@ def test_normal_pagination_is_not_a_warning():
     assert result.data["returned_paper_count"] == 8
 
 
-def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*, postgres_session_factory):
+def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*, monkeypatch, postgres_session_factory):
     fixture = Path(__file__).resolve().parents[2] / "fixtures" / "agent_p002" / "source_document.json"
     record = json.loads(fixture.read_text(encoding="utf-8"))
     record["id"] = record["document_id"]
@@ -268,17 +268,17 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     workspace_context.PaperMapRepo = PaperMapRepository()
     workspace_context.SourceRepo = sources
     browse = BrowseWorkspacePapersService()
-    document_sources.workspace_service = workspace_service
-    document_sources.SourceRepo = sources
-    inspect = InspectDocumentSourcesService()
+    monkeypatch.setattr("agent.tools.document.workspace_service", workspace_service)
+
+    inspect = InspectDocumentSourcesCapability()
     context = ToolExecutionContext(
         operation_id="operation",
         task_id="s", user_id="u", workspace_id="c", tool_call_id="browse"
     )
 
     async def scenario():
-        await seed_workspace(database.AsyncSessionLocal, 'c', document_ids=(source_document.document_id,))
-        await sources.replace_document("c", source_document)
+        await seed_workspace(database.AsyncSessionLocal, 'c', document_ids=(source_document.document_id, 'paper-2'))
+        await sources.replace_document("c", replace(source_document, metadata={"source_fingerprint": "v1"}))
         survey = await browse.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= BrowseWorkspacePapersToolRequest())
         assert [paper["source_status"] for paper in survey.data["papers"]] == ["available", "unavailable"]
         assert len(survey.warnings) == 1
@@ -288,12 +288,12 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         assert paper["abstract_status"] == "not_found"
         assert paper["map_status"] == "not_available"
 
-        outline = await inspect.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= InspectDocumentSourcesToolRequest(
+        outline = await inspect.execute(context=context, arguments=InspectDocumentSourcesToolRequest(
             document_id=paper["document_id"], limit=1,
         ))
         heading = next(section["heading_path"] for section in outline.data["document_outline"]
                        if section["heading_path"] == "Experimental Procedures")
-        read = await inspect.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= InspectDocumentSourcesToolRequest(
+        read = await inspect.execute(context=context, arguments=InspectDocumentSourcesToolRequest(
             document_id=paper["document_id"], heading_path=heading,
         ))
         assert read.status == "succeeded"
@@ -302,7 +302,7 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         assert read.data["sources"][0]["content_truncated"] is False
         assert read.data["sources"][0]["source_digest"]
         assert any(ref.resource_type == "source" for ref in read.resource_refs)
-        missing = await inspect.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments= InspectDocumentSourcesToolRequest(document_id="paper-2"))
+        missing = await inspect.execute(context=context, arguments=InspectDocumentSourcesToolRequest(document_id="paper-2"))
         assert missing.status == "failed"
         assert missing.error_code == "document_sources_not_ready"
 

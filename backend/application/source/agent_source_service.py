@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from application.source import workspace_service
+from document.application.source_reading import TableWindow
 from document.repositories.source_repository import SourceRepo
 
 import hashlib
@@ -576,59 +577,21 @@ class SearchSourcesService:
 
 class InspectTableService:
 
-    async def execute(
-        self,
-        *,
-        user_id: str,
-        workspace_id: str,
-        tool_call_id: str | None,
-        max_result_tokens: int,
-        arguments: InspectTableToolRequest,
-    ) -> ChatToolResult:
-        await workspace_service.get_workspace_for_user(
-            workspace_id,
-            user_id,
-        )
-        document = await SourceRepo.read_document(
-            workspace_id,
-            arguments.document_id,
-        )
-        if document is None:
-            return await _unavailable_document_sources(
-                workspace_id=workspace_id, tool_call_id=tool_call_id,
-                document_ids=[arguments.document_id],
-            )
-        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-        if arguments.source_version is not None and arguments.source_version != source_version:
-            return ChatToolResult(
-                tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
-                error_code="source_version_changed",
-                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
-                data={"document_id": document.document_id, "source_version": source_version},
-            )
-
-        table = next(
-            (item for item in document.tables if item.table_id == arguments.table_ref),
-            None,
-        )
-        if table is None:
-            return ChatToolResult(
-                tool_call_id=tool_call_id,
-                status=ToolResultStatus.FAILED,
-                error_code="table_source_not_found",
-                error_message="The requested table Source was not found in this paper.",
-            )
-
+    def format_table(self, *, window: TableWindow, arguments: InspectTableToolRequest,
+                     workspace_id: str, tool_call_id: str | None,
+                     max_result_tokens: int) -> ChatToolResult:
+        table = window.table
+        source_version = window.source_version
         record = source_table_payload(table)
         canonical_markdown = (record["table_markdown"] or "").strip()
-        digest = hashlib.sha256(canonical_markdown.encode("utf-8")).hexdigest()
+        digest = window.source_digest
         data_rows = table.table_matrix[table.header_row_count :]
         if arguments.row_offset > 0 and arguments.row_offset >= len(data_rows):
             return ChatToolResult(
                 tool_call_id=tool_call_id,
                 status=ToolResultStatus.FAILED,
                 data={
-                    "document_id": document.document_id,
+                    "document_id": window.locator.document_id,
                     "table_ref": table.table_id,
                     "caption": table.caption_text,
                     "page": table.page,
@@ -641,7 +604,7 @@ class InspectTableService:
                 resource_refs=(
                     InspectDocumentSourcesService._source_ref(
                         workspace_id,
-                        document.document_id,
+                        window.locator.document_id,
                         {"source_ref": table.table_id, "page": table.page},
                     ),
                 ),
@@ -671,7 +634,7 @@ class InspectTableService:
             # advanced past every selected row, making later rows unreachable.
             selected_rows: list[tuple[str, ...]] = []
             oversized_row_offset: int | None = None
-            remaining_rows = data_rows[arguments.row_offset :]
+            remaining_rows = window.rows
             for relative_index, row in enumerate(remaining_rows[: arguments.row_limit]):
                 candidate = (
                     render_markdown_table(
@@ -726,8 +689,8 @@ class InspectTableService:
             tool_call_id=tool_call_id,
             status=ToolResultStatus.SUCCEEDED,
             data={
-                "document_id": document.document_id,
-                "document_title": document.title,
+                "document_id": window.locator.document_id,
+                "document_title": window.document_title,
                 "table_ref": table.table_id,
                 "source_version": source_version,
                 "continuation": {**arguments.model_dump(exclude_none=True), "source_version": source_version, "row_offset": next_row_offset} if next_row_offset is not None else None,
@@ -750,7 +713,7 @@ class InspectTableService:
             resource_refs=(
                 InspectDocumentSourcesService._source_ref(
                     workspace_id,
-                    document.document_id,
+                    window.locator.document_id,
                     {
                         "source_ref": table.table_id,
                         "page": table.page,
@@ -775,7 +738,7 @@ class InspectTableService:
                     tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
                     error_code="table_row_exceeds_budget",
                     error_message="A complete table row and its headers do not fit. Read the canonical table with read_source.",
-                    data={"read_arguments": {"document_id": document.document_id, "source_kind": "table",
+                    data={"read_arguments": {"document_id": window.locator.document_id, "source_kind": "table",
                                              "source_ref": table.table_id, "source_version": source_version}},
                 )
             count -= 1
@@ -807,38 +770,10 @@ class InspectTableService:
 
 class InspectDocumentSourcesService:
 
-    async def execute(
-        self,
-        *,
-        user_id: str,
-        workspace_id: str,
-        tool_call_id: str | None,
-        max_result_tokens: int,
-        arguments: InspectDocumentSourcesToolRequest,
-    ) -> ChatToolResult:
-        await workspace_service.get_workspace_for_user(
-            workspace_id,
-            user_id,
-        )
-        document = await SourceRepo.read_document(
-            workspace_id,
-            arguments.document_id,
-        )
-        if document is None:
-            return await _unavailable_document_sources(
-                workspace_id=workspace_id, tool_call_id=tool_call_id,
-                document_ids=[arguments.document_id],
-            )
-
-        source_version = hashlib.sha256(json.dumps(asdict(document), ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-        if arguments.source_version is not None and arguments.source_version != source_version:
-            return ChatToolResult(
-                tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
-                error_code="source_version_changed",
-                error_message="Prepared Source changed. Inspect the current outline before continuing an old position.",
-                data={"document_id": document.document_id, "source_version": source_version},
-            )
-
+    def format_outline(self, *, document: SourceDocument, source_version: str,
+                       sections_by_id: dict[str, str], selected_refs: set[str] | None,
+                       arguments: InspectDocumentSourcesToolRequest, workspace_id: str,
+                       tool_call_id: str | None, max_result_tokens: int) -> ChatToolResult:
         sources = [
             *(
                 self._text_source(block)
@@ -889,29 +824,10 @@ class InspectDocumentSourcesService:
                 section["pages"].append(source["page"])
             if source["source_type"] not in section["source_types"]:
                 section["source_types"].append(source["source_type"])
-        tree = build_source_document_tree(document=document, blocks=document.blocks, tables=document.tables,
-                                          figures=document.figures, workspace_id=workspace_id)
-        section_nodes = {node.node_id: node for node in tree.nodes.values()
-                         if node.node_type in {"section", "references_section"}}
         for heading, section in sections.items():
-            node = next((node for node in section_nodes.values() if " > ".join(node.heading_path) == heading), None)
-            section["section_id"] = node.node_id if node else None
-        selected_refs = None
-        if arguments.section_id is not None:
-            if arguments.section_id not in section_nodes:
-                return ChatToolResult(
-                    tool_call_id=tool_call_id, status=ToolResultStatus.FAILED,
-                    error_code="section_not_found", error_message="Copy an exact section_id from the current outline.",
-                    data={"document_id": document.document_id, "source_version": source_version,
-                          "document_outline": list(sections.values())[:80]},
-                )
-            selected_refs = set()
-            pending = [arguments.section_id]
-            while pending:
-                node = tree.nodes[pending.pop()]
-                if node.source_ref_id is not None:
-                    selected_refs.add(node.source_ref_id)
-                pending.extend(node.child_ids)
+            section["section_id"] = next(
+                (key for key, path in sections_by_id.items() if path == heading), None
+            )
         selected_types = set(arguments.source_types)
         matches = [
             item
@@ -1211,8 +1127,6 @@ __all__ = [
     "ReadSourceService",
     "SearchSourcesToolRequest",
     "SearchSourcesService",
-    "inspect_document_sources",
-    "inspect_table",
     "read_source",
     "search_sources",
 ]
@@ -1272,61 +1186,5 @@ async def search_sources(
             source_types=source_types,
             offset=offset,
             limit=limit,
-        ),
-    )
-
-
-async def inspect_document_sources(
-    *,
-    user_id: str,
-    workspace_id: str,
-    document_id: str,
-    query: str | None,
-    source_ref: str | None,
-    section_id: str | None,
-    source_version: str | None,
-    heading_path: str | None,
-    source_types: list[str],
-    page: int | None,
-    offset: int,
-    limit: int,
-    tool_call_id: str | None,
-    max_result_tokens: int = _SOURCE_CONTENT_LIMIT,
-) -> ChatToolResult:
-    return await InspectDocumentSourcesService().execute(
-        user_id=user_id,
-        workspace_id=workspace_id,
-        tool_call_id=tool_call_id,
-        max_result_tokens=max_result_tokens,
-        arguments=InspectDocumentSourcesToolRequest(
-            document_id=document_id, query=query, source_ref=source_ref,
-            section_id=section_id, source_version=source_version,
-            heading_path=heading_path, source_types=source_types, page=page,
-            offset=offset, limit=limit,
-        ),
-    )
-
-
-async def inspect_table(
-    *,
-    user_id: str,
-    workspace_id: str,
-    document_id: str,
-    table_ref: str,
-    source_version: str | None,
-    row_offset: int,
-    row_limit: int,
-    tool_call_id: str | None,
-    max_result_tokens: int = _TABLE_CONTENT_LIMIT,
-) -> ChatToolResult:
-    return await InspectTableService().execute(
-        user_id=user_id,
-        workspace_id=workspace_id,
-        tool_call_id=tool_call_id,
-        max_result_tokens=max_result_tokens,
-        arguments=InspectTableToolRequest(
-            document_id=document_id, table_ref=table_ref,
-            source_version=source_version, row_offset=row_offset,
-            row_limit=row_limit,
         ),
     )

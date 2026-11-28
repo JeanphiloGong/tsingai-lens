@@ -1,3 +1,5 @@
+from agent.tools.document import InspectDocumentSourcesCapability
+from document.repositories.document_repository import DocumentRepo
 from application.source import agent_source_service as document_sources
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -49,17 +51,15 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         document_order=0,
         title="Synthetic paper",
         text="",
-        blocks=blocks + other,
+        metadata={"source_fingerprint":"v1"}, blocks=blocks + other,
     )
     monkeypatch.setattr(
         document_sources.workspace_service, "get_workspace_for_user", AsyncMock()
     )
     monkeypatch.setattr(
-        document_sources,
-        "SourceRepo",
-        SimpleNamespace(read_document=AsyncMock(return_value=doc)),
+        DocumentRepo, "read", AsyncMock(return_value=doc),
     )
-    cap = InspectDocumentSourcesService()
+    cap = InspectDocumentSourcesCapability()
     context = ToolExecutionContext(task_id="chat", user_id="user", workspace_id="col", tool_call_id="call", operation_id="operation", max_result_tokens=8000)
     seen = []
     offset = 0
@@ -68,16 +68,12 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         pages += 1
         assert pages <= 20
         result = await cap.execute(
-            user_id=context.user_id,
-            workspace_id=context.workspace_id,
-            tool_call_id=context.tool_call_id,
-            max_result_tokens=context.max_result_tokens,
-            arguments=InspectDocumentSourcesToolRequest(
+            context=context, arguments=InspectDocumentSourcesToolRequest(
                 document_id="paper", heading_path="Methods", offset=offset, limit=200
             ),
         )
         assert result.status == "succeeded"
-        assert cap._result_tokens(result) <= context.max_result_tokens
+        assert document_sources.InspectDocumentSourcesService._result_tokens(result) <= context.max_result_tokens
         assert [
             section["heading_path"] for section in result.data["document_outline"]
         ] == ["Methods"]
@@ -101,13 +97,11 @@ async def test_permission_failure_stops_before_loading_sources(monkeypatch):
         "get_workspace_for_user",
         AsyncMock(side_effect=PermissionError()),
     )
-    monkeypatch.setattr(document_sources, "SourceRepo", repo)
-    cap = InspectDocumentSourcesService()
+    monkeypatch.setattr(DocumentRepo, "read", repo.read_document)
+    cap = InspectDocumentSourcesCapability()
     with pytest.raises(PermissionError):
         await cap.execute(
-        user_id="user", workspace_id="col",
-        tool_call_id="call", max_result_tokens=12_000,
-        arguments=InspectDocumentSourcesToolRequest(document_id="paper"),
+        context=ToolExecutionContext("user","col","task","operation","call",12_000), arguments=InspectDocumentSourcesToolRequest(document_id="paper"),
     )
     repo.read_document.assert_not_called()
 
@@ -131,27 +125,23 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
         document_order=0,
         title="Synthetic paper",
         text="",
-        blocks=blocks,
+        metadata={"source_fingerprint":"v1"}, blocks=blocks,
     )
     monkeypatch.setattr(
         document_sources.workspace_service, "get_workspace_for_user", AsyncMock()
     )
     monkeypatch.setattr(
-        document_sources,
-        "SourceRepo",
-        SimpleNamespace(read_document=AsyncMock(return_value=document)),
+        DocumentRepo, "read", AsyncMock(return_value=document),
     )
-    capability = InspectDocumentSourcesService()
+    capability = InspectDocumentSourcesCapability()
     result = await capability.execute(
-        user_id="user", workspace_id="col",
-        tool_call_id="call", max_result_tokens=2000,
-        arguments=InspectDocumentSourcesToolRequest(document_id="paper", heading_path="Methods"),
+        context=ToolExecutionContext("user","col","task","operation","call",2000), arguments=InspectDocumentSourcesToolRequest(document_id="paper", heading_path="Methods"),
     )
     assert result.status == "succeeded"
     assert result.data["returned_source_count"] == 5
     assert all(source["content"] for source in result.data["sources"])
     assert result.data["next_offset"] is None
-    assert capability._result_tokens(result) <= 2000
+    assert document_sources.InspectDocumentSourcesService._result_tokens(result) <= 2000
 
 
 @pytest.mark.anyio
@@ -160,23 +150,19 @@ async def test_parent_section_reads_its_subsections_without_unrelated_sections(m
                 "2 Methods appendix", "3 Results")
     document = SourceDocument(
         document_id="paper", document_order=0, title="IN718 experiment", text="",
-        blocks=tuple(SourceBlock(
+        metadata={"source_fingerprint":"v1"}, blocks=tuple(SourceBlock(
             block_id=f"b{i}", document_id="paper", block_type="paragraph",
             text=f"Complete content for {heading}.", block_order=i, heading_path=heading,
         ) for i, heading in enumerate(headings)),
     )
     monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
-    monkeypatch.setattr(document_sources, "SourceRepo", SimpleNamespace(
-        read_document=AsyncMock(return_value=document),
-    ))
-    capability = InspectDocumentSourcesService()
+    monkeypatch.setattr(DocumentRepo, "read", AsyncMock(return_value=document))
+    capability = InspectDocumentSourcesCapability()
     seen = []
     offset = 0
     while True:
         result = await capability.execute(
-        user_id="user", workspace_id="col",
-        tool_call_id="call", max_result_tokens=12_000,
-        arguments=InspectDocumentSourcesToolRequest(document_id="paper", heading_path="2 Methods", offset=offset, limit=2),
+        context=ToolExecutionContext("user","col","task","operation","call",12_000), arguments=InspectDocumentSourcesToolRequest(document_id="paper", heading_path="2 Methods", offset=offset, limit=2),
     )
         seen.extend(source["source_ref"] for source in result.data["sources"])
         offset = result.data["next_offset"]

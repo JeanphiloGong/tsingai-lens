@@ -1,3 +1,5 @@
+from agent.tools.document import InspectTableCapability
+from document.repositories.document_repository import DocumentRepo
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
@@ -65,15 +67,13 @@ async def test_table_pages_fit_model_budget_without_losing_rows_or_units(monkeyp
     header=('Condition','Elongation (%)')
     rows=tuple((f'condition-{i:02}',str(10+i/10)) for i in range(35))
     table=SourceTable('table','paper',0,'Reported elongation; note: as-built',None,3,'Results',header,(header,*rows))
-    doc=SourceDocument('paper',0,'IN718','',tables=(table,))
+    doc=SourceDocument('paper',0,'IN718','',metadata={"source_fingerprint":"v1"}, tables=(table,))
     monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
-    monkeypatch.setattr(document_sources,'SourceRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
-    cap=InspectTableService();arguments={'document_id':'paper','table_ref':'table'};seen=[]
+    monkeypatch.setattr(DocumentRepo, "read", AsyncMock(return_value=doc))
+    cap=InspectTableCapability();arguments={'document_id':'paper','table_ref':'table'};seen=[]
     for _ in range(40):
         result=await cap.execute(
-        user_id='user', workspace_id='col',
-        tool_call_id='read', max_result_tokens=700,
-        arguments=InspectTableToolRequest(**arguments),
+        context=ToolExecutionContext("user","col","task","operation","call",700), arguments=InspectTableToolRequest(**arguments),
     )
         assert result.status=='succeeded'
         assert document_sources.InspectDocumentSourcesService._result_tokens(result)<=700

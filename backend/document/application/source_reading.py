@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal, Protocol
 
-from document.domain.source import SourceDocument, render_markdown_table
+from document.domain.source import SourceTable, build_source_document_tree, SourceDocument, render_markdown_table
 
 ReadableSourceKind = Literal["text_window", "table", "figure"]
 SourceType = Literal["text", "table", "figure"]
@@ -84,6 +84,8 @@ class TableWindow:
     rows: tuple[tuple[str, ...], ...]
     row_offset: int
     row_limit: int
+    document_title: str
+    table: SourceTable
     next_row_offset: int | None
 
 
@@ -118,7 +120,7 @@ class SourceReadingService:
                 source_version=source_version,
             )
         except FileNotFoundError as exc:
-            raise SourceReadingError("document_not_found") from exc
+            raise SourceReadingError("document_sources_not_ready" if exc.args == ("document_sources_not_ready",) else "document_not_found") from exc
         except LookupError as exc:
             raise SourceReadingError("document_sources_not_ready") from exc
         except ValueError as exc:
@@ -331,6 +333,35 @@ class SourceReadingService:
         next_offset = offset + len(page) if offset + len(page) < len(candidates) else None
         return SourceSearchPage(page, offset, limit, next_offset)
 
+    async def inspect_document_sources(
+        self, *, workspace_id: str, document_id: str,
+        source_version: str | None = None, section_id: str | None = None,
+    ) -> tuple[SourceDocument, str, dict[str, str], set[str] | None]:
+        document, version = await self._read_current(
+            workspace_id=workspace_id, document_id=document_id,
+            source_version=source_version,
+        )
+        tree = build_source_document_tree(
+            document=document, blocks=document.blocks, tables=document.tables,
+            figures=document.figures, workspace_id=workspace_id,
+        )
+        sections = {}
+        for node in tree.nodes.values():
+            if node.node_type in {"section", "references_section"}:
+                sections[node.node_id] = " > ".join(node.heading_path)
+        if section_id is None:
+            return document, version, sections, None
+        if section_id not in sections:
+            raise SourceReadingError("section_not_found")
+        refs = set()
+        pending = [section_id]
+        while pending:
+            node = tree.nodes[pending.pop()]
+            if node.source_ref_id is not None:
+                refs.add(node.source_ref_id)
+            pending.extend(node.child_ids)
+        return document, version, sections, refs
+
     async def inspect_table(
         self,
         *,
@@ -360,6 +391,7 @@ class SourceReadingService:
         rows = resolved.rows[row_offset : row_offset + row_limit]
         next_offset = row_offset + len(rows)
         return TableWindow(
+            document_title=source.title, table=next(t for t in source.tables if t.table_id == table_ref),
             locator=resolved.locator,
             source_version=version,
             source_digest=sha256(resolved.content.encode("utf-8")).hexdigest(),

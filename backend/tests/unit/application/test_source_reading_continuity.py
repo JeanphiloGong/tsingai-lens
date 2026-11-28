@@ -1,3 +1,5 @@
+from agent.tools.document import InspectDocumentSourcesCapability
+from document.repositories.document_repository import DocumentRepo
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -22,18 +24,18 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
                      i+1, heading_path='Methods') for i in range(12)),
         SourceBlock('results', 'paper', 'heading', 'Results', 13, heading_path='Results', heading_level=1),
     )
-    doc = SourceDocument('paper', 0, 'IN718', '', blocks=blocks)
+    doc = SourceDocument('paper', 0, 'IN718', '', metadata={"source_fingerprint":"v1"}, blocks=blocks)
     repo = SimpleNamespace(read_document=AsyncMock(return_value=doc))
-    monkeypatch.setattr(document_sources, 'SourceRepo', repo)
+    monkeypatch.setattr(DocumentRepo, 'read', repo.read_document)
     monkeypatch.setattr(document_sources.workspace_service, 'get_workspace_for_user', AsyncMock())
-    cap = InspectDocumentSourcesService()
+    cap = InspectDocumentSourcesCapability()
     context = ToolExecutionContext(task_id='chat', user_id='user', workspace_id='col', tool_call_id='read', operation_id="operation", max_result_tokens=2000)
-    overview = await cap.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=12000, arguments= InspectDocumentSourcesToolRequest(document_id='paper'))
+    overview = await cap.execute(context=replace(context, max_result_tokens=12000), arguments=InspectDocumentSourcesToolRequest(document_id='paper'))
     section = next(s for s in overview.data['document_outline'] if s['heading_path']=='Methods')
     args = {'document_id':'paper','section_id':section['section_id']}
     seen=[]; records=[]
     for i in range(20):
-        result=await cap.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=2000 if i%2==0 else 5000, arguments=InspectDocumentSourcesToolRequest(**args))
+        result=await cap.execute(context=replace(context, max_result_tokens=2000 if i%2==0 else 5000), arguments=InspectDocumentSourcesToolRequest(**args))
         assert result.status=='succeeded'
         seen.extend(s['source_ref'] for s in result.data['sources'])
         records.append(result.data)
@@ -41,19 +43,17 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
         if args is None:break
     assert seen==['methods',*(f'b{i}' for i in range(12))]
     args={**records[0]['continuation']}
-    repo.read_document.return_value=replace(doc,blocks=(*blocks,SourceBlock('new','paper','paragraph','new',14)))
-    stale=await cap.execute(user_id=context.user_id, workspace_id=context.workspace_id, tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens, arguments=InspectDocumentSourcesToolRequest(**args))
+    repo.read_document.return_value=replace(doc,metadata={"source_fingerprint":"changed"},blocks=(*blocks,SourceBlock('new','paper','paragraph','new',14)))
+    stale=await cap.execute(context=context, arguments=InspectDocumentSourcesToolRequest(**args))
     assert stale.error_code=='source_version_changed'
 
 @pytest.mark.anyio
 async def test_full_document_read_exposes_exact_pending_arguments(monkeypatch):
-    doc=SourceDocument('paper',0,'IN718','',blocks=tuple(SourceBlock(f'b{i}','paper','paragraph','Measured condition '*20,i) for i in range(10)))
-    monkeypatch.setattr(document_sources,'SourceRepo',SimpleNamespace(read_document=AsyncMock(return_value=doc)))
+    doc=SourceDocument('paper',0,'IN718','',metadata={"source_fingerprint":"v1"}, blocks=tuple(SourceBlock(f'b{i}','paper','paragraph','Measured condition '*20,i) for i in range(10)))
+    monkeypatch.setattr(DocumentRepo, "read", AsyncMock(return_value=doc))
     monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
-    r=await InspectDocumentSourcesService().execute(
-        user_id='user', workspace_id='col',
-        tool_call_id='read', max_result_tokens=2000,
-        arguments=InspectDocumentSourcesToolRequest(document_id='paper'),
+    r=await InspectDocumentSourcesCapability().execute(
+        context=ToolExecutionContext("user","col","task","operation","call",2000), arguments=InspectDocumentSourcesToolRequest(document_id='paper'),
     )
     assert r.data['continuation']['document_id'] == 'paper'
 

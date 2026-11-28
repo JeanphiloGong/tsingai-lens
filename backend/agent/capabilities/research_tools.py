@@ -7,6 +7,7 @@ from agent.tools.workspace import (
 from agent.tools.document import (
     InspectDocumentSourcesCapability,
     InspectTableCapability,
+    ListDocumentProfilesCapability,
     ReadSourceCapability,
     SearchSourcesCapability,
 )
@@ -66,6 +67,7 @@ registry = CapabilityRegistry(tuple(
         GetWorkspaceContextCapability(),
         InspectDocumentSourcesCapability(),
         InspectTableCapability(),
+        ListDocumentProfilesCapability(),
         ReadSourceCapability(),
         SearchSourcesCapability(),
         CurateFindingCapability(),

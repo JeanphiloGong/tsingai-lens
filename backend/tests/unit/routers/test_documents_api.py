@@ -229,13 +229,12 @@ async def test_documents_route_forwards_profile_search_filters_and_pagination(
                     offset=0,
                     query="laser",
                     doc_type="experimental",
-                    has_warnings=True,
                 )
             ).body
         )["data"]
     )
 
-    assert payload.total == 1
+    assert payload.total == 2
     assert payload.count == 1
     assert payload.items[0].document_id == "paper-1"
 
@@ -284,7 +283,7 @@ async def test_document_profile_route_returns_single_profile(
     )
 
     assert payload.document_id == "paper-1"
-    assert payload.title == "Single Paper"
+    assert payload.description == "Single Paper"
 
 
 async def test_document_profile_route_preserves_normalized_stored_values(

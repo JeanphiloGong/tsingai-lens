@@ -115,6 +115,9 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
             "repositories.experiment_plan_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
+            "document.repositories.document_repository.AsyncSessionLocal", factory
+        )
+        monkeypatch.setattr(
             "document.repositories.source_repository.AsyncSessionLocal", factory
         )
         monkeypatch.setattr(
@@ -183,7 +186,6 @@ def workspace_service(postgres_session_factory):
 def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
     from application.source import agent_workspace_service as workspace_context
-    from application.source import agent_source_service as document_sources
     from agent.capabilities import research_scope
     import application.core.objectives.analysis.analysis_record_source as _test_analysis_record_source
     import document.application.profile_service as _test_document_profile_service
@@ -272,7 +274,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             ],
         ),
         (objective_derivation, ["workspace_service", "objective_analysis_service"]),
-        (document_sources, ["workspace_service", "SourceRepo"]),
         (
             workspace_context,
             [

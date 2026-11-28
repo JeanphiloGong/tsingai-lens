@@ -153,7 +153,7 @@ class ReadSourceCapability:
                 limit=arguments.limit,
             )
         except SourceReadingError as error:
-            return _failed(context, error)
+            return _failed(context, error, arguments.document_id)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status=ToolResultStatus.SUCCEEDED,

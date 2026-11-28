@@ -18,7 +18,7 @@ from application.source.agent_workspace_service import (
     BrowseWorkspacePapersToolRequest,
 )
 from agent.tools.registry import ToolExecutionContext
-from application.source.agent_source_service import (
+from document.application.source_reading import (
     InspectDocumentSourcesToolRequest,
 )
 from document.domain.source import SourceBlock, SourceDocument

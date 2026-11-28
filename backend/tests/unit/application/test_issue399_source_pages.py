@@ -1,12 +1,12 @@
 from agent.tools.document import InspectDocumentSourcesCapability
 from document.repositories.document_repository import DocumentRepo
-from application.source import agent_source_service as document_sources
+from application.source import workspace_service
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import pytest
 from document.domain.source import SourceDocument, SourceBlock
 from agent.tools.registry import ToolExecutionContext
-from application.source.agent_source_service import (
+from document.application.source_reading import (
     InspectDocumentSourcesService,
     InspectDocumentSourcesToolRequest,
 )
@@ -54,7 +54,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
         metadata={"source_fingerprint":"v1"}, blocks=blocks + other,
     )
     monkeypatch.setattr(
-        document_sources.workspace_service, "get_workspace_for_user", AsyncMock()
+        workspace_service, "get_workspace_for_user", AsyncMock()
     )
     monkeypatch.setattr(
         DocumentRepo, "read", AsyncMock(return_value=doc),
@@ -73,7 +73,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
             ),
         )
         assert result.status == "succeeded"
-        assert document_sources.InspectDocumentSourcesService._result_tokens(result) <= context.max_result_tokens
+        assert InspectDocumentSourcesService._result_tokens(result) <= context.max_result_tokens
         assert [
             section["heading_path"] for section in result.data["document_outline"]
         ] == ["Methods"]
@@ -93,7 +93,7 @@ async def test_section_pages_keep_source_order_and_only_selected_outline(
 async def test_permission_failure_stops_before_loading_sources(monkeypatch):
     repo = SimpleNamespace(read_document=AsyncMock())
     monkeypatch.setattr(
-        document_sources.workspace_service,
+        workspace_service,
         "get_workspace_for_user",
         AsyncMock(side_effect=PermissionError()),
     )
@@ -128,7 +128,7 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
         metadata={"source_fingerprint":"v1"}, blocks=blocks,
     )
     monkeypatch.setattr(
-        document_sources.workspace_service, "get_workspace_for_user", AsyncMock()
+        workspace_service, "get_workspace_for_user", AsyncMock()
     )
     monkeypatch.setattr(
         DocumentRepo, "read", AsyncMock(return_value=document),
@@ -141,7 +141,7 @@ async def test_small_section_budget_contains_real_body_in_one_batch(monkeypatch)
     assert result.data["returned_source_count"] == 5
     assert all(source["content"] for source in result.data["sources"])
     assert result.data["next_offset"] is None
-    assert document_sources.InspectDocumentSourcesService._result_tokens(result) <= 2000
+    assert InspectDocumentSourcesService._result_tokens(result) <= 2000
 
 
 @pytest.mark.anyio
@@ -155,7 +155,7 @@ async def test_parent_section_reads_its_subsections_without_unrelated_sections(m
             text=f"Complete content for {heading}.", block_order=i, heading_path=heading,
         ) for i, heading in enumerate(headings)),
     )
-    monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
+    monkeypatch.setattr(workspace_service, "get_workspace_for_user", AsyncMock())
     monkeypatch.setattr(DocumentRepo, "read", AsyncMock(return_value=document))
     capability = InspectDocumentSourcesCapability()
     seen = []

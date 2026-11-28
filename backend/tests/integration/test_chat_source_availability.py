@@ -1,6 +1,5 @@
 """Source tools use the real workspace lookup to distinguish unavailable papers."""
 
-from application.source import agent_source_service as document_sources
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,17 +8,13 @@ from sqlalchemy.exc import OperationalError
 from agent.tools.document import InspectDocumentSourcesCapability, InspectTableCapability
 from document.repositories.document_repository import DocumentRepo
 from agent.tools.registry import ToolExecutionContext
-from application.source.agent_source_service import (
+from document.application.source_reading import (
     InspectDocumentSourcesToolRequest,
     InspectTableToolRequest,
-    ReadSourceService,
-    ReadSourceToolRequest,
-    SearchSourcesService,
-    SearchSourcesToolRequest,
 )
 from document.domain.document import Document
 from repositories.workspace_repository import StoredDocument
-from document.repositories.source_repository import SourceRepository
+from agent.tools.document import ReadSourceCapability, ReadSourceInput, SearchSourcesCapability, SearchSourcesInput
 
 
 pytestmark = pytest.mark.anyio
@@ -27,12 +22,12 @@ pytestmark = pytest.mark.anyio
 
 @pytest.mark.parametrize("state", ["missing", "unprepared", "database_failure"])
 @pytest.mark.parametrize("capability,arguments", [
-    (ReadSourceService, ReadSourceToolRequest(
+    (ReadSourceCapability, ReadSourceInput(
         document_id="paper", source_kind="text_window", source_ref="methods",
     )),
     (InspectDocumentSourcesCapability, InspectDocumentSourcesToolRequest(document_id="paper")),
     (InspectTableCapability, InspectTableToolRequest(document_id="paper", table_ref="table")),
-    (SearchSourcesService, SearchSourcesToolRequest(document_ids=["paper"], query="HIP")),
+    (SearchSourcesCapability, SearchSourcesInput(document_ids=["paper"], query="HIP")),
 ])
 async def test_source_availability_uses_real_workspace_lookup(
     state,
@@ -61,33 +56,25 @@ async def test_source_availability_uses_real_workspace_lookup(
             updated_at=workspace.updated_at,
         )
     failure = OperationalError("SELECT document", None, RuntimeError("database unavailable"))
-    if state == "database_failure":
-        monkeypatch.setattr(
-            workspace_service.WorkspaceRepo, "read_document", AsyncMock(side_effect=failure),
-        )
     context = ToolExecutionContext(
-        operation_id="operation",
-        task_id="chat", user_id="local-user", workspace_id=workspace_id, tool_call_id="read",
+        operation_id="operation", task_id="chat", user_id="local-user",
+        workspace_id=workspace_id, tool_call_id="read",
     )
-    document_sources.workspace_service = workspace_service
-    document_sources.SourceRepo = SourceRepository()
     handler = capability()
-    if isinstance(handler, (InspectDocumentSourcesCapability, InspectTableCapability)):
-        if state == "database_failure":
-            monkeypatch.setattr(DocumentRepo, "read", AsyncMock(side_effect=failure))
-        kwargs = dict(context=context, arguments=arguments)
-    else:
-        kwargs = dict(user_id=context.user_id, workspace_id=context.workspace_id,
-                      tool_call_id=context.tool_call_id, max_result_tokens=context.max_result_tokens,
-                      arguments=arguments)
     if state == "database_failure":
+        method = "list" if isinstance(handler, SearchSourcesCapability) else "read"
+        monkeypatch.setattr(DocumentRepo, method, AsyncMock(side_effect=failure))
         with pytest.raises(OperationalError) as raised:
-            await handler.execute(**kwargs)
+            await handler.execute(context, arguments)
         assert raised.value is failure
-    else:
-        result = await handler.execute(**kwargs)
-        assert result.error_code == (
-            "document_not_found" if state == "missing" else "document_sources_not_ready"
-        )
-        assert result.data["missing_document_ids"] == (["paper"] if state == "missing" else [])
-        assert result.data["unprepared_document_ids"] == (["paper"] if state == "unprepared" else [])
+        return
+    result = await handler.execute(context, arguments)
+    if isinstance(handler, SearchSourcesCapability):
+        assert result.status == "succeeded"
+        assert result.data["candidates"] == []
+        return
+    assert result.error_code == (
+        "document_not_found" if state == "missing" else "document_sources_not_ready"
+    )
+    assert result.data["missing_document_ids"] == (["paper"] if state == "missing" else [])
+    assert result.data["unprepared_document_ids"] == (["paper"] if state == "unprepared" else [])

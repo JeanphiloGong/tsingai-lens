@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from application.source import agent_source_service as document_sources
+from application.source import workspace_service
 from agent.tools.registry import ToolExecutionContext
-from application.source.agent_source_service import InspectDocumentSourcesService, InspectDocumentSourcesToolRequest
-from domain.chat import ChatToolCall, ToolRisk, ToolResultStatus
+from document.application.source_reading import InspectDocumentSourcesToolRequest
+from domain.chat import ToolResultStatus
 from document.domain.source import SourceBlock, SourceDocument
 
 @pytest.fixture
@@ -27,7 +27,7 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
     doc = SourceDocument('paper', 0, 'IN718', '', metadata={"source_fingerprint":"v1"}, blocks=blocks)
     repo = SimpleNamespace(read_document=AsyncMock(return_value=doc))
     monkeypatch.setattr(DocumentRepo, 'read', repo.read_document)
-    monkeypatch.setattr(document_sources.workspace_service, 'get_workspace_for_user', AsyncMock())
+    monkeypatch.setattr(workspace_service, 'get_workspace_for_user', AsyncMock())
     cap = InspectDocumentSourcesCapability()
     context = ToolExecutionContext(task_id='chat', user_id='user', workspace_id='col', tool_call_id='read', operation_id="operation", max_result_tokens=2000)
     overview = await cap.execute(context=replace(context, max_result_tokens=12000), arguments=InspectDocumentSourcesToolRequest(document_id='paper'))
@@ -51,7 +51,7 @@ async def test_tree_section_continuation_survives_budget_changes_and_rejects_cha
 async def test_full_document_read_exposes_exact_pending_arguments(monkeypatch):
     doc=SourceDocument('paper',0,'IN718','',metadata={"source_fingerprint":"v1"}, blocks=tuple(SourceBlock(f'b{i}','paper','paragraph','Measured condition '*20,i) for i in range(10)))
     monkeypatch.setattr(DocumentRepo, "read", AsyncMock(return_value=doc))
-    monkeypatch.setattr(document_sources.workspace_service,'get_workspace_for_user',AsyncMock())
+    monkeypatch.setattr(workspace_service,'get_workspace_for_user',AsyncMock())
     r=await InspectDocumentSourcesCapability().execute(
         context=ToolExecutionContext("user","col","task","operation","call",2000), arguments=InspectDocumentSourcesToolRequest(document_id='paper'),
     )
@@ -60,30 +60,27 @@ async def test_full_document_read_exposes_exact_pending_arguments(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_exact_read_budget_includes_version_and_continuation_arguments(monkeypatch):
-    from application.source.agent_source_service import ReadSourceService, ReadSourceToolRequest
-    from agent.application.context_builder import ChatContextBuilder
+async def test_exact_read_continues_on_the_same_version(monkeypatch):
+    from agent.tools.document import ReadSourceCapability, ReadSourceInput
 
     text = "Measured IN718 elongation and test conditions. " * 100
-    document = SourceDocument("paper", 0, "IN718", "", blocks=(
+    document = SourceDocument("paper", 0, "IN718", "", metadata={"source_fingerprint": "v1"}, blocks=(
         SourceBlock("results", "paper", "paragraph", text, 0),
     ))
-    monkeypatch.setattr(document_sources, "SourceRepo", SimpleNamespace(
-        read_document=AsyncMock(return_value=document),
-    ))
-    monkeypatch.setattr(document_sources.workspace_service, "get_workspace_for_user", AsyncMock())
-    arguments = {"document_id": "paper", "source_kind": "text_window", "source_ref": "results"}
+    monkeypatch.setattr(DocumentRepo, "read", AsyncMock(return_value=document))
+    monkeypatch.setattr(workspace_service, "get_workspace_for_user", AsyncMock())
+    tool = ReadSourceCapability()
+    context = ToolExecutionContext("user", "col", "task", "operation", "read")
+    args = ReadSourceInput(document_id="paper", source_kind="text_window", source_ref="results", limit=800)
     parts = []
-    for _ in range(30):
-        result = await ReadSourceService().execute(
-        user_id="user", workspace_id="col",
-        tool_call_id="read", max_result_tokens=800,
-        arguments=ReadSourceToolRequest(**arguments),
-    )
+    for offset in range(0, len(text), args.limit):
+        result = await tool.execute(context, args)
         assert result.status is ToolResultStatus.SUCCEEDED
-        assert ChatContextBuilder.estimate_tokens(ChatContextBuilder.tool_result_message(result)) <= 800
+        assert result.data["offset"] == offset
+        assert result.data["source_version"] == "v1"
         parts.append(result.data["content"])
-        arguments = result.data["continuation"]
-        if arguments is None:
+        if result.data["next_offset"] is None:
             break
+        args = args.model_copy(update={"offset": result.data["next_offset"], "source_version": "v1"})
     assert "".join(parts) == text
+    assert result.data["next_offset"] is None

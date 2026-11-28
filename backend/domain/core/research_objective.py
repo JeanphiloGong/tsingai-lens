@@ -807,6 +807,20 @@ def normalize_objective_terms(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _stable_text(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return json.dumps(value, ensure_ascii=True, sort_keys=True, default=str)
+    if isinstance(value, (list, tuple, set)):
+        return json.dumps(list(value), ensure_ascii=True, sort_keys=True, default=str)
+    return str(value or "")
+
+
+def _scoped_id(prefix: str, *parts: Any) -> str:
+    payload = "|".join(_stable_text(part) for part in parts if part is not None)
+    digest = sha1((payload or prefix).encode("utf-8")).hexdigest()[:20]
+    return f"{prefix}_{digest}"
+
+
 
 
 

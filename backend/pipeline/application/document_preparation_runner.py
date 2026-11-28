@@ -54,7 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-SOURCE_PARSER_VERSION = "source-runtime.v1"
+SOURCE_PARSER_VERSION = "source-runtime.v2"
 DOCUMENT_ANALYSIS_VERSION = DOCUMENT_PROFILE_PROMPT_VERSION
 SourceArtifactBuilder = Callable[..., Awaitable[SourceArtifactBundle]]
 
@@ -171,6 +171,11 @@ async def _parse_document_sources(
     work_dir: Path,
 ) -> SourceDocument:
     document = record.document
+    input_dir = work_dir / "input"
+    input_dir.mkdir()
+    parser_file = input_dir / ("source" + Path(document.filename).suffix.lower())
+    payload = await asyncio.to_thread(object_store.read, record.storage_key, document.sha256)
+    await asyncio.to_thread(parser_file.write_bytes, payload)
     parser_task = asyncio.create_task(
         source_artifact_builder(
             config=_source_parser_config(
@@ -180,7 +185,7 @@ async def _parse_document_sources(
                 [
                     {
                         "id": document.document_id,
-                        "source_path": record.storage_key,
+                        "source_path": parser_file.name,
                         "source_type": Path(document.filename).suffix.lstrip("."),
                         "title": document.filename,
                         "creation_date": record.created_at,
@@ -244,7 +249,7 @@ def _source_parser_config(
     return SourceParserConfig(
         root_dir=str(paths.workspace_dir),
         input=InputConfig(
-            storage=InputStorageConfig(base_dir=str(paths.input_dir)),
+            storage=InputStorageConfig(base_dir=str(work_dir / "input")),
             file_type="document",
             encoding="utf-8",
             file_pattern=r".*\.(txt|pdf)$",

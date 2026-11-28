@@ -106,8 +106,9 @@ def test_upload_classification_retry_content_and_research_readiness(
     ).json()["data"]
     assert first_run["status"] == "partial_success"
     assert first_run["warnings"]
-    profile = app_client.get(f"{document_path}/profile").json()["data"]
-    assert profile["profile_status"] == "extraction_failed"
+    profile = app_client.get(f"{document_path}/profile")
+    assert profile.json()["data"]["code"] == "document_profiles_not_ready"
+    assert classifier.calls == 1
     content = app_client.get(f"{document_path}/content")
     assert content.status_code == 200
     assert "2.0%" in content.json()["data"]["content_text"]
